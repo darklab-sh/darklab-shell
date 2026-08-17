@@ -17,6 +17,9 @@ from core.migrations.v0075_assessment_batch_coordinator import (
     MIGRATION as COORDINATOR_MIGRATION,
 )
 from core.migrations.v0076_assessment_batch_items import MIGRATION as ITEM_MIGRATION
+from core.migrations.v0077_assessment_batch_retry_previews import (
+    MIGRATION as RETRY_PREVIEW_MIGRATION,
+)
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_PREVIEW_PAGE_MAX_BYTES,
@@ -185,9 +188,11 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
 
 def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     make_test_app()
-    assert MIGRATIONS[-2] is COORDINATOR_MIGRATION
-    assert MIGRATIONS[-1] is ITEM_MIGRATION
+    assert MIGRATIONS[-3] is COORDINATOR_MIGRATION
+    assert MIGRATIONS[-2] is ITEM_MIGRATION
+    assert MIGRATIONS[-1] is RETRY_PREVIEW_MIGRATION
     assert ITEM_MIGRATION.version == "0076"
+    assert RETRY_PREVIEW_MIGRATION.version == "0077"
     assert any(
         "details_json JSONB" in statement
         for statement in COORDINATOR_MIGRATION.postgres_statements or ()
@@ -274,6 +279,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     assert parent_columns["item_count"] == "INTEGER"
     assert event_columns["details_json"] == "TEXT"
     assert preview_columns["summary_json"] == "TEXT"
+    assert preview_columns["source_execution_id"] == "TEXT"
     assert preview_columns["selected_item_count"] == "INTEGER"
     assert preview_item_columns["public_plan_json"] == "TEXT"
     assert item_columns["child_ordinal"] == "INTEGER"
@@ -285,6 +291,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     assert "idx_assessment_batches_assessment_created" in indexes
     assert "idx_assessment_batch_events_cursor" in indexes
     assert "idx_assessment_batch_previews_personal_expiry" in indexes
+    assert "idx_assessment_batch_previews_source" in indexes
     assert "idx_assessment_batch_items_child" in indexes
 
     preview_id = "abp_batch_storage"

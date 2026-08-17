@@ -1135,6 +1135,9 @@
           "selection": {
             "$ref": "#/components/schemas/AssessmentBatchPreviewSelection"
           },
+          "source_batch_id": {
+            "type": "string"
+          },
           "standard_item_count": {
             "type": "integer"
           },
@@ -1158,7 +1161,8 @@
           "standard_item_count",
           "concurrency",
           "expires_at",
-          "created"
+          "created",
+          "source_batch_id"
         ],
         "type": "object"
       },
@@ -1425,6 +1429,37 @@
             "type": "array"
           },
           "skipped_check_count": {
+            "type": "integer"
+          },
+          "source_batch_id": {
+            "type": "string"
+          },
+          "source_canceled_item_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_failed_item_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_item_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_retry_eligible_check_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_retry_eligible_item_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_skipped_item_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_succeeded_item_count": {
+            "minimum": 0,
             "type": "integer"
           },
           "standard_item_count": {
@@ -15233,6 +15268,226 @@
           }
         },
         "summary": "Request truthful assessment-batch cancellation"
+      }
+    },
+    "/projects/{project_id}/assessment-batches/{batch_id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentBatchStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchStartResponse"
+                }
+              }
+            },
+            "description": "Retry batch accepted and fair launch slots filled"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment-batch retry request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot run assessment commands"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or source assessment batch not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Retry source, preview, or confirmation conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request exceeds its bounded size limit"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Start a confirmed immutable assessment-batch retry"
+      }
+    },
+    "/projects/{project_id}/assessment-batches/{batch_id}/retry-previews": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentBatchPreviewSelection"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchPreviewResponse"
+                }
+              }
+            },
+            "description": "Immutable current-state retry preview created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment-batch retry request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or source assessment batch not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Retry source, preview, or confirmation conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request exceeds its bounded size limit"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Preview failed or unfinished assessment-batch work"
       }
     },
     "/projects/{project_id}/assessments": {

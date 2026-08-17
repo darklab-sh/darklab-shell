@@ -87,6 +87,7 @@ def _audit(
             "project_id": project_id,
             "assessment_id": str(batch.get("assessment_id") or ""),
             "batch_id": str(batch.get("batch_id") or ""),
+            "source_batch_id": str(batch.get("source_batch_id") or ""),
             "status": str(batch.get("status") or ""),
             "count": int(batch.get("item_count") or 0),
         },
@@ -191,7 +192,6 @@ def projects_assessment_batch_cancel(project_id, batch_id):
         },
     )
     return jsonify(result)
-
 
 __all__ = [
     "projects_assessment_batch_cancel",

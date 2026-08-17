@@ -29,6 +29,7 @@ def batch_preview_digest(draft: BatchPreviewDraft) -> str:
         "schema_version": BATCH_SCHEMA_VERSION,
         "project_id": draft.project_id,
         "assessment_id": draft.assessment_id,
+        "source_batch_id": draft.source_batch_id,
         "profile_key": draft.profile_key,
         "profile_version": draft.profile_version,
         "selection": dict(draft.selection),
@@ -80,6 +81,5 @@ def batch_preview_digest(draft: BatchPreviewDraft) -> str:
             )
         )
     return digest.hexdigest()
-
 
 __all__ = ["batch_preview_digest"]

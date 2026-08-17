@@ -88,7 +88,7 @@ def validate_preview_draft(draft: BatchPreviewDraft) -> tuple[int, int, int, int
         raise AssessmentBatchError(
             "invalid_batch_preview", "Assessment batch preview scope is invalid."
         )
-    if not draft.items or len(draft.items) > BATCH_HARD_ITEM_LIMIT:
+    if len(draft.items) > BATCH_HARD_ITEM_LIMIT or (not draft.items and not draft.source_batch_id):
         raise AssessmentBatchError(
             "invalid_batch_preview",
             f"Assessment batch previews require between 1 and {BATCH_HARD_ITEM_LIMIT} items.",
@@ -115,7 +115,7 @@ def validate_preview_draft(draft: BatchPreviewDraft) -> tuple[int, int, int, int
                     "Assessment checks may map to only one item.",
                 )
             check_ids.add(mapping.check_id)
-    if not selected or mappings > BATCH_MAX_TOTAL_CHECK_MAPPINGS:
+    if (not selected and not draft.source_batch_id) or mappings > BATCH_MAX_TOTAL_CHECK_MAPPINGS:
         raise AssessmentBatchError(
             "invalid_batch_preview", "Assessment batch preview selection is invalid."
         )

@@ -76,6 +76,14 @@ def route_cycle(monkeypatch: pytest.MonkeyPatch):
         "services.assessments.batch.preview_draft.probe_planning_runtime",
         _runtime,
     )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+        _runtime,
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+        _runtime,
+    )
     yield session_id, project_id, assessment_id, str(target["id"])
     with get_db_connect()() as conn:
         conn.execute(
@@ -136,6 +144,30 @@ def _assessment_status(assessment_id: str) -> str:
             (assessment_id,),
         ).fetchone()
     return str(row["status"] if row else "")
+
+
+def _settle_route_source(batch_id: str) -> None:
+    with get_db_connect()() as conn:
+        children = conn.execute(
+            "SELECT step_id, ordinal FROM workflow_execution_children "
+            "WHERE execution_id = ? ORDER BY step_id, ordinal",
+            (batch_id,),
+        ).fetchall()
+        assert len(children) == 2
+        for row, status, error_code in (
+            (children[0], "succeeded", ""),
+            (children[1], "failed", "feature_unavailable"),
+        ):
+            conn.execute(
+                "UPDATE workflow_execution_children SET status = ?, error_code = ? "
+                "WHERE execution_id = ? AND step_id = ? AND ordinal = ?",
+                (status, error_code, batch_id, row["step_id"], row["ordinal"]),
+            )
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'failed' WHERE id = ?",
+            (batch_id,),
+        )
+        conn.commit()
 
 
 def test_browser_preview_create_read_and_page_are_owner_scoped_and_side_effect_free(
@@ -315,6 +347,73 @@ def test_batch_start_is_idempotent_audited_and_cancel_is_project_scoped(
         ).fetchone()
     assert cancel_event is not None
     assert project_id in str(cancel_event["details"])
+
+
+@pytest.mark.parametrize("prefix", ["", "/api/v1"])
+def test_retry_preview_and_start_are_lineage_scoped_capability_gated_and_audited(
+    client,
+    route_cycle,
+    monkeypatch,
+    prefix,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    headers = _api_headers(session_id) if prefix else _browser_headers(session_id)
+    source = _start_batch(session_id, project_id, assessment_id)
+    source_id = str(source["batch_id"])
+    _settle_route_source(source_id)
+    preview_route = (
+        f"{prefix}/projects/{project_id}/assessment-batches/{source_id}/retry-previews"
+    )
+
+    created = client.post(preview_route, headers=headers, json={})
+
+    assert created.status_code == 201
+    preview = created.get_json()["preview"]
+    assert preview["source_batch_id"] == source_id
+    assert preview["selected_item_count"] == 1
+    wrong_project = client.post(
+        f"{prefix}/projects/prj_wrong/assessment-batches/{source_id}/retry-previews",
+        headers=headers,
+        json={},
+    )
+    assert wrong_project.status_code == 404
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_actions.launch_assessment_batch",
+        lambda batch_id: {
+            "status": "queued",
+            "batch_id": batch_id,
+            "launched": 0,
+            "reason_code": "fairness_limit",
+        },
+    )
+    started = client.post(
+        f"{prefix}/projects/{project_id}/assessment-batches/{source_id}/retry",
+        headers=headers,
+        json={
+            "preview_id": preview["preview_id"],
+            "plan_digest": preview["plan_digest"],
+            "confirmed": True,
+        },
+    )
+
+    assert started.status_code == 202
+    retry = started.get_json()["batch"]
+    assert retry["source_batch_id"] == source_id
+    assert retry["batch_id"] != source_id
+    with get_db_connect()() as conn:
+        audit = conn.execute(
+            "SELECT event_type, details FROM audit_events WHERE target_id = ?",
+            (retry["batch_id"],),
+        ).fetchone()
+        source_event = conn.execute(
+            "SELECT retry_batch_id FROM assessment_batch_events "
+            "WHERE batch_id = ? AND event_type = 'retry_created'",
+            (source_id,),
+        ).fetchone()
+    assert audit is not None
+    assert audit["event_type"] == "assessment_batch.retry"
+    assert source_id in str(audit["details"])
+    assert source_event["retry_batch_id"] == retry["batch_id"]
 
 
 @pytest.mark.parametrize("prefix", ["", "/api/v1"])
@@ -543,6 +642,10 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
         "services.assessments.batch.preview_draft.probe_planning_runtime",
         _runtime,
     )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+        _runtime,
+    )
 
     browser = client.post(
         f"/projects/{project_id}/assessments/{assessment_id}/batch-previews",
@@ -570,6 +673,40 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
             json={
                 "preview_id": preview["preview_id"],
                 "plan_digest": preview["plan_digest"],
+                "confirmed": True,
+            },
+        )
+        assert denied.status_code == 403
+
+    source = start_assessment_batch(
+        owner,
+        project_id,
+        assessment_id,
+        preview_id=str(browser.get_json()["preview"]["preview_id"]),
+        plan_digest=browser.get_json()["preview"]["plan_digest"],
+        confirmed=True,
+        team_id=team_id,
+    )
+    source_id = str(source["batch_id"])
+    _settle_route_source(source_id)
+    for prefix, headers in (
+        ("", _browser_headers(viewer, team_id)),
+        ("/api/v1", _api_headers(viewer, team_id)),
+    ):
+        retry_preview_response = client.post(
+            f"{prefix}/projects/{project_id}/assessment-batches/"
+            f"{source_id}/retry-previews",
+            headers=headers,
+            json={},
+        )
+        assert retry_preview_response.status_code == 201
+        retry_preview = retry_preview_response.get_json()["preview"]
+        denied = client.post(
+            f"{prefix}/projects/{project_id}/assessment-batches/{source_id}/retry",
+            headers=headers,
+            json={
+                "preview_id": retry_preview["preview_id"],
+                "plan_digest": retry_preview["plan_digest"],
                 "confirmed": True,
             },
         )

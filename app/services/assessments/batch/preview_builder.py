@@ -339,7 +339,7 @@ class BatchPreviewBuilder:
             )
 
     def finish(
-        self, source: Any
+        self, source: Any, *, allow_empty: bool = False
     ) -> tuple[tuple[BatchPreviewItem, ...], dict[str, object]]:
         """Validate selection limits and return stable items plus compact summary."""
         self._validate_scope()
@@ -347,7 +347,7 @@ class BatchPreviewBuilder:
             _public_item(item) for item in sorted(self.compiled.values(), key=_sort_key)
         )
         selected = [item for item in items if item.selected]
-        if not selected:
+        if not selected and not allow_empty:
             raise AssessmentBatchError(
                 "empty_batch_plan",
                 "No supported assessment commands are selected. Include standard "

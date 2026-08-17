@@ -3,6 +3,8 @@
 
 // Shared desktop/mobile assessment-plan preview and durable batch monitor.
 
+import { hasRetryableBatchProgress } from './project_assessment_batch_retry.js';
+
 const STATUS_LABELS = Object.freeze({
   queued: 'Queued',
   launching: 'Launching',
@@ -30,6 +32,7 @@ const REASON_LABELS = Object.freeze({
   target_unavailable: 'Target unavailable',
   target_changed: 'Target changed',
   evidence_unavailable: 'Evidence unavailable',
+  retry_check_missing: 'No longer in this assessment',
 });
 
 function element(tag, className = '', text = '') {
@@ -348,6 +351,14 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       body.appendChild(element('p', 'project-assessment-batch-stale', 'Selection changed. Refresh the preview before starting.'));
     }
     if (!st.preview) return body;
+    const retry = Boolean(st.preview?.source_batch_id);
+    if (retry) {
+      body.appendChild(element(
+        'p',
+        'project-assessment-batch-guidance',
+        'This retry preview rebuilds only failed, unavailable, interrupted, or unlaunched source work. Commands that already succeeded remain unchanged.',
+      ));
+    }
     body.append(previewSummary(st.preview));
     const excluded = exclusions(st.preview.summary);
     if (excluded) body.appendChild(excluded);
@@ -359,13 +370,15 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     body.append(commandHeading, commandList(projectId, assessment.id, st));
     const startActions = element('div', 'project-assessment-batch-actions');
     const canRun = ctx.canRunCommands?.() !== false;
+    const emptyRetry = retry && Number(st.preview?.selected_item_count || 0) === 0;
     const start = actionButton(
-      st.starting ? 'Starting…' : 'Run assessment plan',
+      st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),
       button => act.startBatch(projectId, assessment.id, button),
-      { primary: true, disabled: st.starting || st.previewDirty || !canRun },
+      { primary: true, disabled: st.starting || st.previewDirty || !canRun || emptyRetry },
     );
     if (!canRun) start.title = 'View-only team members can preview plans but cannot start commands.';
     startActions.appendChild(start);
+    if (emptyRetry) startActions.appendChild(element('small', '', 'Nothing can be retried from this batch right now.'));
     if (!canRun) startActions.appendChild(element('small', '', 'Read-only: ask for operator access to start this batch.'));
     body.appendChild(startActions);
     return body;
@@ -408,7 +421,7 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const title = element('div');
     title.append(
       element('strong', '', 'Assessment batch'),
-      element('small', '', `${batch?.batch_id || ''} · started ${ctx.formatDate?.(batch?.created) || batch?.created || 'recently'}`),
+      element('small', '', `${batch?.batch_id || ''} · started ${ctx.formatDate?.(batch?.created) || batch?.created || 'recently'}${batch?.source_batch_id ? ` · retry of ${batch.source_batch_id}` : ''}`),
     );
     top.append(title, badge(STATUS_LABELS[batch?.status] || batch?.status || 'Unknown', statusTone(batch?.status)));
     body.append(top, progressGrid(batch));
@@ -467,7 +480,14 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       if (!canRun) cancel.title = 'View-only team members cannot cancel assessment batches.';
       controls.appendChild(cancel);
     } else if (!['canceling'].includes(String(batch?.status || '')) && assessment?.status === 'active') {
-      controls.appendChild(actionButton('New assessment plan', () => act.newPlan(projectId, assessment.id), { primary: true }));
+      if (hasRetryableBatchProgress(batch)) {
+        controls.appendChild(actionButton(
+          st.previewing ? 'Building retry preview…' : 'Retry failed or unfinished',
+          () => act.retryBatch(projectId, assessment.id),
+          { primary: true, disabled: st.previewing },
+        ));
+      }
+      controls.appendChild(actionButton('New assessment plan', () => act.newPlan(projectId, assessment.id)));
     }
     if (controls.childElementCount) body.appendChild(controls);
     return body;

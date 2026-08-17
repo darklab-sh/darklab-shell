@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1 import openapi_assessment_batch_retries as retries
+
 
 def _ref(name: str) -> dict[str, str]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -25,7 +27,7 @@ def _error(description: str) -> dict[str, Any]:
 
 def assessment_batch_preview_schemas() -> dict[str, Any]:
     string_list = {"type": "array", "items": {"type": "string"}}
-    return {
+    return retries.augment_assessment_batch_preview_schemas({
         "AssessmentBatchPreviewSelection": {
             "type": "object",
             "properties": {
@@ -254,7 +256,7 @@ def assessment_batch_preview_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
-    }
+    })
 
 
 def assessment_batch_preview_paths() -> dict[str, Any]:
@@ -350,6 +352,4 @@ def assessment_batch_preview_paths() -> dict[str, Any]:
             }
         },
     }
-
-
 __all__ = ["assessment_batch_preview_paths", "assessment_batch_preview_schemas"]

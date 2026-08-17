@@ -194,33 +194,42 @@ async function installAssessmentBatchLifecycleFixture(page) {
   const state = {
     launched: false,
     canceling: false,
+    retried: false,
     projectId: '',
     assessmentId: '',
     startBody: null,
+    retryBody: null,
   }
   const batchId = 'wfx_assessment_batch_playwright'
-  const batch = () => ({
+  const retryBatchId = 'wfx_assessment_batch_retry_playwright'
+  const retryPreviewId = 'abp_assessment_batch_retry_playwright'
+  const batch = (id = batchId) => {
+    const retry = id === retryBatchId
+    const canceled = !retry && state.canceling
+    return ({
     schema_version: 1,
-    batch_id: batchId,
+    batch_id: id,
     project_id: state.projectId,
     assessment_id: state.assessmentId,
-    status: state.canceling ? 'canceling' : 'running',
+    source_batch_id: retry ? batchId : '',
+    status: canceled ? 'canceled' : 'running',
     item_count: 1,
     created: '2026-08-17T10:00:00Z',
     progress: {
       total: 1,
       pending: 0,
       launching: 0,
-      running: 1,
+      running: canceled ? 0 : 1,
       succeeded: 0,
       failed: 0,
       unavailable: 0,
-      canceled: 0,
+      canceled: canceled ? 1 : 0,
       skipped: 0,
       could_not_cancel: 0,
-      settled: 0,
+      settled: canceled ? 1 : 0,
     },
   })
+  }
   await page.route(/\/(?:batch-previews|assessment-batch-previews|assessment-batches)(?:[/?]|$)/, async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -247,27 +256,80 @@ async function installAssessmentBatchLifecycleFixture(page) {
       })
       return
     }
+    if (path.endsWith(`/assessment-batches/${batchId}/retry-previews`) && request.method() === 'POST') {
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          preview: {
+            schema_version: 1,
+            preview_id: retryPreviewId,
+            project_id: state.projectId,
+            assessment_id: state.assessmentId,
+            source_batch_id: batchId,
+            profile: { key: 'network', version: '1' },
+            selection: { include_standard: false, item_limit: 128 },
+            summary: {
+              selected_target_count: 1,
+              estimated_min_seconds: 1,
+              estimated_max_seconds: 10,
+              potential_covered_check_count: 1,
+              requires_standard_confirmation: false,
+              reason_counts: {},
+              source_batch_id: batchId,
+              source_item_count: 1,
+              source_retry_eligible_item_count: 1,
+              source_succeeded_item_count: 0,
+            },
+            plan_digest: 'b'.repeat(64),
+            candidate_item_count: 1,
+            selected_item_count: 1,
+            potential_covered_check_count: 1,
+            safe_item_count: 1,
+            standard_item_count: 0,
+            concurrency: { batch: 8, target: 1, owner: 16, instance: 32 },
+            created: '2026-08-17T10:01:00Z',
+            expires_at: '2026-08-17T10:16:00Z',
+          },
+        }),
+      })
+      return
+    }
+    if (path.endsWith(`/assessment-batches/${batchId}/retry`) && request.method() === 'POST') {
+      state.retryBody = request.postDataJSON()
+      state.retried = true
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ batch: batch(retryBatchId), launch: { launched: 1 } }),
+      })
+      return
+    }
     if (/\/projects\/[^/]+\/assessment-batches$/.test(path) && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          batches: state.launched ? [batch()] : [],
+          batches: state.retried ? [batch(retryBatchId)] : (state.launched ? [batch()] : []),
           next_cursor: null,
           has_more: false,
         }),
       })
       return
     }
-    if (path === `/assessment-batches/${batchId}` && request.method() === 'GET') {
+    if ([batchId, retryBatchId].some(id => path === `/assessment-batches/${id}`)
+        && request.method() === 'GET') {
+      const id = path.endsWith(`/${retryBatchId}`) ? retryBatchId : batchId
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ batch: batch() }),
+        body: JSON.stringify({ batch: batch(id) }),
       })
       return
     }
-    if (path === `/assessment-batches/${batchId}/items` && request.method() === 'GET') {
+    if ([batchId, retryBatchId].some(id => path === `/assessment-batches/${id}/items`)
+        && request.method() === 'GET') {
+      const retry = path.includes(retryBatchId)
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -280,8 +342,8 @@ async function installAssessmentBatchLifecycleFixture(page) {
             display_command: 'ping -c 4 -W 2 127.0.0.1',
             check_count: 1,
             attempt: 1,
-            status: 'running',
-            run_id: 'run_assessment_batch_playwright',
+            status: retry ? 'running' : (state.canceling ? 'canceled' : 'running'),
+            run_id: retry ? 'run_assessment_batch_retry_playwright' : 'run_assessment_batch_playwright',
           }],
           next_cursor: null,
           has_more: false,
@@ -289,7 +351,28 @@ async function installAssessmentBatchLifecycleFixture(page) {
       })
       return
     }
-    if (path === `/assessment-batches/${batchId}/events` && request.method() === 'GET') {
+    if (path === `/assessment-batch-previews/${retryPreviewId}/items`
+        && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [{
+            item_index: 0,
+            selected: true,
+            action: { id: 'ping' },
+            target: { type: 'ip', value: '127.0.0.1' },
+            policy_level: 'safe',
+            display_command: 'ping -c 4 -W 2 127.0.0.1',
+            check_mappings: [{ check_id: 'asmc_retry_playwright' }],
+          }],
+          next_cursor: null,
+        }),
+      })
+      return
+    }
+    if ([batchId, retryBatchId].some(id => path === `/assessment-batches/${id}/events`)
+        && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -468,7 +551,32 @@ test.describe('project assessment qualification', () => {
     })
     await confirmAssessmentAction(page, 'cancel_batch')
     expect((await cancelResponse).status()).toBe(200)
-    await expect(restored).toContainText('Cancellation was requested')
+    await expect(restored).toContainText('Canceled')
+
+    const retryPreviewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname.endsWith('/retry-previews')
+    })
+    await restored.getByRole('button', { name: 'Retry failed or unfinished' }).click()
+    expect((await retryPreviewResponse).status()).toBe(201)
+    await expect(restored).toContainText('Commands that already succeeded remain unchanged')
+    await restored.getByRole('button', { name: 'Start retry' }).click()
+    await expect(page.locator('#confirm-host')).toContainText(
+      'Retry failed or unfinished assessment commands?',
+    )
+    const retryResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname.endsWith('/retry')
+    })
+    await confirmAssessmentAction(page, 'start_retry')
+    expect((await retryResponse).status()).toBe(202)
+    expect(fixture.retryBody).toMatchObject({
+      preview_id: 'abp_assessment_batch_retry_playwright',
+      confirmed: true,
+      standard_confirmed: false,
+    })
+    await expect(restored).toContainText('retry of wfx_assessment_batch_playwright')
+    await expect(restored.getByRole('button', { name: 'Open run' })).toBeVisible()
   })
 
   test('preserves focus through lifecycle and destructive confirmations', async ({ page }) => {

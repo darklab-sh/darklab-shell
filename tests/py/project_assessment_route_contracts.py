@@ -14,6 +14,8 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 def _expected_capability(path: str, method: str) -> str:
     if method not in _WRITE_METHODS:
         return ""
+    if path.endswith("/retry-previews"):
+        return ""
     if "/assessment-batches" in path:
         return "RUN_COMMANDS"
     if "/assessments/" in path or path.endswith("/assessments"):

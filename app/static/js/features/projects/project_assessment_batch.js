@@ -4,6 +4,7 @@
 // Durable assessment-batch planning and monitor state for the Assessment tab.
 
 import { createProjectAssessmentBatchRenderer } from './project_assessment_batch_renderer.js';
+import { createAssessmentBatchRetryPreview } from './project_assessment_batch_retry.js';
 import { logAssessmentClientFailure } from './project_assessment_client_log.js';
 
 const ACTIVE_BATCH_STATUSES = new Set(['queued', 'running', 'canceling']);
@@ -25,6 +26,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     loadMoreBatchItems,
     loadMorePreviewItems,
     newPlan,
+    retryBatch,
     selectBatch,
     setSelection,
     startBatch,
@@ -316,6 +318,17 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     }
   }
 
+  async function retryBatch(projectId, assessmentId) {
+    const st = stateFor(projectId, assessmentId);
+    return createAssessmentBatchRetryPreview(st, {
+      loadPreviewItemPage,
+      logFailure,
+      renderViews,
+      requestJson,
+      selectionPayload,
+    });
+  }
+
   function restoreFocus(target) {
     if (!target?.isConnected || target.disabled || typeof target.focus !== 'function') return;
     try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
@@ -332,13 +345,18 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     const st = stateFor(projectId, assessmentId);
     if (!st.preview || st.previewDirty || st.starting) return false;
     const standard = Boolean(st.preview?.summary?.requires_standard_confirmation);
-    const confirmId = standard ? 'start_standard' : 'start';
+    const retry = Boolean(st.preview?.source_batch_id);
+    const confirmId = retry ? 'start_retry' : (standard ? 'start_standard' : 'start');
     const confirmed = await confirmAction({
       body: {
-        text: standard ? 'Run safe and standard assessment commands?' : 'Run this assessment plan?',
-        note: standard
+        text: retry
+          ? 'Retry failed or unfinished assessment commands?'
+          : (standard ? 'Run safe and standard assessment commands?' : 'Run this assessment plan?'),
+        note: retry
+          ? 'This creates a new batch. Succeeded source commands, completed runs, and existing evidence stay unchanged.'
+          : (standard
           ? 'Standard commands were selected separately. Review their targets, fan-out, request bounds, and commands before continuing.'
-          : 'The batch keeps completed evidence if another command fails or you cancel later.',
+          : 'The batch keeps completed evidence if another command fails or you cancel later.'),
       },
       tone: standard ? 'warning' : null,
       confirmId,
@@ -346,19 +364,36 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         {
           id: confirmId,
-          label: standard ? 'Run safe and standard' : 'Run assessment plan',
+          label: retry ? 'Start retry' : (standard ? 'Run safe and standard' : 'Run assessment plan'),
           role: standard ? 'secondary' : 'primary',
           tone: standard ? 'warning' : null,
         },
       ],
     }, returnFocus);
     if (!confirmed) return false;
+    if (retry && standard) {
+      const standardConfirmed = await confirmAction({
+        body: {
+          text: 'Include standard commands in this retry?',
+          note: 'Standard commands were selected separately. Review their targets, bounds, and exact commands before continuing.',
+        },
+        tone: 'warning',
+        confirmId: 'start_retry_standard',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'start_retry_standard', label: 'Include standard and retry', tone: 'warning' },
+        ],
+      }, returnFocus);
+      if (!standardConfirmed) return false;
+    }
     st.starting = true;
     st.error = '';
     renderViews();
     try {
       const payload = await requestJson(
-        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/assessment-batches`,
+        retry
+          ? `/projects/${encodeURIComponent(projectId)}/assessment-batches/${encodeURIComponent(st.preview.source_batch_id)}/retry`
+          : `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/assessment-batches`,
         {
           method: 'POST',
           body: JSON.stringify({
@@ -383,7 +418,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       st.planning = false;
       await Promise.all([loadBatchItemPage(st), loadEvents(st)]);
       schedulePoll(st);
-      ctx.setProjectWorkspaceMessage?.('Assessment batch started.');
+      ctx.setProjectWorkspaceMessage?.(retry ? 'Assessment batch retry started.' : 'Assessment batch started.');
       return true;
     } catch (err) {
       st.error = err?.message || 'Could not start this assessment batch.';

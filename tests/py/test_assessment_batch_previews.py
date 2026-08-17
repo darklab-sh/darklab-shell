@@ -133,6 +133,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
         team_id="",
         project_id="prj-preview-storage",
         assessment_id="asm-preview-storage",
+        source_batch_id="",
         profile_key="network",
         profile_version="1.0",
         selection={"include_standard": False, "item_limit": 128},

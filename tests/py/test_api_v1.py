@@ -354,6 +354,7 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_osv_advisory_lookup": "Capability.TRIAGE_FINDINGS",
     "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
     "api_assessment_batch_start": "Capability.RUN_COMMANDS",
+    "api_assessment_batch_retry": "Capability.RUN_COMMANDS",
     "api_assessment_batch_cancel": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlations": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlation": "Capability.RUN_COMMANDS",
@@ -7697,6 +7698,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     batch_cancel_path = (
         "/projects/{project_id}/assessment-batches/{batch_id}/cancel"
     )
+    batch_retry_preview_path = (
+        "/projects/{project_id}/assessment-batches/{batch_id}/retry-previews"
+    )
+    batch_retry_path = "/projects/{project_id}/assessment-batches/{batch_id}/retry"
     batch_path = "/assessment-batches/{batch_id}"
     batch_items_path = batch_path + "/items"
     batch_events_path = batch_path + "/events"
@@ -7720,6 +7725,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[batch_list_path]) == {"get"}
     assert set(paths[batch_start_path]) == {"post"}
     assert set(paths[batch_cancel_path]) == {"post"}
+    assert set(paths[batch_retry_preview_path]) == {"post"}
+    assert set(paths[batch_retry_path]) == {"post"}
     assert set(paths[batch_path]) == {"get"}
     assert set(paths[batch_items_path]) == {"get"}
     assert set(paths[batch_events_path]) == {"get"}
@@ -7752,6 +7759,13 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert batch_request["properties"]["max_parallel"]["maximum"] == 8
     assert batch_request["properties"]["max_owner_parallel"]["maximum"] == 32
     assert batch_request["properties"]["max_instance_parallel"]["maximum"] == 64
+    assert "source_batch_id" in schemas["AssessmentBatchPreview"]["required"]
+    assert schemas["AssessmentBatchPreview"]["properties"]["source_batch_id"] == {
+        "type": "string"
+    }
+    assert schemas["AssessmentBatchPreviewSummary"]["properties"][
+        "source_retry_eligible_item_count"
+    ] == {"type": "integer", "minimum": 0}
     assert paths[batch_preview_path]["post"]["responses"]["201"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
@@ -7776,6 +7790,12 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[batch_cancel_path]["post"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchCancelResponse"}
+    assert paths[batch_retry_preview_path]["post"]["responses"]["201"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
+    assert paths[batch_retry_path]["post"]["responses"]["202"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchStartResponse"}
     assert schemas["AssessmentBatchItemPage"]["properties"]["items"][
         "maxItems"
     ] == 100
@@ -9125,6 +9145,7 @@ def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contr
         "preview_id": "abp_cli",
         "project_id": "prj_cli",
         "assessment_id": "asmt_cli",
+        "source_batch_id": "",
         "profile": {"key": "network", "version": "1"},
         "selection": {"include_standard": False, "item_limit": 128},
         "summary": {
@@ -9193,6 +9214,32 @@ def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contr
         "finished": "2026-08-17 12:01:00",
         "failure_code": "",
     }
+    retry_preview = {
+        **preview,
+        "preview_id": "abp_retry_cli",
+        "source_batch_id": "wfx_cli",
+        "summary": {
+            **preview["summary"],
+            "source_item_count": 1,
+            "source_retry_eligible_item_count": 1,
+            "source_succeeded_item_count": 0,
+        },
+    }
+    retry_batch = {
+        **batch,
+        "batch_id": "wfx_retry_cli",
+        "preview_id": "abp_retry_cli",
+        "source_batch_id": "wfx_cli",
+        "status": "running",
+        "progress": {
+            **progress,
+            "pending": 1,
+            "succeeded": 0,
+            "settled": 0,
+            "status": "running",
+        },
+        "finished": "",
+    }
     event = {
         "batch_id": "wfx_cli",
         "sequence": 2,
@@ -9234,10 +9281,35 @@ def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contr
                         }
                     }
                 return {"preview": preview}
+            if path == "/projects/prj_cli/assessment-batches/wfx_cli/retry-previews":
+                include_standard = bool((body or {}).get("include_standard"))
+                if include_standard:
+                    return {
+                        "preview": {
+                            **retry_preview,
+                            "selection": {
+                                **retry_preview["selection"],
+                                "include_standard": True,
+                            },
+                            "standard_item_count": 1,
+                            "summary": {
+                                **retry_preview["summary"],
+                                "requires_standard_confirmation": True,
+                            },
+                        }
+                    }
+                return {"preview": retry_preview}
             if path == "/assessment-batch-previews/abp_cli/items":
                 return {
                     "schema_version": 1,
                     "preview_id": "abp_cli",
+                    "items": [item],
+                    "next_cursor": None,
+                }
+            if path == "/assessment-batch-previews/abp_retry_cli/items":
+                return {
+                    "schema_version": 1,
+                    "preview_id": "abp_retry_cli",
                     "items": [item],
                     "next_cursor": None,
                 }
@@ -9252,6 +9324,11 @@ def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contr
                 }
             if path == "/assessment-batches/wfx_cli":
                 return {"batch": batch}
+            if path == "/projects/prj_cli/assessment-batches/wfx_cli/retry":
+                return {
+                    "batch": retry_batch,
+                    "launch": {"status": "running", "launched": 1},
+                }
             if path == "/assessment-batches/wfx_cli/items":
                 return {
                     "schema_version": 1,
@@ -9378,6 +9455,62 @@ def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contr
         "/projects/prj_cli/assessment-batches/wfx_cli/cancel",
         None,
         {},
+    )
+
+    retry_call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "batch", "retry", "wfx_cli",
+    ]) == 0
+    retry_output = capsys.readouterr().out
+    assert "Retry of: wfx_cli" in retry_output
+    assert "Preview only" in retry_output
+    assert calls[retry_call_count:] == [
+        ("GET", "/assessment-batches/wfx_cli", None, None),
+        (
+            "POST",
+            "/projects/prj_cli/assessment-batches/wfx_cli/retry-previews",
+            None,
+            {
+                "target_entity_ids": [],
+                "excluded_target_entity_ids": [],
+                "categories": [],
+                "excluded_categories": [],
+                "include_standard": False,
+                "item_limit": 128,
+                "max_parallel": 8,
+                "max_owner_parallel": 16,
+                "max_instance_parallel": 32,
+            },
+        ),
+        (
+            "GET",
+            "/assessment-batch-previews/abp_retry_cli/items",
+            {"cursor": 0, "limit": 100},
+            None,
+        ),
+    ]
+
+    assert cli_main.main([
+        "assessment", "batch", "retry", "wfx_cli",
+        "--include-standard", "--confirm",
+    ]) == 1
+    assert "add --confirm-standard" in capsys.readouterr().err
+
+    assert cli_main.main([
+        "assessment", "batch", "retry", "wfx_cli",
+        "--include-standard", "--confirm", "--confirm-standard", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["batch"]["batch_id"] == "wfx_retry_cli"
+    assert calls[-1] == (
+        "POST",
+        "/projects/prj_cli/assessment-batches/wfx_cli/retry",
+        None,
+        {
+            "preview_id": "abp_retry_cli",
+            "plan_digest": digest,
+            "confirmed": True,
+            "standard_confirmed": True,
+        },
     )
 
 

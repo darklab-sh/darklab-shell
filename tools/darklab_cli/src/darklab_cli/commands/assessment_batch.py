@@ -15,23 +15,21 @@ from .assessment_batch_reads import (
     handle_batch_list,
     handle_batch_show,
 )
+from .assessment_batch_retry import handle_batch_retry
 
 
 def handle_assessment_batch(client: DarklabClient, args: argparse.Namespace) -> int:
-    match args.assessment_batch_command:
-        case "plan":
-            return handle_batch_plan(client, args)
-        case "start":
-            return handle_batch_start(client, args)
-        case "list":
-            return handle_batch_list(client, args)
-        case "show":
-            return handle_batch_show(client, args)
-        case "follow":
-            return handle_batch_follow(client, args)
-        case "cancel":
-            return handle_batch_cancel(client, args)
-    return die("unknown assessment batch command")
+    handlers = {
+        "plan": handle_batch_plan,
+        "start": handle_batch_start,
+        "list": handle_batch_list,
+        "show": handle_batch_show,
+        "follow": handle_batch_follow,
+        "cancel": handle_batch_cancel,
+        "retry": handle_batch_retry,
+    }
+    handler = handlers.get(args.assessment_batch_command)
+    return handler(client, args) if handler else die("unknown assessment batch command")
 
 
 __all__ = ["handle_assessment_batch"]

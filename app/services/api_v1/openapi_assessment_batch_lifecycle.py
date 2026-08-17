@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.api_v1 import openapi_assessment_batch_mutations as mutations
+from services.api_v1 import openapi_assessment_batch_mutations as mutations, openapi_assessment_batch_retries as retries
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -281,7 +281,7 @@ def assessment_batch_lifecycle_paths() -> dict[str, Any]:
         "404": _error("Project or assessment batch not found"),
         "429": _error("Rate limit exceeded"),
     }
-    return mutations.assessment_batch_mutation_paths() | {
+    return mutations.assessment_batch_mutation_paths() | retries.assessment_batch_retry_paths() | {
         "/projects/{project_id}/assessment-batches": {
             "get": {
                 "summary": "List durable assessment batches for a Project",

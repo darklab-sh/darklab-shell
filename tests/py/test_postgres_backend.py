@@ -569,6 +569,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0074",
         "0075",
         "0076",
+        "0077",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -5019,6 +5020,37 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         confirmed=True,
     )
     claimed_batch_item = claim_next_batch_item(str(started_batch["batch_id"]))
+    conn.execute(
+        "UPDATE workflow_execution_children SET status = 'failed', "
+        "error_code = 'launch_failed' WHERE execution_id = %s",
+        (started_batch["batch_id"],),
+    )
+    conn.execute(
+        "UPDATE workflow_execution_steps SET status = 'failed' "
+        "WHERE execution_id = %s",
+        (started_batch["batch_id"],),
+    )
+    conn.execute(
+        "UPDATE workflow_executions SET status = 'failed' WHERE id = %s",
+        (started_batch["batch_id"],),
+    )
+    conn.commit()
+    retry_preview_resp = client.post(
+        f"/api/v1/projects/{project['id']}/assessment-batches/"
+        f"{started_batch['batch_id']}/retry-previews",
+        headers=api_headers,
+        json={},
+    )
+    retry_preview = json.loads(retry_preview_resp.data)["preview"]
+    retry_batch = start_assessment_batch(
+        session_id,
+        project["id"],
+        assessment_id,
+        preview_id=retry_preview["preview_id"],
+        plan_digest=retry_preview["plan_digest"],
+        confirmed=True,
+        source_batch_id=str(started_batch["batch_id"]),
+    )
     api_batch_preview_resp = client.get(
         f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}",
         headers=api_headers,
@@ -5232,6 +5264,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert replayed_batch["batch_id"] == started_batch["batch_id"]
     assert claimed_batch_item["status"] == "claimed"
     assert claimed_batch_item["item"]["display_command"]
+    assert retry_preview_resp.status_code == 201
+    assert retry_preview["source_batch_id"] == started_batch["batch_id"]
+    assert 1 <= retry_preview["selected_item_count"] <= started_batch["item_count"]
+    assert retry_batch["source_batch_id"] == started_batch["batch_id"]
+    assert retry_batch["batch_id"] != started_batch["batch_id"]
     assert json.loads(api_batch_preview_resp.data)["preview"] == batch_preview
     api_batch_items = json.loads(api_batch_items_resp.data)
     assert len(api_batch_items["items"]) == batch_preview["candidate_item_count"]

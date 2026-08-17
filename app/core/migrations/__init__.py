@@ -87,6 +87,7 @@ from . import (
     v0074_workflow_execution_kinds,
     v0075_assessment_batch_coordinator,
     v0076_assessment_batch_items,
+    v0077_assessment_batch_retry_previews,
 )
 
 _ = baseline
@@ -168,4 +169,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0074_workflow_execution_kinds.MIGRATION,
     v0075_assessment_batch_coordinator.MIGRATION,
     v0076_assessment_batch_items.MIGRATION,
+    v0077_assessment_batch_retry_previews.MIGRATION,
 )

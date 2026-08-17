@@ -6,23 +6,16 @@
 from __future__ import annotations
 
 import hmac
-from collections.abc import Mapping
 
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
 )
 from services.assessments.batch.preview_digest import batch_preview_digest
-from services.assessments.batch.preview_draft import build_batch_preview_draft
 from services.assessments.batch.preview_storage import get_batch_preview
-from services.assessments.batch.start_storage import (
-    confirmed_batch_replay,
-    materialize_confirmed_batch,
-)
-
-
-def _mapping(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, Mapping) else {}
+from services.assessments.batch.start_rebuild import rebuild_confirmed_batch_preview
+from services.assessments.batch.start_replay import confirmed_batch_replay
+from services.assessments.batch.start_storage import materialize_confirmed_batch
 
 
 def _approval_digest(value: object) -> str:
@@ -33,19 +26,6 @@ def _approval_digest(value: object) -> str:
             "Assessment batch approval digest is invalid.",
         )
     return digest
-
-
-def _selection_for_rebuild(preview: Mapping[str, object]) -> dict[str, object]:
-    selection = _mapping(preview.get("selection"))
-    concurrency = _mapping(preview.get("concurrency"))
-    selection.update(
-        {
-            "max_parallel": concurrency.get("batch"),
-            "max_owner_parallel": concurrency.get("owner"),
-            "max_instance_parallel": concurrency.get("instance"),
-        }
-    )
-    return selection
 
 
 def start_assessment_batch(
@@ -78,6 +58,7 @@ def start_assessment_batch(
             "standard_confirmed must be true or false.",
         )
     digest = _approval_digest(plan_digest)
+    normalized_source = str(source_batch_id or "").strip()
     replay = confirmed_batch_replay(
         session_id,
         project_id,
@@ -85,6 +66,7 @@ def start_assessment_batch(
         preview_id,
         digest,
         team_id=team_id,
+        expected_source_batch_id=normalized_source,
     )
     if replay:
         return replay
@@ -93,6 +75,7 @@ def start_assessment_batch(
     if (
         str(preview.get("project_id") or "") != project_id
         or str(preview.get("assessment_id") or "") != assessment_id
+        or str(preview.get("source_batch_id") or "") != normalized_source
         or not hmac.compare_digest(stored_digest, digest)
     ):
         raise AssessmentBatchError(
@@ -100,23 +83,14 @@ def start_assessment_batch(
             "The assessment batch approval doesn't match this cycle preview.",
             status_code=409,
         )
-    try:
-        current_draft = build_batch_preview_draft(
-            session_id,
-            project_id,
-            assessment_id,
-            _selection_for_rebuild(preview),
-            team_id=team_id,
-        )
-    except AssessmentBatchError as exc:
-        if exc.code == "assessment_not_active":
-            raise
-        raise AssessmentBatchError(
-            "batch_preview_stale",
-            "The assessment batch plan changed; create and review a new preview.",
-            status_code=409,
-            details={"reason_code": exc.code},
-        ) from exc
+    current_draft = rebuild_confirmed_batch_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        preview,
+        source_batch_id=normalized_source,
+        team_id=team_id,
+    )
     current_digest = batch_preview_digest(current_draft)
     if not hmac.compare_digest(current_digest, stored_digest):
         raise AssessmentBatchError(
@@ -125,6 +99,12 @@ def start_assessment_batch(
             status_code=409,
         )
     selected_items = sum(int(item.selected) for item in current_draft.items)
+    if not selected_items:
+        raise AssessmentBatchError(
+            "empty_batch_retry",
+            "No failed or unfinished commands are currently eligible to retry.",
+            status_code=409,
+        )
     return materialize_confirmed_batch(
         session_id=session_id,
         team_id=team_id,
@@ -135,7 +115,7 @@ def start_assessment_batch(
         item_count=selected_items,
         concurrency=current_draft.concurrency,
         standard_confirmed=standard_confirmed,
-        source_batch_id=source_batch_id,
+        source_batch_id=normalized_source,
         actor_member_id=actor_member_id,
         actor_role=actor_role,
         owner_client_id=owner_client_id,

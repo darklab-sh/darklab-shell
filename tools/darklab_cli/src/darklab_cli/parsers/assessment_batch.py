@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+from .assessment_batch_retry import register_assessment_batch_retry_parser
 
 
 def _bounded_integer(label: str, minimum: int, maximum: int):
@@ -143,6 +144,5 @@ def register_assessment_batch_parser(commands: argparse._SubParsersAction) -> No
         "--confirm", action="store_true", help="Request cancellation; otherwise remain read-only."
     )
     cancel.add_argument("--format", choices=("text", "json"), default="text")
-
-
+    register_assessment_batch_retry_parser(actions, _add_selection_options)
 __all__ = ["register_assessment_batch_parser"]

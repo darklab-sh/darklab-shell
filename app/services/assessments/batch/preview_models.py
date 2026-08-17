@@ -52,13 +52,13 @@ class BatchPreviewDraft:
     team_id: str
     project_id: str
     assessment_id: str
+    source_batch_id: str
     profile_key: str
     profile_version: str
     selection: Mapping[str, Any]
     summary: Mapping[str, Any]
     concurrency: BatchConcurrency
     items: tuple[BatchPreviewItem, ...]
-
 
 __all__ = [
     "BatchCheckMapping",

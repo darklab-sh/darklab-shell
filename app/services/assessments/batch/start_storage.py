@@ -9,7 +9,7 @@ import hmac
 from datetime import datetime, timezone
 from typing import Any
 
-from core.database_access import get_db_backend, get_db_connect
+from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
@@ -18,7 +18,6 @@ from services.assessments.batch.contracts import (
     BatchConcurrency,
 )
 from services.assessments.batch.storage import create_batch_parent
-from services.assessments.batch.storage_read import get_batch_parent
 from services.projects.scope import shared_owner_where
 
 
@@ -36,48 +35,6 @@ def _as_utc_datetime(value: object) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def confirmed_batch_replay(
-    session_id: str,
-    project_id: str,
-    assessment_id: str,
-    preview_id: str,
-    preview_digest: str,
-    *,
-    team_id: str = "",
-) -> dict[str, object] | None:
-    """Return an already-started matching batch before rebuilding live scope."""
-    owner_sql, owner_params = shared_owner_where(
-        session_id, team_id=team_id, table_alias="p"
-    )
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT p.plan_digest, p.started_execution_id "
-            "FROM assessment_batch_previews p WHERE "
-            + owner_sql  # nosec B608: fixed owner clause
-            + " AND p.id = ? AND p.project_id = ? AND p.assessment_id = ?",
-            (*owner_params, preview_id, project_id, assessment_id),
-        ).fetchone()
-    if not row:
-        return None
-    if not hmac.compare_digest(str(row["plan_digest"] or ""), preview_digest):
-        raise AssessmentBatchError(
-            "batch_confirmation_mismatch",
-            "The assessment batch approval doesn't match this cycle preview.",
-            status_code=409,
-        )
-    batch_id = str(row["started_execution_id"] or "")
-    if not batch_id:
-        return None
-    batch = get_batch_parent(session_id, batch_id, team_id=team_id)
-    if not batch:
-        raise AssessmentBatchError(
-            "batch_state_mismatch",
-            "The confirmed assessment batch couldn't be loaded.",
-            status_code=409,
-        )
-    return batch
-
-
 def _preview_preflight(
     conn: Any,
     *,
@@ -90,6 +47,7 @@ def _preview_preflight(
     item_count: int,
     concurrency: BatchConcurrency,
     standard_confirmed: bool,
+    expected_source_batch_id: str,
     created: str,
 ) -> str:
     owner_sql, owner_params = shared_owner_where(
@@ -107,6 +65,12 @@ def _preview_preflight(
     if not row:
         raise AssessmentBatchError(
             "preview_not_found", "Assessment batch preview wasn't found.", status_code=404
+        )
+    if str(row["source_execution_id"] or "") != expected_source_batch_id:
+        raise AssessmentBatchError(
+            "batch_confirmation_mismatch",
+            "The assessment batch approval doesn't match this retry preview.",
+            status_code=409,
         )
     stored_digest = str(row["plan_digest"] or "")
     if not hmac.compare_digest(stored_digest, preview_digest):
@@ -283,6 +247,7 @@ def materialize_confirmed_batch(
             item_count=item_count,
             concurrency=concurrency,
             standard_confirmed=standard_confirmed,
+            expected_source_batch_id=str(source_batch_id or "").strip(),
             created=created,
         )
 
@@ -315,4 +280,4 @@ def materialize_confirmed_batch(
     )
 
 
-__all__ = ["confirmed_batch_replay", "materialize_confirmed_batch"]
+__all__ = ["materialize_confirmed_batch"]

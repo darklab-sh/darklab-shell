@@ -13,7 +13,10 @@ from conftest import reusable_test_app
 from core.database_access import get_db_connect
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.contracts import AssessmentBatchError
+from services.assessments.batch.events import list_batch_events
 from services.assessments.batch.preview_compiler import compile_batch_preview
+from services.assessments.batch.preview_storage import get_batch_preview_items
+from services.assessments.batch.retry_compiler import compile_batch_retry_preview
 from services.assessments.batch.start import start_assessment_batch
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
@@ -56,6 +59,10 @@ def batch_cycle(monkeypatch: pytest.MonkeyPatch):
     assessment_id = str(cycle["assessment"]["id"])
     monkeypatch.setattr(
         "services.assessments.batch.preview_draft.probe_planning_runtime",
+        _runtime,
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
         _runtime,
     )
     yield session_id, project_id, assessment_id
@@ -276,3 +283,140 @@ def test_start_rejects_scope_drift_and_rolls_back_partial_materialization(batch_
         ).fetchone()
     assert parent_count == 0
     assert claimed["started_execution_id"] == ""
+
+
+def _settle_source_with_one_failure(batch_id: str) -> tuple[str, str]:
+    with get_db_connect()() as conn:
+        items = conn.execute(
+            "SELECT item.item_index, item.step_id, item.child_ordinal, mapping.check_id "
+            "FROM assessment_batch_items item JOIN assessment_batch_item_checks mapping "
+            "ON mapping.batch_id = item.batch_id AND mapping.item_index = item.item_index "
+            "WHERE item.batch_id = ? ORDER BY item.item_index, mapping.mapping_index",
+            (batch_id,),
+        ).fetchall()
+        item_checks: dict[int, list[str]] = {}
+        item_children: dict[int, tuple[str, int]] = {}
+        for row in items:
+            index = int(row["item_index"])
+            item_checks.setdefault(index, []).append(str(row["check_id"]))
+            item_children[index] = (str(row["step_id"]), int(row["child_ordinal"]))
+        assert len(item_children) == 2
+        succeeded_index, failed_index = sorted(item_children)
+        for index, status, error_code in (
+            (succeeded_index, "succeeded", ""),
+            (failed_index, "failed", "feature_unavailable"),
+        ):
+            step_id, ordinal = item_children[index]
+            conn.execute(
+                "UPDATE workflow_execution_children SET status = ?, error_code = ? "
+                "WHERE execution_id = ? AND step_id = ? AND ordinal = ? AND attempt = 1",
+                (status, error_code, batch_id, step_id, ordinal),
+            )
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'failed' WHERE id = ?",
+            (batch_id,),
+        )
+        conn.commit()
+    return item_checks[succeeded_index][0], item_checks[failed_index][0]
+
+
+def test_retry_preview_rebuilds_only_failed_work_and_creates_immutable_lineage(
+    batch_cycle,
+):
+    session_id, project_id, assessment_id = batch_cycle
+    source_preview = compile_batch_preview(session_id, project_id, assessment_id)
+    source = _start(session_id, project_id, assessment_id, source_preview)
+    source_id = str(source["batch_id"])
+    succeeded_check_id, failed_check_id = _settle_source_with_one_failure(source_id)
+
+    retry_preview = compile_batch_retry_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        source_id,
+    )
+    assert retry_preview["source_batch_id"] == source_id
+    assert retry_preview["selected_item_count"] == 1
+    assert retry_preview["summary"]["source_item_count"] == 2
+    assert retry_preview["summary"]["source_succeeded_item_count"] == 1
+    assert retry_preview["summary"]["source_retry_eligible_item_count"] == 1
+    retry_items = get_batch_preview_items(
+        session_id, str(retry_preview["preview_id"])
+    )["items"]
+    retry_check_ids = {
+        mapping["check_id"]
+        for item in retry_items
+        for mapping in item["check_mappings"]
+    }
+    assert retry_check_ids == {failed_check_id}
+    assert succeeded_check_id not in retry_check_ids
+
+    with pytest.raises(AssessmentBatchError) as wrong_surface:
+        _start(session_id, project_id, assessment_id, retry_preview)
+    assert wrong_surface.value.code == "batch_confirmation_mismatch"
+
+    retry = _start(
+        session_id,
+        project_id,
+        assessment_id,
+        retry_preview,
+        source_batch_id=source_id,
+    )
+    assert retry["batch_id"] != source_id
+    assert retry["source_batch_id"] == source_id
+    replay = _start(
+        session_id,
+        project_id,
+        assessment_id,
+        retry_preview,
+        source_batch_id=source_id,
+    )
+    assert replay["batch_id"] == retry["batch_id"]
+    source_events = list_batch_events(session_id, source_id)
+    retry_created = [
+        event for event in source_events if event["event_type"] == "retry_created"
+    ]
+    assert len(retry_created) == 1
+    assert retry_created[0]["source_batch_id"] == source_id
+    assert retry_created[0]["retry_batch_id"] == retry["batch_id"]
+    with get_db_connect()() as conn:
+        statuses = conn.execute(
+            "SELECT status FROM workflow_execution_children WHERE execution_id = ? "
+            "ORDER BY step_id, ordinal, attempt",
+            (source_id,),
+        ).fetchall()
+    assert [str(row["status"]) for row in statuses] == ["succeeded", "failed"]
+
+
+def test_retry_preview_can_explain_nothing_currently_retryable(batch_cycle):
+    session_id, project_id, assessment_id = batch_cycle
+    source_preview = compile_batch_preview(session_id, project_id, assessment_id)
+    source = _start(session_id, project_id, assessment_id, source_preview)
+    source_id = str(source["batch_id"])
+    _succeeded_check_id, failed_check_id = _settle_source_with_one_failure(source_id)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE project_assessment_checks SET state = 'covered' WHERE id = ?",
+            (failed_check_id,),
+        )
+        conn.commit()
+
+    retry_preview = compile_batch_retry_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        source_id,
+    )
+    assert retry_preview["candidate_item_count"] == 0
+    assert retry_preview["selected_item_count"] == 0
+    assert retry_preview["summary"]["reason_counts"] == {"already_covered": 1}
+    assert retry_preview["summary"]["chunk_sizes"] == []
+    with pytest.raises(AssessmentBatchError) as empty:
+        _start(
+            session_id,
+            project_id,
+            assessment_id,
+            retry_preview,
+            source_batch_id=source_id,
+        )
+    assert empty.value.code == "empty_batch_retry"

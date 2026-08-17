@@ -51,6 +51,7 @@ def build_batch_preview_draft(
         team_id=team_id,
         project_id=project_id,
         assessment_id=assessment_id,
+        source_batch_id="",
         profile_key=str(source.assessment["profile_key"] or ""),
         profile_version=str(source.assessment["profile_version"] or ""),
         selection=selection.public(),
@@ -58,6 +59,5 @@ def build_batch_preview_draft(
         concurrency=selection.concurrency,
         items=items,
     )
-
 
 __all__ = ["build_batch_preview_draft"]

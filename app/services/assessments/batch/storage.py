@@ -24,10 +24,8 @@ from services.assessments.batch.contracts import (
     BatchConcurrency,
 )
 from services.assessments.batch.events import append_batch_event_on_conn
-from services.assessments.batch.policy import (
-    batch_chunk_sizes,
-    normalize_batch_concurrency,
-)
+from services.assessments.batch.policy import batch_chunk_sizes, normalize_batch_concurrency
+from services.assessments.batch.retry_events import append_retry_created_on_conn
 from services.assessments.batch.storage_read import active_batch_count, get_batch_parent
 from services.projects.scope import shared_owner_where
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
@@ -320,6 +318,7 @@ def create_batch_parent(
         _insert_chunks(conn, batch_id, sizes, created)
         if _initialize_on_conn:
             _initialize_on_conn(conn, batch_id, created)
+        append_retry_created_on_conn(conn, source_batch_id, batch_id, normalized_item_count, created)
         conn.commit()
     return get_batch_parent(session_id, batch_id, team_id=team_id) or {}
 

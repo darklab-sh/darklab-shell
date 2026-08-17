@@ -63,6 +63,8 @@ def estimate_batch_duration(
 ) -> BatchDurationEstimate:
     """Account for 32-item barriers, worker limits, and target serialization."""
     selected = [item for item in items if item.selected]
+    if not selected:
+        return BatchDurationEstimate(0, 0, ())
     sizes = batch_chunk_sizes(len(selected))
     minimum = maximum = offset = 0
     for size in sizes:

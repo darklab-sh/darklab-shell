@@ -33,6 +33,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_assessment_actions.py",
     "openapi_assessment_batch_lifecycle.py",
     "openapi_assessment_batch_mutations.py",
+    "openapi_assessment_batch_retries.py",
     "openapi_assessment_batches.py",
     "openapi_assessment_deltas.py",
     "openapi_assessment_evidence.py",
@@ -274,6 +275,11 @@ _MODULE_SIZE_RATCHET = (
         110,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/blueprints/projects_assessment_batch_retries.py",
+        124,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/blueprints/projects_assessment_checks.py", 238, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 165, "split-package-ratchet"),
     ModuleSizeBudget(
@@ -317,6 +323,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_previews.py",
         122,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/blueprints/api_v1_assessment_batch_retries.py",
+        115,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_checks.py", 267, "split-package-ratchet"),
@@ -383,6 +394,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_batch_mutations.py",
         137,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_batch_retries.py",
+        115,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -1095,7 +1111,28 @@ _MODULE_SIZE_RATCHET = (
         300,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/retry_actions.py", 57, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/retry_compiler.py", 34, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/retry_draft.py", 82, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/retry_events.py", 33, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/retry_scope.py", 153, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/start.py", 144, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/start_rebuild.py", 68, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/start_replay.py", 60, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/start_storage.py", 315, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/storage.py", 324, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/storage_read.py", 100, "split-package-ratchet"),
@@ -1153,6 +1190,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_pages.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_preview.py", 93, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_reads.py", 198, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_retry.py", 91, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_formatting.py", 26, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/project_references.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe.py", 133, "split-package-ratchet"),
@@ -1162,6 +1200,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/__init__.py", 1, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_batch.py", 145, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_batch_retry.py", 31, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/probe.py", 44, "split-package-ratchet"),
 )
 
@@ -1197,8 +1236,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 290
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "4c48cd9d3154fc2be9a4010e9fed83ae8dd898cce3ce4d244ce1017ce564ed21"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 294
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "f77b8606674e4b446194c0d1fddb7cd4d60c0b5c7d90fe92afae29c42fdbe7be"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

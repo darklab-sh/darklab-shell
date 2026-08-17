@@ -145,20 +145,20 @@ def store_batch_preview(
         delete_expired_batch_previews_on_conn(conn, draft.session_id, draft.team_id, created)
         conn.execute(
             "INSERT INTO assessment_batch_previews "
-            "(id, session_id, team_id, project_id, assessment_id, profile_key, profile_version, "
+            "(id, session_id, team_id, project_id, assessment_id, source_execution_id, profile_key, profile_version, "
             "selection_json, summary_json, plan_digest, candidate_item_count, "
             "selected_item_count, mapping_count, safe_item_count, standard_item_count, "
             "unavailable_check_count, skipped_check_count, estimated_min_seconds, "
             "estimated_max_seconds, max_parallel, max_target_parallel, max_owner_parallel, "
             "max_instance_parallel, expires_at, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 preview_id,
                 draft.session_id,
                 draft.team_id,
                 draft.project_id,
                 draft.assessment_id,
-                draft.profile_key,
+                draft.source_batch_id, draft.profile_key,
                 draft.profile_version,
                 _dialect().json_param(dict(draft.selection)),
                 _dialect().json_param(summary),
@@ -230,6 +230,7 @@ def _public_preview(row: Any) -> dict[str, object]:
         "preview_id": str(row["id"] or ""),
         "project_id": str(row["project_id"] or ""),
         "assessment_id": str(row["assessment_id"] or ""),
+        "source_batch_id": str(row["source_execution_id"] or ""),
         "profile": {
             "key": str(row["profile_key"] or ""),
             "version": str(row["profile_version"] or ""),
@@ -384,7 +385,6 @@ def get_batch_preview_items(
         "items": items,
         "next_cursor": next_cursor,
     }
-
 
 __all__ = [
     "get_batch_preview",

@@ -30,6 +30,7 @@ const preview = {
   preview_id: 'abp_batch_1',
   project_id: 'prj_batch_1',
   assessment_id: assessment.id,
+  source_batch_id: '',
   plan_digest: 'a'.repeat(64),
   selected_item_count: 1,
   candidate_item_count: 2,
@@ -416,6 +417,96 @@ describe('Project assessment batches', () => {
     surface = render(manager)
     expect(surface.textContent).toContain('Cancellation was requested')
     expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith('Assessment batch cancellation requested.')
+    manager.invalidate()
+  })
+
+  it('previews and starts a new immutable retry without replacing its source batch', async () => {
+    const terminalBatch = {
+      ...activeBatch,
+      status: 'failed',
+      progress: {
+        ...activeBatch.progress,
+        running: 0,
+        failed: 1,
+        settled: 1,
+      },
+    }
+    const retryPreview = {
+      ...preview,
+      preview_id: 'abp_retry_1',
+      source_batch_id: terminalBatch.batch_id,
+      candidate_item_count: 1,
+      selected_item_count: 1,
+      summary: {
+        ...preview.summary,
+        source_batch_id: terminalBatch.batch_id,
+        source_item_count: 1,
+        source_retry_eligible_item_count: 1,
+        source_succeeded_item_count: 0,
+      },
+    }
+    const retryBatch = {
+      ...activeBatch,
+      batch_id: 'wfx_retry_1',
+      source_batch_id: terminalBatch.batch_id,
+    }
+    const requests = []
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      const value = String(url)
+      requests.push({ url: value, options })
+      if (value.startsWith('/projects/prj_batch_1/assessment-batches?')) {
+        return response({ batches: [terminalBatch], has_more: false })
+      }
+      if (value.endsWith('/items?cursor=0&limit=100')) {
+        return response({ items: [batchItem], next_cursor: null })
+      }
+      if (value.endsWith('/events?cursor=0&limit=100')) {
+        return response({ events: [], has_more: false })
+      }
+      if (value.endsWith('/retry-previews')) return response({ preview: retryPreview })
+      if (value.startsWith('/assessment-batch-previews/')) {
+        return response({ items: [previewItems[0]], next_cursor: null })
+      }
+      if (value.endsWith('/retry')) {
+        return response({ batch: retryBatch, launch: { launched: 1 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const ctx = context(projectWorkspaceRequest)
+    const manager = createProjectAssessmentBatchManager(ctx, { renderViews: vi.fn() })
+    await manager.load('prj_batch_1', assessment.id, { render: false })
+
+    let surface = render(manager)
+    expect(surface.textContent).toContain('Retry failed or unfinished')
+    expect(surface.textContent).toContain('New assessment plan')
+    const retryAction = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent === 'Retry failed or unfinished')
+    retryAction.click()
+    await vi.waitFor(() => expect(
+      manager.stateFor('prj_batch_1', assessment.id).preview?.source_batch_id,
+    ).toBe(terminalBatch.batch_id))
+
+    surface = render(manager)
+    expect(surface.textContent).toContain('Commands that already succeeded remain unchanged')
+    const start = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent === 'Start retry')
+    start.click()
+    await vi.waitFor(() => expect(
+      requests.some(item => item.url.endsWith(`/${terminalBatch.batch_id}/retry`)),
+    ).toBe(true))
+    const startRequest = requests.find(item => item.url.endsWith(`/${terminalBatch.batch_id}/retry`))
+    expect(JSON.parse(startRequest.options.body)).toEqual({
+      preview_id: retryPreview.preview_id,
+      plan_digest: retryPreview.plan_digest,
+      confirmed: true,
+      standard_confirmed: false,
+    })
+    expect(ctx.showConfirm.mock.calls.at(-1)[0].body.text)
+      .toBe('Retry failed or unfinished assessment commands?')
+    expect(ctx.setProjectWorkspaceMessage)
+      .toHaveBeenCalledWith('Assessment batch retry started.')
+    surface = render(manager)
+    expect(surface.textContent).toContain(`retry of ${terminalBatch.batch_id}`)
     manager.invalidate()
   })
 

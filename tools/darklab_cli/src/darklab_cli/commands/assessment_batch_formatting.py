@@ -40,6 +40,8 @@ def print_batch_preview(preview: dict[str, Any], items: list[dict[str, Any]]) ->
     print(f"Assessment batch preview: {preview.get('preview_id', '')}")
     print(f"Project: {preview.get('project_id', '')}")
     print(f"Assessment: {preview.get('assessment_id', '')}")
+    if preview.get("source_batch_id"):
+        print(f"Retry of: {preview.get('source_batch_id')}")
     print(f"Profile: {profile.get('key', '')} {profile.get('version', '')}".rstrip())
     print(
         "Selection: "
@@ -140,8 +142,6 @@ def print_batch_event(event: dict[str, Any], *, ndjson: bool = False) -> None:
         f"[{event.get('sequence', '')}] {event.get('created', '')} "
         f"{event.get('event_type', '')}{(' ' + suffix) if suffix else ''}"
     )
-
-
 __all__ = [
     "batch_row",
     "print_batch_event",

@@ -131,6 +131,7 @@ class AuditEventType(str, Enum):
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
     ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
     ASSESSMENT_BATCH_START = "assessment_batch.start"
+    ASSESSMENT_BATCH_RETRY = "assessment_batch.retry"
     ASSESSMENT_BATCH_CANCEL = "assessment_batch.cancel"
     PROBE_LAUNCH = "probe.launch"
     ASSESSMENT_OAST_RESERVE = "assessment.oast_reserve"
@@ -302,6 +303,8 @@ PROBE_LAUNCH_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
     "profile_role",
 })
 
+ASSESSMENT_BATCH_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({"source_batch_id"})
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -384,11 +387,19 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.ASSESSMENT_BATCH_START,
         AuditTargetType.ASSESSMENT_BATCH,
         RecordingMode.BEST_EFFORT,
+        detail_keys=ASSESSMENT_BATCH_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_BATCH_RETRY.value: _spec(
+        AuditEventType.ASSESSMENT_BATCH_RETRY,
+        AuditTargetType.ASSESSMENT_BATCH,
+        RecordingMode.BEST_EFFORT,
+        detail_keys=ASSESSMENT_BATCH_DETAIL_KEYS,
     ),
     AuditEventType.ASSESSMENT_BATCH_CANCEL.value: _spec(
         AuditEventType.ASSESSMENT_BATCH_CANCEL,
         AuditTargetType.ASSESSMENT_BATCH,
         RecordingMode.BEST_EFFORT,
+        detail_keys=ASSESSMENT_BATCH_DETAIL_KEYS,
     ),
     AuditEventType.PROBE_LAUNCH.value: _spec(
         AuditEventType.PROBE_LAUNCH,
