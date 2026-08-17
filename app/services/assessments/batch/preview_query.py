@@ -42,7 +42,7 @@ def _active_assessment(
         "SELECT a.id, a.project_id, a.profile_key, a.profile_version, "
         "a.profile_snapshot, a.status, p.status AS project_status "
         "FROM project_assessments a JOIN projects p ON p.id = a.project_id WHERE "
-        + owner_sql  # nosec B608: fixed owner clause
+        + owner_sql  # nosec
         + " AND a.project_id = ? AND a.id = ? AND a.status = 'active' "
         "AND p.status != 'archived' LIMIT 1",
         (*owner_params, project_id, assessment_id),
@@ -66,7 +66,7 @@ def _http_profile_counts(
         "SELECT h.headers_json, h.secret_refs_json, h.file_refs_json, "
         "h.login_workflow_id, h.token_capture_rules_json "
         "FROM project_http_profiles h WHERE "
-        + owner_sql  # nosec B608: fixed owner clause
+        + owner_sql  # nosec
         + " AND h.project_id = ? AND h.enabled = ? "
         "ORDER BY h.id LIMIT ?",
         (*owner_params, project_id, True, HTTP_PROFILE_READ_LIMIT),

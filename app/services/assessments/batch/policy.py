@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_CHUNK_ITEM_LIMIT,
@@ -24,7 +26,7 @@ def _bounded_int(value: object, *, name: str, minimum: int, maximum: int) -> int
     if isinstance(value, bool):
         raise AssessmentBatchError("invalid_batch_policy", f"{name} must be an integer.")
     try:
-        normalized = int(value)
+        normalized = int(cast(Any, value))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError("invalid_batch_policy", f"{name} must be an integer.") from exc
     if not minimum <= normalized <= maximum:

@@ -213,7 +213,7 @@ class DarklabClient:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         try:
-            resp = urllib.request.urlopen(req, timeout=self.config.timeout)  # nosec B310 - user-configured API URL
+            resp = urllib.request.urlopen(req, timeout=self.config.timeout)  # nosec
         except urllib.error.HTTPError as exc:
             message = _error_message(exc)
             raise DarklabCliError(message) from exc

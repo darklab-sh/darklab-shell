@@ -54,7 +54,7 @@ def assessment_batch_provenance_by_run(
         owner_sql = " AND " + owner_clause
         owner_params = tuple(raw_owner_params)
     rows = conn.execute(
-        "SELECT child.run_id, child.execution_id AS batch_id, child.step_id, "  # nosec B608
+        "SELECT child.run_id, child.execution_id AS batch_id, child.step_id, "  # nosec
         "child.attempt, child.status AS item_status, child.exit_code, "
         "item.item_index, batch.assessment_id, batch.source_execution_id, "
         "e.project_id, e.status AS batch_status, e.created, "

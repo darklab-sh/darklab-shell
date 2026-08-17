@@ -61,7 +61,7 @@ def finalize_canceling_batch_run(
             "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
             "AND s.step_id = c.step_id "
             "JOIN workflow_executions e ON e.id = c.execution_id "
-            "WHERE c.run_id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec B608
+            "WHERE c.run_id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec
             (run_id, ASSESSMENT_BATCH_EXECUTION_KIND),
         ).fetchone()
         if (

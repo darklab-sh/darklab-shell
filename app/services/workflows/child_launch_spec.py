@@ -7,9 +7,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from services.runs.signal_context import RunOutputSignalContext
+
+
+class ChildBrokerKwargs(TypedDict, total=False):
+    private_values: tuple[str, ...]
+    trusted_execution_args: tuple[str, ...]
+    reviewed_execution: object
+    output_signal_context: RunOutputSignalContext
+    run_finalized_hook: Callable[[str, dict[str, Any]], None]
+    run_cleanup_hook: Callable[[], None]
+    suppress_run_complete_notification: bool
 
 
 @dataclass(frozen=True)
@@ -36,9 +46,9 @@ class ChildLaunchSpec:
         if any(not isinstance(value, str) for value in self.trusted_execution_args):
             raise ValueError("child trusted execution arguments must be strings")
 
-    def broker_kwargs(self) -> dict[str, object]:
+    def broker_kwargs(self) -> ChildBrokerKwargs:
         """Return optional trusted inputs without serializing or logging them."""
-        values: dict[str, object] = {
+        values: ChildBrokerKwargs = {
             "private_values": self.private_values,
             "trusted_execution_args": self.trusted_execution_args,
         }

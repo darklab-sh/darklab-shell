@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from typing import Any, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
@@ -119,7 +120,7 @@ def _stop_and_reconcile(
 ) -> str:
     batch_id = str(execution.get("id") or "")
     stopped = stop_assessment_batch_for_recovery(batch_id, reason_code, detail)
-    for run_id in tuple(stopped.get("run_ids") or ()):
+    for run_id in tuple(cast(Any, stopped.get("run_ids") or ())):
         completed = storage.completed_run_for_recovery(str(run_id))
         if completed:
             finalize_assessment_batch_run(
@@ -170,8 +171,8 @@ def _recover_runnable(
                 extra={
                     "batch_id": batch_id,
                     "step_id": str(child.get("step_id") or ""),
-                    "ordinal": int(child.get("ordinal") or 0),
-                    "attempt": int(child.get("attempt") or 1),
+                    "ordinal": int(cast(Any, child.get("ordinal") or 0)),
+                    "attempt": int(cast(Any, child.get("attempt") or 1)),
                     "run_id": run_id,
                 },
             )
@@ -184,7 +185,7 @@ def _recover_runnable(
             enqueue_terminal_batch_summary(batch_id)
         return "recovered" if recovered else "ignored"
     launched = launch_assessment_batch(batch_id)
-    if int(launched.get("launched") or 0):
+    if int(cast(Any, launched.get("launched") or 0)):
         return "recovered"
     refreshed_status = str(launched.get("status") or "")
     if refreshed_status == "failed":

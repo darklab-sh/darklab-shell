@@ -17,7 +17,7 @@ CAP_NET_RAW_BIT = 13
 RAW_PACKET_TOOLS = ("nmap", "naabu", "masscan")
 _EXPECTED_FILE_CAPABILITY = "cap_net_raw"
 # The root entrypoint creates this fixed, non-writable marker before dropping privileges.
-_RAW_PACKET_FIREWALL_READY_FILE = Path("/tmp/darklab-raw-packet-firewall.ready")  # nosec B108
+_RAW_PACKET_FIREWALL_READY_FILE = Path("/tmp/darklab-raw-packet-firewall.ready")  # nosec
 _NMAP_RAW_SCAN_MODES = {
     "-sA", "-sF", "-sI", "-sM", "-sN", "-sO", "-sS",
     "-sU", "-sW", "-sX", "-sY", "-sZ",

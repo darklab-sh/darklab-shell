@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pytest
 
@@ -152,19 +153,25 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     assert preview["selected_item_count"] == 101
     assert preview["potential_covered_check_count"] == 101
 
-    first = get_batch_preview_items(
-        "preview-storage-owner",
-        str(preview["preview_id"]),
-        current_time=created_at,
+    first = cast(
+        dict[str, Any],
+        get_batch_preview_items(
+            "preview-storage-owner",
+            str(preview["preview_id"]),
+            current_time=created_at,
+        ),
     )
     assert len(first["items"]) == 100
     assert first["next_cursor"] == 100
     assert first["items"][0]["check_mappings"][0]["check_id"] == "chk-preview-000"
-    second = get_batch_preview_items(
-        "preview-storage-owner",
-        str(preview["preview_id"]),
-        cursor=int(first["next_cursor"]),
-        current_time=created_at,
+    second = cast(
+        dict[str, Any],
+        get_batch_preview_items(
+            "preview-storage-owner",
+            str(preview["preview_id"]),
+            cursor=int(first["next_cursor"]),
+            current_time=created_at,
+        ),
     )
     assert [item["item_index"] for item in second["items"]] == [100]
     assert second["next_cursor"] is None

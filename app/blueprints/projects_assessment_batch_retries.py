@@ -3,6 +3,8 @@
 
 """Browser preview and confirmed start routes for assessment-batch retries."""
 
+from typing import Any, cast
+
 from flask import jsonify, request
 
 from blueprints import projects as project_routes
@@ -114,14 +116,11 @@ def projects_assessment_batch_retry(project_id, batch_id):
             "assessment_id": str(batch.get("assessment_id") or ""),
             "source_batch_id": batch_id,
             "batch_id": str(batch.get("batch_id") or ""),
-            "item_count": int(batch.get("item_count") or 0),
-            "launched_count": int(launch.get("launched") or 0),
+            "item_count": int(cast(Any, batch.get("item_count") or 0)),
+            "launched_count": int(cast(Any, launch.get("launched") or 0)),
         },
     )
     return jsonify(result), 202
 
 
-__all__ = [
-    "projects_assessment_batch_retry",
-    "projects_assessment_batch_retry_preview",
-]
+__all__ = ["projects_assessment_batch_retry", "projects_assessment_batch_retry_preview"]

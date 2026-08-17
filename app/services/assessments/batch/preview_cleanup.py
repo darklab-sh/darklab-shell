@@ -22,7 +22,7 @@ def delete_expired_batch_previews_on_conn(
     )
     cursor = conn.execute(
         "DELETE FROM assessment_batch_previews AS p WHERE "
-        + owner_sql  # nosec B608: fixed owner clause
+        + owner_sql  # nosec
         + " AND p.expires_at <= ?",
         (*owner_params, expires_before),
     )

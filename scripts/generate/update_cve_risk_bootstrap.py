@@ -35,7 +35,7 @@ MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 def download(url: str) -> bytes:
     request = Request(url, headers={"User-Agent": "darklab_shell-cve-risk-bootstrap/1"})
-    with urlopen(request, timeout=45) as response:  # nosec B310 - fixed HTTPS source URLs
+    with urlopen(request, timeout=45) as response:  # nosec
         payload = response.read(MAX_DOWNLOAD_BYTES + 1)
     if len(payload) > MAX_DOWNLOAD_BYTES:
         raise RuntimeError("download exceeded the bootstrap size limit")

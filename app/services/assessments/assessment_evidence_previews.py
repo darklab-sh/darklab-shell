@@ -25,7 +25,7 @@ def attach_evidence_previews(conn: Any, checks: list[dict[str, Any]]) -> None:
     if check_ids:
         placeholders = ",".join("?" for _ in check_ids)
         query = (
-            "SELECT * FROM (SELECT e.*, "  # nosec B608 - bound IDs
+            "SELECT * FROM (SELECT e.*, "  # nosec
             "ROW_NUMBER() OVER (PARTITION BY e.check_id "
             "ORDER BY e.observed_at DESC, e.id DESC) AS item_rank, "
             "COUNT(*) OVER (PARTITION BY e.check_id) AS item_total "

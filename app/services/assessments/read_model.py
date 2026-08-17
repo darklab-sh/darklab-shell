@@ -235,7 +235,7 @@ def list_assessment_cycles(
             include_archived=include_archived,
         )
         total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_assessments a WHERE "  # nosec B608
+            "SELECT COUNT(*) AS count FROM project_assessments a WHERE "  # nosec
             + cycle_where_sql,
             cycle_where_params,
         ).fetchone()

@@ -106,7 +106,7 @@ class _LiveCliServer:
 
 
 def _live_session_token(base_url: str) -> str:
-    with urllib.request.urlopen(f"{base_url}/session/token/generate", timeout=5) as resp:  # nosec B310 - local test server
+    with urllib.request.urlopen(f"{base_url}/session/token/generate", timeout=5) as resp:  # nosec
         payload = json.loads(resp.read().decode("utf-8"))
     return str(payload["session_token"])
 

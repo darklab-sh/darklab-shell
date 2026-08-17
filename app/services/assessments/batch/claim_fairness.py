@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from core.database_access import get_db_backend
 from core.database_backend import DatabaseBackend, postgres_advisory_lock_id
@@ -66,7 +66,7 @@ def global_fairness_reason(conn: Any, context: Mapping[str, object]) -> str:
         (batch_id,),
     ).fetchone()
     if int((batch_active or {"n": 0})["n"] or 0) >= int(
-        context.get("max_parallel") or 0
+        cast(Any, context.get("max_parallel") or 0)
     ):
         return "batch_parallel_limit"
 
@@ -82,8 +82,8 @@ def global_fairness_reason(conn: Any, context: Mapping[str, object]) -> str:
         limit_column="max_owner_parallel",
     )
     owner_limit = min(
-        int(context.get("max_owner_parallel") or 0),
-        active_owner_limit or int(context.get("max_owner_parallel") or 0),
+        int(cast(Any, context.get("max_owner_parallel") or 0)),
+        active_owner_limit or int(cast(Any, context.get("max_owner_parallel") or 0)),
     )
     if owner_active >= owner_limit:
         return "owner_parallel_limit"
@@ -93,8 +93,8 @@ def global_fairness_reason(conn: Any, context: Mapping[str, object]) -> str:
         limit_column="max_instance_parallel",
     )
     instance_limit = min(
-        int(context.get("max_instance_parallel") or 0),
-        active_instance_limit or int(context.get("max_instance_parallel") or 0),
+        int(cast(Any, context.get("max_instance_parallel") or 0)),
+        active_instance_limit or int(cast(Any, context.get("max_instance_parallel") or 0)),
     )
     if instance_active >= instance_limit:
         return "instance_parallel_limit"
@@ -125,7 +125,7 @@ def target_is_active(
         (ASSESSMENT_BATCH_EXECUTION_KIND, *owner_params, target_entity_id),
     ).fetchone()
     return int((row or {"n": 0})["n"] or 0) >= int(
-        context.get("max_target_parallel") or 1
+        cast(Any, context.get("max_target_parallel") or 1)
     )
 
 

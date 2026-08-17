@@ -14,7 +14,7 @@ import shutil
 import socket
 import ssl
 # Team Cymru TXT lookups use dig without shell access.
-import subprocess  # nosec B404
+import subprocess  # nosec
 import time
 from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -634,7 +634,7 @@ class TeamCymruDnsClient:
             raise ProviderApiError("dig is not available for Team Cymru DNS lookup")
         try:
             # Fixed argv, no shell, and the query comes from the Team Cymru helper.
-            proc = subprocess.run(  # nosec B603
+            proc = subprocess.run(  # nosec
                 [dig_bin, "+short", "TXT", query],
                 capture_output=True,
                 check=False,

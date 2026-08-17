@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_connect
 from services.assessments.batch.contracts import (
@@ -27,7 +27,7 @@ def _page_limit(value: object) -> int:
     if isinstance(value, bool):
         raise AssessmentBatchError("invalid_batch_page", "Batch page size is invalid.")
     try:
-        parsed = int(value or BATCH_READ_PAGE_MAX_ITEMS)
+        parsed = int(cast(Any, value or BATCH_READ_PAGE_MAX_ITEMS))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(
             "invalid_batch_page", "Batch page size is invalid."
@@ -41,7 +41,7 @@ def _item_cursor(value: object) -> int:
     if isinstance(value, bool):
         raise AssessmentBatchError("invalid_batch_cursor", "Batch item cursor is invalid.")
     try:
-        parsed = int(value or 0)
+        parsed = int(cast(Any, value or 0))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(
             "invalid_batch_cursor", "Batch item cursor is invalid."
@@ -132,7 +132,7 @@ def list_assessment_batches(
         clauses.append("(e.created < ? OR (e.created = ? AND e.id < ?))")
         values.extend((cursor_created, cursor_created, cursor_id))
     sql = (
-        "SELECT e.id, e.created FROM workflow_executions e "  # nosec B608: fixed owner clause
+        "SELECT e.id, e.created FROM workflow_executions e "  # nosec
         "JOIN assessment_batches b ON b.execution_id = e.id WHERE "
         + " AND ".join(clauses)
         + " ORDER BY e.created DESC, e.id DESC LIMIT ?"
@@ -225,7 +225,7 @@ def get_batch_item_page(
             placeholders = ",".join("?" for _ in indexes)
             mapped = conn.execute(
                 "SELECT item_index, COUNT(*) AS n FROM assessment_batch_item_checks "
-                f"WHERE batch_id = ? AND item_index IN ({placeholders}) "  # nosec B608
+                f"WHERE batch_id = ? AND item_index IN ({placeholders}) "  # nosec
                 "GROUP BY item_index",
                 (batch_id, *indexes),
             ).fetchall()
@@ -245,9 +245,9 @@ def get_batch_item_page(
             more = True
             break
         items.append(item)
-    next_cursor = int(items[-1]["item_index"]) + 1 if more and items else None
+    next_cursor = int(cast(Any, items[-1]["item_index"])) + 1 if more and items else None
     return {
-        "schema_version": int(batch["schema_version"]),
+        "schema_version": int(cast(Any, batch["schema_version"])),
         "batch_id": str(batch_id),
         "items": items,
         "next_cursor": next_cursor,

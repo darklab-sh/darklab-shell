@@ -9,7 +9,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
@@ -110,7 +110,7 @@ def _optional_index(value: object, *, name: str, maximum: int) -> int | None:
     if isinstance(value, bool):
         raise AssessmentBatchError("invalid_batch_event", f"{name} is invalid.")
     try:
-        normalized = int(value)
+        normalized = int(cast(Any, value))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(
             "invalid_batch_event", f"{name} is invalid."
@@ -266,7 +266,7 @@ def list_batch_events(
         session_id, team_id=team_id, table_alias="e"
     )
     event_sql = (
-        "SELECT event.* FROM assessment_batch_events event "  # nosec B608
+        "SELECT event.* FROM assessment_batch_events event "  # nosec
         "JOIN workflow_executions e ON e.id = event.batch_id "
         "WHERE e.execution_kind = ? AND "
         + owner_sql

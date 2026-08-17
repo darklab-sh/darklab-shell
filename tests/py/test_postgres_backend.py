@@ -1667,6 +1667,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         {"status": "completed"},
         conn=conn,
     )
+    assert isinstance(completed, dict)
     assert completed["assessment"]["completed_at"] is not None
     update_assessment_cycle(
         "assessment-lifecycle",
@@ -1691,6 +1692,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         "asm-lifecycle",
         conn=conn,
     )
+    assert isinstance(deleted, dict)
     assert deleted["source_records_deleted"] is False
     assert conn.execute(
         "SELECT id FROM project_assessments WHERE id = 'asm-lifecycle'"
@@ -4115,6 +4117,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
             }],
         },
     )
+    workflow = json.loads(workflow_resp.data)["workflow"]
     playbook = json.loads(playbook_resp.data)["workflow"]
     execution_resp = client.post(
         "/workflow-executions",
@@ -4160,8 +4163,8 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         (session_id,),
     ).fetchone()
     workflows_row = conn.execute(
-        "SELECT inputs, steps FROM user_workflows WHERE session_id = %s",
-        (session_id,),
+        "SELECT inputs, steps FROM user_workflows WHERE session_id = %s AND id = %s",
+        (session_id, workflow["id"]),
     ).fetchone()
     starred_count = conn.execute(
         "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = %s",
@@ -4193,7 +4196,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     assert int(starred_count) == 1
     assert workflows_row["inputs"][0]["id"] == "domain"
     assert workflows_row["steps"][0]["cmd"] == "host {{domain}}"
-    assert json.loads(workflow_resp.data)["workflow"]["steps"][0]["cmd"] == "host {{domain}}"
+    assert workflow["steps"][0]["cmd"] == "host {{domain}}"
 
     from core.database import delete_run_artifacts
     from services.workflows.storage import get_execution, list_executions
@@ -5033,7 +5036,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         plan_digest=batch_preview["plan_digest"],
         confirmed=True,
     )
-    claimed_batch_item = claim_next_batch_item(str(started_batch["batch_id"]))
+    claimed_batch_item = cast(
+        dict[str, Any], claim_next_batch_item(str(started_batch["batch_id"]))
+    )
     claimed_mapping_rows = conn.execute(
         "SELECT check_id FROM assessment_batch_item_checks "
         "WHERE batch_id = %s AND item_index = %s",

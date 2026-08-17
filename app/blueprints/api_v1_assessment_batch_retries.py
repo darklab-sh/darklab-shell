@@ -3,15 +3,12 @@
 
 """API v1 preview and confirmed start routes for assessment-batch retries."""
 
+from typing import Any, cast
+
 from flask import jsonify
 
 from blueprints import api_v1 as api_routes
-from blueprints.api_v1_assessment_batch_mutations import (
-    _audit,
-    _body,
-    _error,
-    _mapping,
-)
+from blueprints.api_v1_assessment_batch_mutations import _audit, _body, _error, _mapping
 from blueprints.api_v1_assessment_batch_previews import _selection_body
 from core.helpers import get_log_session_id
 from services.assessments.batch.contracts import AssessmentBatchError
@@ -108,8 +105,8 @@ def api_assessment_batch_retry(project_id, batch_id):
             "assessment_id": str(batch.get("assessment_id") or ""),
             "source_batch_id": batch_id,
             "batch_id": str(batch.get("batch_id") or ""),
-            "item_count": int(batch.get("item_count") or 0),
-            "launched_count": int(launch.get("launched") or 0),
+            "item_count": int(cast(Any, batch.get("item_count") or 0)),
+            "launched_count": int(cast(Any, launch.get("launched") or 0)),
         },
     )
     return jsonify(result), 202

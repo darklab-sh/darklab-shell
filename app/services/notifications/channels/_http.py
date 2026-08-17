@@ -209,7 +209,7 @@ def _open_http_request(request: Request, *, timeout: float):
 
 
 def urlopen(request: Request, *, timeout: float):
-    return _NO_REDIRECT_OPENER.open(request, timeout=timeout)  # nosec B310
+    return _NO_REDIRECT_OPENER.open(request, timeout=timeout)  # nosec
 
 
 def network_error_message(exc: BaseException, *, label: str) -> str:

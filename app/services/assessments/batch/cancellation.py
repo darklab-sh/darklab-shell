@@ -57,7 +57,7 @@ def _unfinished_rows(conn: Any, batch_id: str) -> list[Any]:
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id WHERE c.execution_id = ? "
         "AND c.status IN ('pending', 'launching', 'running') "
-        "ORDER BY s.step_index, c.ordinal, c.attempt" + _lock_suffix(),  # nosec B608
+        "ORDER BY s.step_index, c.ordinal, c.attempt" + _lock_suffix(),  # nosec
         (batch_id,),
     ).fetchall()
 
@@ -148,7 +148,7 @@ def request_batch_cancellation_on_conn(
     row = conn.execute(
         "SELECT e.status FROM workflow_executions e "
         "JOIN assessment_batches b ON b.execution_id = e.id "
-        "WHERE e.execution_kind = ? AND " + owner_sql + " AND e.id = ?" + _lock_suffix(),  # nosec B608
+        "WHERE e.execution_kind = ? AND " + owner_sql + " AND e.id = ?" + _lock_suffix(),  # nosec
         (ASSESSMENT_BATCH_EXECUTION_KIND, *owner_params, batch_id),
     ).fetchone()
     if not row:

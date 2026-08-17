@@ -31,7 +31,7 @@ def confirmed_batch_replay(
         row = conn.execute(
             "SELECT p.plan_digest, p.started_execution_id, p.source_execution_id "
             "FROM assessment_batch_previews p WHERE "
-            + owner_sql  # nosec B608: fixed owner clause
+            + owner_sql  # nosec
             + " AND p.id = ? AND p.project_id = ? AND p.assessment_id = ?",
             (*owner_params, preview_id, project_id, assessment_id),
         ).fetchone()

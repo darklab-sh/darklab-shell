@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from config import resolve_effective_cfg
 from services.assessments.batch.contracts import (
@@ -45,7 +45,7 @@ def _bounded(value: object, *, default: int, minimum: int, maximum: int) -> int:
     if isinstance(value, bool):
         return default
     try:
-        parsed = int(value)
+        parsed = int(cast(Any, value))
     except TypeError, ValueError:
         return default
     return parsed if minimum <= parsed <= maximum else default
@@ -109,7 +109,7 @@ def _selection_int(value: object, *, default: int, label: str) -> int:
     if isinstance(value, bool):
         raise AssessmentBatchError("invalid_batch_selection", f"{label} must be an integer.")
     try:
-        return int(value)
+        return int(cast(Any, value))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError("invalid_batch_selection", f"{label} must be an integer.") from exc
 

@@ -61,7 +61,7 @@ def _source_parent(
         "SELECT e.status, b.item_count FROM assessment_batches b "
         "JOIN workflow_executions e ON e.id = b.execution_id "
         "WHERE e.execution_kind = ? AND "
-        + owner_sql  # nosec B608: fixed owner clause
+        + owner_sql  # nosec
         + " AND b.execution_id = ? AND b.assessment_id = ? AND e.project_id = ?",
         (
             ASSESSMENT_BATCH_EXECUTION_KIND,

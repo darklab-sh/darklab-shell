@@ -9,7 +9,7 @@ import re
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
@@ -42,7 +42,7 @@ def _parent_and_children(conn: Any, batch_id: str) -> tuple[Any, list[Any]]:
     parent = conn.execute(
         "SELECT e.*, b.execution_id AS batch_row_id FROM workflow_executions e "
         "LEFT JOIN assessment_batches b ON b.execution_id = e.id "
-        "WHERE e.id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec B608
+        "WHERE e.id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec
         (batch_id, ASSESSMENT_BATCH_EXECUTION_KIND),
     ).fetchone()
     if not parent:
@@ -51,7 +51,7 @@ def _parent_and_children(conn: Any, batch_id: str) -> tuple[Any, list[Any]]:
         "SELECT c.*, s.step_index FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id WHERE c.execution_id = ? "
-        "ORDER BY s.step_index, c.ordinal, c.attempt" + _lock_suffix(),  # nosec B608
+        "ORDER BY s.step_index, c.ordinal, c.attempt" + _lock_suffix(),  # nosec
         (batch_id,),
     ).fetchall()
     return parent, list(children)
@@ -283,7 +283,7 @@ def stop_assessment_batch_for_recovery(
             (str(batch_id or ""),),
         ).fetchone()
         conn.commit()
-    run_ids = tuple(result.get("run_ids") or ())
+    run_ids = tuple(cast(Any, result.get("run_ids") or ()))
     if parent and run_ids:
         signal_batch_cancellation_runs(
             str(parent["session_id"] or ""),

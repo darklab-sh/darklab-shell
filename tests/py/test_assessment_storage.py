@@ -551,6 +551,7 @@ def test_cycle_lifecycle_is_forward_only_and_completed_content_is_immutable(
         {"title": "External review"},
         actor_member_id="member-reviewer",
     )
+    assert isinstance(renamed, dict)
     assert renamed["transition_kind"] == "update"
     assert renamed["assessment"]["title"] == "External review"
     assert renamed["assessment"]["updated_by_member_id"] == "member-reviewer"
@@ -561,6 +562,7 @@ def test_cycle_lifecycle_is_forward_only_and_completed_content_is_immutable(
         assessment_id,
         {"status": "completed"},
     )
+    assert isinstance(completed, dict)
     assert completed["from_status"] == "active"
     assert completed["to_status"] == "completed"
     assert completed["assessment"]["completed_at"] is not None
@@ -586,6 +588,7 @@ def test_cycle_lifecycle_is_forward_only_and_completed_content_is_immutable(
         assessment_id,
         {"status": "archived"},
     )
+    assert isinstance(archived, dict)
     assert archived["assessment"]["completed_at"] == completed["assessment"]["completed_at"]
     assert archived["assessment"]["archived_at"] is not None
     with pytest.raises(AssessmentConflict, match="read-only"):
@@ -649,6 +652,7 @@ def test_archived_cycle_deletion_previews_owned_rows_and_preserves_sources(
         {"status": "archived"},
     )
     deleted = delete_assessment_cycle(session_id, project_id, assessment_id)
+    assert isinstance(deleted, dict)
     assert deleted["can_delete"] is True
     assert get_assessment_read_model(session_id, project_id, assessment_id) is None
     with db_connect() as conn:

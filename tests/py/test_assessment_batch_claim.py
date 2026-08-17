@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
 import pytest
 
@@ -135,8 +136,10 @@ def test_claim_skips_busy_targets_and_records_authoritative_events(batch_factory
     assert (first["status"], first["item_index"]) == ("claimed", 0)
     assert (second["status"], second["item_index"]) == ("claimed", 2)
     assert third == {"status": "deferred", "reason_code": "target_parallel_limit"}
-    assert first["item"]["target"]["entity_id"] == "ent-target-a"
-    assert second["item"]["target"]["entity_id"] == "ent-target-b"
+    first_item = cast(dict[str, Any], first["item"])
+    second_item = cast(dict[str, Any], second["item"])
+    assert first_item["target"]["entity_id"] == "ent-target-a"
+    assert second_item["target"]["entity_id"] == "ent-target-b"
     with get_db_connect()() as conn:
         execution = conn.execute(
             "SELECT status FROM workflow_executions WHERE id = ?", (batch_id,)

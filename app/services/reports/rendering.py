@@ -375,14 +375,14 @@ def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
 def _run_source_label(run: Mapping[str, Any]) -> str:
     batch = run.get("assessment_batch")
     if isinstance(batch, Mapping) and batch.get("batch_id"):
-        item = batch.get("item") if isinstance(batch.get("item"), Mapping) else {}
+        item = value if isinstance(value := batch.get("item"), Mapping) else {}
         item_number = int(item.get("item_index") or 0) + 1
         check_count = int(item.get("check_count") or 0)
         check_label = f" · {check_count} mapped check{'s' if check_count != 1 else ''}" if check_count else ""
         return f"Assessment batch {batch['batch_id']} · item {item_number}{check_label}"
     workflow = run.get("workflow_execution")
     if isinstance(workflow, Mapping) and workflow.get("execution_id"):
-        step = workflow.get("step") if isinstance(workflow.get("step"), Mapping) else {}
+        step = value if isinstance(value := workflow.get("step"), Mapping) else {}
         step_label = f" · step {step['step_id']}" if step.get("step_id") else ""
         return f"Playbook {workflow.get('title') or workflow['execution_id']}{step_label}"
     return "Direct run"

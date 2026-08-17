@@ -103,7 +103,7 @@ def _download(
     try:
         # Feed sources are fixed HTTPS URLs whose host is checked against the
         # configured allowlist before this request is created.
-        with urlopen(request, timeout=timeout) as response:  # nosec B310
+        with urlopen(request, timeout=timeout) as response:  # nosec
             _validate_response_url(response.geturl(), settings)
             payload = response.read(max_bytes + 1)
             if len(payload) > max_bytes:

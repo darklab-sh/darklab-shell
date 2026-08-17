@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.contracts import (
@@ -23,7 +25,7 @@ def _page_value(value: object, *, cursor: bool) -> int:
             else "Assessment batch event page size is invalid.",
         )
     try:
-        parsed = int(value or (0 if cursor else BATCH_READ_PAGE_MAX_ITEMS))
+        parsed = int(cast(Any, value or (0 if cursor else BATCH_READ_PAGE_MAX_ITEMS)))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(
             "invalid_batch_event_cursor" if cursor else "invalid_batch_event_page",
@@ -82,7 +84,7 @@ def get_batch_event_page(
     ]
     next_cursor = int(events[-1]["sequence"]) if more and events else None
     return {
-        "schema_version": int(batch["schema_version"]),
+        "schema_version": int(cast(Any, batch["schema_version"])),
         "batch_id": str(batch_id),
         "events": events,
         "next_cursor": next_cursor,

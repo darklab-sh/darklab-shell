@@ -8,7 +8,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import (
@@ -50,7 +50,7 @@ def _active_limit(value: object) -> int:
             "invalid_batch_policy", "Active batch limit must be an integer."
         )
     try:
-        limit = int(value)
+        limit = int(cast(Any, value))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(
             "invalid_batch_policy",
@@ -91,7 +91,7 @@ def _require_active_assessment(
     )
     row = conn.execute(
         "SELECT a.id FROM project_assessments a WHERE "
-        + owner_sql  # nosec: fixed owner clause
+        + owner_sql  # nosec
         + " AND a.project_id = ? AND a.id = ? AND a.status = 'active'",
         (*owner_params, project_id, assessment_id),
     ).fetchone()
@@ -121,7 +121,7 @@ def _require_retry_source(
         "SELECT e.status FROM assessment_batches b "
         "JOIN workflow_executions e ON e.id = b.execution_id "
         "WHERE e.execution_kind = ? AND "
-        + owner_sql  # nosec: fixed owner clause
+        + owner_sql  # nosec
         + " AND b.execution_id = ? AND b.assessment_id = ? AND e.project_id = ?",
         (
             ASSESSMENT_BATCH_EXECUTION_KIND,
@@ -236,7 +236,7 @@ def create_batch_parent(
                     session_id, existing_batch_id, team_id=team_id
                 ) or {}
         active = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions e WHERE e.execution_kind = ? AND "  # nosec B608
+            "SELECT COUNT(*) AS n FROM workflow_executions e WHERE e.execution_kind = ? AND "  # nosec
             + owner_sql
             + " AND e.status IN ('queued', 'running', 'canceling')",
             (ASSESSMENT_BATCH_EXECUTION_KIND, *owner_params),

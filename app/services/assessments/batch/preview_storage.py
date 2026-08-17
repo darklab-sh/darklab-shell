@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
@@ -56,7 +56,7 @@ def _require_active_scope(conn: Any, draft: BatchPreviewDraft) -> None:
     )
     row = conn.execute(
         "SELECT a.profile_key, a.profile_version FROM project_assessments a WHERE "
-        + owner_sql  # nosec B608
+        + owner_sql  # nosec
         + " AND a.project_id = ? AND a.id = ? AND a.status = 'active'",
         (*owner_params, draft.project_id, draft.assessment_id),
     ).fetchone()
@@ -193,7 +193,7 @@ def _preview_row(session_id: str, preview_id: str, *, team_id: str) -> Any:
     with get_db_connect()() as conn:
         return conn.execute(
             "SELECT p.* FROM assessment_batch_previews p WHERE "
-            + owner_sql  # nosec B608
+            + owner_sql  # nosec
             + " AND p.id = ?",
             (*owner_params, preview_id),
         ).fetchone()
@@ -215,7 +215,7 @@ def _page_int(
     if isinstance(value, bool):
         raise AssessmentBatchError(code, message)
     try:
-        normalized = int(value)
+        normalized = int(cast(Any, value))
     except (TypeError, ValueError) as exc:
         raise AssessmentBatchError(code, message) from exc
     if not minimum <= normalized <= maximum:
@@ -329,7 +329,7 @@ def get_batch_preview_items(
             placeholders = ",".join("?" for _ in indexes)
             mapping_rows = conn.execute(
                 "SELECT * FROM assessment_batch_preview_item_checks WHERE preview_id = ? "
-                f"AND item_index IN ({placeholders}) "  # nosec B608
+                f"AND item_index IN ({placeholders}) "  # nosec
                 "ORDER BY item_index, mapping_index",
                 (preview_id, *indexes),
             ).fetchall()
@@ -378,7 +378,7 @@ def get_batch_preview_items(
             more = True
             break
         items.append(item)
-    next_cursor = int(items[-1]["item_index"]) + 1 if more and items else None
+    next_cursor = int(cast(Any, items[-1]["item_index"])) + 1 if more and items else None
     return {
         "schema_version": preview["schema_version"],
         "preview_id": preview_id,

@@ -360,7 +360,7 @@ def _package_batch_source(run) -> str:
     provenance = run.get("assessment_batch") if isinstance(run, dict) else None
     if not isinstance(provenance, dict) or not provenance.get("batch_id"):
         return ""
-    item = provenance.get("item") if isinstance(provenance.get("item"), dict) else {}
+    item = value if isinstance(value := provenance.get("item"), dict) else {}
     item_number = int(item.get("item_index") or 0) + 1
     check_count = int(item.get("check_count") or 0)
     mapped = f" · {check_count} mapped check{'s' if check_count != 1 else ''}" if check_count else ""

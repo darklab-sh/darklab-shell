@@ -4,6 +4,7 @@
 """Browser start and cancellation routes for durable assessment batches."""
 
 from collections.abc import Mapping
+from typing import Any, cast
 
 from flask import jsonify, request
 
@@ -89,7 +90,7 @@ def _audit(
             "batch_id": str(batch.get("batch_id") or ""),
             "source_batch_id": str(batch.get("source_batch_id") or ""),
             "status": str(batch.get("status") or ""),
-            "count": int(batch.get("item_count") or 0),
+            "count": int(cast(Any, batch.get("item_count") or 0)),
         },
         **project_routes._project_audit_fields(session_id, team_id),
     )
@@ -146,8 +147,8 @@ def projects_assessment_batch_start(project_id, assessment_id):
             "project_id": project_id,
             "assessment_id": assessment_id,
             "batch_id": str(batch.get("batch_id") or ""),
-            "item_count": int(batch.get("item_count") or 0),
-            "launched_count": int(launch.get("launched") or 0),
+            "item_count": int(cast(Any, batch.get("item_count") or 0)),
+            "launched_count": int(cast(Any, launch.get("launched") or 0)),
         },
     )
     return jsonify(result), 202
@@ -188,12 +189,9 @@ def projects_assessment_batch_cancel(project_id, batch_id):
             "assessment_id": str(batch.get("assessment_id") or ""),
             "batch_id": batch_id,
             "batch_status": str(batch.get("status") or ""),
-            "signal_failure_count": int(result.get("signal_failures") or 0),
+            "signal_failure_count": int(cast(Any, result.get("signal_failures") or 0)),
         },
     )
     return jsonify(result)
 
-__all__ = [
-    "projects_assessment_batch_cancel",
-    "projects_assessment_batch_start",
-]
+__all__ = ["projects_assessment_batch_cancel", "projects_assessment_batch_start"]

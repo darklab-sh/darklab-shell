@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import secrets
 import time
+from typing import Any, cast
 
 from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
@@ -332,8 +333,8 @@ def _record_job_audit(
     if archive_bytes:
         details["archive_bytes"] = int(archive_bytes)
     if status == "queued":
-        draft = job.get("draft") if isinstance(job.get("draft"), dict) else {}
-        export = draft.get("export") if isinstance(draft.get("export"), dict) else {}
+        draft = value if isinstance(value := job.get("draft"), dict) else {}
+        export = value if isinstance(value := draft.get("export"), dict) else {}
         details["redaction_mode"] = str(export.get("redaction_mode") or "")
     if isinstance(metrics, dict):
         for key in (
@@ -368,7 +369,7 @@ def _record_job_audit(
             job_id=str(job.get("id") or ""),
             correlation_id=str(job.get("id") or ""),
             details=details,
-            **event_fields,
+            **cast(Any, event_fields),
         )
     except Exception:
         log.exception("REPORT_EXPORT_AUDIT_FAILED", extra=_audit_log_extra(job, details=details))

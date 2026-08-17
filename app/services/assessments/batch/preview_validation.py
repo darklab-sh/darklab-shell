@@ -44,9 +44,9 @@ def _validate_mapping(item: BatchPreviewItem, mapping: BatchCheckMapping) -> Non
 
 def _validate_item(item: BatchPreviewItem) -> None:
     plan = item.public_plan
-    target = plan.get("target") if isinstance(plan.get("target"), Mapping) else {}
-    action = plan.get("action") if isinstance(plan.get("action"), Mapping) else {}
-    bounds = plan.get("bounds") if isinstance(plan.get("bounds"), Mapping) else {}
+    target = value if isinstance(value := plan.get("target"), Mapping) else {}
+    action = value if isinstance(value := plan.get("action"), Mapping) else {}
+    bounds = value if isinstance(value := plan.get("bounds"), Mapping) else {}
     if (
         not _is_hex_digest(item.execution_key)
         or not _is_hex_digest(item.public_plan_digest)

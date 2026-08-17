@@ -45,6 +45,11 @@ from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
 from services.workflows.hooks import finalize_workflow_run_safely
 
 
+def _mapping(value: object) -> dict[str, Any]:
+    assert isinstance(value, dict)
+    return value
+
+
 @pytest.fixture
 def batch_builder():
     make_test_app()
@@ -291,7 +296,7 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
         "item_launched",
         "item_run_bound",
     ]
-    assert all("target" not in event["details"] for event in events)
+    assert all("target" not in _mapping(event["details"]) for event in events)
 
 
 def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
@@ -791,7 +796,7 @@ def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(
     )
     second = finalize_fanout_child_run("run-chunk-two", 0)
     assert second is not None
-    assert second["parent_transition"]["terminal"] is True
+    assert _mapping(second["parent_transition"])["terminal"] is True
     with get_db_connect()() as conn:
         terminal = conn.execute(
             "SELECT status, current_step_id FROM workflow_executions WHERE id = ?",
@@ -1147,7 +1152,7 @@ def test_batch_recovery_reapplies_cancellation_without_retrying(
         batch["batch_id"],
         cancel_run_fn=lambda *_args, **_kwargs: True,
     )
-    assert requested is not None and requested["batch"]["status"] == "canceling"
+    assert requested is not None and _mapping(requested["batch"])["status"] == "canceling"
     monkeypatch.setattr(
         "services.assessments.batch.recovery.run_is_still_active",
         lambda _execution, _run_id: False,
@@ -1213,7 +1218,7 @@ def test_batch_recovery_fails_non_runnable_work_without_launching(
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None
     assert (parent["status"], parent["failure_code"]) == ("failed", expected_code)
-    assert parent["progress"]["unavailable"] == (1 if failure == "scope" else 0)
+    assert _mapping(parent["progress"])["unavailable"] == (1 if failure == "scope" else 0)
 
 
 def test_batch_recovery_waits_for_a_live_run_after_project_scope_disappears(
@@ -1261,7 +1266,7 @@ def test_batch_recovery_waits_for_a_live_run_after_project_scope_disappears(
         "failed",
         "scope_unavailable",
     )
-    assert settled["progress"]["canceled"] == 1
+    assert _mapping(settled["progress"])["canceled"] == 1
     with get_db_connect()() as conn:
         attempts = conn.execute(
             "SELECT COUNT(*) AS n FROM workflow_execution_children "
@@ -1414,19 +1419,19 @@ def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_b
     first = cancel_assessment_batch(
         batch["session_id"],
         batch["batch_id"],
-        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id),
+        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id) or True,
     )
     second = cancel_assessment_batch(
         batch["session_id"],
         batch["batch_id"],
-        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id),
+        cancel_run_fn=lambda run_id, *_args, **_kwargs: signaled.append(run_id) or True,
     )
 
     assert first is not None and second is not None
     assert signaled == []
-    assert first["batch"]["status"] == "canceled"
-    assert first["batch"]["progress"]["canceled"] == 2
-    assert second["batch"]["status"] == "canceled"
+    assert _mapping(first["batch"])["status"] == "canceled"
+    assert _mapping(_mapping(first["batch"])["progress"])["canceled"] == 2
+    assert _mapping(second["batch"])["status"] == "canceled"
     events = list_batch_events(batch["session_id"], batch["batch_id"])
     assert [event["event_type"] for event in events].count("item_canceled") == 2
     assert [event["status"] for event in events if event["event_type"] == "parent_status_changed"][-2:] == [
@@ -1450,9 +1455,9 @@ def test_running_batch_cancellation_waits_for_the_bound_run_without_retry(batch_
     )
 
     assert requested is not None
-    assert requested["batch"]["status"] == "canceling"
-    assert requested["batch"]["progress"]["running"] == 1
-    assert requested["batch"]["progress"]["canceled"] == 1
+    assert _mapping(requested["batch"])["status"] == "canceling"
+    assert _mapping(_mapping(requested["batch"])["progress"])["running"] == 1
+    assert _mapping(_mapping(requested["batch"])["progress"])["canceled"] == 1
     assert signaled == ["run-batch-cancel"]
     settled = finalize_assessment_batch_run("run-batch-cancel", -15)
     assert settled is not None
@@ -1460,7 +1465,7 @@ def test_running_batch_cancellation_waits_for_the_bound_run_without_retry(batch_
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None
     assert parent["status"] == "canceled"
-    assert parent["progress"]["canceled"] == 2
+    assert _mapping(parent["progress"])["canceled"] == 2
     with get_db_connect()() as conn:
         attempts = conn.execute(
             "SELECT COUNT(*) AS n FROM workflow_execution_children "
@@ -1485,7 +1490,7 @@ def test_batch_cancellation_retains_a_failed_signal_until_the_run_settles(batch_
 
     assert requested is not None
     assert requested["signal_failures"] == 1
-    assert requested["batch"]["status"] == "canceling"
+    assert _mapping(requested["batch"])["status"] == "canceling"
     settled = finalize_assessment_batch_run("run-batch-signal-failure", 0)
     assert settled is not None
     assert settled["status"] == "failed"
@@ -1493,7 +1498,7 @@ def test_batch_cancellation_retains_a_failed_signal_until_the_run_settles(batch_
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None
     assert parent["status"] == "canceled"
-    assert parent["progress"]["could_not_cancel"] == 1
+    assert _mapping(parent["progress"])["could_not_cancel"] == 1
 
 
 def test_batch_cancellation_retains_a_rejected_signal_until_the_run_settles(
@@ -1510,14 +1515,14 @@ def test_batch_cancellation_retains_a_rejected_signal_until_the_run_settles(
 
     assert requested is not None
     assert requested["signal_failures"] == 1
-    assert requested["batch"]["status"] == "canceling"
+    assert _mapping(requested["batch"])["status"] == "canceling"
     settled = finalize_assessment_batch_run("run-batch-signal-rejected", 0)
     assert settled is not None
     assert settled["status"] == "failed"
     assert settled["error_code"] == "could_not_cancel"
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None
-    assert parent["progress"]["could_not_cancel"] == 1
+    assert _mapping(parent["progress"])["could_not_cancel"] == 1
 
 
 def test_surface_neutral_run_cancellation_uses_the_scoped_process_group(monkeypatch):

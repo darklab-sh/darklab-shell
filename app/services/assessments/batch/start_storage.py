@@ -57,7 +57,7 @@ def _preview_preflight(
         "WHERE item.preview_id = p.id AND item.selected = ? "
         "AND item.policy_level = 'standard') AS selected_standard_count "
         "FROM assessment_batch_previews p WHERE "
-        + owner_sql  # nosec B608: fixed owner clause
+        + owner_sql  # nosec
         + " AND p.id = ? AND p.project_id = ? AND p.assessment_id = ?",
         (1, *owner_params, preview_id, project_id, assessment_id),
     ).fetchone()

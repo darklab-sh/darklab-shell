@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
@@ -44,7 +44,7 @@ def _batch_context(conn: Any, batch_id: str) -> dict[str, object]:
         "JOIN assessment_batches b ON b.execution_id = e.id "
         "JOIN workflow_execution_steps s ON s.execution_id = e.id "
         "AND s.step_id = e.current_step_id "
-        "WHERE e.id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec B608
+        "WHERE e.id = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec
         (batch_id, ASSESSMENT_BATCH_EXECUTION_KIND),
     ).fetchone()
     if not row:
@@ -114,7 +114,7 @@ def _activate_chunk(
         conn,
         batch_id,
         "chunk_status_changed",
-        chunk_index=int(context.get("step_index") or 0),
+        chunk_index=int(cast(Any, context.get("step_index") or 0)),
         status="launching",
         created=created,
     )
@@ -130,8 +130,8 @@ def _public_claim(
         "reason_code": "",
         "batch_id": str(context.get("execution_id") or ""),
         "step_id": str(context.get("current_step_id") or ""),
-        "chunk_index": int(context.get("step_index") or 0),
-        "item_index": int(candidate.get("item_index") or 0),
+        "chunk_index": int(cast(Any, context.get("step_index") or 0)),
+        "item_index": int(cast(Any, candidate.get("item_index") or 0)),
         "child": dict(child),
         "item": {
             "action_key": str(candidate.get("action_key") or ""),
@@ -152,7 +152,7 @@ def _public_claim(
                 candidate.get("public_plan_json")
             ),
             "duration_bound_seconds": int(
-                candidate.get("duration_bound_seconds") or 0
+                cast(Any, candidate.get("duration_bound_seconds") or 0)
             ),
         },
     }
@@ -196,7 +196,7 @@ def claim_next_batch_item(batch_id: str) -> dict[str, object]:
                 str(batch_id),
                 step_id,
                 ordinal,
-                attempt=int(candidate.get("attempt") or 1),
+                attempt=int(cast(Any, candidate.get("attempt") or 1)),
                 execution_kind=ASSESSMENT_BATCH_EXECUTION_KIND,
                 started=created,
             )
@@ -210,10 +210,10 @@ def claim_next_batch_item(batch_id: str) -> dict[str, object]:
                 conn,
                 str(batch_id),
                 "item_claimed",
-                chunk_index=int(context.get("step_index") or 0),
-                item_ordinal=int(candidate.get("item_index") or 0),
+                chunk_index=int(cast(Any, context.get("step_index") or 0)),
+                item_ordinal=int(cast(Any, candidate.get("item_index") or 0)),
                 status="launching",
-                details={"attempt": int(candidate.get("attempt") or 1)},
+                details={"attempt": int(cast(Any, candidate.get("attempt") or 1))},
                 created=created,
             )
             conn.commit()

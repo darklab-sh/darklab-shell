@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
 import pytest
 
@@ -91,7 +92,7 @@ def _start(
         preview_id=str(preview["preview_id"]),
         plan_digest=preview["plan_digest"],
         confirmed=True,
-        **values,
+        **cast(Any, values),
     )
 
 
@@ -329,19 +330,23 @@ def test_retry_preview_rebuilds_only_failed_work_and_creates_immutable_lineage(
     source_id = str(source["batch_id"])
     succeeded_check_id, failed_check_id = _settle_source_with_one_failure(source_id)
 
-    retry_preview = compile_batch_retry_preview(
-        session_id,
-        project_id,
-        assessment_id,
-        source_id,
+    retry_preview = cast(
+        dict[str, Any],
+        compile_batch_retry_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            source_id,
+        ),
     )
     assert retry_preview["source_batch_id"] == source_id
     assert retry_preview["selected_item_count"] == 1
     assert retry_preview["summary"]["source_item_count"] == 2
     assert retry_preview["summary"]["source_succeeded_item_count"] == 1
     assert retry_preview["summary"]["source_retry_eligible_item_count"] == 1
-    retry_items = get_batch_preview_items(
-        session_id, str(retry_preview["preview_id"])
+    retry_items = cast(
+        dict[str, Any],
+        get_batch_preview_items(session_id, str(retry_preview["preview_id"])),
     )["items"]
     retry_check_ids = {
         mapping["check_id"]
@@ -401,11 +406,14 @@ def test_retry_preview_can_explain_nothing_currently_retryable(batch_cycle):
         )
         conn.commit()
 
-    retry_preview = compile_batch_retry_preview(
-        session_id,
-        project_id,
-        assessment_id,
-        source_id,
+    retry_preview = cast(
+        dict[str, Any],
+        compile_batch_retry_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            source_id,
+        ),
     )
     assert retry_preview["candidate_item_count"] == 0
     assert retry_preview["selected_item_count"] == 0

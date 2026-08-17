@@ -91,13 +91,22 @@ async function openAssessment(page) {
   await expect(page.locator('#project-explorer-body')).not.toContainText('Loading project assessments...')
 }
 
+async function startAssessmentCycle(page, assessment, profileKey, profileLabel) {
+  await assessment.locator('.project-assessment-start-form select').selectOption(profileKey)
+  const started = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'POST' && /\/projects\/[^/]+\/assessments$/.test(url.pathname)
+  })
+  await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
+  expect((await started).status()).toBe(201)
+  await expect(assessment.locator('.project-assessment-cycle')).toContainText(profileLabel)
+}
+
 async function startNetworkAssessment(page, name) {
   const created = await createAssessmentProject(page, name)
   await openAssessment(page)
   const assessment = page.locator('#project-explorer-body .project-assessment-root')
-  await assessment.locator('.project-assessment-start-form select').selectOption('network')
-  await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
-  await expect(assessment).toContainText('Network assessment')
+  await startAssessmentCycle(page, assessment, 'network', 'Network assessment')
   return { ...created, assessment }
 }
 
@@ -423,16 +432,8 @@ test.describe('project assessment qualification', () => {
     const categoryChip = assessment.locator('.project-assessment-category-list .chip').filter({
       hasText: 'discovery',
     })
-    await expect(categoryChip).toBeVisible()
-    const chipPadding = await categoryChip.evaluate((element) => {
-      const style = getComputedStyle(element)
-      return {
-        left: Number.parseFloat(style.paddingLeft),
-        right: Number.parseFloat(style.paddingRight),
-      }
-    })
-    expect(chipPadding.left).toBeGreaterThanOrEqual(8)
-    expect(chipPadding.right).toBeGreaterThanOrEqual(8)
+    await expect(categoryChip).toHaveCSS('padding-left', '11px')
+    await expect(categoryChip).toHaveCSS('padding-right', '11px')
     await categoryChip.click()
     const clearFilters = assessment.getByRole('button', { name: 'Clear filters' })
     await expect(assessment.locator('.project-assessment-check-filter-status'))
@@ -446,10 +447,7 @@ test.describe('project assessment qualification', () => {
       .toHaveAttribute('aria-pressed', 'true')
     await assessment.locator('.project-assessment-target-toggle').click()
     const firstCheckRow = assessment.locator('.project-assessment-check-row').first()
-    await expect(firstCheckRow).toBeVisible()
-    expect(await firstCheckRow.evaluate((element) => (
-      Number.parseFloat(getComputedStyle(element).paddingTop)
-    ))).toBeGreaterThanOrEqual(8)
+    await expect(firstCheckRow).toHaveCSS('padding-top', '9px')
     await page.evaluate(() => {
       window.__darklabRunnerHandlers.attachActiveRunFromMonitor = async (run) => {
         window.__assessmentAttachedRun = run
@@ -687,9 +685,7 @@ test.describe('project assessment qualification', () => {
     await openAssessment(page)
 
     const assessment = page.locator('#project-explorer-body .project-assessment-root')
-    await assessment.locator('.project-assessment-start-form select').selectOption('web')
-    await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
-    await expect(assessment).toContainText('Web assessment')
+    await startAssessmentCycle(page, assessment, 'web', 'Web assessment')
 
     await page.setViewportSize({ width: 810, height: 766 })
     const newProfile = assessment.getByRole('button', { name: 'New HTTP profile' })

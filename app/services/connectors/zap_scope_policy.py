@@ -211,7 +211,7 @@ def review_zap_scope_policy(
         method="POST",
     )
     try:
-        with build_opener(ProxyHandler({}), _RejectRedirects()).open(  # nosec B310
+        with build_opener(ProxyHandler({}), _RejectRedirects()).open(  # nosec
             request,
             timeout=max(3, min(15, settings.job_timeout_seconds)),
         ) as response:

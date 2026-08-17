@@ -139,10 +139,17 @@ def _join_team_member(
 
 def _preview_counts() -> tuple[int, int, int]:
     with get_db_connect()() as conn:
-        return tuple(
-            int(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
-            for table in ("workflow_executions", "runs", "audit_events")
+        return (
+            int(conn.execute("SELECT COUNT(*) AS n FROM workflow_executions").fetchone()["n"]),
+            int(conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"]),
+            int(conn.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"]),
         )
+
+
+def _batch_status(session_id: str, batch_id: str) -> str:
+    batch = get_batch_parent(session_id, batch_id)
+    assert batch is not None
+    return str(batch["status"])
 
 
 def _start_batch(
@@ -858,7 +865,7 @@ def test_assessment_lifecycle_waits_for_batch_cancellation_and_requires_a_fresh_
         assert payload["batch_id"] == batch_id
         assert payload["batch_ids"] == [batch_id]
     assert _assessment_status(assessment_id) == "active"
-    assert get_batch_parent(session_id, batch_id)["status"] == "canceled"
+    assert _batch_status(session_id, batch_id) == "canceled"
 
     applied = client.patch(route, headers=headers, json={"status": next_status})
 
@@ -895,7 +902,7 @@ def test_assessment_delete_waits_for_batch_cancellation_before_deleting(
     else:
         assert payload["batch_id"] == batch_id
     assert _assessment_status(assessment_id) == "archived"
-    assert get_batch_parent(session_id, batch_id)["status"] == "canceled"
+    assert _batch_status(session_id, batch_id) == "canceled"
 
     deleted = client.delete(route, headers=headers)
 
@@ -929,7 +936,7 @@ def test_project_delete_cancels_every_active_batch_then_cleans_coordinator_state
             "SELECT 1 FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
     assert {
-        str(get_batch_parent(session_id, batch_id)["status"])
+        _batch_status(session_id, batch_id)
         for batch_id in batch_ids
     } == {"canceled"}
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import uuid
+from typing import Any, cast
 
 import pytest
 
@@ -203,7 +204,9 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
     session_id, project_id, assessment_id, target_id = batch_cycle
     _duplicate_ping_check(assessment_id)
 
-    preview = compile_batch_preview(session_id, project_id, assessment_id)
+    preview = cast(
+        dict[str, Any], compile_batch_preview(session_id, project_id, assessment_id)
+    )
     summary = preview["summary"]
     assert preview["candidate_item_count"] == 3
     assert preview["selected_item_count"] == 2
@@ -232,7 +235,10 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
             ],
         }
     ]
-    page = get_batch_preview_items(session_id, str(preview["preview_id"]))
+    page = cast(
+        dict[str, Any],
+        get_batch_preview_items(session_id, str(preview["preview_id"])),
+    )
     standard = next(
         item for item in page["items"] if item["policy_level"] == "standard"
     )
@@ -255,17 +261,20 @@ def test_compiler_requires_explicit_standard_selection_and_rejects_truncation(
     batch_cycle,
 ):
     session_id, project_id, assessment_id, target_id = batch_cycle
-    preview = compile_batch_preview(
-        session_id,
-        project_id,
-        assessment_id,
-        {
-            "include_standard": True,
-            "target_entity_ids": [target_id],
-            "categories": ["discovery"],
-            "item_limit": 3,
-            "max_parallel": 3,
-        },
+    preview = cast(
+        dict[str, Any],
+        compile_batch_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            {
+                "include_standard": True,
+                "target_entity_ids": [target_id],
+                "categories": ["discovery"],
+                "item_limit": 3,
+                "max_parallel": 3,
+            },
+        ),
     )
     assert preview["selected_item_count"] == 3
     assert preview["summary"]["standard_selected"] is True
@@ -303,7 +312,9 @@ def test_compiler_explains_manual_evidence_and_changed_target_exclusions(batch_c
             (assessment_id,),
         )
         conn.commit()
-    preview = compile_batch_preview(session_id, project_id, assessment_id)
+    preview = cast(
+        dict[str, Any], compile_batch_preview(session_id, project_id, assessment_id)
+    )
     assert preview["selected_item_count"] == 1
     assert preview["summary"]["reason_counts"] == {
         "already_covered": 1,

@@ -55,7 +55,7 @@ def claim_fanout_child_on_conn(
         "AND s.step_id = c.step_id "
         "JOIN workflow_executions e ON e.id = c.execution_id "
         "WHERE c.execution_id = ? AND c.step_id = ? AND c.ordinal = ? "
-        "AND c.attempt = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec B608
+        "AND c.attempt = ? AND e.execution_kind = ?" + _lock_suffix(),  # nosec
         (execution_id, step_id, child_ordinal, child_attempt, execution_kind),
     ).fetchone()
     if (

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from core.database_access import get_db_connect
 from services.assessments.batch.contracts import (
@@ -36,12 +36,17 @@ def _latest_children(
 ) -> dict[tuple[str, int], dict[str, object]]:
     by_item: dict[tuple[str, int], list[dict[str, object]]] = defaultdict(list)
     for child in children:
-        key = (str(child.get("step_id") or ""), int(child.get("ordinal") or 0))
+        key = (
+            str(child.get("step_id") or ""),
+            int(cast(Any, child.get("ordinal") or 0)),
+        )
         by_item[key].append(child)
     latest: dict[tuple[str, int], dict[str, object]] = {}
     for key, attempts in by_item.items():
-        ordered = sorted(attempts, key=lambda row: int(row.get("attempt") or 0))
-        numbers = [int(row.get("attempt") or 0) for row in ordered]
+        ordered = sorted(
+            attempts, key=lambda row: int(cast(Any, row.get("attempt") or 0))
+        )
+        numbers = [int(cast(Any, row.get("attempt") or 0)) for row in ordered]
         if numbers != list(range(1, len(numbers) + 1)) or len(numbers) > BATCH_MAX_ATTEMPTS:
             raise BatchRecoverySnapshotError("child retry lineage is invalid")
         if any(
@@ -77,7 +82,7 @@ def _expected_checkpoint(
             raise BatchRecoverySnapshotError("running child has no run")
         if status in {"pending", "launching"} and run_id:
             raise BatchRecoverySnapshotError("unbound child unexpectedly has a run")
-        groups[state_name[status]].append(int(row.get("ordinal") or 0))
+        groups[state_name[status]].append(int(cast(Any, row.get("ordinal") or 0)))
     return {
         name: tuple(sorted(groups[name]))
         for name in ("pending", "running", "completed", "failed", "skipped")
@@ -90,7 +95,7 @@ def _validate_structure(
     items: list[dict[str, object]],
     children: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    item_count = int(parent.get("item_count") or 0)
+    item_count = int(cast(Any, parent.get("item_count") or 0))
     if not 1 <= item_count <= BATCH_HARD_ITEM_LIMIT:
         raise BatchRecoverySnapshotError("batch item count is invalid")
     expected_chunks = (item_count + BATCH_CHUNK_ITEM_LIMIT - 1) // BATCH_CHUNK_ITEM_LIMIT
@@ -101,8 +106,11 @@ def _validate_structure(
     for index in range(item_count):
         expected_locations[(f"chunk_{index // BATCH_CHUNK_ITEM_LIMIT + 1:04d}", index % BATCH_CHUNK_ITEM_LIMIT)] = index
     actual_locations = {
-        (str(item.get("step_id") or ""), int(item.get("child_ordinal") or 0)): int(
-            item.get("item_index") or 0
+        (
+            str(item.get("step_id") or ""),
+            int(cast(Any, item.get("child_ordinal") or 0)),
+        ): int(
+            cast(Any, item.get("item_index") or 0)
         )
         for item in items
     }

@@ -60,7 +60,7 @@ def _request_lifecycle_cancellation_on_conn(
         table_alias="e",
     )
     query = (
-        "SELECT e.id FROM workflow_executions e "  # nosec B608
+        "SELECT e.id FROM workflow_executions e "  # nosec
         "JOIN assessment_batches b ON b.execution_id = e.id "
         "WHERE e.execution_kind = ? AND " + owner_sql
         + " AND e.project_id = ? AND e.status IN ('queued', 'running', 'canceling')"
@@ -73,7 +73,7 @@ def _request_lifecycle_cancellation_on_conn(
     if assessment_id:
         query += " AND b.assessment_id = ?"
         params = (*params, assessment_id)
-    rows = conn.execute(query + " ORDER BY e.created, e.id", params).fetchall()  # nosec B608
+    rows = conn.execute(query + " ORDER BY e.created, e.id", params).fetchall()  # nosec
     if not rows:
         return None
     requested: list[tuple[str, tuple[str, ...]]] = []

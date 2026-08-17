@@ -20,7 +20,7 @@ def active_batch_count(session_id: str, *, team_id: str = "") -> int:
     )
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions e WHERE e.execution_kind = ? AND "  # nosec B608
+            "SELECT COUNT(*) AS n FROM workflow_executions e WHERE e.execution_kind = ? AND "  # nosec
             + owner_sql
             + " AND e.status IN ('queued', 'running', 'canceling')",
             (ASSESSMENT_BATCH_EXECUTION_KIND, *owner_params),
