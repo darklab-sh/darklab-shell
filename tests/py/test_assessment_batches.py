@@ -17,8 +17,13 @@ from services.assessments.batch.contracts import (
     BATCH_PREVIEW_PAGE_MAX_ITEMS,
     BATCH_PREVIEW_TTL_SECONDS,
 )
-from services.assessments.batch.policy import batch_chunk_sizes, normalize_batch_concurrency
+from services.assessments.batch.events import append_batch_event, list_batch_events
+from services.assessments.batch.policy import (
+    batch_chunk_sizes,
+    normalize_batch_concurrency,
+)
 from services.assessments.batch.rollup import derive_batch_progress
+from services.assessments.batch.storage import active_batch_count, create_batch_parent
 
 
 def test_assessment_batch_limits_chunking_and_progress_are_fixed():
@@ -35,13 +40,28 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
         batch_chunk_sizes(513)
 
     concurrency = normalize_batch_concurrency()
-    assert (concurrency.batch, concurrency.target, concurrency.owner, concurrency.instance) == (
-        8, 1, 16, 32,
+    assert (
+        concurrency.batch,
+        concurrency.target,
+        concurrency.owner,
+        concurrency.instance,
+    ) == (
+        8,
+        1,
+        16,
+        32,
     )
-    assert normalize_batch_concurrency(batch=8, target=1, owner=32, instance=64).instance == 64
-    with pytest.raises(AssessmentBatchError, match="Target concurrency must be between 1 and 1"):
+    assert (
+        normalize_batch_concurrency(batch=8, target=1, owner=32, instance=64).instance
+        == 64
+    )
+    with pytest.raises(
+        AssessmentBatchError, match="Target concurrency must be between 1 and 1"
+    ):
         normalize_batch_concurrency(target=2)
-    with pytest.raises(AssessmentBatchError, match="Batch concurrency must be between 1 and 8"):
+    with pytest.raises(
+        AssessmentBatchError, match="Batch concurrency must be between 1 and 8"
+    ):
         normalize_batch_concurrency(batch=9)
 
     children = [
@@ -55,20 +75,33 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
     assert progress.status == "running"
     assert (progress.succeeded, progress.failed, progress.unavailable) == (1, 1, 1)
     assert progress.could_not_cancel == 1
-    assert derive_batch_progress(children, cancellation_requested=True).status == "canceling"
-    settled = derive_batch_progress([
-        {"status": "succeeded", "error_code": ""},
-        {"status": "canceled", "error_code": "cancelled"},
-    ], cancellation_requested=True)
+    assert (
+        derive_batch_progress(children, cancellation_requested=True).status
+        == "canceling"
+    )
+    settled = derive_batch_progress(
+        [
+            {"status": "succeeded", "error_code": ""},
+            {"status": "canceled", "error_code": "cancelled"},
+        ],
+        cancellation_requested=True,
+    )
     assert settled.status == "canceled"
     assert settled.settled == settled.total == 2
 
 
-def test_assessment_batch_coordinator_migration_is_backend_neutral():
+def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     make_test_app()
     assert MIGRATIONS[-1] is MIGRATION
     assert MIGRATION.version == "0075"
-    assert any("details_json JSONB" in statement for statement in MIGRATION.postgres_statements or ())
+    assert any(
+        "details_json JSONB" in statement
+        for statement in MIGRATION.postgres_statements or ()
+    )
+    timestamp = "2026-08-17 12:00:00"
+    session_id = "batch-storage-owner"
+    project_id = "prj-batch-storage"
+    assessment_id = "asm-batch-storage"
     with get_db_connect()() as conn:
         parent_columns = {
             str(row["name"]): str(row["type"])
@@ -76,7 +109,9 @@ def test_assessment_batch_coordinator_migration_is_backend_neutral():
         }
         event_columns = {
             str(row["name"]): str(row["type"])
-            for row in conn.execute("PRAGMA table_info(assessment_batch_events)").fetchall()
+            for row in conn.execute(
+                "PRAGMA table_info(assessment_batch_events)"
+            ).fetchall()
         }
         parent_foreign_keys = conn.execute(
             "PRAGMA foreign_key_list(assessment_batches)"
@@ -91,12 +126,158 @@ def test_assessment_batch_coordinator_migration_is_backend_neutral():
                 "AND name LIKE 'idx_assessment_batch%'"
             ).fetchall()
         }
+        conn.execute(
+            "INSERT INTO projects "
+            "(id, session_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                project_id,
+                session_id,
+                "Batch storage",
+                "batch-storage",
+                timestamp,
+                timestamp,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO project_assessments "
+            "(id, session_id, project_id, title, profile_key, profile_version, "
+            "status, started_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'network', '1.0', 'active', ?, ?, ?)",
+            (
+                assessment_id,
+                session_id,
+                project_id,
+                "Batch storage",
+                timestamp,
+                timestamp,
+                timestamp,
+            ),
+        )
+        conn.commit()
     assert parent_columns["execution_id"] == "TEXT"
     assert parent_columns["item_count"] == "INTEGER"
     assert event_columns["details_json"] == "TEXT"
     assert {str(row["table"]) for row in parent_foreign_keys} == {
-        "assessment_batches", "workflow_executions",
+        "assessment_batches",
+        "workflow_executions",
     }
     assert {str(row["table"]) for row in event_foreign_keys} == {"assessment_batches"}
     assert "idx_assessment_batches_assessment_created" in indexes
     assert "idx_assessment_batch_events_cursor" in indexes
+
+    parent = create_batch_parent(
+        session_id=session_id,
+        team_id="",
+        project_id=project_id,
+        assessment_id=assessment_id,
+        preview_id="prv_batch_storage",
+        preview_digest="a" * 64,
+        item_count=33,
+    )
+    batch_id = str(parent["batch_id"])
+    assert batch_id.startswith("abx_")
+    assert parent["status"] == "queued"
+    assert parent["item_count"] == 33
+    assert parent["chunk_count"] == 2
+    assert parent["progress"] == {
+        "total": 33,
+        "pending": 33,
+        "launching": 0,
+        "running": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "unavailable": 0,
+        "canceled": 0,
+        "could_not_cancel": 0,
+        "status": "queued",
+        "settled": 0,
+    }
+    assert active_batch_count(session_id) == 1
+
+    events = list_batch_events(session_id, batch_id)
+    assert [event["sequence"] for event in events] == [1, 2, 3]
+    assert [event["event_type"] for event in events] == [
+        "parent_created",
+        "chunk_initialized",
+        "chunk_initialized",
+    ]
+    assert events[-1]["details"] == {"item_count": 1}
+    assert list_batch_events("another-owner", batch_id) == []
+    assert [
+        event["sequence"]
+        for event in list_batch_events(
+            session_id,
+            batch_id,
+            after_sequence=1,
+            limit=1,
+        )
+    ] == [2]
+    with pytest.raises(AssessmentBatchError, match="unsupported fields"):
+        append_batch_event(
+            batch_id,
+            "item_failed",
+            details={"private_values": 1},
+        )
+    with pytest.raises(AssessmentBatchError, match="status is invalid"):
+        append_batch_event(batch_id, "item_claimed", status="unknown_status")
+    assert len(list_batch_events(session_id, batch_id)) == 3
+
+    with pytest.raises(
+        AssessmentBatchError, match="Active assessment batch limit reached"
+    ):
+        create_batch_parent(
+            session_id=session_id,
+            team_id="",
+            project_id=project_id,
+            assessment_id=assessment_id,
+            preview_id="prv_batch_storage_second",
+            preview_digest="b" * 64,
+            item_count=1,
+            max_active=1,
+        )
+    with get_db_connect()() as conn:
+        chunk_rows = conn.execute(
+            "SELECT step_id, step_index, status FROM workflow_execution_steps "
+            "WHERE execution_id = ? ORDER BY step_index",
+            (batch_id,),
+        ).fetchall()
+        child_counts = conn.execute(
+            "SELECT step_id, COUNT(*) AS n FROM workflow_execution_children "
+            "WHERE execution_id = ? GROUP BY step_id ORDER BY step_id",
+            (batch_id,),
+        ).fetchall()
+        execution_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions "
+            "WHERE session_id = ? AND execution_kind = 'assessment_batch'",
+            (session_id,),
+        ).fetchone()
+    assert [
+        (row["step_id"], row["step_index"], row["status"]) for row in chunk_rows
+    ] == [
+        ("chunk_0001", 0, "pending"),
+        ("chunk_0002", 1, "pending"),
+    ]
+    assert [(row["step_id"], row["n"]) for row in child_counts] == [
+        ("chunk_0001", 32),
+        ("chunk_0002", 1),
+    ]
+    assert execution_count["n"] == 1
+
+    with get_db_connect()() as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("DELETE FROM workflow_executions WHERE id = ?", (batch_id,))
+        conn.commit()
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM assessment_batches WHERE execution_id = ?",
+                (batch_id,),
+            ).fetchone()["n"]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM assessment_batch_events WHERE batch_id = ?",
+                (batch_id,),
+            ).fetchone()["n"]
+            == 0
+        )
