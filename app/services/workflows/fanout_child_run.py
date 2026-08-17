@@ -9,6 +9,7 @@ import logging
 from collections.abc import Mapping
 
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
+from services.runs.start_context import cleanup_started_run_material
 from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.fanout_child_lifecycle import (
     bind_fanout_child_run,
@@ -58,6 +59,7 @@ def launch_fanout_child(
     from blueprints import run as run_routes  # noqa: PLC0415
 
     execution_id = str(execution.get("id") or "")
+    execution_kind = str(execution.get("execution_kind") or "workflow")
     child_id = str(child.get("id") or "")
     ordinal = _integer(child.get("ordinal"), 0)
     command = launch_spec.execution_command
@@ -94,11 +96,16 @@ def launch_fanout_child(
             owner_tab_id=str(execution.get("owner_tab_id") or ""),
             workspace_cwd=str(execution.get("workspace_cwd") or ""),
             link_project_id="" if builtin_step else str(execution.get("project_id") or ""),
-            thread_name_prefix="workflow-fanout-run",
+            thread_name_prefix=(
+                "assessment-batch-run"
+                if execution_kind == "assessment_batch"
+                else "workflow-fanout-run"
+            ),
             run_created_hook=attach_run,
             **launch_spec.broker_kwargs(),
         )
     except (RunPreparationError, RunStartRejected, RunSpawnError, FanoutRunBindingError) as exc:
+        cleanup_started_run_material(launch_spec.run_cleanup_hook)
         error_code = _launch_failure_code(exc)
         failed = fail_launching_fanout_child(child_id, error_code) or {}
         log.warning("WORKFLOW_FANOUT_CHILD_LAUNCH_FAILED", extra={
@@ -111,6 +118,7 @@ def launch_fanout_child(
         })
         return {}, failed
     except Exception as exc:
+        cleanup_started_run_material(launch_spec.run_cleanup_hook)
         failed = fail_launching_fanout_child(child_id, "launch_failed") or {}
         log.error("WORKFLOW_FANOUT_CHILD_LAUNCH_ERROR", exc_info=True, extra={
             "execution_id": execution_id,

@@ -13,6 +13,7 @@ from core.database_backend import dialect_for_backend
 from services.workflows.fanout_checkpoint import FanoutCheckpoint
 from services.workflows.fanout_child_failures import fanout_policy_for_row
 from services.workflows.transitions import transition_for_step
+from services.workflows.fanout_parent_kind import finalize_kind_parent_on_conn
 
 
 _FAILURE_DETAIL = "The fan-out step reached its configured failure limit."
@@ -41,6 +42,11 @@ def finalize_fanout_parent_on_conn(
     """Finalize a parent step once no child ordinal remains unfinished."""
     if checkpoint.pending or checkpoint.running or checkpoint.cancelled:
         return None
+    handled, kind_transition = finalize_kind_parent_on_conn(
+        conn, row, checkpoint, finished=finished
+    )
+    if handled:
+        return kind_transition
     policy = fanout_policy_for_row(conn, row)
     failure_limit_reached = bool(checkpoint.failed) and len(checkpoint.failed) >= policy.max_failures
     exit_code = 1 if failure_limit_reached else 0

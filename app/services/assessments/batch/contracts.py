@@ -46,6 +46,8 @@ BATCH_UNAVAILABLE_ERROR_CODES = frozenset({
     "profile_unavailable",
     "scope_unavailable",
     "target_unavailable",
+    "plan_changed",
+    "policy_changed",
 })
 BATCH_COULD_NOT_CANCEL_ERROR_CODE = "could_not_cancel"
 BATCH_VIEW_CAPABILITIES = frozenset()

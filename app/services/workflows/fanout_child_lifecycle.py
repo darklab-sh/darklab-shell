@@ -9,16 +9,23 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from core.database_access import get_db_backend, get_db_connect
-from core.database_backend import DatabaseBackend, dialect_for_backend
+from core.database_access import get_db_connect
 from services.workflows.fanout_child_claim import claim_fanout_child
 from services.workflows.fanout_child_failures import resolve_failed_fanout_child
-from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
+from services.workflows.fanout_kind_events import (
+    record_child_bound_on_conn,
+    record_child_settled_on_conn,
+)
+from services.workflows.fanout_child_state import (
+    active_fanout_child_context as _active_context,
+    begin_fanout_child_transition as _begin_locked,
+    child_checkpoint as _checkpoint_from_row,
+    fanout_child_context as _context_for_child,
+    save_child_checkpoint as _save_checkpoint,
+)
 from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
 
 
-_ACTIVE_EXECUTION_STATUSES = frozenset({"queued", "running"})
-_ACTIVE_STEP_STATUSES = frozenset({"launching", "running"})
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -40,54 +47,6 @@ def _bounded_number(value: object, name: str, minimum: int, maximum: int) -> int
 
 def _child_from_row(row: Any) -> dict[str, object]:
     return {str(key): row[key] for key in row.keys()}
-
-
-def _begin_locked(conn: Any) -> str:
-    conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
-    return " FOR UPDATE" if get_db_backend() == DatabaseBackend.POSTGRES else ""
-
-
-def _context_for_child(
-    conn: Any, where_sql: str, params: tuple[object, ...], lock_sql: str,
-) -> Any:
-    query = (
-        "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "  # nosec
-        "s.fanout_checkpoint, "
-        "e.status AS execution_status, e.execution_kind, e.definition_snapshot "
-        "FROM workflow_execution_children c "
-        "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
-        "AND s.step_id = c.step_id "
-        "JOIN workflow_executions e ON e.id = c.execution_id WHERE "
-        + where_sql
-        + lock_sql
-    )
-    return conn.execute(query, params).fetchone()
-
-
-def _active_context(row: Any) -> bool:
-    return bool(
-        row
-        and str(row["execution_status"] or "") in _ACTIVE_EXECUTION_STATUSES
-        and str(row["parent_status"] or "") in _ACTIVE_STEP_STATUSES
-    )
-
-
-def _checkpoint_from_row(row: Any) -> FanoutCheckpoint:
-    payload = dialect_for_backend(get_db_backend()).decode_json_dict(row["fanout_checkpoint"])
-    return checkpoint_from_payload(payload)
-
-
-def _save_checkpoint(conn: Any, row: Any, checkpoint: FanoutCheckpoint) -> None:
-    dialect = dialect_for_backend(get_db_backend())
-    conn.execute(
-        "UPDATE workflow_execution_steps SET fanout_checkpoint = ? "
-        "WHERE execution_id = ? AND step_id = ?",
-        (
-            dialect.json_param(checkpoint.to_payload()),
-            str(row["execution_id"]),
-            str(row["step_id"]),
-        ),
-    )
 
 
 def bind_fanout_child_run(child_id: str, run_id: str) -> bool:
@@ -116,6 +75,7 @@ def bind_fanout_child_run(child_id: str, run_id: str) -> bool:
                 "WHERE execution_id = ? AND step_id = ? AND status IN ('launching', 'running')",
                 (str(row["execution_id"]), str(row["step_id"])),
             )
+            record_child_bound_on_conn(conn, row, normalized_run_id)
         conn.commit()
     return changed.rowcount == 1
 
@@ -174,6 +134,13 @@ def finalize_fanout_child_run(
             failure_limit_reached = resolution.failure_limit_reached
             skipped_ordinals = resolution.skipped_ordinals
         _save_checkpoint(conn, row, next_checkpoint)
+        record_child_settled_on_conn(
+            conn,
+            row,
+            status=status,
+            error_code=normalized_error,
+            retry_child_id=retry_child_id,
+        )
         parent_transition = finalize_fanout_parent_on_conn(conn, row, next_checkpoint, finished=finished)
         updated = conn.execute(
             "SELECT * FROM workflow_execution_children WHERE id = ?",

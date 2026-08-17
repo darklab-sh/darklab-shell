@@ -942,16 +942,22 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/collections.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/execution_kinds.py", 30, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/workflows/execution_authorization.py", 106, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_children.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_lifecycle.py", 224, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_claim.py", 125, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/fanout_child_state.py", 76, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_queries.py", 50, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_failures.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_cancellation.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_parent_completion.py", 120, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/fanout_parent_kind.py", 32, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/fanout_kind_events.py", 47, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/child_launch_spec.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_launch.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_run.py", 185, "split-package-ratchet"),
@@ -965,6 +971,16 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/claim.py", 225, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/claim_fairness.py", 129, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/events.py", 310, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/batch/execution.py", 204, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/finalization.py", 80, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/lifecycle_events.py", 82, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/parent_completion.py", 122, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/plan_policy.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/policy.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_builder.py", 385, "split-package-ratchet"),
@@ -981,6 +997,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/preview_summary.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_validation.py", 122, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/rollup.py", 100, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/revalidation.py", 157, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/start.py", 144, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/start_storage.py", 315, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/storage.py", 324, "split-package-ratchet"),

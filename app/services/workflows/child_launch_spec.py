@@ -24,6 +24,7 @@ class ChildLaunchSpec:
     output_signal_context: RunOutputSignalContext | None = None
     run_finalized_hook: Callable[[str, dict[str, Any]], None] | None = None
     run_cleanup_hook: Callable[[], None] | None = None
+    suppress_run_complete_notification: bool = False
 
     def __post_init__(self) -> None:
         if not self.execution_command.strip():
@@ -49,6 +50,8 @@ class ChildLaunchSpec:
             values["run_finalized_hook"] = self.run_finalized_hook
         if self.run_cleanup_hook is not None:
             values["run_cleanup_hook"] = self.run_cleanup_hook
+        if self.suppress_run_complete_notification:
+            values["suppress_run_complete_notification"] = True
         return values
 
 

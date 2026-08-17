@@ -13,6 +13,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
 from services.workflows.fanout_child_failures import resolve_failed_fanout_child
+from services.workflows.fanout_kind_events import record_child_settled_on_conn
 from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
 
 
@@ -110,6 +111,13 @@ def fail_launching_fanout_child(
             now=finished,
         )
         _save_checkpoint(conn, row, resolution.checkpoint)
+        record_child_settled_on_conn(
+            conn,
+            row,
+            status="failed",
+            error_code=normalized_error,
+            retry_child_id=resolution.retry_child_id,
+        )
         parent_transition = finalize_fanout_parent_on_conn(
             conn,
             row,
