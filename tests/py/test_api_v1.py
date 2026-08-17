@@ -8669,6 +8669,13 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
 
     assert cli_main.main([
         "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm",
+    ]) == 0
+    confirmed_output = capsys.readouterr().out
+    assert confirmed_output.index("ping -c 4 probe.example") < confirmed_output.index("run_probe")
+
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
         "--confirm", "--format", "json",
     ]) == 0
     assert json.loads(capsys.readouterr().out)["run"]["id"] == "run_probe"
@@ -8968,6 +8975,17 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         None,
         None,
     )
+
+    assert cli_main.main([
+        "assessment",
+        "start-action",
+        "prj_cli",
+        "asmt_cli",
+        "asmc_cli",
+        "--confirm",
+    ]) == 0
+    confirmed_output = capsys.readouterr().out
+    assert confirmed_output.index("command:nmap") < confirmed_output.index("run_cli_verification")
 
     call_count = len(calls)
     assert cli_main.main([

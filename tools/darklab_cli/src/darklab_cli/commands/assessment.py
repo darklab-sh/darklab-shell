@@ -75,17 +75,17 @@ def _start_action(client: DarklabClient, args: argparse.Namespace, base_path: st
             "source_run_id": args.source_run_id,
             "parameter_observation_id": args.parameter_observation_id,
             "schema_artifact_id": args.schema_artifact_id,
-        }.items() if value
-    }
+        }.items() if value}
     preview = client.request("GET", action_path, params=selections or None)
-    raw_plan = preview.get("plan") if isinstance(preview, dict) else {}
-    plan: dict[str, Any] = raw_plan if isinstance(raw_plan, dict) else {}
+    plan = preview.get("plan") if isinstance(preview, dict) and isinstance(preview.get("plan"), dict) else {}
     if not args.confirm:
         if args.format == "json":
             return print_payload(preview, "json")
         print_assessment_action_plan(plan)
         print("Preview only. Re-run with --confirm to start this action.")
         return 0
+    if args.format != "json":
+        print_assessment_action_plan(plan)
     if not plan.get("launchable"):
         return die(str(plan.get("unavailable_reason") or "assessment action is unavailable"))
     payload = client.request("POST", action_path, body={

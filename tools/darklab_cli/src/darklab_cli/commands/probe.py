@@ -47,6 +47,8 @@ def handle_probe(client: DarklabClient, args: argparse.Namespace) -> int:
         if args.probe_command == "run":
             print("Preview only. Re-run with --confirm to start this probe.")
         return 0
+    if args.format != "json":
+        print_probe_plan(plan)
     if not plan.get("launchable"):
         reason = str(plan.get("unavailable_reason") or "probe action is unavailable")
         raise DarklabCliError(reason)
