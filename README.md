@@ -99,10 +99,10 @@ Atlas can preview external scanner reports before saving any rows. Alongside Nuc
 
 1. Add the approved domains, IPs, ports, or URLs to a Project.
 2. Open **Assessment**, start a Network, Web, API, TLS, or Combined cycle, and review the checks created for those targets.
-3. Run a recommended action or link compatible evidence the Project already has. Mark a check blocked, skipped, or not applicable only when you have a reason to keep with the cycle.
+3. Run one recommended action, build a reviewed **Run assessment plan** for several safe checks, or link compatible evidence the Project already has. Mark a check blocked, skipped, or not applicable only when you have a reason to keep with the cycle.
 4. Review findings and retests, complete the cycle, then choose that cycle when you build an evidence package or engagement report.
 
-Coverage stays factual: a saved run counts only when its target, tool, outcome, version, and evidence match the frozen check. Each target keeps its full-cycle totals even when the worklist spans several pages. **Fix first** ranks current issues without making untested checks look complete, and the **Retest queue** groups two to ten findings only when they share the same safe, credential-free plan. Completed and archived cycles are read-only, and team viewers can inspect the work without changing it.
+Coverage stays factual: a saved run counts only when its target, tool, outcome, version, and evidence match the frozen check. Each target keeps its full-cycle totals even when the worklist spans several pages. **Run assessment plan** previews the selected targets, categories, commands, limits, skipped work, potential coverage, and estimated completion window before anything starts. Safe checks are selected by default; standard checks need a separate acknowledgement, and intrusive or credentialed work stays individual. The durable batch monitor survives reloads and keeps completed evidence when another command fails or the batch is canceled. **Fix first** ranks current issues without making untested checks look complete, and the **Retest queue** groups two to ten findings only when they share the same safe, credential-free plan. Completed and archived cycles are read-only, and team viewers can inspect the work without changing it.
 
 ### Run a one-off Project probe
 

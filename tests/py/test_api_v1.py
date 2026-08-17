@@ -9113,6 +9113,334 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     ]
 
 
+def test_darklab_cli_assessment_batch_commands_preserve_preview_and_cursor_contracts(
+    monkeypatch,
+    capsys,
+):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    digest = "b" * 64
+    preview = {
+        "schema_version": 1,
+        "preview_id": "abp_cli",
+        "project_id": "prj_cli",
+        "assessment_id": "asmt_cli",
+        "profile": {"key": "network", "version": "1"},
+        "selection": {"include_standard": False, "item_limit": 128},
+        "summary": {
+            "selected_target_count": 1,
+            "estimated_min_seconds": 10,
+            "estimated_max_seconds": 60,
+            "potential_covered_check_count": 2,
+            "requires_standard_confirmation": False,
+            "reason_counts": {"not_applicable": 1},
+        },
+        "plan_digest": digest,
+        "candidate_item_count": 1,
+        "selected_item_count": 1,
+        "potential_covered_check_count": 2,
+        "safe_item_count": 1,
+        "standard_item_count": 0,
+        "concurrency": {"batch": 8, "target": 1, "owner": 16, "instance": 32},
+        "expires_at": "2026-08-17 12:15:00",
+        "created": "2026-08-17 12:00:00",
+    }
+    item = {
+        "item_index": 0,
+        "execution_key": "c" * 64,
+        "selected": True,
+        "policy_level": "safe",
+        "action": {"key": "command:nmap", "id": "nmap"},
+        "target": {"entity_id": "ent_cli", "type": "ip", "value": "192.0.2.10"},
+        "profile_identity": {"kind": "nmap", "id": "safe"},
+        "bounds": {"summary": "One approved target."},
+        "display_command": "nmap -sV 192.0.2.10",
+        "public_plan_digest": "d" * 64,
+        "public_plan": {},
+        "duration_bound_seconds": 60,
+        "check_mappings": [{"check_id": "asmc_cli"}],
+    }
+    progress = {
+        "total": 1,
+        "pending": 0,
+        "launching": 0,
+        "running": 0,
+        "succeeded": 1,
+        "failed": 0,
+        "unavailable": 0,
+        "canceled": 0,
+        "skipped": 0,
+        "could_not_cancel": 0,
+        "settled": 1,
+        "status": "completed",
+    }
+    batch = {
+        "schema_version": 1,
+        "batch_id": "wfx_cli",
+        "assessment_id": "asmt_cli",
+        "project_id": "prj_cli",
+        "preview_id": "abp_cli",
+        "preview_digest": digest,
+        "source_batch_id": "",
+        "status": "completed",
+        "item_count": 1,
+        "chunk_count": 1,
+        "concurrency": {"batch": 8, "target": 1, "owner": 16, "instance": 32},
+        "progress": progress,
+        "next_event_sequence": 3,
+        "created": "2026-08-17 12:00:00",
+        "updated": "2026-08-17 12:01:00",
+        "finished": "2026-08-17 12:01:00",
+        "failure_code": "",
+    }
+    event = {
+        "batch_id": "wfx_cli",
+        "sequence": 2,
+        "event_type": "parent_completed",
+        "chunk_index": None,
+        "item_ordinal": None,
+        "status": "completed",
+        "reason_code": "",
+        "run_id": "",
+        "source_batch_id": "",
+        "retry_batch_id": "",
+        "details": {"succeeded": 1},
+        "created": "2026-08-17 12:01:00",
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if path == "/projects":
+                return {
+                    "projects": [{"id": "prj_cli", "slug": "assessment-project", "status": "active"}],
+                    "has_more": False,
+                }
+            if path.endswith("/batch-previews") and method == "POST":
+                include_standard = bool((body or {}).get("include_standard"))
+                if include_standard:
+                    return {
+                        "preview": {
+                            **preview,
+                            "selection": {**preview["selection"], "include_standard": True},
+                            "standard_item_count": 1,
+                            "summary": {
+                                **preview["summary"],
+                                "requires_standard_confirmation": True,
+                            },
+                        }
+                    }
+                return {"preview": preview}
+            if path == "/assessment-batch-previews/abp_cli/items":
+                return {
+                    "schema_version": 1,
+                    "preview_id": "abp_cli",
+                    "items": [item],
+                    "next_cursor": None,
+                }
+            if path.endswith("/assessment-batches") and method == "POST":
+                return {"batch": batch, "launch": {"status": "completed", "launched": 1}}
+            if path == "/projects/prj_cli/assessment-batches":
+                return {
+                    "schema_version": 1,
+                    "batches": [batch],
+                    "next_cursor": "next_cli",
+                    "has_more": True,
+                }
+            if path == "/assessment-batches/wfx_cli":
+                return {"batch": batch}
+            if path == "/assessment-batches/wfx_cli/items":
+                return {
+                    "schema_version": 1,
+                    "batch_id": "wfx_cli",
+                    "items": [{
+                        "item_index": 0,
+                        "status": "succeeded",
+                        "attempt": 1,
+                        "action_id": "nmap",
+                        "target": item["target"],
+                        "run_id": "run_cli",
+                        "reason_code": "",
+                    }],
+                    "next_cursor": None,
+                    "has_more": False,
+                }
+            if path == "/assessment-batches/wfx_cli/events":
+                return {
+                    "schema_version": 1,
+                    "batch_id": "wfx_cli",
+                    "events": [event],
+                    "next_cursor": None,
+                    "has_more": False,
+                }
+            if path == "/projects/prj_cli/assessment-batches/wfx_cli/cancel":
+                return {"batch": {**batch, "status": "canceled"}, "signal_failures": 0}
+            raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main([
+        "assessment", "batch", "plan", "assessment-project", "asmt_cli",
+        "--target", "ent_cli", "--category", "discovery",
+    ]) == 0
+    plan_output = capsys.readouterr().out
+    assert "Assessment batch preview: abp_cli" in plan_output
+    assert "nmap -sV 192.0.2.10" in plan_output
+    assert calls[-2:] == [
+        (
+            "POST",
+            "/projects/prj_cli/assessments/asmt_cli/batch-previews",
+            None,
+            {
+                "target_entity_ids": ["ent_cli"],
+                "excluded_target_entity_ids": [],
+                "categories": ["discovery"],
+                "excluded_categories": [],
+                "include_standard": False,
+                "item_limit": 128,
+                "max_parallel": 8,
+                "max_owner_parallel": 16,
+                "max_instance_parallel": 32,
+            },
+        ),
+        (
+            "GET",
+            "/assessment-batch-previews/abp_cli/items",
+            {"cursor": 0, "limit": 100},
+            None,
+        ),
+    ]
+
+    assert cli_main.main([
+        "assessment", "batch", "start", "prj_cli", "asmt_cli",
+        "--include-standard", "--confirm",
+    ]) == 1
+    assert "add --confirm-standard" in capsys.readouterr().err
+    assert not any(call[0] == "POST" and call[1].endswith("/assessment-batches") for call in calls)
+
+    assert cli_main.main([
+        "assessment", "batch", "start", "prj_cli", "asmt_cli",
+        "--include-standard", "--confirm", "--confirm-standard", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["batch"]["batch_id"] == "wfx_cli"
+    assert calls[-1] == (
+        "POST",
+        "/projects/prj_cli/assessments/asmt_cli/assessment-batches",
+        None,
+        {
+            "preview_id": "abp_cli",
+            "plan_digest": digest,
+            "confirmed": True,
+            "standard_confirmed": True,
+        },
+    )
+
+    assert cli_main.main([
+        "assessment", "batch", "list", "assessment-project", "--limit", "1",
+    ]) == 0
+    assert "wfx_cli" in capsys.readouterr().out
+    assert calls[-1] == (
+        "GET",
+        "/projects/prj_cli/assessment-batches",
+        {"assessment_id": None, "cursor": None, "limit": 1},
+        None,
+    )
+
+    assert cli_main.main([
+        "assessment", "batch", "show", "wfx_cli", "--items", "--events",
+        "--item-cursor", "0", "--event-cursor", "1",
+    ]) == 0
+    show_output = capsys.readouterr().out
+    assert "run_cli" in show_output
+    assert "parent_completed" in show_output
+    assert calls[-2:] == [
+        ("GET", "/assessment-batches/wfx_cli/items", {"cursor": 0, "limit": 100}, None),
+        ("GET", "/assessment-batches/wfx_cli/events", {"cursor": 1, "limit": 100}, None),
+    ]
+
+    assert cli_main.main(["assessment", "batch", "follow", "wfx_cli", "--cursor", "1"]) == 0
+    follow_output = capsys.readouterr().out
+    assert "[2]" in follow_output
+    assert "Final status:" in follow_output
+
+    assert cli_main.main(["assessment", "batch", "cancel", "wfx_cli"]) == 0
+    assert "Preview only" in capsys.readouterr().out
+    assert cli_main.main([
+        "assessment", "batch", "cancel", "wfx_cli", "--confirm", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["batch"]["status"] == "canceled"
+    assert calls[-1] == (
+        "POST",
+        "/projects/prj_cli/assessment-batches/wfx_cli/cancel",
+        None,
+        {},
+    )
+
+
+def test_darklab_cli_assessment_batch_follow_reports_resumable_interrupt(
+    monkeypatch,
+    capsys,
+):
+    cli_main = import_module("darklab_cli.__main__")
+    batch_reads = import_module("darklab_cli.commands.assessment_batch_reads")
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, **_kwargs):
+            if path.endswith("/events"):
+                return {
+                    "events": [{
+                        "sequence": 7,
+                        "event_type": "item_started",
+                        "created": "2026-08-17 12:00:00",
+                        "status": "running",
+                    }],
+                    "has_more": False,
+                    "next_cursor": None,
+                }
+            return {"batch": {"batch_id": "wfx_running", "status": "running"}}
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+    monkeypatch.setattr(batch_reads.time, "sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    assert cli_main.main([
+        "assessment", "batch", "follow", "wfx_running", "--cursor", "5",
+    ]) == 130
+    captured = capsys.readouterr()
+    assert "[7]" in captured.out
+    assert "--cursor 7" in captured.err
+    assert batch_reads._terminal_exit_code({
+        "status": "completed", "progress": {"succeeded": 2},
+    }) == 0
+    assert batch_reads._terminal_exit_code({
+        "status": "completed", "progress": {"succeeded": 1, "failed": 1},
+    }) == batch_reads.BATCH_PARTIAL_EXIT_CODE
+    assert batch_reads._terminal_exit_code({
+        "status": "canceled", "progress": {"canceled": 1},
+    }) == batch_reads.BATCH_CANCELED_EXIT_CODE
+    assert batch_reads._terminal_exit_code({"status": "failed"}) == 1
+
+    class BrokenClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, **_kwargs):
+            return {"events": "not-a-page"}
+
+    monkeypatch.setattr(cli_main, "DarklabClient", BrokenClient)
+    assert cli_main.main([
+        "assessment", "batch", "follow", "wfx_broken",
+    ]) == 1
+    assert "invalid event page" in capsys.readouterr().err
+
+
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
     help_text = cli_main._parser().format_help()
@@ -9125,7 +9453,8 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
-    assert "assessment) _darklab_comp_words 'checks clear-state list set-state show start-action'" in bash_completion
+    assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
+    assert "assessment:batch) _darklab_comp_words 'cancel follow list plan show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
     invite_create_completion = (

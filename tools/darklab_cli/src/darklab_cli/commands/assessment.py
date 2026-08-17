@@ -11,10 +11,13 @@ from typing import Any
 from ..client import DarklabClient, die
 from ..formatting import print_collection, print_payload, print_table
 from .assessment_formatting import print_assessment_action_plan
+from .assessment_batch import handle_assessment_batch
 from .project_references import resolve_active_project_id
 
 
 def handle_assessment(client: DarklabClient, args: argparse.Namespace) -> int:
+    if args.assessment_command == "batch":
+        return handle_assessment_batch(client, args)
     base_path = f"/projects/{resolve_active_project_id(client, args.project_id)}/assessments"
     match args.assessment_command:
         case "list":

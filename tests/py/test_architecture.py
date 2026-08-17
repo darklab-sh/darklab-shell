@@ -1148,6 +1148,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/formatting.py", 86, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/__init__.py", 1, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment.py", 116, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch.py", 34, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_formatting.py", 148, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_pages.py", 65, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_preview.py", 93, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_reads.py", 198, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_formatting.py", 26, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/project_references.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe.py", 133, "split-package-ratchet"),
@@ -1156,6 +1161,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe_render_values.py", 28, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/__init__.py", 1, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment.py", 81, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_batch.py", 145, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/probe.py", 44, "split-package-ratchet"),
 )
 

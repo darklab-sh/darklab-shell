@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 
+from .assessment_batch import register_assessment_batch_parser
+
 
 _STATUS_CHOICES = ("active", "completed", "archived")
 _CHECK_STATE_CHOICES = (
@@ -21,7 +23,7 @@ _EVIDENCE_STATE_CHOICES = ("available", "unavailable", "none")
 def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     assessment = subparsers.add_parser("assessment", help="Review and update project assessment cycles.")
     commands = assessment.add_subparsers(dest="assessment_command", required=True)
-
+    register_assessment_batch_parser(commands)
     listing = commands.add_parser("list", help="List assessment cycles for one project.")
     listing.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     listing.add_argument("--status", choices=_STATUS_CHOICES)
@@ -55,17 +57,15 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     set_state.add_argument("--reason", required=True)
     set_state.add_argument("--format", choices=("text", "json"), default="text")
 
-    clear_state = commands.add_parser(
-        "clear-state", help="Clear a manual check state and restore its evidence-derived state."
-    )
+    clear_state = commands.add_parser("clear-state", help=
+        "Clear a manual check state and restore its evidence-derived state.")
     clear_state.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     clear_state.add_argument("assessment_id")
     clear_state.add_argument("check_id")
     clear_state.add_argument("--format", choices=("text", "json"), default="text")
 
-    start_action = commands.add_parser(
-        "start-action", help="Preview or explicitly start an Assessment check recommendation."
-    )
+    start_action = commands.add_parser("start-action", help=
+        "Preview or explicitly start an Assessment check recommendation.")
     start_action.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     start_action.add_argument("assessment_id")
     start_action.add_argument("check_id")

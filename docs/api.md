@@ -534,9 +534,19 @@ darklab assessment start-action darklab-sh asmt_123 asmc_123 \
   --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
 darklab assessment start-action darklab-sh asmt_123 asmc_123 \
   --schema-artifact-id art_123 --confirm
+darklab assessment batch plan darklab-sh asmt_123
+darklab assessment batch plan darklab-sh asmt_123 \
+  --target ent_123 --category discovery --exclude-category web
+darklab assessment batch start darklab-sh asmt_123 --confirm
+darklab assessment batch start darklab-sh asmt_123 \
+  --include-standard --confirm --confirm-standard
+darklab assessment batch list darklab-sh --assessment-id asmt_123
+darklab assessment batch show wfx_123 --items --events
+darklab assessment batch follow wfx_123 --cursor 42
+darklab assessment batch cancel wfx_123 --confirm
 ```
 
-List and check commands support `text`, `json`, and `ndjson`. Text-mode collections print `No results.` when the server returns no rows; JSON and NDJSON keep their machine-readable empty shapes. Cycle detail, state mutations, and recommended actions support `text` and `json`. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
+List and check commands support `text`, `json`, and `ndjson`. Text-mode collections print `No results.` when the server returns no rows; JSON and NDJSON keep their machine-readable empty shapes. Cycle detail, state mutations, recommended actions, and batch previews support `text` and `json`; batch list and follow also offer NDJSON. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. Batch start does the same with a fresh server-owned preview and needs `--confirm-standard` when standard work is selected. Batch follow prints a resumable cursor on Ctrl+C and returns `0` for complete success, `3` for a completed partial result, `4` for canceled work, `1` for failure, or `130` when interrupted. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.
 
 ---
 
@@ -874,6 +884,12 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab assessment set-state <project-slug-or-id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
 | `darklab assessment clear-state <project-slug-or-id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
 | `darklab assessment start-action <project-slug-or-id> <assessment_id> <check_id> [--http-profile-id ID] [--source-run-id ID] [--parameter-observation-id ID] [--schema-artifact-id ID] [--confirm] [--workspace-cwd PATH] [--format text\|json]` | Preview the saved check's recommended action. Add `--confirm` to start the freshly revalidated bounded action and link its run to the Project. The optional ids select a protected HTTP profile, reviewed Dalfox observation, or saved Schemathesis schema when that check requires one. |
+| `darklab assessment batch plan <project-slug-or-id> <assessment_id> [selection and concurrency options] [--format text\|json]` | Compile and page a fresh read-only plan. Repeat `--target`, `--exclude-target`, `--category`, or `--exclude-category` for explicit scope. Safe commands are selected by default; `--include-standard` adds eligible standard commands. `--item-limit`, `--max-parallel`, `--max-owner-parallel`, and `--max-instance-parallel` stay within server caps. |
+| `darklab assessment batch start <project-slug-or-id> <assessment_id> [selection and concurrency options] [--confirm] [--confirm-standard] [--format text\|json]` | Compile and print a fresh plan, remaining read-only unless `--confirm` is present. A plan containing standard commands also requires `--confirm-standard`; the server still rebuilds and verifies the complete preview digest before creating the batch. |
+| `darklab assessment batch list <project-slug-or-id> [--assessment-id ID] [--cursor TOKEN] [--limit N] [--format text\|json\|ndjson]` | List one bounded newest-first page of durable batches and print the opaque cursor needed for the next page. |
+| `darklab assessment batch show <batch_id> [--items] [--events] [--item-cursor N] [--event-cursor N] [--limit N] [--format text\|json]` | Show current aggregate progress and optionally one bounded page of latest item attempts or sanitized events. |
+| `darklab assessment batch follow <batch_id> [--cursor SEQUENCE] [--poll-interval SECONDS] [--format text\|ndjson]` | Follow sanitized events after the acknowledged sequence and print a durable terminal summary. Ctrl+C leaves the batch running and prints a resumable command. |
+| `darklab assessment batch cancel <batch_id> [--confirm] [--format text\|json]` | Show the current batch without changing it. Add `--confirm` to stop new claims and request cancellation of active child runs; completed work and evidence remain intact. |
 | `darklab team list\|status [--format text\|json]` | List joined teams or show the active CLI scope. |
 | `darklab team create <name> [--slug SLUG] [--display-name NAME] [--format text\|json]` | Create a team and print the one-time recovery code. |
 | `darklab team switch <team-id\|slug\|name\|personal>` | Save the active CLI team scope, or clear it with `personal`. |
