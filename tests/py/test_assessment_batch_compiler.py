@@ -15,6 +15,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.contracts import AssessmentBatchError
+from services.assessments.batch.preview_builder import BatchPreviewBuilder
 from services.assessments.batch.preview_compiler import compile_batch_preview
 from services.assessments.batch.preview_estimate import estimate_batch_duration
 from services.assessments.batch.preview_models import (
@@ -22,6 +23,7 @@ from services.assessments.batch.preview_models import (
     BatchPreviewItem,
 )
 from services.assessments.batch.preview_storage import get_batch_preview_items
+from services.assessments.batch.preview_selection import normalize_preview_selection
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
@@ -274,3 +276,49 @@ def test_duration_estimate_preserves_the_32_item_chunk_boundary():
     assert estimate_batch_duration(
         (*base[:32], *unselected), parallel=8
     ).chunk_sizes == (32,)
+
+
+def test_preview_selection_accepts_the_200_target_project_boundary_only():
+    target_ids = [f"ent-boundary-{index:03d}" for index in range(200)]
+
+    selection = normalize_preview_selection({"target_entity_ids": target_ids})
+
+    assert selection.target_entity_ids == tuple(target_ids)
+    with pytest.raises(AssessmentBatchError) as oversized:
+        normalize_preview_selection(
+            {"target_entity_ids": [*target_ids, "ent-boundary-200"]}
+        )
+    assert oversized.value.code == "invalid_batch_selection"
+
+
+def test_preview_builder_rejects_only_after_the_50000_check_boundary():
+    runtime = ProbePlanningRuntime(
+        available_features=frozenset(),
+        intrusive_actions_enabled=False,
+        template_snapshot=NucleiTemplateCacheSnapshot("missing", "", "", 0),
+    )
+    builder = BatchPreviewBuilder(
+        "prj-check-boundary",
+        normalize_preview_selection(None),
+        runtime,
+        {"checks": []},
+    )
+    unavailable_row = {
+        "target_entity_id": "ent-check-boundary",
+        "category": "discovery",
+        "check_key": "missing-frozen-check",
+        "state": "not_started",
+        "state_source": "",
+        "policy_level": "safe",
+        "recommended_action_key": "command:ping",
+        "applicability": "applicable",
+        "unavailable_evidence_count": 0,
+    }
+
+    for _index in range(50_000):
+        builder.observe(unavailable_row)
+
+    assert builder.check_count == 50_000
+    with pytest.raises(AssessmentBatchError) as oversized:
+        builder.observe(unavailable_row)
+    assert oversized.value.code == "preview_check_limit_exceeded"

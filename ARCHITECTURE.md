@@ -286,6 +286,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Creates an active cycle from a validated profile snapshot; team scope requires Project mutation permission. |
 | `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Returns one cycle's safe profile snapshot, truthful rollups, and a bounded, filtered check page. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Renames an active cycle or advances it to completed or archived. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview without starting a coordinator or run. |
+| `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
+| `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Sets or clears a reasoned manual decision on an active check. |
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Validates and links one compatible saved source to an active check. |
 | `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Removes one manually added evidence link and recalculates the active check. |
@@ -681,6 +684,9 @@ Assessment-batch previews stream one active cycle's frozen checks through explic
 | `POST` | `/projects/<project_id>/assessments` | Creates one active assessment cycle from a validated profile and the Project's confirmed targets. |
 | `GET` | `/projects/<project_id>/assessments/<assessment_id>` | Returns one scoped cycle with rollups and a filtered, bounded check page. |
 | `PATCH` | `/projects/<project_id>/assessments/<assessment_id>` | Renames an active cycle or moves it forward to completed or archived. |
+| `POST` | `/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview for a browser viewer without starting work. |
+| `GET` | `/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
+| `GET` | `/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
 | `PATCH` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Sets or clears a reasoned manual decision on one active assessment check. |
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Validates and links one compatible saved source to an active assessment check. |
 | `DELETE` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Removes one manually added evidence link and recalculates the active check. |

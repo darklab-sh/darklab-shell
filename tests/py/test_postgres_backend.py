@@ -4875,7 +4875,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core import database as core_database
     from services.atlas.materializer import materialize_run_entities
+    from services.assessments.base_action_catalog import ACTIONS
+    from services.assessments.probe_runtime import ProbePlanningRuntime
     from services.assessments.coverage import reconcile_run_evidence_on_conn
+    from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
     from services.projects import findings as project_findings
 
     conn = postgres_schema.conn
@@ -4886,6 +4889,18 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(
+        "services.assessments.batch.preview_compiler.probe_planning_runtime",
+        lambda: ProbePlanningRuntime(
+            available_features=frozenset(
+                {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
+            ),
+            intrusive_actions_enabled=True,
+            template_snapshot=NucleiTemplateCacheSnapshot(
+                "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+            ),
+        ),
+    )
 
     client = app.test_client()
     bootstrap_session_id = str(uuid.uuid4())
@@ -4979,6 +4994,20 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     assessment = json.loads(assessment_resp.data)
     assessment_id = assessment["assessment"]["id"]
+    batch_preview_resp = client.post(
+        f"/projects/{project['id']}/assessments/{assessment_id}/batch-previews",
+        headers=browser_headers,
+        json={},
+    )
+    batch_preview = json.loads(batch_preview_resp.data)["preview"]
+    api_batch_preview_resp = client.get(
+        f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}",
+        headers=api_headers,
+    )
+    api_batch_items_resp = client.get(
+        f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}/items",
+        headers=api_headers,
+    )
     active_resp = client.post(
         "/projects/active",
         headers=browser_headers,
@@ -5178,6 +5207,12 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     }
     assert json.loads(http_profile_update_resp.data)["profile"]["enabled"] is False
     assert assessment_resp.status_code == 201
+    assert batch_preview_resp.status_code == 201
+    assert batch_preview["selected_item_count"] >= 1
+    assert json.loads(api_batch_preview_resp.data)["preview"] == batch_preview
+    api_batch_items = json.loads(api_batch_items_resp.data)
+    assert len(api_batch_items["items"]) == batch_preview["candidate_item_count"]
+    assert api_batch_items["next_cursor"] is None
     assert assessment_reconciliation["checks_matched"] >= 1
     assert assessment_reconciliation["evidence_linked"] >= 1
     assert browser_assessment_resp.status_code == 200

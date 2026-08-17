@@ -585,6 +585,449 @@
         ],
         "type": "object"
       },
+      "AssessmentBatchCheckMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "check_id": {
+            "type": "string"
+          },
+          "check_key": {
+            "type": "string"
+          },
+          "coverage_key": {
+            "type": "string"
+          },
+          "frozen_check_digest": {
+            "type": "string"
+          },
+          "target_entity_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "check_id",
+          "check_key",
+          "target_entity_id",
+          "coverage_key",
+          "frozen_check_digest"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "candidate_item_count": {
+            "type": "integer"
+          },
+          "concurrency": {
+            "additionalProperties": false,
+            "properties": {
+              "batch": {
+                "type": "integer"
+              },
+              "instance": {
+                "type": "integer"
+              },
+              "owner": {
+                "type": "integer"
+              },
+              "target": {
+                "enum": [
+                  1
+                ],
+                "type": "integer"
+              }
+            },
+            "required": [
+              "batch",
+              "target",
+              "owner",
+              "instance"
+            ],
+            "type": "object"
+          },
+          "created": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "potential_covered_check_count": {
+            "type": "integer"
+          },
+          "preview_id": {
+            "type": "string"
+          },
+          "profile": {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "version"
+            ],
+            "type": "object"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "safe_item_count": {
+            "type": "integer"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "selected_item_count": {
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AssessmentBatchPreviewSelection"
+          },
+          "standard_item_count": {
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AssessmentBatchPreviewSummary"
+          }
+        },
+        "required": [
+          "schema_version",
+          "preview_id",
+          "project_id",
+          "assessment_id",
+          "profile",
+          "selection",
+          "summary",
+          "plan_digest",
+          "candidate_item_count",
+          "selected_item_count",
+          "potential_covered_check_count",
+          "safe_item_count",
+          "standard_item_count",
+          "concurrency",
+          "expires_at",
+          "created"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchPreviewItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "bounds": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "check_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatchCheckMapping"
+            },
+            "type": "array"
+          },
+          "display_command": {
+            "type": "string"
+          },
+          "duration_bound_seconds": {
+            "type": "integer"
+          },
+          "execution_key": {
+            "type": "string"
+          },
+          "item_index": {
+            "type": "integer"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard"
+            ],
+            "type": "string"
+          },
+          "profile_identity": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "public_plan": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "public_plan_digest": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "target": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "item_index",
+          "execution_key",
+          "selected",
+          "policy_level",
+          "action",
+          "target",
+          "profile_identity",
+          "bounds",
+          "display_command",
+          "public_plan_digest",
+          "public_plan",
+          "duration_bound_seconds",
+          "check_mappings"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchPreviewItemPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatchPreviewItem"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "preview_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "preview_id",
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/AssessmentBatchPreview"
+          }
+        },
+        "required": [
+          "preview"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchPreviewSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_target_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_standard": {
+            "default": false,
+            "type": "boolean"
+          },
+          "item_limit": {
+            "default": 128,
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_instance_parallel": {
+            "default": 32,
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_owner_parallel": {
+            "default": 16,
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_parallel": {
+            "default": 8,
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "AssessmentBatchPreviewSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_item_count": {
+            "type": "integer"
+          },
+          "check_count": {
+            "type": "integer"
+          },
+          "chunk_sizes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "credential_classification": {
+            "enum": [
+              "none"
+            ],
+            "type": "string"
+          },
+          "credentialed_http_profile_count": {
+            "type": "integer"
+          },
+          "credentialed_work_remains_individual": {
+            "type": "boolean"
+          },
+          "eligible_check_count": {
+            "type": "integer"
+          },
+          "enabled_http_profile_count": {
+            "type": "integer"
+          },
+          "estimate_label": {
+            "type": "string"
+          },
+          "estimated_max_seconds": {
+            "type": "integer"
+          },
+          "estimated_min_seconds": {
+            "type": "integer"
+          },
+          "explicit_request_limit_item_count": {
+            "type": "integer"
+          },
+          "fan_out": {
+            "type": "integer"
+          },
+          "maximum_item_duration_bound_seconds": {
+            "type": "integer"
+          },
+          "potential_covered_check_count": {
+            "type": "integer"
+          },
+          "reason_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "requires_standard_confirmation": {
+            "type": "boolean"
+          },
+          "safe_item_count": {
+            "type": "integer"
+          },
+          "selected_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "selected_item_count": {
+            "type": "integer"
+          },
+          "selected_target_count": {
+            "type": "integer"
+          },
+          "selected_target_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped_check_count": {
+            "type": "integer"
+          },
+          "standard_item_count": {
+            "type": "integer"
+          },
+          "standard_selected": {
+            "type": "boolean"
+          },
+          "target_review_hints": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tool_bounded_request_item_count": {
+            "type": "integer"
+          },
+          "unavailable_check_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "check_count",
+          "candidate_item_count",
+          "selected_item_count",
+          "selected_target_count",
+          "fan_out",
+          "potential_covered_check_count",
+          "estimated_min_seconds",
+          "estimated_max_seconds",
+          "estimate_label"
+        ],
+        "type": "object"
+      },
       "AssessmentCategoryRollup": {
         "additionalProperties": false,
         "properties": {
@@ -11598,6 +12041,179 @@
         "summary": "Look up one exact package version in OSV"
       }
     },
+    "/assessment-batch-previews/{preview_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchPreviewResponse"
+                }
+              }
+            },
+            "description": "Current compact preview summary"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid preview selection or page"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project, assessment, or preview not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment state, scope, or preview conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Read a current assessment batch preview summary"
+      }
+    },
+    "/assessment-batch-previews/{preview_id}/items": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchPreviewItemPage"
+                }
+              }
+            },
+            "description": "Bounded complete preview-item page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid preview selection or page"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project, assessment, or preview not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment state, scope, or preview conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Page through assessment batch preview items"
+      }
+    },
     "/atlas": {
       "get": {
         "parameters": [
@@ -14239,6 +14855,111 @@
             "description": "Rate limit exceeded"
           }
         }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/batch-previews": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentBatchPreviewSelection"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchPreviewResponse"
+                }
+              }
+            },
+            "description": "Server-owned preview created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid preview selection or page"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project, assessment, or preview not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Assessment state, scope, or preview conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Preview selection request exceeds 64 KiB"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Compile a bounded assessment batch preview"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}": {

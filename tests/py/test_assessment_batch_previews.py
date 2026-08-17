@@ -211,3 +211,16 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
             current_time=created_at + timedelta(seconds=15 * 60 + 1),
         )
     assert expired.value.code == "preview_expired"
+
+    replacement = store_batch_preview(
+        draft,
+        current_time=created_at + timedelta(seconds=15 * 60 + 1),
+    )
+    assert replacement["preview_id"] != preview["preview_id"]
+    with pytest.raises(AssessmentBatchError) as cleaned:
+        get_batch_preview_items(
+            "preview-storage-owner",
+            str(preview["preview_id"]),
+            current_time=created_at + timedelta(seconds=15 * 60 + 1),
+        )
+    assert cleaned.value.code == "preview_not_found"

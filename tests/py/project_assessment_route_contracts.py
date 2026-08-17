@@ -15,7 +15,7 @@ def _expected_capability(path: str, method: str) -> str:
     if method not in _WRITE_METHODS:
         return ""
     if "/assessments/" in path or path.endswith("/assessments"):
-        if path.endswith("/zap-plan"):
+        if path.endswith(("/zap-plan", "/batch-previews")):
             return ""
         if any(
             part in path

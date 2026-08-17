@@ -163,6 +163,9 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/projects/<project_id>/assessments` | Create an active assessment cycle from a saved profile definition. |
 | `GET` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | One assessment cycle with coverage, finding-change, and fix-first rollups plus independently paged check and remediation worklists. Check filters use `category`, `state`, `target_type`, `policy_level`, and `evidence_state`; fix-first filters use `finding_priority`, `finding_limit`, and `finding_offset`. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>` | Rename, complete, or archive an assessment cycle. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compile a 15-minute server-owned assessment-batch preview from explicit target, category, policy, item-limit, and concurrency choices. This viewer-safe route doesn't start commands. |
+| `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Read the compact summary and approval digest for one current owner-scoped preview. |
+| `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Page through complete preview items with `cursor` and `limit`; pages contain at most 100 items and 1 MiB. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Set or clear a reasoned manual check state. |
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Link one compatible saved evidence source to a check. |
 | `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Unlink one manually added evidence source. |

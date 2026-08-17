@@ -20,6 +20,7 @@ from services.assessments.batch.contracts import (
     BATCH_PREVIEW_TTL_SECONDS,
 )
 from services.assessments.batch.preview_digest import batch_preview_digest
+from services.assessments.batch.preview_cleanup import delete_expired_batch_previews_on_conn
 from services.assessments.batch.preview_models import BatchPreviewDraft, BatchPreviewItem
 from services.assessments.batch.preview_validation import validate_preview_draft
 from services.projects.scope import shared_owner_where
@@ -141,6 +142,7 @@ def store_batch_preview(
     with get_db_connect()() as conn:
         conn.execute(_dialect().begin_immediate_sql())
         _require_active_scope(conn, draft)
+        delete_expired_batch_previews_on_conn(conn, draft.session_id, draft.team_id, created)
         conn.execute(
             "INSERT INTO assessment_batch_previews "
             "(id, session_id, team_id, project_id, assessment_id, profile_key, profile_version, "
@@ -292,8 +294,8 @@ def get_batch_preview_items(
     preview_id: str,
     *,
     team_id: str = "",
-    cursor: int = 0,
-    limit: int = BATCH_PREVIEW_PAGE_MAX_ITEMS,
+    cursor: object = 0,
+    limit: object = BATCH_PREVIEW_PAGE_MAX_ITEMS,
     current_time: datetime | None = None,
 ) -> dict[str, object]:
     """Return complete item pages bounded by both count and encoded bytes."""

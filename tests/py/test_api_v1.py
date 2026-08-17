@@ -7687,6 +7687,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     schemas = spec["components"]["schemas"]
     paths = spec["paths"]
     assessment_path = "/projects/{project_id}/assessments/{assessment_id}"
+    batch_preview_path = assessment_path + "/batch-previews"
+    batch_preview_read_path = "/assessment-batch-previews/{preview_id}"
+    batch_preview_items_path = batch_preview_read_path + "/items"
     check_path = assessment_path + "/checks/{check_id}"
     action_path = check_path + "/recommended-action"
     zap_plan_path = check_path + "/zap-plan"
@@ -7701,6 +7704,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
 
     assert set(paths["/projects/{project_id}/assessments"]) == {"get", "post"}
     assert set(paths[assessment_path]) == {"get", "patch", "delete"}
+    assert set(paths[batch_preview_path]) == {"post"}
+    assert set(paths[batch_preview_read_path]) == {"get"}
+    assert set(paths[batch_preview_items_path]) == {"get"}
     assert set(paths[check_path]) == {"patch"}
     assert set(paths[action_path]) == {"get", "post"}
     assert set(paths[zap_plan_path]) == {"post"}
@@ -7724,6 +7730,18 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "$ref": "#/components/schemas/AssessmentProfileSummary"
     }
     assert schemas["AssessmentProfileSummary"]["additionalProperties"] is False
+    batch_request = schemas["AssessmentBatchPreviewSelection"]
+    assert batch_request["additionalProperties"] is False
+    assert batch_request["properties"]["item_limit"]["maximum"] == 512
+    assert batch_request["properties"]["max_parallel"]["maximum"] == 8
+    assert batch_request["properties"]["max_owner_parallel"]["maximum"] == 32
+    assert batch_request["properties"]["max_instance_parallel"]["maximum"] == 64
+    assert paths[batch_preview_path]["post"]["responses"]["201"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
+    assert schemas["AssessmentBatchPreviewItemPage"]["properties"]["items"][
+        "maxItems"
+    ] == 100
     assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/AssessmentDetail"}
