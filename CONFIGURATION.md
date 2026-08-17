@@ -658,6 +658,8 @@ commands:
 
 Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current personal or team scope, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row. Personal secrets are not inherited by team scope; team owners and admins create shared team secrets explicitly.
 
+The Project HTTP-profile editor lists the Secret names available in the Project's current personal or team scope. Basic authentication needs separate stored references for its username and password. API clients can refer to a Secret by its stored name or by one of its unique consumer env bindings; either form resolves to the stored name before the profile is saved. Personal Secrets don't become available to team Projects, or vice versa.
+
 Inside each command's `autocomplete` block, a root can define:
 
 ```yaml

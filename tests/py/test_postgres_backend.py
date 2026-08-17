@@ -4923,7 +4923,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     secret_resp = client.post(
         "/session/secrets",
         headers=browser_headers,
-        json={"name": "POSTGRES_ASSESSMENT_TOKEN", "value": "postgres-route-secret"},
+        json={
+            "name": "POSTGRES_ASSESSMENT_TOKEN",
+            "value": "postgres-route-secret",
+            "consumer_envs": ["POSTGRES_HTTP_BEARER"],
+        },
     )
     http_profile_resp = client.post(
         f"/projects/{project['id']}/http-profiles",
@@ -4935,7 +4939,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             "scope_roots": ["https://darklab.sh/admin"],
             "allowed_hosts": ["darklab.sh"],
             "include_paths": ["/admin"],
-            "secret_refs": {"bearer_token": "POSTGRES_ASSESSMENT_TOKEN"},
+            "secret_refs": {"bearer_token": "POSTGRES_HTTP_BEARER"},
             "token_capture_rules": [{
                 "name": "csrf",
                 "source": "header",

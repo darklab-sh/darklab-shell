@@ -49,6 +49,38 @@ function textInput(value = '', options = {}) {
   return input;
 }
 
+function secretSelect(reference = '', secrets = []) {
+  const select = document.createElement('select');
+  select.className = 'form-select';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = 'Not set';
+  select.appendChild(empty);
+
+  const currentName = valueOf(reference);
+  const names = new Set();
+  (Array.isArray(secrets) ? secrets : []).forEach((secret) => {
+    const name = String(secret?.name || '').trim();
+    if (!name || names.has(name)) return;
+    names.add(name);
+    const aliases = (Array.isArray(secret?.consumer_envs) ? secret.consumer_envs : [])
+      .map(value => String(value || '').trim())
+      .filter(value => value && value !== name);
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = aliases.length ? `${name} — ${aliases.join(', ')}` : name;
+    select.appendChild(option);
+  });
+  if (currentName && !names.has(currentName)) {
+    const unavailable = document.createElement('option');
+    unavailable.value = currentName;
+    unavailable.textContent = `${currentName} — unavailable`;
+    select.appendChild(unavailable);
+  }
+  select.value = currentName;
+  return select;
+}
+
 function textarea(value = '', placeholder = '') {
   const input = document.createElement('textarea');
   input.className = 'form-control project-http-profile-textarea nice-scroll';
@@ -82,10 +114,11 @@ function parseHeaders(value) {
   });
 }
 
-function profileForm(profile = null) {
+function profileForm(profile = null, options = {}) {
   const current = profile || {};
   const refs = current.secret_refs || {};
   const files = current.file_refs || {};
+  const secrets = Array.isArray(options.secrets) ? options.secrets : [];
   const controls = {
     name: textInput(current.name, { placeholder: 'Authenticated application user' }),
     role: textInput(current.role || 'anonymous', { placeholder: 'anonymous' }),
@@ -96,12 +129,12 @@ function profileForm(profile = null) {
     excludePaths: textarea(listValue(current.exclude_paths), '/logout\n/admin/destructive'),
     rate: textInput(current.rate_limit_per_second || 10, { type: 'number', min: 1, max: 1000 }),
     concurrency: textInput(current.concurrency || 5, { type: 'number', min: 1, max: 100 }),
-    bearer: textInput(valueOf(refs.bearer_token), { placeholder: 'APP_BEARER_TOKEN' }),
-    cookie: textInput(valueOf(refs.cookie), { placeholder: 'APP_SESSION_COOKIE' }),
-    basicUsername: textInput(valueOf(refs.basic_username), { placeholder: 'APP_BASIC_USERNAME' }),
-    basicPassword: textInput(valueOf(refs.basic_password), { placeholder: 'APP_BASIC_PASSWORD' }),
-    proxyAuthorization: textInput(valueOf(refs.proxy_authorization), { placeholder: 'PROXY_AUTHORIZATION' }),
-    keyPassphrase: textInput(valueOf(refs.client_key_passphrase), { placeholder: 'CLIENT_KEY_PASSPHRASE' }),
+    bearer: secretSelect(refs.bearer_token, secrets),
+    cookie: secretSelect(refs.cookie, secrets),
+    basicUsername: secretSelect(refs.basic_username, secrets),
+    basicPassword: secretSelect(refs.basic_password, secrets),
+    proxyAuthorization: secretSelect(refs.proxy_authorization, secrets),
+    keyPassphrase: secretSelect(refs.client_key_passphrase, secrets),
     certificate: textInput(files.client_certificate, { placeholder: 'certificates/client.crt' }),
     clientKey: textInput(files.client_key, { placeholder: 'certificates/client.key' }),
     headers: textarea(headerValue(current.headers), 'X-API-Key = APP_API_KEY'),
@@ -132,7 +165,10 @@ function profileForm(profile = null) {
   authHeading.textContent = 'Protected references';
   const authCopy = document.createElement('p');
   authCopy.className = 'project-http-profile-editor-copy';
-  authCopy.textContent = 'Enter Secret names and Files paths only. Secret values stay in Options and are never shown here.';
+  const scopeLabel = options.secretScope === 'team' ? 'team Secrets' : 'personal Secrets';
+  authCopy.textContent = secrets.length
+    ? `Choose from the ${scopeLabel} available to this Project. Basic authentication needs separate username and password Secrets. Values stay in Options and are never shown here.`
+    : `No ${scopeLabel} are available to this Project. Use Manage Secrets before adding protected references.`;
   const auth = document.createElement('div');
   auth.className = 'project-http-profile-editor-grid';
   auth.append(
@@ -218,8 +254,23 @@ async function openHttpProfileEditor(context, options = {}) {
   const ctx = context || {};
   const projectId = String(options.projectId || '');
   const profile = options.profile || null;
-  if (!projectId || typeof ctx.showConfirm !== 'function') return false;
-  const { content, controls, error } = profileForm(profile);
+  if (
+    !projectId
+    || typeof ctx.showConfirm !== 'function'
+    || typeof ctx.projectWorkspaceRequest !== 'function'
+  ) return false;
+  const secretResponse = await ctx.projectWorkspaceRequest('/session/secrets', { cache: 'no-store' });
+  if (!secretResponse.ok) {
+    if (typeof ctx.projectResponseError === 'function') {
+      throw await ctx.projectResponseError(secretResponse, 'Could not load Project-scope Secrets.');
+    }
+    throw new Error('Could not load Project-scope Secrets.');
+  }
+  const secretPayload = await secretResponse.json();
+  const { content, controls, error } = profileForm(profile, {
+    secrets: Array.isArray(secretPayload?.secrets) ? secretPayload.secrets : [],
+    secretScope: String(secretPayload?.scope || ''),
+  });
   const save = {
     id: 'save',
     label: profile ? 'Save profile' : 'Create profile',

@@ -6668,6 +6668,58 @@ class TestProjectRoutes:
         assert created["protected_references_visible"] is True
         assert created["reference_counts"]["secret_refs"] == 0
 
+        for name, consumer_env in (
+            ("BROWSER_BASIC_USER", "BROWSER_LOGIN_USERNAME"),
+            ("BROWSER_BASIC_PASS", "BROWSER_LOGIN_PASSWORD"),
+        ):
+            secret_response = client.post(
+                "/session/secrets",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "name": name,
+                    "value": f"value-for-{name.lower()}",
+                    "consumer_envs": [consumer_env],
+                },
+            )
+            assert secret_response.status_code == 201
+        protected_response = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Custom Secret bindings",
+                "role": "member",
+                "base_url": f"https://{target}",
+                "secret_refs": {
+                    "basic_username": "BROWSER_LOGIN_USERNAME",
+                    "basic_password": "BROWSER_LOGIN_PASSWORD",
+                },
+            },
+        )
+        assert protected_response.status_code == 201
+        protected = protected_response.get_json()["profile"]
+        assert protected["secret_refs"] == {
+            "basic_password": {"name": "BROWSER_BASIC_PASS", "available": True},
+            "basic_username": {"name": "BROWSER_BASIC_USER", "available": True},
+        }
+        missing_username = client.post(
+            route,
+            headers={"X-Session-ID": session_id},
+            json={
+                "name": "Incomplete basic authentication",
+                "role": "member",
+                "base_url": f"https://{target}",
+                "secret_refs": {
+                    "basic_username": "MISSING_BROWSER_USER",
+                    "basic_password": "BROWSER_LOGIN_PASSWORD",
+                },
+            },
+        )
+        assert missing_username.status_code == 400
+        assert missing_username.get_json()["error"] == (
+            "HTTP profile Secret references aren't available in this Project scope: "
+            "Basic username Secret"
+        )
+
         detail_route = f"{route}/{created['id']}"
         listed = client.get(route, headers={"X-Session-ID": session_id})
         detail = client.get(detail_route, headers={"X-Session-ID": session_id})
@@ -6677,7 +6729,10 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
             json={"revision": created["revision"], "enabled": False},
         )
-        assert listed.get_json()["profiles"][0]["id"] == created["id"]
+        assert {item["id"] for item in listed.get_json()["profiles"]} == {
+            created["id"],
+            protected["id"],
+        }
         assert detail.get_json()["profile"]["id"] == created["id"]
         assert foreign.status_code == 404
         assert updated.status_code == 200

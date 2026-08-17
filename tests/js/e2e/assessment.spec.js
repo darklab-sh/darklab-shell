@@ -340,6 +340,20 @@ test.describe('project assessment qualification', () => {
 
   test('keeps missing HTTP credentials unavailable and restores the launch control', async ({ page }) => {
     test.setTimeout(90_000)
+    await page.route('**/session/secrets', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scope: 'personal',
+          can_manage: true,
+          secrets: [{
+            name: 'PLAYWRIGHT_BASIC_PASSWORD',
+            consumer_envs: ['PLAYWRIGHT_BASIC_PASSWORD', 'HTTP_PASSWORD'],
+          }],
+        }),
+      })
+    })
     await page.route('**/projects/*/http-profiles', async (route) => {
       await route.fulfill({
         status: 200,
@@ -385,6 +399,17 @@ test.describe('project assessment qualification', () => {
     await newProfile.click()
     const profileEditor = page.locator('#confirm-host .project-http-profile-editor')
     await expect(profileEditor).toBeVisible()
+    const passwordSecret = profileEditor.getByLabel('Basic password Secret')
+    await expect(passwordSecret).toHaveValue('')
+    await expect(passwordSecret.locator('option')).toContainText([
+      'Not set',
+      'PLAYWRIGHT_BASIC_PASSWORD — HTTP_PASSWORD',
+    ])
+    await passwordSecret.selectOption('PLAYWRIGHT_BASIC_PASSWORD')
+    await expect(passwordSecret).toHaveValue('PLAYWRIGHT_BASIC_PASSWORD')
+    await expect(profileEditor).toContainText(
+      'Basic authentication needs separate username and password Secrets.',
+    )
     const profileLayout = await page.locator('#confirm-host').evaluate((host) => {
       const card = host.querySelector('[data-confirm-card]')?.getBoundingClientRect()
       const editor = host.querySelector('.project-http-profile-editor')?.getBoundingClientRect()

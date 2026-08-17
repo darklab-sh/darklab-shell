@@ -7428,7 +7428,7 @@ describe('app helpers', () => {
     expect(document.getElementById('options-secrets-list').textContent).not.toContain('value-that-must-not-render')
   })
 
-  it('keeps a custom secret escape hatch with an unused-secret warning', async () => {
+  it('keeps a custom secret escape hatch with integration guidance', async () => {
     let secrets = []
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/commands/catalog') {
@@ -7450,7 +7450,9 @@ describe('app helpers', () => {
     const showConfirm = vi.fn().mockImplementation(async (opts) => {
       const select = opts.content[0].querySelector('select')
       const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
-      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Custom secrets are stored')
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain(
+        'HTTP profiles can reference this stored name',
+      )
       select.value = '__custom__'
       select.dispatchEvent(new Event('change'))
       inputs[0].value = 'future_api_key'
@@ -7473,7 +7475,10 @@ describe('app helpers', () => {
       value: 'custom-secret-value',
       consumer_envs: ['FUTURE_API_KEY'],
     })
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('not currently used'), 'success')
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP profiles can reference its name'),
+      'success',
+    )
   })
 
   it('suggests app-native intel secret consumers in the options prompt', async () => {

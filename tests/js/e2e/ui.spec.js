@@ -2988,7 +2988,20 @@ test.describe('options modal', () => {
     await page.locator('#options-secret-new-btn').click()
     const confirmHost = page.locator('#confirm-host')
     await expect(confirmHost).toBeVisible()
-    await confirmHost.locator('.options-secret-field').filter({ hasText: 'Secret' }).locator('select').selectOption('SHODAN_API_KEY')
+    const secretField = confirmHost.locator('.options-secret-field').filter({ hasText: 'Secret' })
+    await secretField.locator('.app-select-trigger').click()
+    const secretMenu = page.locator('body > .app-select-menu[data-app-select-portaled="true"]')
+    await expect(secretMenu).toBeVisible()
+    const menuLayout = await secretMenu.evaluate((menu) => ({
+      clientHeight: menu.clientHeight,
+      scrollHeight: menu.scrollHeight,
+      optionFlexShrink: Array.from(menu.querySelectorAll('button')).map((option) => (
+        getComputedStyle(option).flexShrink
+      )),
+    }))
+    expect(menuLayout.scrollHeight).toBeGreaterThan(menuLayout.clientHeight)
+    expect(menuLayout.optionFlexShrink.every(value => value === '0')).toBe(true)
+    await secretMenu.getByRole('option', { name: /SHODAN_API_KEY/ }).click()
     await confirmHost.locator('.options-secret-field').filter({ hasText: 'API key or token' }).locator('input').fill('playwright-shodan-key')
     await confirmHost.locator('[data-confirm-action-id="save"]').click()
     await expect(confirmHost).toBeHidden()

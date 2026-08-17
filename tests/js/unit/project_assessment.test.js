@@ -828,6 +828,15 @@ describe('project assessment controller', () => {
   it('manages reusable HTTP profiles in the shared desktop and mobile Assessment surface', async () => {
     let savedProfiles = [httpProfile]
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url === '/session/secrets') {
+        return apiResponse({
+          scope: 'personal',
+          secrets: [{
+            name: 'APP_ADMIN_TOKEN',
+            consumer_envs: ['APP_ADMIN_TOKEN', 'APP_ADMIN_BEARER'],
+          }],
+        })
+      }
       if (url.endsWith('/http-profiles')) {
         if (options.method === 'POST') {
           const payload = JSON.parse(options.body)
@@ -841,7 +850,7 @@ describe('project assessment controller', () => {
     const showConfirm = vi.fn(async (options) => {
       if (options.body?.text === 'Create an HTTP assessment profile') {
         const fields = [...options.content.querySelectorAll('.project-http-profile-field')]
-        const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea')
+        const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea, select')
         const enabled = options.content.querySelector('.project-http-profile-enabled')
         expect(enabled?.tagName).toBe('LABEL')
         expect(enabled?.classList.contains('form-check')).toBe(true)
@@ -851,6 +860,8 @@ describe('project assessment controller', () => {
         control('Authentication role').value = 'admin'
         control('Base URL').value = 'https://example.com/'
         control('Allowed Project hosts').value = 'example.com'
+        expect(control('Bearer token Secret').tagName).toBe('SELECT')
+        expect(control('Bearer token Secret').textContent).toContain('APP_ADMIN_BEARER')
         control('Bearer token Secret').value = 'APP_ADMIN_TOKEN'
         expect(await options.actions.find(action => action.id === 'save').onActivate()).toBe(true)
         return 'save'
@@ -872,6 +883,10 @@ describe('project assessment controller', () => {
     desktop.querySelector('.project-http-profile-header-actions .btn-secondary').click()
     expect(ctx.openSecretsOptions).toHaveBeenCalledTimes(1)
     desktop.querySelector('.project-http-profile-header-actions .btn-primary').click()
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/session/secrets',
+      { cache: 'no-store' },
+    ))
     await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
       '/projects/prj_1/http-profiles',
       expect.objectContaining({ method: 'POST' }),

@@ -509,6 +509,11 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/http_profile_runtime_read.py", 166, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/http_profile_scope.py", 75, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/http_profile_secret_references.py",
+        69,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/http_profile_validation.py", 362, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/export_context.py", 329, "split-package-ratchet"
