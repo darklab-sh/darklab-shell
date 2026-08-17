@@ -171,7 +171,9 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     with get_db_connect()() as conn:
         assert (
             conn.execute(
-                "SELECT COUNT(*) AS n FROM workflow_executions WHERE execution_kind = 'assessment_batch'"
+                "SELECT COUNT(*) AS n FROM assessment_batches "
+                "WHERE assessment_id = ?",
+                ("asm-preview-storage",),
             ).fetchone()["n"]
             == 0
         )

@@ -153,8 +153,9 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
     with get_db_connect()() as conn:
         assert (
             conn.execute(
-                "SELECT COUNT(*) AS n FROM workflow_executions "
-                "WHERE execution_kind = 'assessment_batch'"
+                "SELECT COUNT(*) AS n FROM assessment_batches "
+                "WHERE assessment_id = ?",
+                (assessment_id,),
             ).fetchone()["n"]
             == 0
         )
