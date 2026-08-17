@@ -1049,7 +1049,7 @@ If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
 
-Both shipped Compose stacks mount the managed Nuclei templates at `/tmp/nuclei-templates` through the `nuclei-templates` named volume. The first web-container startup fills an empty volume. Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery; Nuclei plans stay unavailable until an operator runs `nuclei -update-templates`. Removing the named volume also removes the installed template snapshot.
+Both shipped Compose stacks mount the managed Nuclei templates at `/tmp/nuclei-templates` through the `nuclei-templates` named volume. The first web-container startup fills an empty volume. The shell healthcheck gives that bounded download enough startup grace before a failed check can mark the container unhealthy. Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery; Nuclei plans stay unavailable until an operator runs `nuclei -update-templates`. Removing the named volume also removes the installed template snapshot.
 
 ---
 

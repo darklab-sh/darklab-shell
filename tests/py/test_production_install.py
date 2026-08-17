@@ -1003,6 +1003,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED"] == (
         "${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
     )
+    assert shell["healthcheck"]["start_period"] == "210s"
     assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
     assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
         "${DARKLAB_ZAP_API_KEY:-}"
@@ -1115,6 +1116,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "${DEV_HOST_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8888}:${APP_PORT:-8888}"
     ]
     assert development_shell["labels"]["sh.darklab.environment"] == "development"
+    assert development_shell["healthcheck"]["start_period"] == "210s"
     assert all("container_name" not in service for service in development_services.values())
     development_environment = development_shell["environment"]
     assert "APP_SOURCE_DIR=/opt/darklab-source/app" in development_environment
