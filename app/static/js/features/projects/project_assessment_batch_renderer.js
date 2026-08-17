@@ -49,8 +49,7 @@ function badge(label, tone = '') {
 function statusTone(status) {
   if (['completed', 'succeeded'].includes(status)) return 'green';
   if (['failed', 'could_not_cancel'].includes(status)) return 'red';
-  if (['canceling', 'canceled', 'unavailable'].includes(status)) return 'amber';
-  if (['running', 'launching'].includes(status)) return 'cyan';
+  if (['queued', 'pending', 'launching', 'running', 'canceling'].includes(status)) return 'amber';
   return '';
 }
 

@@ -407,17 +407,46 @@ describe('Project assessment batches', () => {
   })
 
   it('restores an active monitor after reload, opens child runs, and requests truthful cancellation', async () => {
-    const canceledBatch = {
+    const partialBatch = {
       ...activeBatch,
+      item_count: 5,
+      progress: {
+        ...activeBatch.progress,
+        total: 5,
+        running: 1,
+        failed: 1,
+        unavailable: 1,
+        canceled: 1,
+        could_not_cancel: 1,
+        settled: 4,
+      },
+    }
+    const partialItems = [
+      batchItem,
+      {
+        ...batchItem,
+        item_index: 1,
+        status: 'failed',
+        run_id: '',
+        display_command: 'nmap -sT failed.example.test',
+        execution_command: 'nmap --token private-execution-value failed.example.test',
+        private_values: ['private-profile-value'],
+      },
+      { ...batchItem, item_index: 2, status: 'unavailable', run_id: '' },
+      { ...batchItem, item_index: 3, status: 'canceled', run_id: '' },
+      { ...batchItem, item_index: 4, status: 'could_not_cancel', run_id: '' },
+    ]
+    const canceledBatch = {
+      ...partialBatch,
       status: 'canceling',
-      progress: { ...activeBatch.progress, status: 'canceling' },
+      progress: { ...partialBatch.progress, status: 'canceling' },
     }
     const projectWorkspaceRequest = vi.fn(async (url) => {
       if (String(url).startsWith('/projects/prj_batch_1/assessment-batches?')) {
-        return response({ batches: [activeBatch], has_more: false })
+        return response({ batches: [partialBatch], has_more: false })
       }
       if (String(url).endsWith('/items?cursor=0&limit=100')) {
-        return response({ items: [batchItem], next_cursor: null })
+        return response({ items: partialItems, next_cursor: null })
       }
       if (String(url).endsWith('/events?cursor=0&limit=100')) {
         return response({
@@ -441,6 +470,16 @@ describe('Project assessment batches', () => {
     await manager.load('prj_batch_1', assessment.id, { render: false })
 
     let surface = render(manager)
+    const badgeFor = label => [...surface.querySelectorAll('.badge')]
+      .find(item => item.textContent === label)
+    expect(badgeFor('Running')?.classList.contains('badge-tone-amber')).toBe(true)
+    expect(badgeFor('Failed')?.classList.contains('badge-tone-red')).toBe(true)
+    expect(badgeFor('Unavailable')?.classList.contains('badge-tone-muted')).toBe(true)
+    expect(badgeFor('Canceled')?.classList.contains('badge-tone-muted')).toBe(true)
+    expect(badgeFor('Could not cancel')?.classList.contains('badge-tone-red')).toBe(true)
+    expect(surface.textContent).toContain('4 / 5')
+    expect(surface.textContent).not.toContain('private-execution-value')
+    expect(surface.textContent).not.toContain('private-profile-value')
     expect(surface.textContent).toContain('Recent activity')
     expect(surface.textContent).toContain('Running · command 1')
     surface.querySelector('.project-assessment-batch-command .btn').click()
