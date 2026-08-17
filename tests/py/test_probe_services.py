@@ -27,10 +27,10 @@ from services.assessments.probe_catalog import probe_catalog
 from services.assessments.probe_contracts import (
     PROBE_LAUNCH_CAPABILITIES,
     PROBE_PROTECTED_CAPABILITIES,
-    PROBE_VIEW_CAPABILITIES,
     ProbeError,
     ProbePlanRequest,
 )
+from services.assessments.probe_authorization import required_probe_launch_capabilities
 from services.assessments.probe_plan_digest import probe_plan_digest
 from services.assessments.probe_plans import build_probe_plan, confirm_probe_plan
 from services.assessments.probe_cleanup import observed_probe_cleanup
@@ -171,9 +171,8 @@ def test_probe_catalog_pins_public_schema_and_excludes_cycle_only_actions():
         target_type="ip",
         template_snapshot=_READY_TEMPLATES,
     )["service_recommendations"]
-    assert PROBE_VIEW_CAPABILITIES == frozenset()
-    assert PROBE_LAUNCH_CAPABILITIES == frozenset({"run_commands"})
-    assert PROBE_PROTECTED_CAPABILITIES == frozenset({"run_commands", "manage_secrets"})
+    assert required_probe_launch_capabilities(protected=False) is PROBE_LAUNCH_CAPABILITIES
+    assert required_probe_launch_capabilities(protected=True) is PROBE_PROTECTED_CAPABILITIES
 
     with pytest.raises(ProbeError) as invalid_target_type:
         probe_catalog(

@@ -10,18 +10,21 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from extensions import limiter
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
-from services.assessments.probe_authorization import probe_launch_authorization
+from services.assessments.probe_authorization import (
+    probe_launch_authorization,
+    required_probe_launch_capabilities,
+)
 from services.assessments.probe_execution import start_project_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.models import AuditEventType
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
-from services.teams.capabilities import Capability
 
 
 _LAUNCH_FIELDS = frozenset({
     "action_id", "confirmed", "entity_id", "http_profile_id", "nmap_profile", "nuclei_profile",
     "plan_digest", "tab_id", "workspace_cwd",
 })
+_BASE_LAUNCH_CAPABILITY = next(iter(required_probe_launch_capabilities(protected=False)))
 
 
 def _error(exc: ProbeError):
@@ -37,9 +40,7 @@ def _error(exc: ProbeError):
 @project_routes.projects_bp.post("/projects/<project_id>/probes/run")
 @limiter.limit(project_routes._project_write_limit)
 def project_probe_launch(project_id):
-    session_id, team_id, error_response = project_routes._project_owner(
-        Capability.RUN_COMMANDS
-    )
+    session_id, team_id, error_response = project_routes._project_owner(_BASE_LAUNCH_CAPABILITY)
     if error_response:
         return error_response
     observability = ProbeLogContext(
@@ -52,11 +53,14 @@ def project_probe_launch(project_id):
         return _error(ProbeError("unsupported_fields", "Probe launch contains unsupported fields."))
     http_profile_id = str(data.get("http_profile_id") or "").strip()
     if http_profile_id:
-        _session_id, _team_id, error_response = project_routes._project_owner(
-            Capability.MANAGE_SECRETS
+        extra_capabilities = (
+            required_probe_launch_capabilities(protected=True)
+            - required_probe_launch_capabilities(protected=False)
         )
-        if error_response:
-            return error_response
+        for capability in extra_capabilities:
+            _session_id, _team_id, error_response = project_routes._project_owner(capability)
+            if error_response:
+                return error_response
     probe_request = ProbePlanRequest(
         project_id=project_id,
         action_id=str(data.get("action_id") or "").strip(),

@@ -14,7 +14,6 @@ PROBE_PLAN_SCHEMA_VERSION = 1
 PROBE_PLAN_DIGEST_VERSION = 1
 PROBE_POLICY_LEVELS = ("safe", "standard", "intrusive", "destructive")
 PROBE_TARGET_TYPES = frozenset({"domain", "ip", "url"})
-PROBE_VIEW_CAPABILITIES = frozenset()
 PROBE_LAUNCH_CAPABILITIES = frozenset({"run_commands"})
 PROBE_PROTECTED_CAPABILITIES = frozenset({"run_commands", "manage_secrets"})
 PROBE_EXCLUSIONS = (
@@ -57,16 +56,7 @@ class ProbePlanRequest:
     http_profile_id: str = ""
 
 
-@dataclass(frozen=True)
-class ConfirmedProbePlanRequest:
-    """The only caller-controlled values accepted at probe confirmation."""
-
-    confirmed: bool
-    plan_digest: str
-
-
 __all__ = [
-    "ConfirmedProbePlanRequest",
     "PROBE_CATALOG_SCHEMA_VERSION",
     "PROBE_EXCLUSIONS",
     "PROBE_LAUNCH_CAPABILITIES",
@@ -75,7 +65,6 @@ __all__ = [
     "PROBE_POLICY_LEVELS",
     "PROBE_PROTECTED_CAPABILITIES",
     "PROBE_TARGET_TYPES",
-    "PROBE_VIEW_CAPABILITIES",
     "ProbeError",
     "ProbePlanRequest",
 ]

@@ -10,7 +10,10 @@ from flask import jsonify, request
 from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
-from services.assessments.probe_authorization import probe_launch_authorization
+from services.assessments.probe_authorization import (
+    probe_launch_authorization,
+    required_probe_launch_capabilities,
+)
 from services.assessments.probe_execution import start_project_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.context import route_audit_fields
@@ -25,6 +28,7 @@ _FIELDS = frozenset({
     "action_id", "confirmed", "entity_id", "http_profile_id", "nmap_profile", "nuclei_profile",
     "plan_digest", "workspace_cwd",
 })
+_BASE_LAUNCH_CAPABILITY = next(iter(required_probe_launch_capabilities(protected=False)))
 
 
 def _error(exc: Exception):
@@ -52,13 +56,21 @@ def api_project_probe_launch(project_id):
             "api_v1", request.environ.get("darklab_request_id", ""),
             session_id, owner_scope.team_id,
         )
-        api_routes._require_api_team_capability(owner_scope, Capability.RUN_COMMANDS)
+        api_routes._require_api_team_capability(
+            owner_scope,
+            Capability(_BASE_LAUNCH_CAPABILITY),
+        )
         data = api_routes._json_body()
         if set(data) - _FIELDS:
             raise ProbeError("unsupported_fields", "Probe launch contains unsupported fields.")
         http_profile_id = str(data.get("http_profile_id") or "").strip()
         if http_profile_id:
-            api_routes._require_api_team_capability(owner_scope, Capability.MANAGE_SECRETS)
+            extra_capabilities = (
+                required_probe_launch_capabilities(protected=True)
+                - required_probe_launch_capabilities(protected=False)
+            )
+            for capability in extra_capabilities:
+                api_routes._require_api_team_capability(owner_scope, Capability(capability))
         probe_request = ProbePlanRequest(
             project_id=project_id,
             action_id=str(data.get("action_id") or "").strip(),
