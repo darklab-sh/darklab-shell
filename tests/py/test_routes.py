@@ -21660,6 +21660,9 @@ class TestRunRoute:
                 "note_count": 0,
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
+                "assessment_batch": None,
+                "assessment_batch_id": "",
+                "assessment_batch_item_index": None,
                 "scheduled": False,
                 "schedule_id": "",
             }

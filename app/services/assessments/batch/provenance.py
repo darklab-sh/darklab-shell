@@ -34,7 +34,7 @@ def assessment_batch_provenance_by_run(
     normalized_ids = [str(run_id) for run_id in run_ids if str(run_id or "")]
     if not normalized_ids:
         return {}
-    if get_db_backend() == DatabaseBackend.SQLITE and not all(
+    if getattr(conn, "database_backend", get_db_backend()) == DatabaseBackend.SQLITE and not all(
         sqlite_table_exists(conn, table_name) for table_name in _REQUIRED_TABLES
     ):
         return {}
