@@ -5034,6 +5034,12 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         confirmed=True,
     )
     claimed_batch_item = claim_next_batch_item(str(started_batch["batch_id"]))
+    claimed_mapping_rows = conn.execute(
+        "SELECT check_id FROM assessment_batch_item_checks "
+        "WHERE batch_id = %s AND item_index = %s",
+        (started_batch["batch_id"], claimed_batch_item["item_index"]),
+    ).fetchall()
+    claimed_mapped_check_ids = {str(row["check_id"]) for row in claimed_mapping_rows}
     conn.execute(
         "UPDATE workflow_execution_children SET status = 'failed', "
         "error_code = 'launch_failed' WHERE execution_id = %s",
@@ -5098,6 +5104,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         json={"project_id": project["id"]},
     )
     run_id = "run-" + uuid.uuid4().hex
+    claimed_display_command = str(claimed_batch_item["item"]["display_command"])
+    claimed_command_root = claimed_display_command.split(maxsplit=1)[0]
     conn.execute(
         """
         INSERT INTO runs (
@@ -5109,7 +5117,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (
             run_id,
             session_id,
-            "nmap -sT -sV darklab.sh",
+            claimed_display_command,
             "2026-05-17T00:00:00Z",
             "2026-05-17T00:01:00Z",
             "[]",
@@ -5219,6 +5227,13 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, "2026-05-17T00:00:03Z"),
         )
         assessment_reconciliation = reconcile_run_evidence_on_conn(compat_conn, run_id)
+        reconciled_check_ids = {
+            str(row["check_id"])
+            for row in compat_conn.execute(
+                "SELECT check_id FROM project_assessment_evidence WHERE evidence_id = ?",
+                (run_id,),
+            ).fetchall()
+        }
     conn.commit()
     run_entity_preview_resp = client.post(
         f"/projects/{project['id']}/links/run-entities/preview",
@@ -5229,7 +5244,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     targets_resp = client.get(f"/projects/{project['id']}/targets", headers=browser_headers)
     links_resp = client.get(f"/projects/{project['id']}/links", headers=browser_headers)
     findings_resp = client.get(
-        f"/projects/{project['id']}/findings?command_root=nmap&severity=high&scope=finding",
+        f"/projects/{project['id']}/findings?command_root={claimed_command_root}"
+        "&severity=high&scope=finding",
         headers=browser_headers,
     )
     findings_review_resp = client.post(
@@ -5357,6 +5373,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert api_batch_items["next_cursor"] is None
     assert assessment_reconciliation["checks_matched"] >= 1
     assert assessment_reconciliation["evidence_linked"] >= 1
+    assert assessment_reconciliation["checks_considered"] == len(claimed_mapped_check_ids)
+    assert reconciled_check_ids
+    assert reconciled_check_ids <= claimed_mapped_check_ids
     assert browser_assessment_resp.status_code == 200
     browser_assessment = json.loads(browser_assessment_resp.data)
     assert browser_assessment["checks"]["total"] >= 1
@@ -5365,13 +5384,16 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert json.loads(api_assessment_list_resp.data)["assessments"][0]["id"] == assessment_id
     assert api_assessment_detail_resp.status_code == 200
     api_assessment = json.loads(api_assessment_detail_resp.data)
-    service_check = next(
-        check for check in api_assessment["checks"]["checks"]
-        if check["check_key"] == "service_discovery"
+    api_checks_by_id = {
+        check["id"]: check for check in api_assessment["checks"]["checks"]
+    }
+    assert all(
+        api_checks_by_id[check_id]["state"] in {"covered", "needs_review"}
+        for check_id in reconciled_check_ids
     )
-    assert service_check["state"] == "covered"
-    assert service_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
-    assessment_provenance = service_check["evidence_previews"]["evidence"][0][
+    reconciled_check = api_checks_by_id[sorted(reconciled_check_ids)[0]]
+    assert reconciled_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
+    assessment_provenance = reconciled_check["evidence_previews"]["evidence"][0][
         "assessment_batch"
     ]
     assert assessment_provenance["batch_id"] == started_batch["batch_id"]

@@ -29,12 +29,14 @@ from services.assessments.batch.recovery import (
 from services.assessments.batch.revalidation import build_batch_child_launch_spec
 from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.storage import create_batch_parent
+from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.run_launch_context import AssessmentRunLaunchContext
 from services.notifications import channels_store
 from services.notifications.models import NotificationEvent
 from services.metrics.assessment_batch_state import assessment_batch_metric_families
 from services.projects.packages import evidence_manifest_from_summary
+from services.projects.links import link_run_to_project_on_conn
 from services.projects.queries import get_project_summary
 from services.runs.start_contracts import BrokeredRunStartResult
 from services.workflows.child_launch_spec import ChildLaunchSpec
@@ -433,6 +435,136 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
     assert hidden["assessment_batch"] is None
     assert hidden["assessment_batch_id"] == ""
     assert hidden["assessment_batch_item_index"] is None
+
+
+def test_batch_child_evidence_considers_only_independently_matching_mapped_checks(
+    batch_builder,
+):
+    batch = batch_builder()
+    run_id = "run-batch-coverage-" + uuid.uuid4().hex
+    created = "2026-08-17 12:01:00"
+    target = "target-0.example.test"
+    check_ids = {
+        "mapped_match": "chk-batch-mapped-match-" + uuid.uuid4().hex,
+        "mapped_mismatch": "chk-batch-mapped-mismatch-" + uuid.uuid4().hex,
+        "unmapped_match": "chk-batch-unmapped-match-" + uuid.uuid4().hex,
+    }
+
+    def rule(root: str) -> dict[str, object]:
+        return {
+            "key": "completed_probe",
+            "version": "1.0",
+            "evidence_types": ["run"],
+            "command_roots": [root],
+            "workflow_actions": [],
+            "structured_output_kinds": [],
+            "target_match": "exact",
+            "completion": "succeeded",
+            "compatible_versions": ["*"],
+            "negative_evidence": True,
+        }
+
+    profile = {
+        "checks": [
+            {"key": "mapped_match", "evidence_rules": [rule("ping")]},
+            {"key": "mapped_mismatch", "evidence_rules": [rule("curl")]},
+            {"key": "unmapped_match", "evidence_rules": [rule("ping")]},
+        ]
+    }
+    dialect = dialect_for_backend(get_db_backend())
+    with get_db_connect()() as conn:
+        item = conn.execute(
+            "SELECT target_entity_id FROM assessment_batch_items "
+            "WHERE batch_id = ? AND item_index = 0",
+            (batch["batch_id"],),
+        ).fetchone()
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (dialect.json_param(profile), batch["assessment_id"]),
+        )
+        for index, (check_key, check_id) in enumerate(check_ids.items()):
+            conn.execute(
+                "INSERT INTO project_assessment_checks "
+                "(id, assessment_id, category, check_key, target_entity_id, target_type, "
+                "target_value, target_value_hash, applicability, policy_level, state, "
+                "state_source, state_reason, recommended_action_key, created_at, updated_at) "
+                "VALUES (?, ?, 'network', ?, ?, 'domain', ?, ?, 'applicable', 'safe', "
+                "'not_started', 'derived', '', 'command:ping', ?, ?)",
+                (
+                    check_id,
+                    batch["assessment_id"],
+                    check_key,
+                    str(item["target_entity_id"]),
+                    target,
+                    f"{index + 1:064x}",
+                    created,
+                    created,
+                ),
+            )
+        for mapping_index, check_key in enumerate(("mapped_match", "mapped_mismatch")):
+            conn.execute(
+                "INSERT INTO assessment_batch_item_checks "
+                "(batch_id, item_index, mapping_index, assessment_id, check_id, check_key, "
+                "target_entity_id, coverage_key, frozen_check_digest, created) "
+                "VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    batch["batch_id"],
+                    mapping_index,
+                    batch["assessment_id"],
+                    check_ids[check_key],
+                    check_key,
+                    str(item["target_entity_id"]),
+                    f"{mapping_index + 10:064x}",
+                    f"{mapping_index + 20:064x}",
+                    created,
+                ),
+            )
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, run_kind, command, started, finished, exit_code) "
+            "VALUES (?, ?, 'external', ?, ?, ?, 0)",
+            (run_id, batch["session_id"], f"ping -c 4 {target}", created, created),
+        )
+        assert link_run_to_project_on_conn(
+            conn,
+            batch["session_id"],
+            batch["project_id"],
+            run_id,
+        ) is not None
+        conn.execute(
+            "UPDATE workflow_execution_children SET run_id = ?, status = 'succeeded', "
+            "exit_code = 0, started = ?, finished = ? "
+            "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = 0",
+            (run_id, created, created, batch["batch_id"]),
+        )
+        summary = reconcile_run_evidence_on_conn(
+            conn,
+            run_id,
+            command_target_inputs_fn=lambda _command: [{
+                "value": target,
+                "value_type": "domain",
+            }],
+        )
+        evidence = conn.execute(
+            "SELECT check_id FROM project_assessment_evidence WHERE evidence_id = ?",
+            (run_id,),
+        ).fetchall()
+        states = conn.execute(
+            "SELECT check_key, state FROM project_assessment_checks "
+            "WHERE assessment_id = ? ORDER BY check_key",
+            (batch["assessment_id"],),
+        ).fetchall()
+        conn.commit()
+
+    assert summary["checks_considered"] == 2
+    assert summary["checks_matched"] == 1
+    assert summary["evidence_linked"] == 1
+    assert [row["check_id"] for row in evidence] == [check_ids["mapped_match"]]
+    assert {row["check_key"]: row["state"] for row in states} == {
+        "mapped_match": "covered",
+        "mapped_mismatch": "not_started",
+        "unmapped_match": "not_started",
+    }
 
 
 def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypatch):
