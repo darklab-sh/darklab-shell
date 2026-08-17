@@ -658,6 +658,8 @@ Workflow execution is bounded by `workflow_active_execution_limit` per personal/
 
 Assessment-batch previews stream one active cycle's frozen checks through explicit row and memory limits, classify excluded work, and compile each eligible check through one shared probe-readiness snapshot. Safe plans are selected automatically, supported standard plans stay separately visible, and explicit target/category filters remain the assessor's scope decision. Exact execution matches deduplicate across checks without merging their coverage mappings. The stored preview validates every credential-free public plan and its digest, hashes the complete stable-ordered snapshot, expires after 15 minutes, and returns complete items in pages capped at 100 entries and 1 MiB. Creating or reading a preview doesn't create a coordinator or run row.
 
+Confirmed start rebuilds that preview from its stored selection and current cycle state, compares the complete digest, and requires a separate confirmation when standard work is selected. One transaction claims the preview and copies the exact selected public plans and frozen-check mappings into the immutable coordinator snapshot alongside its chunk children. A copy or count mismatch rolls the whole transaction back. A matching retry returns the already-created batch before checking preview expiry or current cycle state, while concurrent starts serialize on the owner and preview claim so they can't create duplicate work. No command starts until the coordinator later claims an item.
+
 ### Project Routes
 
 | Method | Endpoint | Description |

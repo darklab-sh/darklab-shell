@@ -69,7 +69,7 @@ def route_cycle(monkeypatch: pytest.MonkeyPatch):
     cycle = create_assessment_cycle(session_id, project_id, "network")
     assessment_id = str(cycle["assessment"]["id"])
     monkeypatch.setattr(
-        "services.assessments.batch.preview_compiler.probe_planning_runtime",
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
         _runtime,
     )
     yield session_id, project_id, assessment_id, str(target["id"])
@@ -278,7 +278,7 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
     cycle = create_assessment_cycle(owner, project_id, "network", team_id=team_id)
     assessment_id = str(cycle["assessment"]["id"])
     monkeypatch.setattr(
-        "services.assessments.batch.preview_compiler.probe_planning_runtime",
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
         _runtime,
     )
 

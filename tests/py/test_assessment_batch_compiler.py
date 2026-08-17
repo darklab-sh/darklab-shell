@@ -68,7 +68,7 @@ def batch_cycle(monkeypatch: pytest.MonkeyPatch):
         ),
     )
     monkeypatch.setattr(
-        "services.assessments.batch.preview_compiler.probe_planning_runtime",
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
         lambda: runtime,
     )
     yield session_id, project_id, assessment_id, str(target["id"])
