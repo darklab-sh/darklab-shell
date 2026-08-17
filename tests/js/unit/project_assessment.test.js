@@ -1673,10 +1673,11 @@ describe('project assessment controller', () => {
       projectId: 'prj_1',
       assessmentId: 'asmt_1',
       check: { id: 'asmc_intrusive', recommended_action_key: 'command:nuclei' },
-      httpProfiles: [],
+      httpProfiles: [httpProfile],
     })
 
     expect(launched).toBe(true)
+    expect(showConfirm).toHaveBeenCalledTimes(1)
     const confirmation = showConfirm.mock.calls[0][0]
     expect(confirmation.body.text).toBe('Start intrusive Nuclei profile?')
     expect(confirmation.body.note).toContain('fresh confirmation')

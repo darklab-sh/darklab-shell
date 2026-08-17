@@ -31,6 +31,8 @@ def command_plan(
     """Return one bounded command without resolving any protected values."""
     if target_type not in base_action_target_types(action_id):
         return None
+    if action_id == "nuclei" and http_profile:
+        return None
     if action_id == "nuclei" and get_nuclei_profile(nuclei_profile).requires_confirmation and not allow_intrusive:
         return None
     quoted = shlex.quote(target_value)

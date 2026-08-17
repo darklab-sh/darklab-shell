@@ -424,12 +424,12 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.f498b1e56f80.js",
-      "hash": "11a33f9b14f236d5a68728d9397939c7531d41fb06a425bf590ca24959a1703b"
+      "path": "/static/build/static-project-assessment.b89532097d22.js",
+      "hash": "e4edb8cc62cd7f48fd123670d7dbc4e8550692176249337534403caef732b4d5"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
-      "path": "/static/build/static-project-assessment-actions.e60b3d32b0b2.js",
-      "hash": "8e06052256d560426a54924a9fcddc1970d96dec1215a37a0f28f6da138eaf13"
+      "path": "/static/build/static-project-assessment-actions.3ba0fef9fdf7.js",
+      "hash": "259e34b91e935228ddb8d3a96b3261a755fae92396666d54820d636970afdf9a"
     },
     "/static/js/features/projects/project_assessment_check_state.js": {
       "path": "/static/build/static-project-assessment-check-state.7a24a680a141.js",
@@ -444,12 +444,12 @@
       "hash": "b6382b28d270ab9477157b4b5c03b328e0ce28c4ef727134a552f3fe6e8c5f27"
     },
     "/static/js/features/projects/project_assessment_oast.js": {
-      "path": "/static/build/static-project-assessment-oast.a20348c782e5.js",
-      "hash": "3a9fa9fdee4a841d0f9cf5fa54bcb210fe9465b1a44cf0310d9c6271d6888158"
+      "path": "/static/build/static-project-assessment-oast.385fae312f2b.js",
+      "hash": "5ce894997ee741b7dc3640708c07edd144bb7163d86cf955272a12080f8f629c"
     },
     "/static/js/features/projects/project_assessment_renderer.js": {
-      "path": "/static/build/static-project-assessment-renderer.f9f5ed7c22aa.js",
-      "hash": "befa249e8b0f9c4a5ad54ee9b1f48a4bf207bafb5ebea270685733a60f8558e7"
+      "path": "/static/build/static-project-assessment-renderer.228f73a0f632.js",
+      "hash": "360ebac62325e817136ac7ce546d5c7c1028bf8be056683335885e922c978778"
     },
     "/static/js/features/projects/project_assessment_risk_renderer.js": {
       "path": "/static/build/static-project-assessment-risk-renderer.1f2ba1ab29c7.js",

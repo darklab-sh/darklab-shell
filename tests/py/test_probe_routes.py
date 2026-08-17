@@ -1130,11 +1130,14 @@ def test_browser_protected_probe_is_redacted_project_bound_and_cleanup_safe(
 ))
 def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
     client,
+    monkeypatch,
     target_type,
     target_value,
     base_url,
     allowed_host,
 ):
+    from services.assessments import probe_service
+
     token = "tok_" + uuid.uuid4().hex
     _register_token(token)
     project = _create_project(client, token)
@@ -1173,6 +1176,46 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
     assert secret_value not in rendered
     assert "PROBE_HTTP_TOKEN" not in rendered
 
+    monkeypatch.setitem(
+        probe_service.app_config.CFG,
+        "assessment_intrusive_actions_enabled",
+        True,
+    )
+    start_run = mock.Mock()
+    monkeypatch.setattr("blueprints.api_v1._start_brokered_run_service", start_run)
+    for nuclei_profile in ("safe", "standard", "intrusive"):
+        nuclei_body = {
+            "action_id": "nuclei",
+            "entity_id": target["id"],
+            "http_profile_id": profile_id,
+            "nuclei_profile": nuclei_profile,
+        }
+        nuclei_response = client.post(
+            f"/api/v1/projects/{project['id']}/probes/plan",
+            headers={"Authorization": f"Bearer {token}"},
+            json=nuclei_body,
+        )
+        assert nuclei_response.status_code == 200
+        nuclei_plan = nuclei_response.get_json()["plan"]
+        assert nuclei_plan["launchable"] is False
+        assert nuclei_plan["availability"]["code"] == "http_profile_unavailable"
+        assert "exact scheme, port, root" in nuclei_plan["unavailable_reason"]
+        assert nuclei_plan["display_command"] == ""
+        assert secret_value not in nuclei_response.get_data(as_text=True)
+
+        blocked = client.post(
+            f"/api/v1/projects/{project['id']}/probes/run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                **nuclei_body,
+                "confirmed": True,
+                "plan_digest": nuclei_plan["plan_digest"],
+            },
+        )
+        assert blocked.status_code == 409
+        assert blocked.get_json()["error"]["code"] == "action_unavailable"
+    start_run.assert_not_called()
+
 
 def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(client):
     token = "tok_" + uuid.uuid4().hex
@@ -1197,7 +1240,7 @@ def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(clie
     route = f"/api/v1/projects/{project['id']}/probes/plan"
     headers = {"Authorization": f"Bearer {token}"}
 
-    for action_id in ("curl", "httpx", "dalfox", "nuclei"):
+    for action_id in ("curl", "httpx", "dalfox"):
         for protected in (False, True):
             response = client.post(
                 route,
@@ -1212,6 +1255,16 @@ def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(clie
             command = response.get_json()["plan"]["display_command"]
             assert f"https://[{target_value}]" in command
             assert f"https://{target_value}" not in command
+
+    nuclei = client.post(
+        route,
+        headers=headers,
+        json={"action_id": "nuclei", "entity_id": target["id"]},
+    )
+    assert nuclei.status_code == 200
+    nuclei_command = nuclei.get_json()["plan"]["display_command"]
+    assert f"https://[{target_value}]" in nuclei_command
+    assert f"https://{target_value}" not in nuclei_command
 
 
 def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(

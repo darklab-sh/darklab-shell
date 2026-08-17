@@ -37,7 +37,10 @@ from services.assessments.probe_cleanup import observed_probe_cleanup
 from services.assessments.probe_broker_launch import launch_confirmed_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
-from services.assessments.http_profile_execution import ProtectedHttpLaunch
+from services.assessments.http_profile_execution import (
+    NUCLEI_HTTP_PROFILE_UNAVAILABLE,
+    ProtectedHttpLaunch,
+)
 from services.assessments.probe_targets import resolve_probe_target
 from services.assessments.probe_target_service import resolve_project_probe_target
 from services.audit.context import request_audit_fields
@@ -271,12 +274,7 @@ def test_intrusive_nuclei_requires_the_instance_gate_and_fresh_confirmation():
 
 
 @pytest.mark.parametrize("profile_key", ("safe", "standard", "intrusive"))
-def test_protected_nuclei_launch_keeps_the_reviewed_profile(
-    monkeypatch,
-    profile_key,
-):
-    from services.assessments import http_profile_execution
-
+def test_protected_nuclei_profiles_fail_closed_before_confirmation(profile_key):
     http_summary = {
         "id": "ahp_probe_nuclei",
         "revision": 1,
@@ -296,45 +294,25 @@ def test_protected_nuclei_launch_keeps_the_reviewed_profile(
         intrusive_actions_enabled=True,
         template_snapshot=_READY_TEMPLATES,
         http_profile=http_summary,
-        http_profile_target="https://example.test/path",
-    )
-    monkeypatch.setitem(
-        http_profile_execution.app_config.CFG,
-        "assessment_intrusive_actions_enabled",
-        True,
-    )
-    monkeypatch.setattr(
-        http_profile_execution,
-        "load_http_profile_plan_context",
-        lambda *_args, **_kwargs: (
-            http_summary,
-            "https://example.test/path",
-            "",
-            {"include_paths": [], "exclude_paths": []},
-        ),
-    )
-    monkeypatch.setattr(
-        http_profile_execution,
-        "_resolved_headers",
-        lambda *_args, **_kwargs: ([], []),
-    )
-    monkeypatch.setattr(
-        http_profile_execution,
-        "materialize_tool_profile",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            trusted_args=(), private_values=(), cleanup=None,
-        ),
+        http_profile_unavailable=NUCLEI_HTTP_PROFILE_UNAVAILABLE,
     )
 
-    materialized = http_profile_execution.materialize_http_profile_launch(
-        "session-probe",
-        "prj_probe",
-        plan,
-    )
-
-    assert materialized.execution_command == plan["display_command"].removesuffix(
-        " -sf [protected]"
-    )
+    assert plan["launchable"] is False
+    assert plan["availability"] == {
+        "available": False,
+        "code": "http_profile_unavailable",
+        "reason": NUCLEI_HTTP_PROFILE_UNAVAILABLE,
+    }
+    assert plan["display_command"] == ""
+    assert plan["profile"]["id"] == profile_key
+    assert plan["policy_level"] in {"safe", "standard", "intrusive"}
+    with pytest.raises(ProbeError) as exc_info:
+        confirm_probe_plan(
+            {"confirmed": True, "plan_digest": plan["plan_digest"]},
+            lambda: plan,
+        )
+    assert exc_info.value.code == "action_unavailable"
+    assert str(exc_info.value) == NUCLEI_HTTP_PROFILE_UNAVAILABLE
 
 
 def test_probe_plan_fails_closed_for_profiles_features_and_target_types(monkeypatch):
@@ -851,7 +829,7 @@ def _digest_test_plan():
                 "exclude_paths": ["/app/private"],
             },
         },
-        http_profile_target="https://example.test/path",
+        http_profile_unavailable=NUCLEI_HTTP_PROFILE_UNAVAILABLE,
     )
 
 
@@ -897,8 +875,8 @@ def _replace_digest_field(plan, path, value):
     (("display_command",), "nuclei -u https://changed.example"),
     (("expected_evidence",), ["services"]),
     (("availability", "code"), "feature_unavailable"),
-    (("availability", "available"), False),
-    (("launchable",), False),
+    (("availability", "available"), True),
+    (("launchable",), True),
     (("requires_confirmation",), False),
 ))
 def test_probe_digest_changes_for_every_approval_field(path, value):

@@ -102,7 +102,7 @@ function profileIssue(profile) {
 
 function supportsHttpProfile(check) {
   const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
-  return kind === 'command' && ['curl', 'httpx', 'katana', 'nuclei', 'dalfox', 'sqlmap'].includes(actionId);
+  return kind === 'command' && ['curl', 'httpx', 'katana', 'dalfox', 'sqlmap'].includes(actionId);
 }
 
 async function chooseHttpProfile(confirm, profiles) {

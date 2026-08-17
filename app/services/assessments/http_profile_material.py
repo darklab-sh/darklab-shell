@@ -84,6 +84,11 @@ def materialize_tool_profile(
     actor_member_id: str,
 ) -> ProtectedToolMaterial:
     """Build one scanner-readable context without exposing values in argv."""
+    if tool == "nuclei":
+        raise HttpProfileMaterialError(
+            "Nuclei HTTP profile material is unavailable because exact request scope "
+            "can't be enforced."
+        )
     if not headers and not profile.get("file_refs"):
         return ProtectedToolMaterial((), (), None)
     material: PrivateHttpRunMaterial | None = None
@@ -115,7 +120,7 @@ def materialize_tool_profile(
             trusted_args.extend(["-c", str(config_path)])
             private_values.append(str(config_path))
         elif headers:
-            if tool in {"httpx", "nuclei"}:
+            if tool == "httpx":
                 secret_payload = {
                     "id": "darklab-http-profile",
                     "info": {"name": "Protected DarkLab HTTP profile"},
@@ -140,13 +145,6 @@ def materialize_tool_profile(
                 )
                 trusted_args.extend(["-H", str(secret_path)])
             private_values.append(str(secret_path))
-        if copied and tool == "nuclei":
-            trusted_args.extend([
-                "-cc",
-                copied["client_certificate"],
-                "-ck",
-                copied["client_key"],
-            ])
     except (
         OSError,
         PrivateHttpMaterialError,

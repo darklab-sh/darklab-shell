@@ -317,7 +317,7 @@ PLAN_RESPONSE="$(curl -sS -X POST \
 PLAN_DIGEST="$(printf '%s' "$PLAN_RESPONSE" | jq -r '.plan.plan_digest')"
 ```
 
-Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. For probe routes, `http_profile_id` accepts either the stable id or the unique saved name within that Project; names are matched case-insensitively, and the returned plan always carries the canonical id. `launch_authorization` reports the required and missing Team capabilities for the current caller. Clients should show its reason and skip confirmation when `authorized` is false; the launch route still enforces those permissions independently. The launch body must repeat every selection from the preview exactly; omitting or changing one rebuilds a different plan and returns `409 stale_plan`. A protected HTTP profile requires Secret-management permission at launch and stays redacted in its preview: the response identifies its id, name, role, revision, allowed hosts, scope roots, and included or excluded paths, but never includes Secret values, private Files paths, generated arguments, or private environment data. Those scope fields are part of `plan_digest`, alongside the exact saved command, target, policy, bounds, credential classification, expected evidence, and availability. Caller-specific authorization metadata isn't part of the digest.
+Optional `nmap_profile`, `nuclei_profile`, and `http_profile_id` fields select one reviewed local plan variant. For probe routes, `http_profile_id` accepts either the stable id or the unique saved name within that Project; names are matched case-insensitively, and the returned plan always carries the canonical id. Nuclei profiles can't be combined with `http_profile_id`: template-generated requests can't enforce the profile's exact scheme, port, root, included paths, and excluded paths, so the preview returns `http_profile_unavailable` and no command. `launch_authorization` reports the required and missing Team capabilities for the current caller. Clients should show its reason and skip confirmation when `authorized` is false; the launch route still enforces those permissions independently. The launch body must repeat every selection from the preview exactly; omitting or changing one rebuilds a different plan and returns `409 stale_plan`. A protected HTTP profile requires Secret-management permission at launch and stays redacted in its preview: the response identifies its id, name, role, revision, allowed hosts, scope roots, and included or excluded paths, but never includes Secret values, private Files paths, generated arguments, or private environment data. Those scope fields are part of `plan_digest`, alongside the exact saved command, target, policy, bounds, credential classification, expected evidence, and availability. Caller-specific authorization metadata isn't part of the digest.
 
 Launch only the freshly previewed plan:
 
@@ -346,7 +346,7 @@ curl -sS -X POST \
   "$DARKLAB_API_URL/api/v1/projects/$PROJECT_ID/probes/run"
 ```
 
-Use the same pattern for `nuclei_profile` or `http_profile_id`: send the chosen field in both requests and use the digest returned by that exact preview.
+Use the same pattern for either `nuclei_profile` or `http_profile_id`: send the chosen field in both requests and use the digest returned by that exact preview. Don't combine them; Nuclei plans with an HTTP profile are unavailable.
 
 Launch returns `202` with the ordinary run summary, stream and History locations, and rebuilt plan. It requires `RUN_COMMANDS`; a team launch with `http_profile_id` also requires `MANAGE_SECRETS`. The server binds the run to the requested Project independently of the active browser Project or automatic external-run capture setting. A changed target, profile, policy, feature gate, or command makes the digest stale and returns `409`. Validation errors return `400`, missing scoped records return `404`, rate limits return `429`, and an unavailable broker returns `503` with `Retry-After: 5`.
 
@@ -412,7 +412,7 @@ Create returns `201`. Update with `PATCH` and the profile's current `revision`; 
 
 ### Recommended actions
 
-Direct Assessment actions support protected Curl, HTTPx, Katana, Nuclei, Dalfox, and detection-only SQLmap runs. Preview accepts these optional query fields:
+Direct Assessment actions support protected Curl, HTTPx, Katana, Dalfox, and detection-only SQLmap runs. Nuclei actions remain anonymous because generated template requests can't safely inherit an HTTP profile's exact request boundary. Preview accepts these optional query fields:
 
 - `http_profile_id` selects one enabled Project HTTP profile.
 - `source_run_id` and `parameter_observation_id` select one reviewed Dalfox parameter together.

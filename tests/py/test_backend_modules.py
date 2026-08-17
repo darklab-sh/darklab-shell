@@ -33907,6 +33907,7 @@ class TestAssessmentHttpProfileExecution:
         from services.assessments.command_plans import command_plan
         from services.assessments.http_profile_execution import (
             HttpProfileExecutionError,
+            NUCLEI_HTTP_PROFILE_UNAVAILABLE,
             _SUPPORTED_TOOLS,
             _execution_target,
             _scope_arguments,
@@ -33914,6 +33915,8 @@ class TestAssessmentHttpProfileExecution:
             materialize_http_profile_launch,
         )
         from services.assessments.http_profile_material import (
+            HttpProfileMaterialError,
+            materialize_tool_profile,
             private_file_values,
         )
         from services.assessments.http_profile_material_formats import (
@@ -34027,9 +34030,7 @@ class TestAssessmentHttpProfileExecution:
             "include_paths": ["/allowed"],
             "exclude_paths": ["/secret"],
         }
-        assert _SUPPORTED_TOOLS == {
-            "curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap",
-        }
+        assert _SUPPORTED_TOOLS == {"curl", "httpx", "katana", "dalfox", "sqlmap"}
         assert _execution_target(
             scoped_profile,
             {"type": "url", "value": "https://app.example/allowed/./page"},
@@ -34059,7 +34060,26 @@ class TestAssessmentHttpProfileExecution:
         )[3]
         assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
         assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
-        assert _scope_arguments(profile, "nuclei", "https://app.example") == ["-dr", "-ni"]
+        with pytest.raises(HttpProfileExecutionError) as nuclei_scope:
+            _scope_arguments(profile, "nuclei", "https://app.example")
+        assert nuclei_scope.value.code == "http_profile_tool_unsupported"
+        assert str(nuclei_scope.value) == NUCLEI_HTTP_PROFILE_UNAVAILABLE
+        assert _unsupported_reason(profile, "nuclei") == NUCLEI_HTTP_PROFILE_UNAVAILABLE
+        assert command_plan(
+            "nuclei",
+            "url",
+            "https://app.example/admin",
+            http_profile=summary,
+        ) is None
+        with pytest.raises(HttpProfileMaterialError, match="exact request scope"):
+            materialize_tool_profile(
+                "nuclei",
+                {"allowed_hosts": ["app.example"], "file_refs": {}},
+                [("Authorization", "Bearer protected")],
+                session_id="tok-nuclei-profile",
+                team_id="",
+                actor_member_id="",
+            )
         assert "proxy allowlist" in _unsupported_reason({"proxy_url": "https://proxy.example"}, "httpx")
         assert "client certificate" in _unsupported_reason(
             {"file_refs": {"client_certificate": "cert.pem"}},

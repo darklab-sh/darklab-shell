@@ -34,11 +34,15 @@ from services.secrets.storage import get_secret_value_by_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
 
-_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap"})
+_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "dalfox", "sqlmap"})
 _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
 })
+NUCLEI_HTTP_PROFILE_UNAVAILABLE = (
+    "Nuclei can't safely enforce this HTTP profile's exact scheme, port, root, "
+    "included paths, and excluded paths. Run the Nuclei profile without an HTTP profile."
+)
 
 
 def _sqlmap_validation_command(target_value: str, concurrency: object) -> str:
@@ -78,6 +82,8 @@ def _public_scope(profile: Mapping[str, Any]) -> dict[str, list[str]]:
 
 
 def _unsupported_reason(profile: Mapping[str, Any], tool: str) -> str:
+    if tool == "nuclei":
+        return NUCLEI_HTTP_PROFILE_UNAVAILABLE
     if tool not in _SUPPORTED_TOOLS:
         return "This assessment tool does not yet have a protected HTTP-profile adapter."
     if profile.get("proxy_url"):
@@ -212,7 +218,10 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
     if tool in {"curl", "httpx", "dalfox", "sqlmap"}:
         return []
     if tool == "nuclei":
-        return ["-dr", "-ni"]
+        raise HttpProfileExecutionError(
+            "http_profile_tool_unsupported",
+            NUCLEI_HTTP_PROFILE_UNAVAILABLE,
+        )
     raw_host = str(urlsplit(target_value).hostname or "")
     host = re.escape(f"[{raw_host}]" if ":" in raw_host else raw_host)
     arguments = ["-fs", "fqdn"]
@@ -221,19 +230,6 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
     for prefix in profile.get("exclude_paths", []):
         arguments.extend(["-cos", rf"^https?://{host}(?::\d+)?{re.escape(str(prefix))}"])
     return arguments
-
-
-def _reviewed_nuclei_profile(plan: Mapping[str, Any]) -> str:
-    probe_profile = plan.get("profile")
-    if (
-        isinstance(probe_profile, Mapping)
-        and str(probe_profile.get("kind") or "") == "nuclei"
-    ):
-        return str(probe_profile.get("id") or "safe")
-    assessment_profile = plan.get("nuclei_profile")
-    if isinstance(assessment_profile, Mapping):
-        return str(assessment_profile.get("key") or "safe")
-    return "safe"
 
 
 def materialize_http_profile_launch(
@@ -291,7 +287,6 @@ def materialize_http_profile_launch(
         web_target=target_value,
         http_profile=summary,
         protected_display=False,
-        nuclei_profile=_reviewed_nuclei_profile(plan),
         allow_intrusive=bool(
             app_config.CFG.get("assessment_intrusive_actions_enabled", False)
         ),
