@@ -190,6 +190,128 @@ async function installSafeAssessmentLaunchFixture(page) {
   })
 }
 
+async function installAssessmentBatchLifecycleFixture(page) {
+  const state = {
+    launched: false,
+    canceling: false,
+    projectId: '',
+    assessmentId: '',
+    startBody: null,
+  }
+  const batchId = 'wfx_assessment_batch_playwright'
+  const batch = () => ({
+    schema_version: 1,
+    batch_id: batchId,
+    project_id: state.projectId,
+    assessment_id: state.assessmentId,
+    status: state.canceling ? 'canceling' : 'running',
+    item_count: 1,
+    created: '2026-08-17T10:00:00Z',
+    progress: {
+      total: 1,
+      pending: 0,
+      launching: 0,
+      running: 1,
+      succeeded: 0,
+      failed: 0,
+      unavailable: 0,
+      canceled: 0,
+      skipped: 0,
+      could_not_cancel: 0,
+      settled: 0,
+    },
+  })
+  await page.route(/\/(?:batch-previews|assessment-batch-previews|assessment-batches)(?:[/?]|$)/, async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    const startMatch = path.match(/\/projects\/([^/]+)\/assessments\/([^/]+)\/assessment-batches$/)
+    if (startMatch && request.method() === 'POST') {
+      state.projectId = decodeURIComponent(startMatch[1])
+      state.assessmentId = decodeURIComponent(startMatch[2])
+      state.startBody = request.postDataJSON()
+      state.launched = true
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ batch: batch(), launch: { launched: 1 } }),
+      })
+      return
+    }
+    if (path.endsWith(`/assessment-batches/${batchId}/cancel`) && request.method() === 'POST') {
+      state.canceling = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ batch: batch(), signal_failures: 0 }),
+      })
+      return
+    }
+    if (/\/projects\/[^/]+\/assessment-batches$/.test(path) && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          batches: state.launched ? [batch()] : [],
+          next_cursor: null,
+          has_more: false,
+        }),
+      })
+      return
+    }
+    if (path === `/assessment-batches/${batchId}` && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ batch: batch() }),
+      })
+      return
+    }
+    if (path === `/assessment-batches/${batchId}/items` && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [{
+            item_index: 0,
+            action_id: 'ping',
+            target: { type: 'ip', value: '127.0.0.1' },
+            policy_level: 'safe',
+            display_command: 'ping -c 4 -W 2 127.0.0.1',
+            check_count: 1,
+            attempt: 1,
+            status: 'running',
+            run_id: 'run_assessment_batch_playwright',
+          }],
+          next_cursor: null,
+          has_more: false,
+        }),
+      })
+      return
+    }
+    if (path === `/assessment-batches/${batchId}/events` && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: [{
+            sequence: 1,
+            event_type: 'item_run_bound',
+            item_ordinal: 0,
+            status: 'running',
+            created: '2026-08-17T10:00:01Z',
+          }],
+          next_cursor: null,
+          has_more: false,
+        }),
+      })
+      return
+    }
+    await route.continue()
+  })
+  return state
+}
+
 test.describe('project assessment qualification', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -280,6 +402,73 @@ test.describe('project assessment qualification', () => {
     await expect(assessment.locator('.project-assessment-recent-evidence')).toContainText(
       'Host reachability · ip · 127.0.0.1 · Matched automatically',
     )
+  })
+
+  test('previews starts restores and cancels a bounded assessment batch', async ({ page }) => {
+    test.setTimeout(90_000)
+    const fixture = await installAssessmentBatchLifecycleFixture(page)
+    const { assessment } = await startNetworkAssessment(
+      page,
+      `Assessment Batch ${Date.now()}`,
+    )
+    const section = assessment.locator('.project-assessment-batch')
+    await expect(section).toContainText('Safe checks are selected by default')
+    const previewButton = section.getByRole('button', { name: 'Preview assessment plan' })
+    await expect(previewButton).toBeEnabled()
+    const targetChoice = section.locator('.project-assessment-batch-selector').first()
+      .getByRole('checkbox').first()
+    await targetChoice.focus()
+    await targetChoice.press('Space')
+    await expect(previewButton).toBeDisabled()
+    await targetChoice.press('Space')
+    await expect(previewButton).toBeEnabled()
+
+    const previewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname.endsWith('/batch-previews')
+    })
+    await previewButton.click()
+    expect((await previewResponse).status()).toBe(201)
+    await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
+    await expect(section.locator('.project-assessment-batch-command').first()).toBeVisible()
+    await expect(section).toContainText('Planning estimate')
+
+    await section.getByRole('button', { name: 'Run assessment plan' }).click()
+    const confirm = page.locator('#confirm-host')
+    await expect(confirm).toContainText('Run this assessment plan?')
+    const startResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname.endsWith('/assessment-batches')
+    })
+    await confirmAssessmentAction(page, 'start')
+    expect((await startResponse).status()).toBe(202)
+    expect(fixture.startBody).toMatchObject({
+      confirmed: true,
+      standard_confirmed: false,
+    })
+    await expect(section).toContainText('Assessment batch')
+    await expect(section).toContainText('Running')
+    await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await ensurePromptReady(page, { timeout: 30_000 })
+    await openAssessment(page)
+    const restored = page.locator('#project-explorer-body .project-assessment-batch')
+    await expect(restored).toContainText('ping -c 4 -W 2 127.0.0.1')
+    await expect(restored.getByRole('button', { name: 'Open run' })).toBeVisible()
+    await expect(restored).toContainText('Recent activity')
+
+    await restored.getByRole('button', { name: 'Cancel batch' }).click()
+    await expect(page.locator('#confirm-host')).toContainText(
+      'Active commands receive a cancellation request',
+    )
+    const cancelResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname.endsWith('/cancel')
+    })
+    await confirmAssessmentAction(page, 'cancel_batch')
+    expect((await cancelResponse).status()).toBe(200)
+    await expect(restored).toContainText('Cancellation was requested')
   })
 
   test('preserves focus through lifecycle and destructive confirmations', async ({ page }) => {
@@ -515,6 +704,18 @@ test.describe('project assessment qualification', () => {
       await assessment.locator('.project-assessment-start-form select').selectOption('network')
       await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
       await expect(assessment).toContainText('Network assessment')
+
+      const batchPlan = assessment.locator('.project-assessment-batch')
+      await expect(batchPlan.getByRole('button', { name: 'Preview assessment plan' })).toBeVisible()
+      const selectorLayout = await batchPlan.locator('.project-assessment-batch-selector').evaluateAll(
+        (selectors) => selectors.slice(0, 2).map((selector) => {
+          const box = selector.getBoundingClientRect()
+          return { top: box.top, right: box.right, bottom: box.bottom }
+        }),
+      )
+      expect(selectorLayout).toHaveLength(2)
+      expect(selectorLayout[1].top).toBeGreaterThanOrEqual(selectorLayout[0].bottom - 1)
+      expect(selectorLayout.every(item => item.right <= page.viewportSize().width + 1)).toBe(true)
 
       const cycleActions = assessment.getByRole('button', { name: 'Cycle actions' })
       const sheet = page.locator('#action-sheet-overlay')

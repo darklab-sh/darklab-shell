@@ -4,6 +4,7 @@
 // Project Assessment tab state and data controller.
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+import { createProjectAssessmentBatchManager } from './project_assessment_batch.js';
 import { openAssessmentCheckStateEditor } from './project_assessment_check_state.js';
 import { openAssessmentEvidenceEditor } from './project_assessment_evidence.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
@@ -89,6 +90,7 @@ function createProjectAssessmentController(context) {
     httpProfileManager.invalidate(id);
     oastManager.invalidate(id);
     zapManager.invalidate(id);
+    batchManager.invalidate(id);
   }
 
   async function responseError(resp, fallback) {
@@ -110,6 +112,7 @@ function createProjectAssessmentController(context) {
   const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
   const oastManager = createProjectAssessmentOastManager(ctx, { renderViews });
   const zapManager = createProjectAssessmentZapManager(ctx, { renderViews });
+  const batchManager = createProjectAssessmentBatchManager(ctx, { renderViews });
 
   function loadOastHistoryForDetail(projectId, loadedDetail) {
     const assessmentId = String(loadedDetail?.assessment?.id || '');
@@ -847,6 +850,9 @@ function createProjectAssessmentController(context) {
     oastCurrentCorrelation: oastManager.currentCorrelation,
     oastStateFor: oastManager.stateFor,
     zapStateFor: zapManager.stateFor,
+    renderBatch: (projectId, assessment, detail, options = {}) => (
+      batchManager.renderSection(projectId, assessment, detail, options)
+    ),
     renderHttpProfiles: (projectId, options = {}) => httpProfileManager.renderSection(projectId, options),
   });
 

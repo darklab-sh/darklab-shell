@@ -103,6 +103,9 @@ let exportedLoadWatchersModal = null;
     if (name === 'project_assessment_css') {
       return { url: '/static/css/features/project-assessment.css', type: 'style' };
     }
+    if (name === 'project_assessment_batch_css') {
+      return { url: '/static/css/features/project-assessment-batch.css', type: 'style' };
+    }
     if (name === 'atlas_css') return { url: '/static/css/features/atlas.css', type: 'style' };
     if (name === 'atlas_mobile_css') return { url: '/static/css/features/atlas-mobile.css', type: 'style' };
     if (name === 'command_registry_css') return { url: '/static/css/features/command-registry.css', type: 'style' };
@@ -124,6 +127,12 @@ let exportedLoadWatchersModal = null;
     if (name === 'finding_triage_editor') return { url: '/static/js/features/findings/finding_triage_editor.js', type: 'module' };
     if (name === 'project_activity') return { url: '/static/js/features/projects/project_activity.js', type: 'module' };
     if (name === 'project_assessment') return { url: '/static/js/features/projects/project_assessment.js', type: 'module' };
+    if (name === 'project_assessment_batch') {
+      return { url: '/static/js/features/projects/project_assessment_batch.js', type: 'module' };
+    }
+    if (name === 'project_assessment_batch_renderer') {
+      return { url: '/static/js/features/projects/project_assessment_batch_renderer.js', type: 'module' };
+    }
     if (name === 'project_overview') return { url: '/static/js/features/projects/project_overview.js', type: 'module' };
     if (name === 'project_monitoring') return { url: '/static/js/features/projects/project_monitoring.js', type: 'module' };
     if (name === 'project_artifacts') return { url: '/static/js/features/projects/project_artifacts.js', type: 'module' };
@@ -945,8 +954,9 @@ let exportedLoadWatchersModal = null;
 
   async function loadProjectAssessment() {
     const cssReady = loadLazyAsset('project_assessment_css');
+    const batchCssReady = loadLazyAsset('project_assessment_batch_css');
     const assessmentModule = await loadLazyAsset('project_assessment');
-    await cssReady;
+    await Promise.all([cssReady, batchCssReady]);
     return _requireLazyModuleExport(assessmentModule, 'DarklabProjectAssessment', value => (
       value && typeof value.createProjectAssessmentController === 'function'
     ));

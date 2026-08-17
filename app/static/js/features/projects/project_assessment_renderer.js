@@ -1524,7 +1524,9 @@ function createProjectAssessmentRenderer(context, actions) {
       appendAssessmentTail(root, projectId, st, selected, { mobile });
       return root;
     }
+    const batch = act.renderBatch(projectId, selected, st.detail, { mobile });
     root.append(
+      ...(batch ? [batch] : []),
       renderCoverage(st.detail.rollup),
       renderAssessmentFindingWorklist(ctx, act, projectId, st, st.detail.finding_worklist),
       renderRetestQueue(projectId, st.detail.retest_queue),
