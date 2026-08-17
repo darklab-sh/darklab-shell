@@ -183,7 +183,12 @@ def store_batch_preview(
         for item_index, item in enumerate(draft.items):
             _insert_item(conn, preview_id, item_index, item, created)
         conn.commit()
-    return get_batch_preview(draft.session_id, preview_id, team_id=draft.team_id)
+    return get_batch_preview(
+        draft.session_id,
+        preview_id,
+        team_id=draft.team_id,
+        current_time=created_at,
+    )
 
 
 def _preview_row(session_id: str, preview_id: str, *, team_id: str) -> Any:
