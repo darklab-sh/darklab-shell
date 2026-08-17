@@ -19,6 +19,7 @@ from services.assessments.batch.revalidation import build_batch_child_launch_spe
 from services.assessments.batch.recovery_stop import (
     stop_assessment_batch_for_recovery,
 )
+from services.assessments.batch.settings import assessment_batch_settings
 from services.workflows import storage
 from services.workflows.execution_authorization import (
     current_execution_role,
@@ -52,7 +53,7 @@ def _stop_execution(
 
 
 def _authorized_role(execution: Mapping[str, object]) -> tuple[bool, str]:
-    if execution_expired(execution):
+    if execution_expired(execution, max_runtime_seconds=assessment_batch_settings().max_runtime_seconds):
         _stop_execution(
             execution,
             "execution_timeout",

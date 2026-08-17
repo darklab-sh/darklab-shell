@@ -702,7 +702,7 @@ def test_batch_recovery_fails_non_runnable_work_without_launching(
     elif failure == "timeout":
         monkeypatch.setattr(
             "services.assessments.batch.recovery.execution_expired",
-            lambda _execution: True,
+            lambda _execution, **kwargs: kwargs["max_runtime_seconds"] == 14_400,
         )
     else:
         monkeypatch.setattr(
@@ -893,6 +893,11 @@ def test_runtime_bootstrap_runs_batch_recovery_after_workflow_recovery(monkeypat
         "recover_assessment_batches_on_startup",
         lambda: calls.append("assessment_batches"),
     )
+    monkeypatch.setattr(
+        runtime_bootstrap,
+        "prune_assessment_batches_on_startup",
+        lambda: calls.append("assessment_batch_retention"),
+    )
 
     runtime_bootstrap.bootstrap_runtime(
         init_metrics=False,
@@ -903,7 +908,13 @@ def test_runtime_bootstrap_runs_batch_recovery_after_workflow_recovery(monkeypat
         runtime_name="batch-recovery-test",
     )
 
-    assert calls == ["active_runs", "http_profiles", "workflows", "assessment_batches"]
+    assert calls == [
+        "active_runs",
+        "http_profiles",
+        "workflows",
+        "assessment_batches",
+        "assessment_batch_retention",
+    ]
 
 
 def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_builder):

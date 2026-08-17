@@ -14,7 +14,6 @@ from core.database_backend import dialect_for_backend
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_CHUNK_ITEM_LIMIT,
-    BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
     BatchConcurrency,
 )
 from services.assessments.batch.storage import create_batch_parent
@@ -231,7 +230,7 @@ def materialize_confirmed_batch(
     actor_role: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
-    max_active: int = BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
+    max_active: int | None = None,
 ) -> dict[str, object]:
     """Claim one current preview and create its complete execution snapshot."""
 

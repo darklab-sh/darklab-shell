@@ -38,15 +38,14 @@ def execution_timestamp(value: object) -> datetime | None:
 
 
 def execution_expired(
-    execution: Mapping[str, object],
-    *,
-    now: datetime | None = None,
+    execution: Mapping[str, object], *, now: datetime | None = None, max_runtime_seconds: int | None = None
 ) -> bool:
     created = execution_timestamp(execution.get("created"))
     if created is None:
         return True
     current = now or datetime.now(timezone.utc)
-    return (current - created).total_seconds() >= max_execution_runtime_seconds()
+    runtime_limit = max_execution_runtime_seconds() if max_runtime_seconds is None else max(1, int(max_runtime_seconds))
+    return (current - created).total_seconds() >= runtime_limit
 
 
 def execution_elapsed_seconds(

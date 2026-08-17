@@ -7,10 +7,7 @@ from __future__ import annotations
 
 import hmac
 
-from services.assessments.batch.contracts import (
-    AssessmentBatchError,
-    BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
-)
+from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.preview_digest import batch_preview_digest
 from services.assessments.batch.preview_storage import get_batch_preview
 from services.assessments.batch.start_rebuild import rebuild_confirmed_batch_preview
@@ -43,7 +40,7 @@ def start_assessment_batch(
     actor_role: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
-    max_active: int = BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
+    max_active: int | None = None,
 ) -> dict[str, object]:
     """Rebuild, verify, and atomically materialize one immutable batch snapshot."""
     if confirmed is not True:

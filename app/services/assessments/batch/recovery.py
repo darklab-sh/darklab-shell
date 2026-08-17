@@ -26,6 +26,7 @@ from services.assessments.batch.recovery_snapshot import (
 from services.assessments.batch.recovery_stop import (
     stop_assessment_batch_for_recovery,
 )
+from services.assessments.batch.settings import assessment_batch_settings
 from services.assessments.batch.execution import launch_assessment_batch
 from services.metrics_lazy import app_metrics
 from services.workflows import storage
@@ -220,7 +221,7 @@ def recover_assessment_batch(batch_id: str) -> str:
             "scope_unavailable",
             "The assessment batch Project or active assessment is no longer available.",
         )
-    if execution_expired(execution):
+    if execution_expired(execution, max_runtime_seconds=assessment_batch_settings().max_runtime_seconds):
         return _stop_and_reconcile(
             execution,
             "execution_timeout",

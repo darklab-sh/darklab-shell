@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `assessment_batches`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `assessment_batches`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -384,6 +384,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
+| `assessment_batches` | see nested defaults | Server-side safety, runtime, and retention settings for **Run assessment plan** |
+| `assessment_batches.item_limit` | `128` | Maximum selected commands in one new batch, from 1 to the fixed product ceiling of 512. Larger work needs another preview and confirmation |
+| `assessment_batches.max_active_per_owner` | `3` | Maximum queued, running, or canceling assessment batches for one personal session or team, from 1 to 8 |
+| `assessment_batches.max_parallel` | `8` | Maximum active child commands in one assessment batch, from 1 to the fixed cap of 8 |
+| `assessment_batches.max_owner_parallel` | `16` | Maximum active assessment-batch child commands for one personal session or team, from 1 to 32 |
+| `assessment_batches.max_instance_parallel` | `32` | Maximum active assessment-batch child commands across the deployment, from 1 to 64 |
+| `assessment_batches.retention_days` | `30` | Days to keep terminal coordinator and sanitized event state. `0` keeps it indefinitely. Ordinary child runs, evidence, and retry ancestry still in use aren't deleted |
+| `assessment_batches.max_runtime_seconds` | `14400` | Maximum lifetime of one assessment batch, from 60 to 604800 seconds. The coordinator checks it before claim, launch, and startup recovery |
 | `cve_risk` | see nested defaults | Server-side public CVE risk data. Release-pinned FIRST EPSS and CISA KEV snapshots work offline; live bulk-feed refresh remains an operator opt-in |
 | `cve_risk.bootstrap_enabled` | `true` | Loads the release-pinned EPSS and KEV snapshots when the database has no newer accepted data. Bootstrap import is a silent ranking baseline and does not create risk-escalation events |
 | `cve_risk.refresh_enabled` | `false` | Lets the scheduler refresh the public EPSS and KEV bulk feeds. Refreshes send no Project, target, finding, package, or CVE inventory values to either source |

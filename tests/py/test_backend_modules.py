@@ -2969,6 +2969,10 @@ class TestLoadConfig:
                       max_per_session: 7
                     project_digests:
                       default_cadence_preset: weekly
+                    assessment_batches:
+                      item_limit: 64
+                      max_parallel: 4
+                      retention_days: 14
                     zap_connector:
                       enabled: true
                       base_url: https://zap.example.test/
@@ -3007,6 +3011,11 @@ class TestLoadConfig:
         assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
         assert cfg["project_digests"]["first_send_lookback_hours"] == 24
         assert cfg.project_digests.default_cadence_preset == "weekly"
+        assert cfg["assessment_batches"]["item_limit"] == 64
+        assert cfg["assessment_batches"]["max_active_per_owner"] == 3
+        assert cfg["assessment_batches"]["max_parallel"] == 4
+        assert cfg["assessment_batches"]["retention_days"] == 14
+        assert cfg.assessment_batches.max_runtime_seconds == 14400
         assert cfg["zap_connector"] == {
             "enabled": True,
             "base_url": "https://zap.example.test",

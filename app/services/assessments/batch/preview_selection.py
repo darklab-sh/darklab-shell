@@ -10,16 +10,12 @@ from dataclasses import dataclass
 
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
-    BATCH_DEFAULT_INSTANCE_PARALLEL,
     BATCH_DEFAULT_ITEM_LIMIT,
-    BATCH_DEFAULT_OWNER_PARALLEL,
-    BATCH_DEFAULT_PARALLEL,
-    BATCH_HARD_ITEM_LIMIT,
     BATCH_PREVIEW_MAX_CATEGORY_SELECTIONS,
     BATCH_PREVIEW_MAX_TARGET_SELECTIONS,
     BatchConcurrency,
 )
-from services.assessments.batch.policy import normalize_batch_concurrency
+from services.assessments.batch.settings import configured_preview_policy
 
 
 _ALLOWED_FIELDS = frozenset(
@@ -57,22 +53,6 @@ def _identifiers(value: object, *, label: str, maximum: int) -> tuple[str, ...]:
             "invalid_batch_selection", f"{label} is oversized or contains duplicates."
         )
     return tuple(sorted(normalized))
-
-
-def _integer(value: object, *, default: int, label: str) -> int:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        raise AssessmentBatchError(
-            "invalid_batch_selection", f"{label} must be an integer."
-        )
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError) as exc:
-        raise AssessmentBatchError(
-            "invalid_batch_selection", f"{label} must be an integer."
-        ) from exc
-    return normalized
 
 
 @dataclass(frozen=True)
@@ -156,19 +136,7 @@ def normalize_preview_selection(data: object) -> BatchPreviewSelection:
         raise AssessmentBatchError(
             "invalid_batch_selection", "include_standard must be true or false."
         )
-    item_limit = _integer(
-        values.get("item_limit"), default=BATCH_DEFAULT_ITEM_LIMIT, label="Item limit"
-    )
-    if not 1 <= item_limit <= BATCH_HARD_ITEM_LIMIT:
-        raise AssessmentBatchError(
-            "invalid_batch_selection",
-            f"Item limit must be between 1 and {BATCH_HARD_ITEM_LIMIT}.",
-        )
-    concurrency = normalize_batch_concurrency(
-        batch=values.get("max_parallel", BATCH_DEFAULT_PARALLEL),
-        owner=values.get("max_owner_parallel", BATCH_DEFAULT_OWNER_PARALLEL),
-        instance=values.get("max_instance_parallel", BATCH_DEFAULT_INSTANCE_PARALLEL),
-    )
+    item_limit, concurrency = configured_preview_policy(values)
     return BatchPreviewSelection(
         target_entity_ids=included_targets,
         excluded_target_entity_ids=excluded_targets,

@@ -262,6 +262,21 @@ def recover_assessment_batches_on_startup() -> None:
         )
 
 
+def prune_assessment_batches_on_startup() -> None:
+    from services.assessments.batch.retention import (  # noqa: PLC0415
+        prune_terminal_assessment_batches,
+    )
+
+    try:
+        prune_terminal_assessment_batches()
+    except Exception:
+        log.error(
+            "ASSESSMENT_BATCH_RETENTION_ERROR",
+            exc_info=True,
+            extra={"stage": "startup_prune", "pid": os.getpid()},
+        )
+
+
 def cleanup_http_profile_runtime_on_startup() -> None:
     from services.assessments.http_profile_runtime import (  # noqa: PLC0415
         cleanup_stale_http_profile_runtime,
@@ -342,6 +357,7 @@ def bootstrap_runtime(
         ("http_profile_runtime_cleanup", cleanup_active_runs, cleanup_http_profile_runtime_on_startup),
         ("workflow_recovery", cleanup_active_runs, recover_workflow_executions_on_startup),
         ("assessment_batch_recovery", cleanup_active_runs, recover_assessment_batches_on_startup),
+        ("assessment_batch_retention", cleanup_active_runs, prune_assessment_batches_on_startup),
     )
     for step, enabled, func in steps:
         if not enabled:

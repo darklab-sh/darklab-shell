@@ -4879,6 +4879,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from services.assessments.base_action_catalog import ACTIONS
     from services.assessments.probe_runtime import ProbePlanningRuntime
     from services.assessments.batch.claim import claim_next_batch_item
+    from services.assessments.batch.retention import prune_terminal_assessment_batches
     from services.assessments.batch.start import start_assessment_batch
     from services.assessments.coverage import reconcile_run_evidence_on_conn
     from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
@@ -5240,6 +5241,28 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "SELECT attributes_json FROM entities WHERE session_id = %s AND type = 'port' AND canonical_value = %s",
         (session_id, "darklab.sh:443/tcp"),
     ).fetchone()
+    conn.execute(
+        "UPDATE workflow_executions SET status = 'failed', finished = %s "
+        "WHERE id IN (%s, %s)",
+        (
+            "2026-05-01 00:00:00",
+            started_batch["batch_id"],
+            retry_batch["batch_id"],
+        ),
+    )
+    conn.commit()
+    pruned_batches = prune_terminal_assessment_batches(
+        cfg={"assessment_batches": {"retention_days": 30}},
+        now=datetime(2026, 8, 17, tzinfo=timezone.utc),
+    )
+    retained_batch_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM assessment_batches WHERE execution_id IN (%s, %s)",
+        (started_batch["batch_id"], retry_batch["batch_id"]),
+    ).fetchone()["n"]
+    retained_run_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM runs WHERE id = %s",
+        (run_id,),
+    ).fetchone()["n"]
 
     assert token_resp.status_code == 200
     assert command_catalog_resp.status_code == 200
@@ -5341,6 +5364,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
     assert port_row is not None
     assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
+    assert pruned_batches == 2
+    assert retained_batch_count == 0
+    assert retained_run_count == 1
 
 
 @pytest.mark.postgres

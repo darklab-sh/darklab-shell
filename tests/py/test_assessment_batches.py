@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -37,6 +38,12 @@ from services.assessments.batch.policy import (
     normalize_batch_concurrency,
 )
 from services.assessments.batch.rollup import derive_batch_progress
+from services.assessments.batch.retention import prune_terminal_assessment_batches
+from services.assessments.batch.settings import (
+    AssessmentBatchSettings,
+    assessment_batch_settings,
+    configured_preview_policy,
+)
 from services.assessments.batch.storage import active_batch_count, create_batch_parent
 
 
@@ -77,6 +84,31 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
         AssessmentBatchError, match="Batch concurrency must be between 1 and 8"
     ):
         normalize_batch_concurrency(batch=9)
+    configured = AssessmentBatchSettings(
+        item_limit=64,
+        max_parallel=4,
+        max_owner_parallel=8,
+        max_instance_parallel=12,
+    )
+    item_limit, concurrency = configured_preview_policy({}, settings=configured)
+    assert item_limit == 64
+    assert (concurrency.batch, concurrency.owner, concurrency.instance) == (4, 8, 12)
+    with pytest.raises(AssessmentBatchError, match="configured maximum of 64"):
+        configured_preview_policy({"item_limit": 65}, settings=configured)
+    with pytest.raises(AssessmentBatchError, match="configured maximum of 4"):
+        configured_preview_policy({"max_parallel": 5}, settings=configured)
+    loaded = assessment_batch_settings({
+        "assessment_batches": {
+            "item_limit": 32,
+            "max_active_per_owner": 2,
+            "max_parallel": 3,
+            "max_owner_parallel": 6,
+            "max_instance_parallel": 9,
+            "retention_days": 7,
+            "max_runtime_seconds": 7200,
+        }
+    })
+    assert loaded == AssessmentBatchSettings(32, 2, 3, 6, 9, 7, 7200)
 
     children = [
         {"status": "succeeded", "error_code": ""},
@@ -186,7 +218,7 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
     ).code == "action_excluded"
 
 
-def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
+def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monkeypatch):
     make_test_app()
     assert MIGRATIONS[-3] is COORDINATOR_MIGRATION
     assert MIGRATIONS[-2] is ITEM_MIGRATION
@@ -407,6 +439,10 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
     with pytest.raises(
         AssessmentBatchError, match="Active assessment batch limit reached"
     ):
+        monkeypatch.setattr(
+            "services.assessments.batch.storage.assessment_batch_settings",
+            lambda: AssessmentBatchSettings(max_active_per_owner=1),
+        )
         create_batch_parent(
             session_id=session_id,
             team_id="",
@@ -415,7 +451,6 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
             preview_id="prv_batch_storage_second",
             preview_digest="b" * 64,
             item_count=1,
-            max_active=1,
         )
     with get_db_connect()() as conn:
         chunk_rows = conn.execute(
@@ -502,3 +537,61 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
             "SELECT COUNT(*) AS n FROM assessment_batch_preview_item_checks WHERE preview_id = ?",
             (preview_id,),
         ).fetchone()["n"] == 0
+
+    source_batch_id = "abx-retention-source"
+    retry_batch_id = "abx-retention-retry"
+    run_id = "run-retention-preserved"
+    with get_db_connect()() as conn:
+        for retention_batch_id, status, finished in (
+            (source_batch_id, "failed", "2026-06-01 00:00:00"),
+            (retry_batch_id, "completed", "2026-08-16 00:00:00"),
+        ):
+            conn.execute(
+                "INSERT INTO workflow_executions "
+                "(id, session_id, execution_kind, workflow_id, workflow_source, title, "
+                "definition_snapshot, input_values, variables, status, project_id, "
+                "created, updated, finished) VALUES (?, ?, 'assessment_batch', '', "
+                "'assessment', 'Assessment batch', '{}', '{}', '{}', ?, ?, ?, ?, ?)",
+                (retention_batch_id, session_id, status, project_id, finished, finished, finished),
+            )
+            conn.execute(
+                "INSERT INTO assessment_batches "
+                "(execution_id, assessment_id, preview_id, preview_digest, "
+                "source_execution_id, item_count, max_parallel, max_target_parallel, "
+                "max_owner_parallel, max_instance_parallel, created) "
+                "VALUES (?, ?, '', '', ?, 1, 1, 1, 1, 1, ?)",
+                (
+                    retention_batch_id,
+                    assessment_id,
+                    source_batch_id if retention_batch_id == retry_batch_id else None,
+                    finished,
+                ),
+            )
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+            "VALUES (?, ?, 'nmap retention.example', ?, ?, 0)",
+            (run_id, session_id, timestamp, timestamp),
+        )
+        conn.commit()
+
+    retention_cfg = {"assessment_batches": {"retention_days": 30}}
+    retention_now = datetime(2026, 8, 17, tzinfo=timezone.utc)
+    assert prune_terminal_assessment_batches(cfg=retention_cfg, now=retention_now) == 0
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET finished = ?, updated = ? WHERE id = ?",
+            ("2026-06-02 00:00:00", "2026-06-02 00:00:00", retry_batch_id),
+        )
+        conn.commit()
+    assert prune_terminal_assessment_batches(cfg=retention_cfg, now=retention_now) == 2
+    with get_db_connect()() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE id IN (?, ?)",
+            (source_batch_id, retry_batch_id),
+        ).fetchone()["n"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM runs WHERE id = ?", (run_id,)
+        ).fetchone()["n"] == 1
+    assert prune_terminal_assessment_batches(
+        cfg={"assessment_batches": {"retention_days": 0}}, now=retention_now
+    ) == 0

@@ -424,6 +424,21 @@
 #   default_cadence_preset: daily
 #   first_send_lookback_hours: 24
 
+# ── Assessment Batches ──────────────────────────────────────────────────────
+#
+# Safety and retention limits for Run assessment plan. These can narrow the
+# product hard caps but can't raise them. Work against one target always stays
+# serialized and isn't configurable.
+# Server default if unset:
+# assessment_batches:
+#   item_limit: 128
+#   max_active_per_owner: 3
+#   max_parallel: 8
+#   max_owner_parallel: 16
+#   max_instance_parallel: 32
+#   retention_days: 30  # 0 keeps terminal coordinator state indefinitely.
+#   max_runtime_seconds: 14400
+
 # ── Public CVE Risk Data ────────────────────────────────────────────────────
 #
 # Release-pinned FIRST EPSS and CISA KEV snapshots give CVE findings a dated,

@@ -18,7 +18,6 @@ from core.database_backend import (
 )
 from services.assessments.batch.contracts import (
     AssessmentBatchError,
-    BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
     BATCH_HARD_MAX_ACTIVE_PER_OWNER,
     BATCH_TERMINAL_STATUSES,
     BatchConcurrency,
@@ -26,6 +25,7 @@ from services.assessments.batch.contracts import (
 from services.assessments.batch.events import append_batch_event_on_conn
 from services.assessments.batch.policy import batch_chunk_sizes, normalize_batch_concurrency
 from services.assessments.batch.retry_events import append_retry_created_on_conn
+from services.assessments.batch.settings import assessment_batch_settings
 from services.assessments.batch.storage_read import active_batch_count, get_batch_parent
 from services.projects.scope import shared_owner_where
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
@@ -192,7 +192,7 @@ def create_batch_parent(
     actor_role: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
-    max_active: int = BATCH_DEFAULT_MAX_ACTIVE_PER_OWNER,
+    max_active: int | None = None,
     _preflight_on_conn: Callable[[Any, str], str] | None = None,
     _initialize_on_conn: Callable[[Any, str, str], None] | None = None,
 ) -> dict[str, object]:
@@ -206,7 +206,8 @@ def create_batch_parent(
         owner=policy.owner,
         instance=policy.instance,
     )
-    owner_limit = _active_limit(max_active)
+    active_limit = max_active if max_active is not None else assessment_batch_settings().max_active_per_owner
+    owner_limit = _active_limit(active_limit)
     normalized_preview_id = str(preview_id or "").strip()
     normalized_digest = str(preview_digest or "").strip().lower()
     if not normalized_preview_id or len(normalized_preview_id) > 64:
