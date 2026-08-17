@@ -295,7 +295,14 @@ def test_team_viewer_can_read_probe_catalog_and_plan(client):
     )
     assert catalog.status_code == 200
     assert plan.status_code == 200
-    assert plan.get_json()["plan"]["target"]["value"] == target["value"]
+    viewer_plan = plan.get_json()["plan"]
+    assert viewer_plan["target"]["value"] == target["value"]
+    assert viewer_plan["launch_authorization"] == {
+        "authorized": False,
+        "required_capabilities": ["run_commands"],
+        "missing_capabilities": ["run_commands"],
+        "reason": "Your Team role doesn't allow probe launches in this scope.",
+    }
     protected_plan = client.get(
         f"/projects/{project['id']}/probes/plan",
         query_string={
@@ -305,7 +312,7 @@ def test_team_viewer_can_read_probe_catalog_and_plan(client):
         },
         headers=_headers(viewer, team_id),
     )
-    assert protected_plan.status_code == 403
+    assert protected_plan.status_code == 404
     denied = client.post(
         f"/projects/{project['id']}/probes/run",
         headers=_headers(viewer, team_id),
@@ -313,7 +320,7 @@ def test_team_viewer_can_read_probe_catalog_and_plan(client):
             "action_id": "ping",
             "entity_id": target["id"],
             "confirmed": True,
-            "plan_digest": plan.get_json()["plan"]["plan_digest"],
+            "plan_digest": viewer_plan["plan_digest"],
         },
     )
     assert denied.status_code == 403
@@ -397,6 +404,20 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
         },
     )
     assert operator_launch.status_code == 202
+    viewer_protected = client.post(
+        f"{route}/plan",
+        headers=api_headers(viewer),
+        json={
+            "action_id": "httpx",
+            "entity_id": target["id"],
+            "http_profile_id": profile_id,
+        },
+    )
+    assert viewer_protected.status_code == 200
+    assert viewer_protected.get_json()["plan"]["launch_authorization"]["missing_capabilities"] == [
+        "manage_secrets", "run_commands",
+    ]
+
     operator_protected = client.post(
         f"{route}/plan",
         headers=api_headers(operator),
@@ -406,7 +427,13 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
             "http_profile_id": profile_id,
         },
     )
-    assert operator_protected.status_code == 403
+    assert operator_protected.status_code == 200
+    assert operator_protected.get_json()["plan"]["launch_authorization"] == {
+        "authorized": False,
+        "required_capabilities": ["manage_secrets", "run_commands"],
+        "missing_capabilities": ["manage_secrets"],
+        "reason": "Your Team role doesn't allow protected probe launches in this scope.",
+    }
     owner_protected_plan = client.post(
         f"{route}/plan",
         headers=api_headers(owner),
@@ -441,6 +468,7 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
             json=protected_body,
         )
         assert protected_plan.status_code == 200
+        assert protected_plan.get_json()["plan"]["launch_authorization"]["authorized"] is True
         launched = client.post(
             f"{route}/run",
             headers=api_headers(token),
@@ -804,6 +832,7 @@ def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
     assert resolved.get_json()["target"]["entity_id"] == target["id"]
     assert planned.status_code == 200
     plan = planned.get_json()["plan"]
+    assert plan["launch_authorization"]["authorized"] is True
 
     calls = []
     monkeypatch.setattr("blueprints.api_v1.broker_available", lambda: True)

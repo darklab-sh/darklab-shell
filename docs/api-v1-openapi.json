@@ -8274,6 +8274,36 @@
         ],
         "type": "object"
       },
+      "ProbeLaunchAuthorization": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized": {
+            "type": "boolean"
+          },
+          "missing_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "authorized",
+          "required_capabilities",
+          "missing_capabilities",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ProbeNmapCatalogProfile": {
         "additionalProperties": false,
         "properties": {
@@ -8646,6 +8676,9 @@
           "http_profile": {
             "$ref": "#/components/schemas/ProbeHttpProfile"
           },
+          "launch_authorization": {
+            "$ref": "#/components/schemas/ProbeLaunchAuthorization"
+          },
           "launchable": {
             "type": "boolean"
           },
@@ -8737,7 +8770,8 @@
           "launchable",
           "unavailable_reason",
           "requires_confirmation",
-          "plan_digest"
+          "plan_digest",
+          "launch_authorization"
         ],
         "type": "object"
       },
@@ -17950,6 +17984,14 @@
                           "id": "",
                           "revision": ""
                         },
+                        "launch_authorization": {
+                          "authorized": true,
+                          "missing_capabilities": [],
+                          "reason": "",
+                          "required_capabilities": [
+                            "run_commands"
+                          ]
+                        },
                         "launchable": true,
                         "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                         "policy_level": "safe",
@@ -18012,6 +18054,14 @@
                           "credential_use": "none",
                           "id": "",
                           "revision": ""
+                        },
+                        "launch_authorization": {
+                          "authorized": true,
+                          "missing_capabilities": [],
+                          "reason": "",
+                          "required_capabilities": [
+                            "run_commands"
+                          ]
                         },
                         "launchable": false,
                         "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -18212,6 +18262,14 @@
                       "credential_use": "none",
                       "id": "",
                       "revision": ""
+                    },
+                    "launch_authorization": {
+                      "authorized": true,
+                      "missing_capabilities": [],
+                      "reason": "",
+                      "required_capabilities": [
+                        "run_commands"
+                      ]
                     },
                     "launchable": true,
                     "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

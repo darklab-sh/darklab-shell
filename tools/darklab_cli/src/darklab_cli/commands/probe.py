@@ -50,6 +50,11 @@ def handle_probe(client: DarklabClient, args: argparse.Namespace) -> int:
     if not plan.get("launchable"):
         reason = str(plan.get("unavailable_reason") or "probe action is unavailable")
         raise DarklabCliError(reason)
+    authorization = plan.get("launch_authorization")
+    if isinstance(authorization, dict) and authorization.get("authorized") is False:
+        raise DarklabCliError(
+            str(authorization.get("reason") or "you do not have permission to launch this probe")
+        )
     launched = client.request("POST", f"{base_path}/run", body={
         **request_body,
         "confirmed": True,

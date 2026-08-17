@@ -7,9 +7,9 @@ from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_authorization import probe_launch_authorization
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_service import get_probe_catalog, get_probe_plan
-from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
 
 
@@ -67,11 +67,6 @@ def api_project_probe_plan(project_id):
         if set(data) - _PLAN_FIELDS:
             raise ProbeError("unsupported_fields", "Probe plan contains unsupported fields.")
         http_profile_id = str(data.get("http_profile_id") or "").strip()
-        if http_profile_id:
-            api_routes._require_api_team_capability(
-                owner_scope,
-                Capability.MANAGE_SECRETS,
-            )
         plan = get_probe_plan(
             session_id,
             project_id,
@@ -86,6 +81,11 @@ def api_project_probe_plan(project_id):
             team_id=owner_scope.team_id,
             actor_member_id=str((owner_scope.member or {}).get("id") or ""),
             observability=observability,
+        )
+        plan["launch_authorization"] = probe_launch_authorization(
+            team_id=owner_scope.team_id,
+            team_role=str((owner_scope.member or {}).get("role") or ""),
+            protected=bool(http_profile_id),
         )
     except (ProbeError, TeamPermissionDenied) as exc:
         if isinstance(exc, TeamPermissionDenied):

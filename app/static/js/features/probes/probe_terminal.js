@@ -240,6 +240,9 @@ function formatProbePlan(plan) {
   if (!plan.availability?.available) {
     lines.push(`  Unavailable: ${plan.availability?.reason || plan.availability?.code || 'not available'}`);
   }
+  if (plan.launch_authorization?.authorized === false) {
+    lines.push(`  Launch permission: ${plan.launch_authorization.reason || 'You do not have permission to launch this probe.'}`);
+  }
   return lines;
 }
 
@@ -373,6 +376,10 @@ async function handleProbeTerminalCommand(command, tabId, execution, launchAdapt
         append(line, index === 0 ? 'builtin-section' : 'builtin-help-row');
       });
       if (!plan.launchable) {
+        execution.setStatus('fail');
+        return true;
+      }
+      if (plan.launch_authorization?.authorized === false) {
         execution.setStatus('fail');
         return true;
       }

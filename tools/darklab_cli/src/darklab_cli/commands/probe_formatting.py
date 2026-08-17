@@ -25,6 +25,7 @@ def print_probe_plan(plan: dict[str, Any]) -> None:
     target = _dict_value(plan.get("target"))
     bounds = _dict_value(plan.get("bounds"))
     availability = _dict_value(plan.get("availability"))
+    authorization = _dict_value(plan.get("launch_authorization"))
     evidence = plan.get("expected_evidence")
     evidence = evidence if isinstance(evidence, list) else []
     profile = _dict_value(plan.get("http_profile"))
@@ -47,6 +48,8 @@ def print_probe_plan(plan: dict[str, Any]) -> None:
     print(f"Approval digest: {str(plan.get('plan_digest') or '')[:12]}")
     if not availability.get("available"):
         print(f"Unavailable: {availability.get('reason') or availability.get('code') or 'not available'}")
+    if authorization.get("authorized") is False:
+        print(f"Launch permission: {authorization.get('reason') or 'You do not have permission to launch this probe.'}")
 
 
 __all__ = ["print_probe_catalog", "print_probe_plan"]

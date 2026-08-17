@@ -47,9 +47,7 @@ def plan_example(*, available: bool = True) -> dict[str, Any]:
             "id": "ping", "revision": "1", "mode": "reachability",
             "label": "Ping", "purpose": "Check whether one approved host responds.",
         },
-        "target": {
-            "entity_id": "ent_example", "type": "domain", "value": "example.test",
-        },
+        "target": {"entity_id": "ent_example", "type": "domain", "value": "example.test"},
         "profile": {}, "profile_details": {},
         "http_profile": {"id": "", "revision": "", "credential_use": "none"},
         "policy_level": "safe", "required_features": ["ping"],
@@ -72,18 +70,20 @@ def plan_example(*, available: bool = True) -> dict[str, Any]:
         },
         "launchable": available, "unavailable_reason": reason,
         "requires_confirmation": True, "plan_digest": _DIGEST,
+        "launch_authorization": {
+            "authorized": True,
+            "required_capabilities": ["run_commands"],
+            "missing_capabilities": [],
+            "reason": "",
+        },
     }
 
 
 def plan_response_examples() -> dict[str, Any]:
     return {
-        "available": {
-            "summary": "Launchable bounded plan",
-            "value": {"plan": plan_example()},
-        },
+        "available": {"summary": "Launchable bounded plan", "value": {"plan": plan_example()}},
         "unavailable": {
-            "summary": "Plan stopped by a feature gate",
-            "value": {"plan": plan_example(available=False)},
+            "summary": "Plan stopped by a feature gate", "value": {"plan": plan_example(available=False)},
         },
     }
 

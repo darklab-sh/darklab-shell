@@ -7,9 +7,9 @@ from flask import jsonify, request
 
 from blueprints import projects as project_routes
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_authorization import probe_launch_authorization
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_service import get_probe_catalog, get_probe_plan
-from services.teams.capabilities import Capability
 
 
 def _probe_error(exc: ProbeError):
@@ -44,9 +44,7 @@ def projects_probes_catalog(project_id):
 @project_routes.projects_bp.get("/projects/<project_id>/probes/plan")
 def projects_probes_plan(project_id):
     http_profile_id = str(request.args.get("http_profile_id") or "").strip()
-    session_id, team_id, error_response = project_routes._project_owner(
-        Capability.MANAGE_SECRETS if http_profile_id else None
-    )
+    session_id, team_id, error_response = project_routes._project_owner()
     if error_response:
         return error_response
     observability = ProbeLogContext(
@@ -61,13 +59,19 @@ def projects_probes_plan(project_id):
         http_profile_id=http_profile_id,
     )
     try:
+        actor = project_routes._project_team_log_context(session_id, team_id)
         plan = get_probe_plan(
             session_id,
             project_id,
             probe_request,
             team_id=team_id,
-            actor_member_id=project_routes._project_actor_member_id(session_id, team_id),
+            actor_member_id=str(actor.get("actor_member_id") or ""),
             observability=observability,
+        )
+        plan["launch_authorization"] = probe_launch_authorization(
+            team_id=team_id,
+            team_role=str(actor.get("actor_role") or ""),
+            protected=bool(http_profile_id),
         )
     except ProbeError as exc:
         return _probe_error(exc)

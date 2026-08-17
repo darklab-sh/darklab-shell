@@ -364,7 +364,7 @@ describe('Project probe terminal', () => {
     expect(commandExecution.setStatus).not.toHaveBeenCalledWith('ok');
   });
 
-  it('settles a declined probe without posting a launch', async () => {
+  it('settles a declined probe and stops unauthorized plans before confirmation', async () => {
     const apiFetch = vi.fn(async () => response({
       plan: {
         project_id: 'prj_1', action: { id: 'ping', label: 'Ping' },
@@ -390,6 +390,47 @@ describe('Project probe terminal', () => {
       '',
       'tab-1',
     );
+
+    const deniedExecution = execution();
+    let deniedPending;
+    setRuntimeHandlers({
+      apiFetch: vi.fn(async () => response({
+        plan: {
+          project_id: 'prj_1', action: { id: 'ping', label: 'Ping' },
+          target: { entity_id: 'ent_1', type: 'domain', value: 'example.test' },
+          policy_level: 'safe', display_command: 'ping -c 4 example.test',
+          bounds: {}, expected_evidence: [], plan_digest: 'f'.repeat(64),
+          availability: { available: true }, launchable: true,
+          launch_authorization: {
+            authorized: false,
+            required_capabilities: ['run_commands'],
+            missing_capabilities: ['run_commands'],
+            reason: "Your Team role doesn't allow probe launches in this scope.",
+          },
+        },
+      })),
+    });
+    await handleProbeTerminalCommand(
+      'probe run ping --entity-id ent_1 --project prj_1',
+      'tab-viewer',
+      deniedExecution,
+      {
+        requestConfirmation: config => { deniedPending = config; },
+        bindStartedRun: vi.fn(),
+      },
+    );
+    expect(deniedPending).toBeUndefined();
+    expect(deniedExecution.appendLine).toHaveBeenCalledWith(
+      "  Launch permission: Your Team role doesn't allow probe launches in this scope.",
+      'builtin-help-row',
+      'tab-viewer',
+    );
+    expect(deniedExecution.appendLine).not.toHaveBeenCalledWith(
+      'Run this probe? Type yes or no.',
+      expect.anything(),
+      'tab-viewer',
+    );
+    expect(deniedExecution.setStatus).toHaveBeenCalledWith('fail');
   });
 
   it('reports a confirmed launch failure with only bounded probe context', async () => {

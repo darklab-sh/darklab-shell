@@ -7,6 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.api_v1.openapi_probe_authorization import (
+    probe_availability_schema,
+    probe_launch_authorization_schema,
+)
+
 
 POLICY_LEVELS = ["safe", "standard", "intrusive", "destructive"]
 TARGET_TYPES = ["domain", "ip", "url"]
@@ -39,17 +44,6 @@ def _empty_or(schema_name: str) -> dict[str, Any]:
             _ref(schema_name),
         ]
     }
-
-
-def _availability() -> dict[str, Any]:
-    return _object(
-        ["available", "code", "reason"],
-        {
-            "available": {"type": "boolean"},
-            "code": {"type": "string"},
-            "reason": {"type": "string"},
-        },
-    )
 
 
 def _template_snapshot() -> dict[str, Any]:
@@ -127,7 +121,7 @@ def _nuclei_profile(*, catalog: bool) -> dict[str, Any]:
 
 def _catalog_schemas() -> dict[str, Any]:
     return {
-        "ProbeAvailability": _availability(),
+        "ProbeAvailability": probe_availability_schema(_object),
         "ProbeTemplateSnapshot": _template_snapshot(),
         "ProbeCompatibleProfiles": _object(
             ["nmap", "nuclei"], {"nmap": _strings(), "nuclei": _strings()},
@@ -284,13 +278,14 @@ def _plan_schemas() -> dict[str, Any]:
                 "summary": {"type": "string"},
             },
         ),
+        "ProbeLaunchAuthorization": probe_launch_authorization_schema(_object, _strings),
         "ProbePlan": _object(
             [
                 "schema_version", "digest_version", "project_id", "action", "target",
                 "profile", "profile_details", "http_profile", "policy_level",
                 "required_features", "feature_gates", "scope", "bounds", "display_command",
                 "expected_evidence", "availability", "launchable", "unavailable_reason",
-                "requires_confirmation", "plan_digest",
+                "requires_confirmation", "plan_digest", "launch_authorization",
             ],
             {
                 "schema_version": {"type": "integer", "enum": [1]},
@@ -319,6 +314,7 @@ def _plan_schemas() -> dict[str, Any]:
                 "unavailable_reason": {"type": "string"},
                 "requires_confirmation": {"type": "boolean"},
                 "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "launch_authorization": _ref("ProbeLaunchAuthorization"),
             },
         ),
         "ProbePlanResponse": _object(["plan"], {"plan": _ref("ProbePlan")}),

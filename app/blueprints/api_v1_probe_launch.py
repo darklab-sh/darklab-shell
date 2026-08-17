@@ -10,6 +10,7 @@ from flask import jsonify, request
 from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_authorization import probe_launch_authorization
 from services.assessments.probe_execution import start_project_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.context import route_audit_fields
@@ -93,6 +94,11 @@ def api_project_probe_launch(project_id):
         return api_routes._api_json_error("spawn_failed", str(exc), 500)
 
     plan, started = result.plan, result.started
+    plan["launch_authorization"] = probe_launch_authorization(
+        team_id=owner_scope.team_id,
+        team_role=str((owner_scope.member or {}).get("role") or ""),
+        protected=bool(http_profile_id),
+    )
     action, target = plan["action"], plan["target"]
     record_event(
         AuditEventType.PROBE_LAUNCH,

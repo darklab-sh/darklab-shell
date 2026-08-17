@@ -8443,6 +8443,12 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         "expected_evidence": ["run"],
         "availability": {"available": True, "code": "", "reason": ""},
         "launchable": True,
+        "launch_authorization": {
+            "authorized": True,
+            "required_capabilities": ["run_commands"],
+            "missing_capabilities": [],
+            "reason": "",
+        },
         "display_command": "ping -c 4 probe.example",
         "plan_digest": "a" * 64,
     }
@@ -8655,6 +8661,20 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "private_values" not in protected_launch_output
     assert "trusted_execution_args" not in json.dumps(calls, default=str)
     assert "private_values" not in json.dumps(calls, default=str)
+
+    plan["launch_authorization"] = {
+        "authorized": False,
+        "required_capabilities": ["run_commands"],
+        "missing_capabilities": ["run_commands"],
+        "reason": "Your Team role doesn't allow probe launches in this scope.",
+    }
+    denied_call_count = len(calls)
+    assert cli_main.main([
+        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
+        "--confirm",
+    ]) == 1
+    assert "doesn't allow probe launches" in capsys.readouterr().err
+    assert [call[1].rsplit("/", 1)[-1] for call in calls[denied_call_count:]] == ["plan"]
 
 
 def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, capsys):

@@ -952,6 +952,14 @@ def test_probe_digest_public_shape_remains_versioned():
         "plan_digest",
     }
     assert plan["digest_version"] == 1
+    caller_specific = deepcopy(plan)
+    caller_specific["launch_authorization"] = {
+        "authorized": False,
+        "required_capabilities": ["run_commands"],
+        "missing_capabilities": ["run_commands"],
+        "reason": "Caller can't launch.",
+    }
+    assert probe_plan_digest(caller_specific) == plan["plan_digest"]
 
 
 def test_probe_confirmation_rebuilds_the_plan_and_rejects_stale_or_extra_fields():

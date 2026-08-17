@@ -10,6 +10,7 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from extensions import limiter
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_authorization import probe_launch_authorization
 from services.assessments.probe_execution import start_project_probe
 from services.assessments.probe_log_context import ProbeLogContext
 from services.audit.models import AuditEventType
@@ -102,6 +103,11 @@ def project_probe_launch(project_id):
             observability=observability,
         )
         plan, started = result.plan, result.started
+        plan["launch_authorization"] = probe_launch_authorization(
+            team_id=team_id,
+            team_role=team_role,
+            protected=bool(http_profile_id),
+        )
     except ProbeError as exc:
         return _error(exc)
     except RunStartRejected as exc:
