@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.api_v1 import openapi_assessment_batches as batches
+from services.api_v1 import openapi_assessment_batch_lifecycle as batch_lifecycle, openapi_assessment_batches as batches
 from services.api_v1.openapi_assessment_deltas import assessment_delta_schemas
 from services.api_v1.openapi_assessment_evidence import assessment_evidence_schemas
 from services.api_v1.openapi_assessment_retests import assessment_retest_schemas
@@ -78,7 +78,7 @@ def _request_body(schema_name: str) -> dict[str, Any]:
 
 def assessment_schemas() -> dict[str, Any]:
     nullable_string = {"type": "string", "nullable": True}
-    return batches.assessment_batch_preview_schemas() | {
+    return batches.assessment_batch_preview_schemas() | batch_lifecycle.assessment_batch_lifecycle_schemas() | {
         **assessment_delta_schemas(),
         **assessment_evidence_schemas(),
         **assessment_retest_schemas(),
@@ -618,7 +618,7 @@ def assessment_paths() -> dict[str, Any]:
         *assessment_worklist_query_params(_query_param),
         *page,
     ]
-    return batches.assessment_batch_preview_paths() | {
+    return batches.assessment_batch_preview_paths() | batch_lifecycle.assessment_batch_lifecycle_paths() | {
         "/projects/{project_id}/assessments": {
             "get": {
                 "parameters": [

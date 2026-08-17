@@ -166,6 +166,10 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compile a 15-minute server-owned assessment-batch preview from explicit target, category, policy, item-limit, and concurrency choices. This viewer-safe route doesn't start commands. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Read the compact summary and approval digest for one current owner-scoped preview. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Page through complete preview items with `cursor` and `limit`; pages contain at most 100 items and 1 MiB. |
+| `GET` | `/api/v1/projects/<project_id>/assessment-batches` | List durable batches newest first, optionally filtered by `assessment_id`; `cursor` and `limit` provide stable pages of at most 100 batches. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>` | Read one durable batch, including its immutable selection, saved concurrency, current status, and progress counts. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>/items` | Page through durable items and their latest attempt with `cursor` and `limit`; pages contain at most 100 items and 1 MiB. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>/events` | Follow sanitized batch events after a sequence `cursor`; `has_more` and `next_cursor` tell a client when to continue paging. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Set or clear a reasoned manual check state. |
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Link one compatible saved evidence source to a check. |
 | `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Unlink one manually added evidence source. |

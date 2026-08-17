@@ -14,6 +14,7 @@ from conftest import reusable_test_app
 from core.database_access import get_db_connect
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.preview_compiler import compile_batch_preview
+from services.assessments.batch.cancellation import cancel_assessment_batch
 from services.assessments.batch.start import start_assessment_batch
 from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.probe_runtime import ProbePlanningRuntime
@@ -80,6 +81,11 @@ def route_cycle(monkeypatch: pytest.MonkeyPatch):
         conn.execute(
             "DELETE FROM assessment_batch_previews WHERE assessment_id = ?",
             (assessment_id,),
+        )
+        conn.execute(
+            "DELETE FROM workflow_executions WHERE project_id = ? "
+            "AND execution_kind = 'assessment_batch'",
+            (project_id,),
         )
         conn.commit()
     delete_project(session_id, project_id)
@@ -226,6 +232,107 @@ def test_api_preview_uses_the_same_digest_pages_and_stable_errors(client, route_
     )
     assert invalid_cursor.status_code == 400
     assert invalid_cursor.get_json()["error"]["code"] == "invalid_preview_cursor"
+
+
+def test_browser_and_api_batch_reads_share_bounded_pages_and_stable_rollups(
+    client,
+    route_cycle,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    batches = [
+        _start_batch(session_id, project_id, assessment_id)
+        for _index in range(2)
+    ]
+    batch_ids = {str(batch["batch_id"]) for batch in batches}
+    first_batch_id = str(batches[0]["batch_id"])
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'skipped', "
+            "error_code = 'failure_limit' WHERE execution_id = ? "
+            "AND step_id = 'chunk_0001' AND ordinal = 0",
+            (first_batch_id,),
+        )
+        conn.commit()
+
+    browser_headers = _browser_headers(session_id)
+    api_headers = _api_headers(session_id)
+    browser_list = client.get(
+        f"/projects/{project_id}/assessment-batches",
+        query_string={"assessment_id": assessment_id, "limit": 1},
+        headers=browser_headers,
+    )
+    assert browser_list.status_code == 200
+    browser_page = browser_list.get_json()
+    assert len(browser_page["batches"]) == 1
+    assert browser_page["has_more"] is True
+    browser_next = client.get(
+        f"/projects/{project_id}/assessment-batches",
+        query_string={"cursor": browser_page["next_cursor"], "limit": 1},
+        headers=browser_headers,
+    ).get_json()
+    assert {batch["batch_id"] for batch in [*browser_page["batches"], *browser_next["batches"]]} == batch_ids
+    assert browser_next["has_more"] is False
+
+    api_list = client.get(
+        f"/api/v1/projects/{project_id}/assessment-batches",
+        query_string={"assessment_id": assessment_id},
+        headers=api_headers,
+    )
+    assert api_list.status_code == 200
+    assert {batch["batch_id"] for batch in api_list.get_json()["batches"]} == batch_ids
+
+    for prefix, headers in (("", browser_headers), ("/api/v1", api_headers)):
+        detail = client.get(
+            f"{prefix}/assessment-batches/{first_batch_id}", headers=headers
+        )
+        assert detail.status_code == 200
+        progress = detail.get_json()["batch"]["progress"]
+        assert (progress["pending"], progress["skipped"], progress["canceled"]) == (
+            1,
+            1,
+            0,
+        )
+        items = client.get(
+            f"{prefix}/assessment-batches/{first_batch_id}/items",
+            query_string={"limit": 1},
+            headers=headers,
+        )
+        assert items.status_code == 200
+        item_page = items.get_json()
+        assert item_page["has_more"] is True
+        assert item_page["next_cursor"] == 1
+        assert item_page["items"][0]["status"] == "skipped"
+        assert item_page["items"][0]["check_count"] >= 1
+        events = client.get(
+            f"{prefix}/assessment-batches/{first_batch_id}/events",
+            query_string={"limit": 1},
+            headers=headers,
+        )
+        assert events.status_code == 200
+        event_page = events.get_json()
+        assert event_page["has_more"] is True
+        assert event_page["next_cursor"] == 1
+        assert event_page["events"][0]["event_type"] == "parent_created"
+
+    foreign = "tok_batch_routes_read_foreign_" + uuid.uuid4().hex
+    _register_token(foreign)
+    hidden = client.get(
+        f"/api/v1/assessment-batches/{first_batch_id}",
+        headers=_api_headers(foreign),
+    )
+    assert hidden.status_code == 404
+    assert hidden.get_json()["error"]["code"] == "batch_not_found"
+    invalid = client.get(
+        f"/api/v1/projects/{project_id}/assessment-batches",
+        query_string={"cursor": "not-a-cursor"},
+        headers=api_headers,
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_batch_cursor"
+
+    for batch_id in batch_ids:
+        canceled = cancel_assessment_batch(session_id, batch_id)
+        assert canceled is not None
 
 
 @pytest.mark.parametrize("prefix", ["", "/api/v1"])

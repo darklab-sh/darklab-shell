@@ -585,6 +585,91 @@
         ],
         "type": "object"
       },
+      "AssessmentBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_id": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "chunk_count": {
+            "maximum": 16,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "concurrency": {
+            "$ref": "#/components/schemas/AssessmentBatchConcurrency"
+          },
+          "created": {
+            "type": "string"
+          },
+          "failure_code": {
+            "type": "string"
+          },
+          "finished": {
+            "type": "string"
+          },
+          "item_count": {
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "next_event_sequence": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "preview_id": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/AssessmentBatchProgress"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "source_batch_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "batch_id",
+          "assessment_id",
+          "project_id",
+          "preview_id",
+          "preview_digest",
+          "source_batch_id",
+          "status",
+          "item_count",
+          "chunk_count",
+          "concurrency",
+          "progress",
+          "next_event_sequence",
+          "created",
+          "updated",
+          "finished",
+          "failure_code"
+        ],
+        "type": "object"
+      },
       "AssessmentBatchCheckMapping": {
         "additionalProperties": false,
         "properties": {
@@ -614,6 +699,310 @@
           "target_entity_id",
           "coverage_key",
           "frozen_check_digest"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchConcurrency": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "instance": {
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "owner": {
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch",
+          "target",
+          "owner",
+          "instance"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "chunk_index": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "created": {
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "item_ordinal": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "retry_batch_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "source_batch_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "batch_id",
+          "sequence",
+          "event_type",
+          "chunk_index",
+          "item_ordinal",
+          "status",
+          "reason_code",
+          "run_id",
+          "source_batch_id",
+          "retry_batch_id",
+          "details",
+          "created"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchEventPage": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatchEvent"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "batch_id",
+          "events",
+          "next_cursor",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "attempt": {
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "check_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chunk_id": {
+            "type": "string"
+          },
+          "chunk_ordinal": {
+            "maximum": 31,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created": {
+            "type": "string"
+          },
+          "display_command": {
+            "type": "string"
+          },
+          "duration_bound_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finished": {
+            "type": "string"
+          },
+          "item_index": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "policy_level": {
+            "enum": [
+              "safe",
+              "standard"
+            ],
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id",
+              "type",
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "item_index",
+          "chunk_id",
+          "chunk_ordinal",
+          "policy_level",
+          "action_id",
+          "target",
+          "display_command",
+          "duration_bound_seconds",
+          "check_count",
+          "attempt",
+          "status",
+          "run_id",
+          "exit_code",
+          "reason_code",
+          "created",
+          "started",
+          "finished"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchItemPage": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatchItem"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "batch_id",
+          "items",
+          "next_cursor",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchList": {
+        "additionalProperties": false,
+        "properties": {
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatch"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "batches",
+          "next_cursor",
+          "has_more"
         ],
         "type": "object"
       },
@@ -1025,6 +1414,93 @@
           "estimated_min_seconds",
           "estimated_max_seconds",
           "estimate_label"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "canceled": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "could_not_cancel": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "launching": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pending": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "running": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settled": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "skipped": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "canceling",
+              "completed",
+              "failed",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "succeeded": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unavailable": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "pending",
+          "launching",
+          "running",
+          "succeeded",
+          "failed",
+          "unavailable",
+          "canceled",
+          "skipped",
+          "could_not_cancel",
+          "settled",
+          "status"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/AssessmentBatch"
+          }
+        },
+        "required": [
+          "batch"
         ],
         "type": "object"
       },
@@ -12214,6 +12690,245 @@
         "summary": "Page through assessment batch preview items"
       }
     },
+    "/assessment-batches/{batch_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchResponse"
+                }
+              }
+            },
+            "description": "Current assessment-batch state"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment batch page or cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or assessment batch not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Read one durable assessment batch"
+      }
+    },
+    "/assessment-batches/{batch_id}/events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchEventPage"
+                }
+              }
+            },
+            "description": "Bounded event page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment batch page or cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or assessment batch not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Follow sanitized assessment-batch events"
+      }
+    },
+    "/assessment-batches/{batch_id}/items": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchItemPage"
+                }
+              }
+            },
+            "description": "Bounded item page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment batch page or cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or assessment batch not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Page through assessment-batch items"
+      }
+    },
     "/atlas": {
       "get": {
         "parameters": [
@@ -14229,6 +14944,97 @@
             "description": "Rate limit exceeded"
           }
         }
+      }
+    },
+    "/projects/{project_id}/assessment-batches": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assessment_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchList"
+                }
+              }
+            },
+            "description": "Bounded assessment-batch page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment batch page or cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project or assessment batch not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "List durable assessment batches for a Project"
       }
     },
     "/projects/{project_id}/assessments": {

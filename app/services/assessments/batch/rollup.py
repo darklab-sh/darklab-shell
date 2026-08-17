@@ -36,6 +36,7 @@ def derive_batch_progress(
         "failed": 0,
         "unavailable": 0,
         "canceled": 0,
+        "skipped": 0,
         "could_not_cancel": 0,
     }
     for row in rows:
@@ -51,7 +52,7 @@ def derive_batch_progress(
         elif status == "failed" and error_code in BATCH_UNAVAILABLE_ERROR_CODES:
             counts["unavailable"] += 1
         else:
-            counts[status if status != "skipped" else "canceled"] += 1
+            counts[status] += 1
 
     active = counts["launching"] + counts["running"]
     unsettled = counts["pending"] + active

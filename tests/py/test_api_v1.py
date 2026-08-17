@@ -7690,6 +7690,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     batch_preview_path = assessment_path + "/batch-previews"
     batch_preview_read_path = "/assessment-batch-previews/{preview_id}"
     batch_preview_items_path = batch_preview_read_path + "/items"
+    batch_list_path = "/projects/{project_id}/assessment-batches"
+    batch_path = "/assessment-batches/{batch_id}"
+    batch_items_path = batch_path + "/items"
+    batch_events_path = batch_path + "/events"
     check_path = assessment_path + "/checks/{check_id}"
     action_path = check_path + "/recommended-action"
     zap_plan_path = check_path + "/zap-plan"
@@ -7707,6 +7711,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[batch_preview_path]) == {"post"}
     assert set(paths[batch_preview_read_path]) == {"get"}
     assert set(paths[batch_preview_items_path]) == {"get"}
+    assert set(paths[batch_list_path]) == {"get"}
+    assert set(paths[batch_path]) == {"get"}
+    assert set(paths[batch_items_path]) == {"get"}
+    assert set(paths[batch_events_path]) == {"get"}
     assert set(paths[check_path]) == {"patch"}
     assert set(paths[action_path]) == {"get", "post"}
     assert set(paths[zap_plan_path]) == {"post"}
@@ -7740,6 +7748,19 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
     assert schemas["AssessmentBatchPreviewItemPage"]["properties"]["items"][
+        "maxItems"
+    ] == 100
+    assert schemas["AssessmentBatchProgress"]["properties"]["skipped"] == {
+        "type": "integer",
+        "minimum": 0,
+    }
+    assert paths[batch_list_path]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchList"}
+    assert schemas["AssessmentBatchItemPage"]["properties"]["items"][
+        "maxItems"
+    ] == 100
+    assert schemas["AssessmentBatchEventPage"]["properties"]["events"][
         "maxItems"
     ] == 100
     assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"][

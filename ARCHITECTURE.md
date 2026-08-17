@@ -289,6 +289,10 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview without starting a coordinator or run. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
+| `GET` | `/api/v1/projects/<project_id>/assessment-batches` | Returns a cursor-paged owner-scoped list of durable assessment batches, optionally narrowed to one assessment cycle. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>` | Returns one durable batch with current aggregate progress and immutable launch context. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>/items` | Returns a count- and byte-bounded page of durable items with their latest attempt state. |
+| `GET` | `/api/v1/assessment-batches/<batch_id>/events` | Returns the sanitized durable event stream after an acknowledged sequence cursor. |
 | `PATCH` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Sets or clears a reasoned manual decision on an active check. |
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Validates and links one compatible saved source to an active check. |
 | `DELETE` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Removes one manually added evidence link and recalculates the active check. |
@@ -699,6 +703,10 @@ Assessment complete, archive, and delete requests and Project deletion lock that
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview for a browser viewer without starting work. |
 | `GET` | `/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
 | `GET` | `/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
+| `GET` | `/projects/<project_id>/assessment-batches` | Returns a cursor-paged owner-scoped list of durable assessment batches, optionally narrowed to one assessment cycle. |
+| `GET` | `/assessment-batches/<batch_id>` | Returns one durable batch with current aggregate progress and immutable launch context. |
+| `GET` | `/assessment-batches/<batch_id>/items` | Returns a count- and byte-bounded page of durable items with their latest attempt state. |
+| `GET` | `/assessment-batches/<batch_id>/events` | Returns the sanitized durable event stream after an acknowledged sequence cursor. |
 | `PATCH` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>` | Sets or clears a reasoned manual decision on one active assessment check. |
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence` | Validates and links one compatible saved source to an active assessment check. |
 | `DELETE` | `/projects/<project_id>/assessments/<assessment_id>/checks/<check_id>/evidence/<evidence_link_id>` | Removes one manually added evidence link and recalculates the active check. |

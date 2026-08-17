@@ -14,6 +14,7 @@ BATCH_EVENT_SCHEMA_VERSION = 1
 BATCH_PREVIEW_TTL_SECONDS = 15 * 60
 BATCH_PREVIEW_PAGE_MAX_ITEMS = 100
 BATCH_PREVIEW_PAGE_MAX_BYTES = 1024 * 1024
+BATCH_READ_PAGE_MAX_ITEMS = 100
 BATCH_PREVIEW_REQUEST_MAX_BYTES = 64 * 1024
 BATCH_PREVIEW_BUILD_MAX_BYTES = 16 * 1024 * 1024
 BATCH_PREVIEW_MAX_CHECK_ROWS = 50_000
@@ -93,6 +94,7 @@ class BatchProgress:
     failed: int
     unavailable: int
     canceled: int
+    skipped: int
     could_not_cancel: int
     status: str
 
@@ -103,6 +105,7 @@ class BatchProgress:
             + self.failed
             + self.unavailable
             + self.canceled
+            + self.skipped
             + self.could_not_cancel
         )
 
@@ -137,6 +140,7 @@ __all__ = [
     "BATCH_PREVIEW_MAX_CHECK_ROWS",
     "BATCH_PREVIEW_MAX_TARGET_SELECTIONS",
     "BATCH_PREVIEW_TTL_SECONDS",
+    "BATCH_READ_PAGE_MAX_ITEMS",
     "BATCH_RETENTION_DAYS",
     "BATCH_SCHEMA_VERSION",
     "BATCH_TARGET_PARALLEL",

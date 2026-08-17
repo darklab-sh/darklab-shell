@@ -80,12 +80,14 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
         {"status": "failed", "error_code": "child_failed"},
         {"status": "failed", "error_code": "feature_unavailable"},
         {"status": "pending", "error_code": ""},
+        {"status": "skipped", "error_code": "failure_limit"},
         {"status": "failed", "error_code": "could_not_cancel"},
     ]
     progress = derive_batch_progress(children)
     assert progress.status == "running"
     assert (progress.succeeded, progress.failed, progress.unavailable) == (1, 1, 1)
     assert progress.could_not_cancel == 1
+    assert progress.skipped == 1
     assert (
         derive_batch_progress(children, cancellation_requested=True).status
         == "canceling"
@@ -360,6 +362,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
         "failed": 0,
         "unavailable": 0,
         "canceled": 0,
+        "skipped": 0,
         "could_not_cancel": 0,
         "status": "queued",
         "settled": 0,
