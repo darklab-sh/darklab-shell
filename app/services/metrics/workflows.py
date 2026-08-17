@@ -10,6 +10,7 @@ from typing import Any
 from prometheus_client import Counter, Histogram
 
 from services.metrics import assessment_batch_lifecycle as assessment_batch_lifecycle_metrics
+from services.metrics import assessment_batch_observability as assessment_batch_observability_metrics
 from services.metrics import assessment_batches as assessment_batch_metrics
 
 
@@ -88,6 +89,9 @@ LABEL_CARDINALITY_POLICIES.update(assessment_batch_metrics.LABEL_CARDINALITY_POL
 LABEL_CARDINALITY_POLICIES.update(
     assessment_batch_lifecycle_metrics.LABEL_CARDINALITY_POLICIES
 )
+LABEL_CARDINALITY_POLICIES.update(
+    assessment_batch_observability_metrics.LABEL_CARDINALITY_POLICIES
+)
 
 METRIC_DEFINITIONS = (
     WORKFLOW_EXECUTIONS_FINISHED,
@@ -99,8 +103,13 @@ METRIC_DEFINITIONS = (
     WORKFLOW_RECOVERY_ACTIONS_TOTAL,
     *assessment_batch_metrics.METRIC_DEFINITIONS,
     *assessment_batch_lifecycle_metrics.METRIC_DEFINITIONS,
+    *assessment_batch_observability_metrics.METRIC_DEFINITIONS,
 )
-HISTOGRAM_DEFINITIONS = (WORKFLOW_EXECUTION_DURATION, WORKFLOW_STEP_DURATION)
+HISTOGRAM_DEFINITIONS = (
+    WORKFLOW_EXECUTION_DURATION,
+    WORKFLOW_STEP_DURATION,
+    *assessment_batch_observability_metrics.HISTOGRAM_DEFINITIONS,
+)
 
 
 def _enum(value: str, allowed: frozenset[str], fallback: str) -> str:

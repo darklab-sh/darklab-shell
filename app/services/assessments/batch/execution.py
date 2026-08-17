@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 
 from services.assessments.batch.claim import claim_next_batch_item
@@ -21,6 +22,7 @@ from services.assessments.batch.recovery_stop import (
     stop_assessment_batch_for_recovery,
 )
 from services.assessments.batch.settings import assessment_batch_settings
+from services.metrics_lazy import app_metrics
 from services.workflows import storage
 from services.workflows.execution_authorization import (
     current_execution_role,
@@ -32,6 +34,15 @@ from services.workflows.fanout_launch_state import fail_launching_fanout_child
 
 
 log = logging.getLogger("shell")
+
+
+def _integer(value: object, default: int = 0) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _parent_is_terminal(result: Mapping[str, object] | None) -> bool:
+    transition = result.get("parent_transition") if result else None
+    return isinstance(transition, Mapping) and bool(transition.get("terminal"))
 
 
 def _execution(batch_id: str) -> dict[str, object] | None:
@@ -73,11 +84,11 @@ def _record_launch(claim: Mapping[str, object]) -> None:
     append_batch_event(
         str(claim.get("batch_id") or ""),
         "item_launched",
-        chunk_index=int(claim.get("chunk_index") or 0),
-        item_ordinal=int(claim.get("item_index") or 0),
+        chunk_index=_integer(claim.get("chunk_index")),
+        item_ordinal=_integer(claim.get("item_index")),
         status="launching",
         details={
-            "attempt": int(child.get("attempt") or 1)
+            "attempt": _integer(child.get("attempt"), 1)
             if isinstance(child, Mapping)
             else 1
         },
@@ -103,6 +114,8 @@ def launch_assessment_batch(batch_id: str) -> dict[str, object]:
         claim_status = str(claim.get("status") or "")
         if claim_status != "claimed":
             reason_code = str(claim.get("reason_code") or "")
+            if claim_status == "deferred":
+                app_metrics.record_assessment_batch_deferral(reason_code)
             break
         child = claim.get("child")
         item = claim.get("item")
@@ -113,17 +126,23 @@ def launch_assessment_batch(batch_id: str) -> dict[str, object]:
                 status_code=409,
             )
         child_id = str(child.get("id") or "")
+        launch_started = time.perf_counter()
         try:
             launch_spec = build_batch_child_launch_spec(execution, item)
         except AssessmentBatchError as exc:
+            app_metrics.record_assessment_batch_rejection(exc.code)
+            app_metrics.record_assessment_batch_launch(
+                "rejected", time.perf_counter() - launch_started
+            )
             settled = fail_launching_fanout_child(child_id, exc.code)
             reason_code = exc.code
-            if not settled or bool(
-                (settled.get("parent_transition") or {}).get("terminal")
-            ):
+            if not settled or _parent_is_terminal(settled):
                 break
             continue
         except Exception as exc:
+            app_metrics.record_assessment_batch_launch(
+                "failed", time.perf_counter() - launch_started
+            )
             settled = fail_launching_fanout_child(child_id, "launch_failed")
             reason_code = "launch_failed"
             log.error(
@@ -131,22 +150,30 @@ def launch_assessment_batch(batch_id: str) -> dict[str, object]:
                 exc_info=True,
                 extra={
                     "batch_id": str(batch_id),
-                    "item_index": int(claim.get("item_index") or 0),
+                    "item_index": _integer(claim.get("item_index")),
                     "error_type": type(exc).__name__,
                 },
             )
-            if not settled or bool(
-                (settled.get("parent_transition") or {}).get("terminal")
-            ):
+            if not settled or _parent_is_terminal(settled):
                 break
             continue
         _record_launch(claim)
-        started, _state = launch_fanout_child(
-            execution,
-            str(claim.get("step_id") or ""),
-            child,
-            current_role,
-            launch_spec,
+        try:
+            started, _state = launch_fanout_child(
+                execution,
+                str(claim.get("step_id") or ""),
+                child,
+                current_role,
+                launch_spec,
+            )
+        except Exception:
+            app_metrics.record_assessment_batch_launch(
+                "failed", time.perf_counter() - launch_started
+            )
+            raise
+        app_metrics.record_assessment_batch_launch(
+            "launched" if started else "failed",
+            time.perf_counter() - launch_started,
         )
         if started:
             launched += 1

@@ -32,6 +32,7 @@ from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.run_launch_context import AssessmentRunLaunchContext
 from services.notifications import channels_store
 from services.notifications.models import NotificationEvent
+from services.metrics.assessment_batch_state import assessment_batch_metric_families
 from services.runs.start_contracts import BrokeredRunStartResult
 from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.executions import finalize_workflow_run
@@ -231,6 +232,7 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
 ):
     batch = batch_builder()
     captured: dict[str, object] = {}
+    launch_metrics: list[tuple[str, float]] = []
 
     def fake_spec(_execution, item):
         return ChildLaunchSpec(
@@ -250,6 +252,10 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
     )
     monkeypatch.setattr("blueprints.run.broker_available", lambda: True)
     monkeypatch.setattr("blueprints.run._start_brokered_run_service", fake_start)
+    monkeypatch.setattr(
+        "services.assessments.batch.execution.app_metrics.record_assessment_batch_launch",
+        lambda outcome, duration: launch_metrics.append((outcome, duration)),
+    )
 
     result = launch_assessment_batch(batch["batch_id"])
 
@@ -259,6 +265,9 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
     assert captured["original_command"] == expected
     assert captured["link_project_id"] == batch["project_id"]
     assert captured["suppress_run_complete_notification"] is True
+    assert len(launch_metrics) == 1
+    assert launch_metrics[0][0] == "launched"
+    assert launch_metrics[0][1] >= 0
     with get_db_connect()() as conn:
         child = conn.execute(
             "SELECT run_id, status FROM workflow_execution_children "
@@ -279,6 +288,8 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
     batch = batch_builder()
     _add_batch_notification_channels(batch)
     starts: list[str] = []
+    rejections: list[str] = []
+    launch_metrics: list[tuple[str, float]] = []
     monkeypatch.setattr(
         "services.assessments.batch.execution.build_batch_child_launch_spec",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -289,10 +300,20 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
         "blueprints.run._start_brokered_run_service",
         lambda **_kwargs: starts.append("started"),
     )
+    monkeypatch.setattr(
+        "services.assessments.batch.execution.app_metrics.record_assessment_batch_rejection",
+        lambda code: rejections.append(code),
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.execution.app_metrics.record_assessment_batch_launch",
+        lambda outcome, duration: launch_metrics.append((outcome, duration)),
+    )
 
     result = launch_assessment_batch(batch["batch_id"])
 
     assert starts == []
+    assert rejections == ["plan_changed"]
+    assert len(launch_metrics) == 1 and launch_metrics[0][0] == "rejected"
     assert result["status"] == "completed"
     with get_db_connect()() as conn:
         children = conn.execute(
@@ -309,6 +330,71 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
     summary = _batch_notification_events(batch)[0]["payload"]["summary_fields"]
     assert summary["unavailable"] == 1
     assert summary["succeeded"] == 0
+
+
+def test_batch_metrics_derive_active_queue_and_terminal_outcomes(batch_builder):
+    batch = batch_builder()
+
+    with get_db_connect()() as conn:
+        queued_families = assessment_batch_metric_families(conn)
+    queued_samples = {
+        (sample.name, tuple(sample.labels.items())): sample.value
+        for family in queued_families
+        for sample in family.samples
+    }
+    assert queued_samples[
+        ("darklab_assessment_batches_active", (("status", "queued"),))
+    ] == 1
+    assert queued_samples[("darklab_assessment_batch_queue_depth", ())] == 1
+    assert queued_samples[
+        ("darklab_assessment_batch_items_retained", (("outcome", "pending"),))
+    ] == 1
+
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'completed' WHERE id = ?",
+            (batch["batch_id"],),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'failed', "
+            "error_code = 'plan_changed' WHERE execution_id = ?",
+            (batch["batch_id"],),
+        )
+        conn.commit()
+        terminal_families = assessment_batch_metric_families(conn)
+    terminal_samples = {
+        (sample.name, tuple(sample.labels.items())): sample.value
+        for family in terminal_families
+        for sample in family.samples
+    }
+    assert terminal_samples[
+        ("darklab_assessment_batches_retained", (("outcome", "partial"),))
+    ] == 1
+    assert terminal_samples[
+        ("darklab_assessment_batch_items_retained", (("outcome", "unavailable"),))
+    ] == 1
+
+
+def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch):
+    batch = batch_builder()
+    deferrals: list[str] = []
+    monkeypatch.setattr(
+        "services.assessments.batch.execution.claim_next_batch_item",
+        lambda _batch_id: {
+            "status": "deferred",
+            "reason_code": "owner_parallel_limit",
+        },
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.execution.app_metrics.record_assessment_batch_deferral",
+        lambda reason: deferrals.append(reason),
+    )
+
+    result = launch_assessment_batch(batch["batch_id"])
+
+    assert result["launched"] == 0
+    assert result["reason_code"] == "owner_parallel_limit"
+    assert deferrals == ["owner_parallel_limit"]
 
 
 def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(

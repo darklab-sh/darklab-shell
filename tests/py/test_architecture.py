@@ -686,6 +686,16 @@ _MODULE_SIZE_RATCHET = (
         44,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/services/metrics/assessment_batch_observability.py",
+        125,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/metrics/assessment_batch_state.py",
+        155,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/metrics/probes.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/runs/broker_worker.py", 496, "split-package-ratchet"),
