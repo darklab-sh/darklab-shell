@@ -58,6 +58,15 @@ def _normalize_context_suggestion(item):
     value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
     if value_type:
         result["value_type"] = value_type
+    raw_target_types = item.get("target_types")
+    if isinstance(raw_target_types, (list, tuple, set, frozenset)):
+        target_types = [
+            str(target_type or "").strip().lower()
+            for target_type in raw_target_types
+            if str(target_type or "").strip()
+        ]
+        if target_types:
+            result["target_types"] = list(dict.fromkeys(target_types))
     raw_position = item.get("position") or item.get("order") or item.get("argument_position")
     raw_position = raw_position or item.get("argument_order")
     position = _coerce_positive_int(raw_position, 0)
@@ -104,7 +113,7 @@ def _normalize_smoke_metadata(raw_value):
     return result or None
 
 
-def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
+def filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
     filtered: dict[str, dict] = {}
     for root, raw_spec in (context or {}).items():
         if not isinstance(raw_spec, dict):

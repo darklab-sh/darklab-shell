@@ -247,7 +247,7 @@ def _save_dalfox_parameter_evidence(
     target: str,
 ) -> tuple[str, list[dict[str, object]]]:
     command = (
-        f"dalfox {target} --only-discovery --skip-mining-dict "
+        f"dalfox scan {target} --only-discovery --skip-mining-dict "
         "--format jsonl --no-color"
     )
     state = DalfoxParameterObservationState(command, run_id)
@@ -288,7 +288,7 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
         cleanup,
         session_id,
         project_id,
-        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl "
+        f"dalfox scan {target} --only-discovery --skip-mining-dict --format jsonl "
         "--no-color --timeout 10 --scan-timeout 60 --rate-limit 10 --workers 5 "
         "--max-concurrent-targets 1 --max-targets-per-host 1",
     )
@@ -353,7 +353,7 @@ def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_dr
         cleanup,
         session_id,
         project_id,
-        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl --no-color",
+        f"dalfox scan {target} --only-discovery --skip-mining-dict --format jsonl --no-color",
     )
     observation_id, preview = _save_dalfox_parameter_evidence(run_id, target)
 
@@ -392,7 +392,7 @@ def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_dr
             cleanup,
             session_id,
             project_id,
-            f"dalfox {target} --skip-discovery --format jsonl",
+            f"dalfox scan {target} --skip-discovery --format jsonl",
         )
         drift_observation_id, _drift_preview = _save_dalfox_parameter_evidence(
             drift_run_id,
@@ -478,7 +478,7 @@ def test_assessment_xss_preview_confirms_and_materializes_only_selected_saved_ev
         cleanup,
         session_id,
         project_id,
-        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl "
+        f"dalfox scan {target} --only-discovery --skip-mining-dict --format jsonl "
         "--no-color --timeout 10 --scan-timeout 60 --rate-limit 10 --workers 5 "
         "--max-concurrent-targets 1 --max-targets-per-host 1",
     )
@@ -514,7 +514,7 @@ def test_assessment_xss_preview_confirms_and_materializes_only_selected_saved_ev
         },
     )
     assert selected["launchable"] is True
-    assert selected["display_command"].startswith("dalfox ")
+    assert selected["display_command"].startswith("dalfox scan ")
     assert "--input-type url --param q:query" in selected["display_command"]
     assert selected["evidence_selection"]["selected"]["observation_id"] == observation_id
     confirmed = confirm_recommended_action_plan(
@@ -718,12 +718,12 @@ def test_rule_matching_requires_root_completion_version_target_and_structured_ev
 
 def test_dalfox_evidence_modes_keep_discovery_and_active_clean_runs_distinct():
     discovery_command = (
-        "dalfox https://example.com/search?q=one --only-discovery --skip-mining-dict "
+        "dalfox scan https://example.com/search?q=one --only-discovery --skip-mining-dict "
         "--format jsonl --no-color --timeout 10 --scan-timeout 60 --rate-limit 10 "
         "--workers 5 --max-concurrent-targets 1 --max-targets-per-host 1"
     )
     active_command = (
-        "dalfox https://example.com/search?q=one --input-type url --param q:query "
+        "dalfox scan https://example.com/search?q=one --input-type url --param q:query "
         "--skip-discovery --skip-mining --format jsonl --no-color --timeout 10 "
         "--scan-timeout 60 --retries 0 --rate-limit 2 --workers 1 "
         "--max-concurrent-targets 1 --max-targets-per-host 1 "
@@ -732,6 +732,12 @@ def test_dalfox_evidence_modes_keep_discovery_and_active_clean_runs_distinct():
     )
     assert assessment_command_mode(discovery_command) == DALFOX_PARAMETER_DISCOVERY_MODE
     assert assessment_command_mode(active_command) == DALFOX_XSS_VALIDATION_MODE
+    assert assessment_command_mode(
+        discovery_command.replace("dalfox scan ", "dalfox ", 1)
+    ) == DALFOX_PARAMETER_DISCOVERY_MODE
+    assert assessment_command_mode(
+        active_command.replace("dalfox scan ", "dalfox url ", 1)
+    ) == DALFOX_XSS_VALIDATION_MODE
     assert assessment_command_mode(
         discovery_command + " --config [protected]"
     ) == DALFOX_PARAMETER_DISCOVERY_MODE

@@ -17,12 +17,21 @@ function responseError(payload, status, fallback) {
   return error;
 }
 
+function liveFocusTarget(target) {
+  if (target?.isConnected) return target;
+  const key = text(target?.dataset?.projectAssessmentActionFocus);
+  if (!key || typeof document === 'undefined') return target;
+  return [...document.querySelectorAll('[data-project-assessment-action-focus]')]
+    .find(node => node.dataset.projectAssessmentActionFocus === key) || target;
+}
+
 function restoreFocus(target) {
-  if (!target?.isConnected || target.disabled || typeof target.focus !== 'function') return;
+  const focusTarget = liveFocusTarget(target);
+  if (!focusTarget?.isConnected || focusTarget.disabled || typeof focusTarget.focus !== 'function') return;
   try {
-    target.focus({ preventScroll: true });
+    focusTarget.focus({ preventScroll: true });
   } catch (_) {
-    target.focus();
+    focusTarget.focus();
   }
 }
 
@@ -93,7 +102,7 @@ function profileIssue(profile) {
 
 function supportsHttpProfile(check) {
   const [kind, actionId] = String(check?.recommended_action_key || '').split(':', 2);
-  return kind === 'command' && ['curl', 'httpx', 'katana', 'nuclei', 'dalfox', 'sqlmap'].includes(actionId);
+  return kind === 'command' && ['curl', 'httpx', 'katana', 'dalfox', 'sqlmap'].includes(actionId);
 }
 
 async function chooseHttpProfile(confirm, profiles) {

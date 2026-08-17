@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, cast
 from urllib.parse import urlsplit
 
+import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.http_profile_contracts import HttpProfileError
 from services.assessments.command_plans import command_plan
@@ -33,11 +34,15 @@ from services.secrets.storage import get_secret_value_by_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
 
-_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "nuclei", "dalfox", "sqlmap"})
+_SUPPORTED_TOOLS = frozenset({"curl", "httpx", "katana", "dalfox", "sqlmap"})
 _UNSUPPORTED_SECRET_SLOTS = frozenset({
     "client_key_passphrase",
     "proxy_authorization",
 })
+NUCLEI_HTTP_PROFILE_UNAVAILABLE = (
+    "Nuclei can't safely enforce this HTTP profile's exact scheme, port, root, "
+    "included paths, and excluded paths. Run the Nuclei profile without an HTTP profile."
+)
 
 
 def _sqlmap_validation_command(target_value: str, concurrency: object) -> str:
@@ -68,7 +73,17 @@ def _credential_use(profile: Mapping[str, Any]) -> list[str]:
     return sorted(uses)
 
 
+def _public_scope(profile: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Return only the saved request boundary an operator can safely review."""
+    return {
+        key: [str(value) for value in profile.get(key, [])]
+        for key in ("allowed_hosts", "scope_roots", "include_paths", "exclude_paths")
+    }
+
+
 def _unsupported_reason(profile: Mapping[str, Any], tool: str) -> str:
+    if tool == "nuclei":
+        return NUCLEI_HTTP_PROFILE_UNAVAILABLE
     if tool not in _SUPPORTED_TOOLS:
         return "This assessment tool does not yet have a protected HTTP-profile adapter."
     if profile.get("proxy_url"):
@@ -108,6 +123,7 @@ def load_http_profile_plan_context(
         "name": profile["name"],
         "role": profile["role"],
         "credential_use": _credential_use(profile),
+        "scope": _public_scope(profile),
         "enabled": bool(profile["enabled"]),
         "revision": int(profile["revision"]),
         "rate_limit_per_second": int(profile["rate_limit_per_second"]),
@@ -202,7 +218,10 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
     if tool in {"curl", "httpx", "dalfox", "sqlmap"}:
         return []
     if tool == "nuclei":
-        return ["-dr", "-ni"]
+        raise HttpProfileExecutionError(
+            "http_profile_tool_unsupported",
+            NUCLEI_HTTP_PROFILE_UNAVAILABLE,
+        )
     raw_host = str(urlsplit(target_value).hostname or "")
     host = re.escape(f"[{raw_host}]" if ":" in raw_host else raw_host)
     arguments = ["-fs", "fqdn"]
@@ -268,6 +287,9 @@ def materialize_http_profile_launch(
         web_target=target_value,
         http_profile=summary,
         protected_display=False,
+        allow_intrusive=bool(
+            app_config.CFG.get("assessment_intrusive_actions_enabled", False)
+        ),
     )
     if protected_command is None:
         raise HttpProfileExecutionError(

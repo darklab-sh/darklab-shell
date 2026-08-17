@@ -19,6 +19,7 @@ from services.api_v1.openapi_findings import finding_schemas
 from services.api_v1.openapi_finding_evidence import finding_evidence_paths, finding_evidence_schemas
 from services.api_v1.openapi_http_profiles import http_profile_paths, http_profile_schemas
 from services.api_v1.openapi_osv_lookup import osv_lookup_paths, osv_lookup_schemas
+from services.api_v1.openapi_probes import probe_paths, probe_schemas
 from services.api_v1.openapi_verification_actions import verification_action_paths as action_paths, verification_action_schemas
 from services.scheduler.models import CADENCE_PRESETS
 from services.watchers.models import (
@@ -573,6 +574,7 @@ OPENAPI_SPEC: dict = {
             },
             **cve_risk_schemas(),
             **osv_lookup_schemas(),
+            **probe_schemas(),
             **finding_schemas(),
             "AtlasFindingPage": {
                 "type": "object",
@@ -1552,6 +1554,7 @@ OPENAPI_SPEC: dict = {
         | http_profile_paths()
         | manual.manual_finding_paths()
         | osv_lookup_paths()
+        | probe_paths()
         | run_evidence.run_evidence_paths()
         | action_paths()
         | {

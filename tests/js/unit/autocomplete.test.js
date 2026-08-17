@@ -1075,7 +1075,12 @@ describe('autocomplete helpers', () => {
   })
 
   it('walks nested subcommands before suggesting the next project argument', () => {
-    const { getAutocompleteMatches, setProjectAutocompleteProjects } = fromDomScripts(
+    const {
+      getAutocompleteMatches,
+      setProjectAutocompleteHttpProfiles,
+      setProjectAutocompleteProjects,
+      setProjectAutocompleteTargets,
+    } = fromDomScripts(
       [
         'app/static/js/core/utils.js',
         'app/static/js/core/autocomplete_core.js',
@@ -1185,6 +1190,57 @@ describe('autocomplete helpers', () => {
               },
             },
           },
+          probe: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {},
+            subcommands: {
+              list: {
+                flags: [{ value: '--project', description: 'Project slug or id' }],
+                expects_value: ['--project'],
+                arg_hints: {},
+                subcommands: {},
+              },
+              ...Object.fromEntries(['plan', 'run'].map(name => [name, {
+                flags: [
+                  { value: '--project', description: 'Project slug or id' },
+                  { value: '--http-profile', description: 'HTTP profile name or id' },
+                ],
+                expects_value: ['--project', '--http-profile'],
+                arg_hints: {
+                  '--http-profile': [{
+                    value: '<http_profile>', hintOnly: true, value_type: 'http_profile',
+                  }],
+                },
+                subcommands: {
+                  ping: {
+                    flags: [], expects_value: [],
+                    arg_hints: { __positional__: [{
+                      value: '<target>', hintOnly: true, value_type: 'project_target',
+                      target_types: ['domain', 'ip'], position: 1,
+                    }] },
+                    subcommands: {},
+                  },
+                  httpx: {
+                    flags: [], expects_value: [],
+                    arg_hints: { __positional__: [{
+                      value: '<target>', hintOnly: true, value_type: 'project_target',
+                      target_types: ['domain', 'ip', 'url'], position: 1,
+                    }] },
+                    subcommands: {},
+                  },
+                  sqlmap: {
+                    flags: [], expects_value: [],
+                    arg_hints: { __positional__: [{
+                      value: '<target>', hintOnly: true, value_type: 'project_target',
+                      target_types: ['url'], position: 1,
+                    }] },
+                    subcommands: {},
+                  },
+                },
+              }])),
+            },
+          },
           ping: { flags: [], expects_value: [], arg_hints: {} },
         },
         acFiltered: [],
@@ -1193,7 +1249,9 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
+      setProjectAutocompleteHttpProfiles,
       setProjectAutocompleteProjects,
+      setProjectAutocompleteTargets,
     }`,
     )
 
@@ -1211,6 +1269,35 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('project archive ', 16).map(item => item.value)).toEqual(['active-case'])
     expect(getAutocompleteMatches('project unarchive ', 18).map(item => item.value)).toEqual(['archived-case'])
     expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
+    const probeProjectCommands = [
+      'probe list --project ',
+      'probe plan ping example.test --project ',
+      'probe run ping example.test --project ',
+    ]
+    probeProjectCommands.forEach((command) => {
+      expect(getAutocompleteMatches(command, command.length).map(item => item.value)).toEqual(['active-case'])
+    })
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'app.example.test', review_state: 'confirmed' },
+      { type: 'ip', value: '192.0.2.20', review_state: 'confirmed' },
+      { type: 'url', value: 'https://app.example.test/login', review_state: 'confirmed' },
+      { type: 'domain', value: 'pending.example.test', review_state: 'pending' },
+    ])
+    setProjectAutocompleteHttpProfiles([
+      { id: 'htp_enabled', name: 'Protected application', role: 'user', enabled: true },
+      { id: 'htp_disabled', name: 'Retired application', role: 'anonymous', enabled: false },
+    ])
+    expect(getAutocompleteMatches('probe plan ping ', 16).map(item => item.value)).toEqual([
+      'app.example.test', '192.0.2.20', '--project', '--http-profile', '<target>',
+    ])
+    expect(getAutocompleteMatches('probe plan sqlmap ', 18).map(item => item.value)).toEqual([
+      'https://app.example.test/login', '--project', '--http-profile', '<target>',
+    ])
+    const profileItems = getAutocompleteMatches(
+      'probe run httpx https://app.example.test/login --http-profile ', 62,
+    )
+    expect(profileItems.map(item => item.value)).toEqual(['htp_enabled', '<http_profile>'])
+    expect(profileItems[0]).toMatchObject({ label: 'Protected application' })
   })
 
   it('suggests schedule ids for terminal schedule actions', () => {
@@ -1574,9 +1661,19 @@ describe('autocomplete helpers', () => {
           }),
         })
       }
+      if (url === '/projects/prj_abc123/http-profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            profiles: [{
+              id: 'htp_active', name: 'Active application', role: 'user', enabled: true,
+            }],
+          }),
+        })
+      }
       return Promise.reject(new Error(`Unexpected URL: ${url}`))
     })
-    const { _readProjectTargets } = fromDomScripts(
+    const { _readAutocompleteHttpProfiles, _readProjectTargets } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1593,9 +1690,16 @@ describe('autocomplete helpers', () => {
         acSuppressInputOnce: false,
       },
       `{
+      _readAutocompleteHttpProfiles,
       _readProjectTargets,
-    }`,
+      }`,
     )
+
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: false },
+    }))
+    for (let i = 0; i < 4; i += 1) await Promise.resolve()
+    expect(apiFetch).not.toHaveBeenCalled()
 
     window.dispatchEvent(new StorageEvent('storage', {
       key: 'darklab_project_workspace_changed',
@@ -1605,9 +1709,13 @@ describe('autocomplete helpers', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/projects/active', { cache: 'no-store' })
     expect(apiFetch).toHaveBeenCalledWith('/projects/prj_abc123/targets?limit=200', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith('/projects/prj_abc123/http-profiles', { cache: 'no-store' })
     expect(_readProjectTargets()).toEqual([
       { type: 'domain', value: 'new-target.example.com', label: 'CLI add' },
     ])
+    expect(_readAutocompleteHttpProfiles()).toEqual([{
+      id: 'htp_active', name: 'Active application', role: 'user', enabled: true,
+    }])
   })
 
   it('persists captured recent values without requiring browser storage', async () => {

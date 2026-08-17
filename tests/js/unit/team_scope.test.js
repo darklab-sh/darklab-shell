@@ -128,34 +128,51 @@ describe('team scope selector', () => {
       sessionId,
       localStorageEntries: { [`active_team_id:${sessionId}`]: 'team_live_1' },
     })
+    const capabilityEvents = []
+    const recordCapabilityEvent = event => capabilityEvents.push(event.detail)
+    document.addEventListener('app:scope-capabilities-changed', recordCapabilityEvent)
 
-    await DarklabTeamScope.refreshTeamScopes()
+    try {
+      await DarklabTeamScope.refreshTeamScopes()
 
-    expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({
-      id: 'team_live_1',
-      capabilities: ['view_team'],
-    }))
-    expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
-    expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
-    expect(DarklabTeamScope.deniedMessage('run commands in team scope'))
-      .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
-
-    DarklabTeamScope.replaceTeamScopes({
-      teams: [{
+      expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({
         id: 'team_live_1',
-        name: 'Live team',
-        slug: 'live-team',
-        status: 'archived',
-        member: {
-          role: 'owner',
-          capabilities: ['view_team', 'run_commands', 'mutate_projects'],
-        },
-      }],
-    })
-    expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({ status: 'archived' }))
-    expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
-    expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
-    expect(DarklabTeamScope.activeTeamScopeCan('mutate_projects')).toBe(false)
+        capabilities: ['view_team'],
+      }))
+      expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
+      expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
+      expect(DarklabTeamScope.deniedMessage('run commands in team scope'))
+        .toBe("View-only team members can't run commands in team scope. Switch to Personal or ask for operator access.")
+      expect(capabilityEvents.at(-1)).toEqual(expect.objectContaining({
+        team_id: 'team_live_1',
+        changed: false,
+        initial: true,
+      }))
+
+      DarklabTeamScope.replaceTeamScopes({
+        teams: [{
+          id: 'team_live_1',
+          name: 'Live team',
+          slug: 'live-team',
+          status: 'archived',
+          member: {
+            role: 'owner',
+            capabilities: ['view_team', 'run_commands', 'mutate_projects'],
+          },
+        }],
+      })
+      expect(DarklabTeamScope.getActiveTeam()).toEqual(expect.objectContaining({ status: 'archived' }))
+      expect(DarklabTeamScope.activeTeamScopeCan('view_team')).toBe(true)
+      expect(DarklabTeamScope.activeTeamScopeCan('run_commands')).toBe(false)
+      expect(DarklabTeamScope.activeTeamScopeCan('mutate_projects')).toBe(false)
+      expect(capabilityEvents.at(-1)).toEqual(expect.objectContaining({
+        team_id: 'team_live_1',
+        changed: true,
+        initial: false,
+      }))
+    } finally {
+      document.removeEventListener('app:scope-capabilities-changed', recordCapabilityEvent)
+    }
   })
 
   it('restores token-scoped team selection before runtime session handlers are ready', async () => {

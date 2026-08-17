@@ -1,0 +1,12 @@
+diff --git a/runner/headless.go b/runner/headless.go
+--- a/runner/headless.go
++++ b/runner/headless.go
+@@ -51,7 +51,7 @@ func NewBrowser(proxy string, useLocal bool, optionalArgs map[string]string) (*Br
+ 	// pids := processutil.FindProcesses(processutil.IsChromeProcess)
+ 
+ 	chromeLauncher := launcher.New().
+-		Leakless(true).
++		Leakless(false).
+ 		Set("disable-gpu", "true").
+ 		Set("ignore-certificate-errors", "true").
+ 		Set("ignore-certificate-errors", "1").

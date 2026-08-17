@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from config import resolve_effective_cfg
-from core.database_access import get_db_connect
+from core.database_access import db_connection_scope
 from .osv_parser import OsvDatasetError, parse_osv_dataset
 from .osv_store import OSV_ATTRIBUTION, OSV_TERMS_URL, accept_local_osv_dataset
 
@@ -103,15 +103,10 @@ def get_osv_source_status(
     cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = _settings(cfg)
-    owns_connection = conn is None
-    active = conn or get_db_connect()()
-    try:
+    with db_connection_scope(conn) as active:
         row = active.execute(
             "SELECT * FROM cve_advisory_sources WHERE source = 'osv'"
         ).fetchone()
-    finally:
-        if owns_connection:
-            active.close()
     item = dict(row) if row else {
         "source": "osv",
         "origin": "unavailable",

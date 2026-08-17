@@ -6,12 +6,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 from flask import Request
 
 from core.helpers import get_client_ip
 from services.teams.request_scope import RequestScope
+
+
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+
+
+def _request_id(value: object) -> str:
+    candidate = str(value or "").strip()
+    return candidate if _REQUEST_ID_RE.fullmatch(candidate) else ""
 
 
 def request_audit_fields(request: Request) -> dict[str, Any]:
@@ -23,12 +32,13 @@ def request_audit_fields(request: Request) -> dict[str, Any]:
     return {
         "client_ip": client_ip,
         "user_agent": str(getattr(request, "user_agent", "") or "")[:256],
-        "request_id": str(
-            request.headers.get("X-Request-ID")
+        "request_id": _request_id(
+            request.environ.get("darklab_request_id")
+            or request.headers.get("X-Request-ID")
             or request.headers.get("Request-ID")
             or request.headers.get("X-Correlation-ID")
             or ""
-        )[:128],
+        ),
     }
 
 

@@ -55,6 +55,7 @@ def test_reviewed_blind_xss_command_uses_only_the_app_callback_path():
     plan = reviewed_dalfox_oast_command_plan(evidence)
 
     assert plan is not None
+    assert plan.command.startswith("dalfox scan ")
     assert f"--blind '{DALFOX_OAST_DISPLAY_CALLBACK}'" in plan.command
     assert assessment_command_mode(plan.command) == DALFOX_OAST_VALIDATION_MODE
     assert assessment_command_mode(

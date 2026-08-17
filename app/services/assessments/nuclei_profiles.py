@@ -82,7 +82,7 @@ def nuclei_profile_args(profile: str = "safe") -> tuple[str, ...]:
         "-no-interactsh", "-disable-redirects", "-disable-update-check",
     )
     if selected.headless:
-        args += ("-headless",)
+        args += ("-headless", "-system-chrome", "-headless-options", "--no-sandbox")
     return (*args, "-dast", "-fuzz-aggression", "low") if selected.dast else args
 
 

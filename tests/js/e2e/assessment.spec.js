@@ -21,6 +21,7 @@ async function issueAndActivateSessionToken(page) {
 }
 
 async function createAndSelectTeam(page, suffix) {
+  await page.evaluate(() => window.DarklabTeamScope.refreshTeamScopes())
   const team = await page.evaluate(async ({ teamSuffix }) => {
     const response = await apiFetch('/session/teams', {
       method: 'POST',
@@ -339,6 +340,20 @@ test.describe('project assessment qualification', () => {
 
   test('keeps missing HTTP credentials unavailable and restores the launch control', async ({ page }) => {
     test.setTimeout(90_000)
+    await page.route('**/session/secrets', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          scope: 'personal',
+          can_manage: true,
+          secrets: [{
+            name: 'PLAYWRIGHT_BASIC_PASSWORD',
+            consumer_envs: ['PLAYWRIGHT_BASIC_PASSWORD', 'HTTP_PASSWORD'],
+          }],
+        }),
+      })
+    })
     await page.route('**/projects/*/http-profiles', async (route) => {
       await route.fulfill({
         status: 200,
@@ -378,6 +393,40 @@ test.describe('project assessment qualification', () => {
     await assessment.locator('.project-assessment-start-form select').selectOption('web')
     await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
     await expect(assessment).toContainText('Web assessment')
+
+    await page.setViewportSize({ width: 810, height: 766 })
+    const newProfile = assessment.getByRole('button', { name: 'New HTTP profile' })
+    await newProfile.click()
+    const profileEditor = page.locator('#confirm-host .project-http-profile-editor')
+    await expect(profileEditor).toBeVisible()
+    const passwordSecret = profileEditor.getByLabel('Basic password Secret')
+    await expect(passwordSecret).toHaveValue('')
+    await expect(passwordSecret.locator('option')).toContainText([
+      'Not set',
+      'PLAYWRIGHT_BASIC_PASSWORD — HTTP_PASSWORD',
+    ])
+    await passwordSecret.selectOption('PLAYWRIGHT_BASIC_PASSWORD')
+    await expect(passwordSecret).toHaveValue('PLAYWRIGHT_BASIC_PASSWORD')
+    await expect(profileEditor).toContainText(
+      'Basic authentication needs separate username and password Secrets.',
+    )
+    const profileLayout = await page.locator('#confirm-host').evaluate((host) => {
+      const card = host.querySelector('[data-confirm-card]')?.getBoundingClientRect()
+      const editor = host.querySelector('.project-http-profile-editor')?.getBoundingClientRect()
+      if (!card || !editor) return null
+      return {
+        cardLeft: card.left,
+        cardRight: card.right,
+        editorLeft: editor.left,
+        editorRight: editor.right,
+      }
+    })
+    expect(profileLayout).not.toBeNull()
+    expect(profileLayout.editorLeft).toBeGreaterThanOrEqual(profileLayout.cardLeft)
+    expect(profileLayout.editorRight).toBeLessThanOrEqual(profileLayout.cardRight)
+    await confirmAssessmentAction(page, 'cancel')
+    await expect(profileEditor).toBeHidden()
+
     await assessment.locator('.project-assessment-target-toggle').click()
     const runHttpx = assessment.getByRole('button', { name: 'Run Httpx' })
     await runHttpx.click()
@@ -387,6 +436,10 @@ test.describe('project assessment qualification', () => {
     const missingOption = confirm.locator('option', { hasText: 'Member role with missing token' })
     await expect(missingOption).toContainText('missing Secret')
     await expect(missingOption).toHaveAttribute('disabled', '')
+    // Assessment data can finish refreshing while the role picker is open.
+    // Model that rerender so focus restoration must find the live replacement
+    // instead of relying on the detached button that opened the dialog.
+    await runHttpx.evaluate((button) => button.replaceWith(button.cloneNode(true)))
     await confirmAssessmentAction(page, 'cancel')
     await expect(runHttpx).toBeFocused()
   })

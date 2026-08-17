@@ -36,6 +36,7 @@ const runnerHandlers = RUNNER_BRIDGE_GLOBAL.__darklabRunnerHandlers || {
   submitComposerCommand: null,
   submitVisibleComposerCommand: null,
   syncActiveRunTimer: null,
+  syncPendingTerminalConfirmPromptMode: null,
 };
 
 if (RUNNER_BRIDGE_GLOBAL) {
@@ -141,6 +142,7 @@ function submitCommand(...args) { return _callRunnerHandler('submitCommand', fal
 function submitComposerCommand(...args) { return _callRunnerHandler('submitComposerCommand', false, args); }
 function submitVisibleComposerCommand(...args) { return _callRunnerHandler('submitVisibleComposerCommand', false, args); }
 function syncActiveRunTimer(...args) { return _callRunnerHandler('syncActiveRunTimer', undefined, args); }
+function syncPendingTerminalConfirmPromptMode(...args) { return _callRunnerHandler('syncPendingTerminalConfirmPromptMode', undefined, args); }
 
 if (RUNNER_BRIDGE_GLOBAL) {
   RUNNER_BRIDGE_GLOBAL.DarklabRunner = {
@@ -170,6 +172,7 @@ if (RUNNER_BRIDGE_GLOBAL) {
     submitComposerCommand,
     submitVisibleComposerCommand,
     syncActiveRunTimer,
+    syncPendingTerminalConfirmPromptMode,
   };
 }
 
@@ -200,4 +203,5 @@ export {
   submitComposerCommand,
   submitVisibleComposerCommand,
   syncActiveRunTimer,
+  syncPendingTerminalConfirmPromptMode,
 };

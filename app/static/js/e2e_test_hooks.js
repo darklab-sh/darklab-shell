@@ -75,6 +75,7 @@ import {
 } from './search.js';
 import { persistTabSessionStateNow } from './features/tabs/tab_session_state.js';
 import {
+  cancelWelcome,
   requestWelcomeSettle,
   welcomeOwnsTab,
 } from './welcome.js';
@@ -137,6 +138,7 @@ function installE2ETestHooks() {
     acShow,
     appendLine,
     appendLines,
+    cancelWelcome,
     clearTab,
     closeOptions,
     getActiveTabId,

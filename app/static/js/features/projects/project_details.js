@@ -306,6 +306,31 @@ let exportedDarklabProjectDetails = null;
       };
     }
 
+    function targetSearchFocusSnapshot(projectId) {
+      const search = document.activeElement;
+      if (!search?.classList?.contains('project-target-search')) return null;
+      if (String(search.dataset.projectId || '') !== String(projectId || '')) return null;
+      const valueLength = String(search.value || '').length;
+      return {
+        start: typeof search.selectionStart === 'number' ? search.selectionStart : valueLength,
+        end: typeof search.selectionEnd === 'number' ? search.selectionEnd : valueLength,
+        direction: search.selectionDirection || 'none',
+      };
+    }
+
+    function restoreTargetSearchFocus(projectId, snapshot) {
+      if (!snapshot) return;
+      const search = document.querySelector('.project-target-search');
+      if (!search || String(search.dataset.projectId || '') !== String(projectId || '')) return;
+      if (typeof ctx.focusElement === 'function') ctx.focusElement(search, { preventScroll: true });
+      else search.focus({ preventScroll: true });
+      if (typeof search.setSelectionRange !== 'function') return;
+      const valueLength = String(search.value || '').length;
+      const start = Math.min(Math.max(0, Number(snapshot.start) || 0), valueLength);
+      const end = Math.min(Math.max(start, Number(snapshot.end) || 0), valueLength);
+      search.setSelectionRange(start, end, snapshot.direction);
+    }
+
     async function loadTargetPage(projectId, { offset = null, skipFinalRender = false } = {}) {
       const normalizedProjectId = String(projectId || '');
       if (!normalizedProjectId || typeof ctx.apiFetch !== 'function') return;
@@ -342,7 +367,11 @@ let exportedDarklabProjectDetails = null;
       } finally {
         if (state.seq === seq) {
           state.loading = false;
-          if (!skipFinalRender) ctx.renderProjectExplorer?.();
+          if (!skipFinalRender) {
+            const searchFocus = targetSearchFocusSnapshot(normalizedProjectId);
+            ctx.renderProjectExplorer?.();
+            restoreTargetSearchFocus(normalizedProjectId, searchFocus);
+          }
         }
       }
     }
@@ -532,6 +561,7 @@ let exportedDarklabProjectDetails = null;
       search.autocomplete = 'off';
       search.spellcheck = false;
       search.value = state.query || '';
+      search.dataset.projectId = String(projectId || '');
       search.setAttribute('aria-label', 'Search project targets');
       search.addEventListener('input', () => {
         state.query = String(search.value || '').trim();
@@ -658,6 +688,10 @@ let exportedDarklabProjectDetails = null;
       targetNew.setAttribute('aria-label', 'Add project target');
       targetHeading.append(targetTitle, targetNew);
       targetSection.appendChild(targetHeading);
+      const probeHint = document.createElement('div');
+      probeHint.className = 'project-target-value-help project-target-probe-hint';
+      probeHint.textContent = 'Use probe list, probe plan, and probe run in the terminal with confirmed targets.';
+      targetSection.appendChild(probeHint);
       targetSection.appendChild(renderTargetBrowser(projectId, summary));
       container.appendChild(targetSection);
 

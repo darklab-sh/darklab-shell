@@ -35,10 +35,12 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "7cf65cd8bf170c6504691d8bae775dce135397cc64fc1e430d589e2bf5625566"
+_LOG_EVENT_INVENTORY_HASH = "c7369dc155eaed661162762d913b43c1b18ef4bb9bcb325d6a6c2c87df270277"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
+    "app/blueprints/projects_probe*.py",
+    "app/blueprints/api_v1_probe*.py",
     "app/blueprints/projects_http_profiles.py",
     "app/blueprints/api_v1_http_profiles.py",
     "app/blueprints/projects_manual_findings.py",
@@ -51,11 +53,14 @@ _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/services/runs/broker_observability.py",
     "app/services/runs/finalization*.py",
     "app/services/runs/schemathesis_completion.py",
+    "app/static/js/features/probes/*.js",
 )
 _ASSESSMENT_LOG_EVENT_PREFIXES = (
     "ASSESSMENT_",
     "PROJECT_ASSESSMENT_",
     "API_PROJECT_ASSESSMENT_",
+    "PROJECT_PROBE_",
+    "API_PROJECT_PROBE_",
     "PROJECT_HTTP_PROFILE_",
     "API_PROJECT_HTTP_PROFILE_",
     "PROJECT_MANUAL_FINDING_",
@@ -396,6 +401,11 @@ def _assessment_log_event_literals() -> set[str]:
         "warning",
     }
     for path in sorted(paths):
+        if path.suffix == ".js":
+            for event in re.findall(r"['\"]([A-Z][A-Z0-9_]+)['\"]", path.read_text()):
+                if event.startswith(_ASSESSMENT_LOG_EVENT_PREFIXES):
+                    events.add(event)
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -847,10 +857,17 @@ class TestLoggingReference:
     def test_event_inventory_was_moved_without_dropping_contracts(self):
         body = _log_event_inventory_body()
         documented = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", body))
-        missing = sorted(_assessment_log_event_literals() - documented)
+        emitted = _assessment_log_event_literals()
+        assert {
+            "PROJECT_PROBE_CLIENT_REQUEST_FAILED",
+            "PROJECT_PROBE_LAUNCHED",
+            "API_PROJECT_PROBE_LAUNCHED",
+        } <= emitted
+        missing = sorted(emitted - documented)
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
-        assert len(re.findall(r"^\| (?:DEBUG|INFO|WARNING|ERROR|CRITICAL) \|", body, re.M)) == 342
+        level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 352
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

@@ -123,7 +123,10 @@ RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/nuclei-kin-openapi-v0.
         "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}" \
         "github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}"
-RUN install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
+# Rod's leakless helper is unpacked below /tmp at runtime. The runtime keeps
+# /tmp non-executable, so launch the reviewed system Chromium directly instead.
+RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/httpx-disable-leakless.patch \
+    install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}"
@@ -471,7 +474,7 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
         libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
         python3-requests fierce dnsenum libcap2-bin sudo groff-base \
         bsdextrautils iptables masscan libpcap0.8 ca-certificates perl \
-        postgresql-client-${POSTGRESQL_CLIENT_VERSION} zlib1g unzip \
+        postgresql-client-${POSTGRESQL_CLIENT_VERSION} chromium zlib1g unzip \
         inetutils-telnet httping && \
     rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses
@@ -550,7 +553,9 @@ COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/container/stage_runtime_source.sh /usr/local/libexec/darklab-stage-runtime-source
-RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source
+COPY scripts/container/bootstrap_nuclei_templates.sh /usr/local/libexec/darklab-bootstrap-nuclei-templates
+RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source \
+    /usr/local/libexec/darklab-bootstrap-nuclei-templates
 
 ARG APP_PORT=8888
 EXPOSE ${APP_PORT}

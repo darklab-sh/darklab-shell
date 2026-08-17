@@ -764,6 +764,22 @@ function _runtimeProjectContext(baseSpec = {}) {
   return spec;
 }
 
+function _runtimeProbeContext(baseSpec = {}) {
+  const spec = _cloneRuntimeSpec(baseSpec);
+  spec.subcommands = spec.subcommands && typeof spec.subcommands === 'object' ? spec.subcommands : {};
+  const projectHints = _runtimeProjectRefHints(['active']);
+  ['list', 'plan', 'run'].forEach((name) => {
+    const subSpec = spec.subcommands[name] && typeof spec.subcommands[name] === 'object'
+      ? _cloneRuntimeSpec(spec.subcommands[name])
+      : {};
+    if (projectHints.length) {
+      subSpec.arg_hints = Object.assign({}, subSpec.arg_hints || {}, { '--project': projectHints });
+      spec.subcommands[name] = subSpec;
+    }
+  });
+  return spec;
+}
+
 function _runtimeScheduleHints() {
   const readSchedules = (typeof importedReadAutocompleteSchedules !== 'undefined' && importedReadAutocompleteSchedules)
     || _runtimeGlobalFunction('_readAutocompleteSchedules');
@@ -848,6 +864,9 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (baseRegistry.project) {
     context.project = _runtimeProjectContext(baseRegistry.project);
+  }
+  if (baseRegistry.probe) {
+    context.probe = _runtimeProbeContext(baseRegistry.probe);
   }
   if (baseRegistry.schedule) {
     context.schedule = _runtimeScheduleContext(baseRegistry.schedule);

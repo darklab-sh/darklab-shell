@@ -828,6 +828,15 @@ describe('project assessment controller', () => {
   it('manages reusable HTTP profiles in the shared desktop and mobile Assessment surface', async () => {
     let savedProfiles = [httpProfile]
     const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      if (url === '/session/secrets') {
+        return apiResponse({
+          scope: 'personal',
+          secrets: [{
+            name: 'APP_ADMIN_TOKEN',
+            consumer_envs: ['APP_ADMIN_TOKEN', 'APP_ADMIN_BEARER'],
+          }],
+        })
+      }
       if (url.endsWith('/http-profiles')) {
         if (options.method === 'POST') {
           const payload = JSON.parse(options.body)
@@ -841,7 +850,7 @@ describe('project assessment controller', () => {
     const showConfirm = vi.fn(async (options) => {
       if (options.body?.text === 'Create an HTTP assessment profile') {
         const fields = [...options.content.querySelectorAll('.project-http-profile-field')]
-        const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea')
+        const control = label => fields.find(field => field.textContent.startsWith(label))?.querySelector('input, textarea, select')
         const enabled = options.content.querySelector('.project-http-profile-enabled')
         expect(enabled?.tagName).toBe('LABEL')
         expect(enabled?.classList.contains('form-check')).toBe(true)
@@ -851,6 +860,8 @@ describe('project assessment controller', () => {
         control('Authentication role').value = 'admin'
         control('Base URL').value = 'https://example.com/'
         control('Allowed Project hosts').value = 'example.com'
+        expect(control('Bearer token Secret').tagName).toBe('SELECT')
+        expect(control('Bearer token Secret').textContent).toContain('APP_ADMIN_BEARER')
         control('Bearer token Secret').value = 'APP_ADMIN_TOKEN'
         expect(await options.actions.find(action => action.id === 'save').onActivate()).toBe(true)
         return 'save'
@@ -872,6 +883,10 @@ describe('project assessment controller', () => {
     desktop.querySelector('.project-http-profile-header-actions .btn-secondary').click()
     expect(ctx.openSecretsOptions).toHaveBeenCalledTimes(1)
     desktop.querySelector('.project-http-profile-header-actions .btn-primary').click()
+    await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
+      '/session/secrets',
+      { cache: 'no-store' },
+    ))
     await vi.waitFor(() => expect(projectWorkspaceRequest).toHaveBeenCalledWith(
       '/projects/prj_1/http-profiles',
       expect.objectContaining({ method: 'POST' }),
@@ -1142,7 +1157,7 @@ describe('project assessment controller', () => {
         summary: 'One reviewed URL and saved query parameter.',
         credential_use: 'none',
       },
-      display_command: "dalfox url 'https://example.com/search?term=one' -p term --blind 'https://[private-oast-callback]'",
+      display_command: "dalfox scan 'https://example.com/search?term=one' -p term --blind 'https://[private-oast-callback]'",
       launchable: false,
       unavailable_reason: selected ? 'Prepare a private callback before this reviewed action can start.' : 'Choose saved evidence.',
       plan_digest: selected ? 'b'.repeat(64) : 'a'.repeat(64),
@@ -1639,7 +1654,7 @@ describe('project assessment controller', () => {
       policy_level: 'intrusive',
       scope: { target_count: 1, fan_out: 1 },
       bounds: { summary: 'One approved target.', credential_use: 'none' },
-      display_command: 'nuclei -u https://example.com -headless -dast -fuzz-aggression low',
+      display_command: 'nuclei -u https://example.com -headless -system-chrome -headless-options --no-sandbox -dast -fuzz-aggression low',
       launchable: true,
       plan_digest: 'f'.repeat(64),
     }
@@ -1658,10 +1673,11 @@ describe('project assessment controller', () => {
       projectId: 'prj_1',
       assessmentId: 'asmt_1',
       check: { id: 'asmc_intrusive', recommended_action_key: 'command:nuclei' },
-      httpProfiles: [],
+      httpProfiles: [httpProfile],
     })
 
     expect(launched).toBe(true)
+    expect(showConfirm).toHaveBeenCalledTimes(1)
     const confirmation = showConfirm.mock.calls[0][0]
     expect(confirmation.body.text).toBe('Start intrusive Nuclei profile?')
     expect(confirmation.body.note).toContain('fresh confirmation')
@@ -1711,7 +1727,7 @@ describe('project assessment controller', () => {
       policy_level: 'intrusive',
       scope: { target_count: 1, fan_out: 1 },
       bounds: { summary: 'One reviewed query parameter.', credential_use: 'none' },
-      display_command: 'dalfox https://example.com/?q=one --param q:query --skip-discovery',
+      display_command: 'dalfox scan https://example.com/?q=one --param q:query --skip-discovery',
       launchable: true,
       evidence_selection: { required: true, selected: evidence, options: [evidence] },
       plan_digest: 'c'.repeat(64),
@@ -1891,7 +1907,7 @@ describe('project assessment controller', () => {
       policy_level: 'safe',
       scope: { target_count: 1, fan_out: 1 },
       bounds: { summary: 'One approved web target.', credential_use: 'protected_http_profile' },
-      display_command: 'dalfox https://example.com/ --only-discovery --config [protected]',
+      display_command: 'dalfox scan https://example.com/ --only-discovery --config [protected]',
       launchable: true,
       plan_digest: 'b'.repeat(64),
     }

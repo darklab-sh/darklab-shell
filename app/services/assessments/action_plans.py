@@ -18,6 +18,10 @@ from services.assessments.dalfox_oast_actions import DalfoxOastActionContext
 from services.assessments.dalfox_xss_actions import DalfoxXssActionContext
 from services.assessments.nuclei_takeover_contracts import NUCLEI_TAKEOVER_CHECK_KEY
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
+from services.assessments.plan_confirmation import (
+    PlanConfirmationFailure,
+    confirm_current_plan,
+)
 from services.assessments.schemathesis_actions import SchemathesisActionContext
 from services.projects.scope import shared_owner_where
 
@@ -271,43 +275,20 @@ def confirm_assessment_action_plan(
     load_plan: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
     """Re-read and validate a previously previewed assessment action plan."""
-    if not isinstance(data, Mapping):
-        raise AssessmentActionError(
-            "invalid_body",
-            "Request body must be a JSON object.",
-        )
     allowed = {
         "confirmed", "http_profile_id", "parameter_observation_id",
         "plan_digest", "schema_artifact_id", "source_run_id", "workspace_cwd",
     }
-    if set(data) - allowed:
-        raise AssessmentActionError(
-            "unsupported_fields",
-            "Assessment launch contains unsupported fields.",
+    try:
+        return confirm_current_plan(
+            data,
+            load_plan,
+            subject="assessment",
+            allowed_fields=frozenset(allowed),
         )
-    if data.get("confirmed") is not True:
+    except PlanConfirmationFailure as exc:
         raise AssessmentActionError(
-            "confirmation_required",
-            "Explicit assessment launch confirmation is required.",
-            status_code=409,
-        )
-    supplied_digest = str(data.get("plan_digest") or "").strip()
-    if not supplied_digest:
-        raise AssessmentActionError(
-            "plan_digest_required",
-            "The assessment launch plan digest is required.",
-        )
-    plan = load_plan()
-    if supplied_digest != plan["plan_digest"]:
-        raise AssessmentActionError(
-            "stale_plan",
-            "The assessment launch plan changed. Review the current plan and confirm again.",
-            status_code=409,
-        )
-    if not plan["launchable"]:
-        raise AssessmentActionError(
-            "action_unavailable",
-            str(plan["unavailable_reason"] or "Assessment action is unavailable."),
-            status_code=409,
-        )
-    return plan
+            exc.code,
+            str(exc),
+            status_code=exc.status_code,
+        ) from exc

@@ -1420,6 +1420,9 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0', { cache: 'no-store' })
+    expect(document.querySelector('.project-target-probe-hint')?.textContent).toBe(
+      'Use probe list, probe plan, and probe run in the terminal with confirmed targets.',
+    )
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.sh')
     document.querySelector('.project-workspace-close')?.click()
     await tick()
@@ -1461,10 +1464,17 @@ describe('shell chrome project workspace', () => {
 
     const search = document.querySelector('.project-target-search')
     search.value = 'login'
+    search.focus()
+    search.setSelectionRange(2, 4)
     search.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 300))
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&type=domain&q=login', { cache: 'no-store' })
+    const refreshedSearch = document.querySelector('.project-target-search')
+    expect(refreshedSearch).not.toBe(search)
+    expect(document.activeElement).toBe(refreshedSearch)
+    expect(refreshedSearch.selectionStart).toBe(2)
+    expect(refreshedSearch.selectionEnd).toBe(4)
 
     document.querySelector('[data-project-target-type=""]').click()
     await tick()
@@ -4065,7 +4075,9 @@ describe('shell chrome project workspace', () => {
         ))
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ target: targetStates.find(target => target.id === 'target-1') }),
+          json: () => Promise.resolve({
+            target: { ...targetStates.find(target => target.id === 'target-1'), id: 'target-updated' },
+          }),
         })
       }
       if (url === '/projects/project-1/targets/target-1' && options.method === 'DELETE') {
@@ -4670,17 +4682,16 @@ describe('shell chrome project workspace', () => {
         value: 'darklab.io',
       }),
     }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
-      method: 'DELETE',
-      body: JSON.stringify({ label: 'Primary domain' }),
-    }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-updated/labels', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ label: 'Updated target' }),
     }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/note', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-updated/note', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ body: 'Retest scope' }),
+    }))
+    expect(apiFetch).not.toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+      method: 'POST',
     }))
     expect(apiFetch.mock.calls
       .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length).toBe(projectFetchesBeforeTargetEdit)

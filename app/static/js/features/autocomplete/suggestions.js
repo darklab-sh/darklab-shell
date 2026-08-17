@@ -208,6 +208,7 @@ const acRecentValuePersistPromises = new Set();
 const acPendingRecentValueCommands = [];
 let acProjectTargets = [];
 let acProjects = [];
+let acHttpProfiles = [];
 let acSchedules = [];
 let acWatchers = [];
 
@@ -225,6 +226,10 @@ function _readProjectTargets() {
 
 function _readAutocompleteProjects() {
   return acProjects.slice(0, 200);
+}
+
+function _readAutocompleteHttpProfiles() {
+  return acHttpProfiles.slice(0, 200);
 }
 
 function _readAutocompleteSchedules() {
@@ -270,11 +275,15 @@ function setProjectAutocompleteTargets(items) {
     .map((item) => {
       if (typeof item === 'string') return { value: item, type: 'target', label: '' };
       if (!item || typeof item !== 'object') return null;
-      return {
+      const normalized = {
         value: String(item.value || '').trim(),
         type: String(item.type || 'target').trim().toLowerCase(),
         label: String(item.label || '').trim(),
       };
+      const reviewState = String(item.review_state || item.reviewState || '').trim().toLowerCase();
+      if (reviewState) normalized.reviewState = reviewState;
+      if (Array.isArray(item.labels)) normalized.labels = item.labels;
+      return normalized;
     })
     .filter((item) => {
       if (!item || !item.value) return false;
@@ -285,6 +294,30 @@ function setProjectAutocompleteTargets(items) {
     })
     .slice(0, 200);
   return _readProjectTargets();
+}
+
+function setProjectAutocompleteHttpProfiles(items) {
+  const seen = new Set();
+  acHttpProfiles = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const id = String(item.id || '').trim();
+      const name = String(item.name || '').trim();
+      if (!id || !name) return null;
+      return {
+        id,
+        name,
+        role: String(item.role || 'anonymous').trim(),
+        enabled: item.enabled !== false,
+      };
+    })
+    .filter((item) => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .slice(0, 200);
+  return _readAutocompleteHttpProfiles();
 }
 
 function setProjectAutocompleteProjects(items) {
@@ -365,16 +398,25 @@ function loadProjectAutocompleteTargets() {
     .then((data) => {
       const project = data && data.project && typeof data.project === 'object' ? data.project : null;
       const projectId = project && project.id ? String(project.id) : '';
-      if (!projectId) return setProjectAutocompleteTargets([]);
-      return _autocompleteApiFetch(`/projects/${encodeURIComponent(projectId)}/targets?limit=200`, { cache: 'no-store' })
+      if (!projectId) {
+        setProjectAutocompleteTargets([]);
+        setProjectAutocompleteHttpProfiles([]);
+        return [];
+      }
+      const targets = _autocompleteApiFetch(`/projects/${encodeURIComponent(projectId)}/targets?limit=200`, { cache: 'no-store' })
         .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { targets: [] }))
         .then(targetData => setProjectAutocompleteTargets(targetData && targetData.targets));
+      const profiles = _autocompleteApiFetch(`/projects/${encodeURIComponent(projectId)}/http-profiles`, { cache: 'no-store' })
+        .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { profiles: [] }))
+        .then(profileData => setProjectAutocompleteHttpProfiles(profileData && profileData.profiles));
+      return Promise.all([targets, profiles]);
     })
   return Promise.all([projectListRequest, activeTargetRequest])
     .then(() => _readProjectTargets())
     .catch((err) => {
       setProjectAutocompleteProjects([]);
       setProjectAutocompleteTargets([]);
+      setProjectAutocompleteHttpProfiles([]);
       _autocompleteLogClientError('failed to load project autocomplete targets', err);
       return _readProjectTargets();
     });
@@ -410,7 +452,12 @@ function _autocompleteReloadProjectTargets() {
   loadProjectAutocompleteTargets().catch(() => {});
 }
 
-_autocompleteOnUiEvent('app:active-project-changed', _autocompleteReloadProjectTargets);
+function _autocompleteHandleActiveProjectChanged(event) {
+  if (event?.detail?.changed === false) return;
+  _autocompleteReloadProjectTargets();
+}
+
+_autocompleteOnUiEvent('app:active-project-changed', _autocompleteHandleActiveProjectChanged);
 _autocompleteOnUiEvent('app:project-workspace-changed', _autocompleteReloadProjectTargets);
 
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
@@ -492,6 +539,45 @@ function _wordlistCategoriesFromHints(hints) {
 }
 
 const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
+  http_profile: {
+    emptySlot: false,
+    slotFromHints: hints => _hintsContainValueType(hints, 'http_profile'),
+    applySuggestions: (ctx, baseItems) => {
+      const items = _readAutocompleteHttpProfiles()
+        .filter(profile => profile.enabled)
+        .map(profile => autocompleteCore.buildItem({
+          value: profile.id,
+          label: profile.name,
+          description: ['HTTP profile', profile.role, profile.id].filter(Boolean).join(' · '),
+          replaceStart: ctx.tokenStart,
+          replaceEnd: ctx.tokenEnd,
+        }));
+      return _prependDedupedItems(
+        autocompleteCore.filterItems(items, ctx.currentToken),
+        baseItems,
+      );
+    },
+  },
+  project_target: {
+    emptySlot: { active: false, types: [] },
+    slotFromHints: (hints) => {
+      const selected = (Array.isArray(hints) ? hints : [])
+        .filter(hint => _itemValueTypeIs(hint, 'project_target'));
+      if (!selected.length) return { active: false, types: [] };
+      const types = selected.flatMap(hint => (
+        Array.isArray(hint.target_types) ? hint.target_types : []
+      )).map(type => String(type || '').trim().toLowerCase()).filter(Boolean);
+      return { active: true, types: Array.from(new Set(types)) };
+    },
+    applySuggestions: (ctx, baseItems, slot) => {
+      if (!slot || !slot.active) return baseItems;
+      const items = autocompleteCore.filterItems(
+        _projectTargetAutocompleteItems(ctx, slot.types, { confirmedOnly: true }),
+        ctx.currentToken,
+      );
+      return _prependDedupedItems(items, baseItems);
+    },
+  },
   domain: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'domain'),
@@ -882,6 +968,8 @@ function _autocompleteValueTypeSlot(ctx, spec, contextSpec = {}, type = '') {
 
 function _autocompleteValueTypeSlots(ctx, spec, contextSpec = {}) {
   return {
+    http_profile: _autocompleteValueTypeSlot(ctx, spec, contextSpec, 'http_profile'),
+    project_target: _autocompleteValueTypeSlot(ctx, spec, contextSpec, 'project_target'),
     target: _autocompleteValueTypeSlot(ctx, spec, contextSpec, 'target'),
     url: _autocompleteValueTypeSlot(ctx, spec, contextSpec, 'url'),
     host: _autocompleteValueTypeSlot(ctx, spec, contextSpec, 'host'),
@@ -904,12 +992,13 @@ function _recentValueAutocompleteItems(ctx, kinds = []) {
     }));
 }
 
-function _projectTargetAutocompleteItems(ctx, allowedTypes = []) {
+function _projectTargetAutocompleteItems(ctx, allowedTypes = [], options = {}) {
   const allowed = new Set((Array.isArray(allowedTypes) ? allowedTypes : [])
     .map(type => String(type || '').trim().toLowerCase())
     .filter(Boolean));
   return _readProjectTargets()
     .filter(target => !allowed.size || allowed.has(target.type))
+    .filter(target => !options.confirmedOnly || !target.reviewState || target.reviewState === 'confirmed')
     .map(target => autocompleteCore.buildItem({
       value: target.value,
       description: [
@@ -993,10 +1082,14 @@ function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}, options
     // not prepend project targets or recent scan values.
     return baseItems;
   }
-  for (const type of ['target', 'url', 'host', 'ip', 'cidr', 'port_set', 'domain']) {
+  for (const type of [
+    'http_profile', 'project_target', 'target', 'url', 'host', 'ip', 'cidr', 'port_set', 'domain',
+  ]) {
     const handler = _valueTypeHandler(type);
-    if (handler && valueSlots[type]) {
-      return handler.applySuggestions(ctx, baseItems, valueSlots[type]);
+    const slot = valueSlots[type];
+    const active = slot && (typeof slot !== 'object' || slot.active !== false);
+    if (handler && active) {
+      return handler.applySuggestions(ctx, baseItems, slot);
     }
   }
   return baseItems;
@@ -1642,6 +1735,7 @@ export {
   _readRecentValues,
   _readProjectTargets,
   _readAutocompleteProjects,
+  _readAutocompleteHttpProfiles,
   _readAutocompleteSchedules,
   _readAutocompleteWatchers,
   _autocompleteTokenContext,
@@ -1654,4 +1748,5 @@ export {
   loadWatcherAutocompleteHints,
   rememberRecentValuesFromCommand,
   setAutocompleteCatalog,
+  setProjectAutocompleteHttpProfiles,
 };

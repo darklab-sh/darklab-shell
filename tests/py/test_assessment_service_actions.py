@@ -718,6 +718,8 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     intrusive_args = nuclei_profile_args("intrusive")
     assert intrusive_args[-3:] == ("-dast", "-fuzz-aggression", "low")
     assert "-headless" in intrusive_args
+    assert "-system-chrome" in intrusive_args
+    assert intrusive_args[intrusive_args.index("-headless-options") + 1] == "--no-sandbox"
     assert "exploit" in nuclei_profile("safe").excluded_tags
     assert nuclei_profile("intrusive").requires_confirmation is True
     assert nuclei_profile("safe").template_source == "managed_cache"
@@ -754,6 +756,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     assert "-tags exposure,misconfig,cve,tech,network,ssl,api" in standard.command
     assert "-no-interactsh -disable-redirects -disable-update-check" in standard.command
     assert "-headless" in intrusive.command
+    assert "-headless -system-chrome -headless-options --no-sandbox" in intrusive.command
     row = {
         "check_id": "ach_nuclei",
         "assessment_id": "asm_nuclei",
@@ -848,7 +851,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     )
     assert enabled["launchable"] is True
     assert enabled["nuclei_profile"]["key"] == "intrusive"
-    assert "-headless -dast -fuzz-aggression low" in enabled["display_command"]
+    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (
+        enabled["display_command"]
+    )
     assert assessment_run_launch_context(enabled).output_signal_context == (
         RunOutputSignalContext(nuclei_template_snapshot=template_snapshot)
     )
@@ -2614,17 +2619,30 @@ def test_dnsx_event_review_rejects_limits_and_never_returns_partial_rows():
 
 def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     record = normalize_httpx_screenshot({
-        "url": "https://app.example.test/login", "screenshot_path": "/scanner/output/app.png",
-        "screenshot_path_rel": "app.png",
+        "url": "https://app.example.test/login",
+        "screenshot_path": "/scanner/output/screenshots/screenshot/app.example.test/app.png",
+        "screenshot_path_rel": "app.example.test/app.png",
         "status_code": "200", "title": "  Login   page ", "technologies": ["nginx", "nginx"],
         "run_id": "run-1", "profile_role": "authenticated",
     }, output_directory="screenshots")
     assert record == {
-        "url": "https://app.example.test/login", "artifact_path": "screenshots/app.png",
+        "url": "https://app.example.test/login",
+        "artifact_path": "screenshots/screenshot/app.example.test/app.png",
         "status_code": 200, "title": "Login page", "technologies": ["nginx", "nginx"],
         "captured_at": "", "visual_hash": "", "source_run_id": "run-1", "profile_role": "authenticated",
     }
+    prefixed = normalize_httpx_screenshot({
+        "url": "https://app.example.test",
+        "screenshot_path_rel": "screenshot/app.example.test/prefixed.png",
+    }, output_directory="screenshots")
+    assert prefixed and prefixed["artifact_path"] == (
+        "screenshots/screenshot/app.example.test/prefixed.png"
+    )
     assert normalize_httpx_screenshot({"url": "https://app.example.test", "screenshot_path": "../secret.png"}) is None
+    assert normalize_httpx_screenshot({
+        "url": "https://app.example.test",
+        "screenshot_path_rel": "../secret.png",
+    }, output_directory="screenshots") is None
     assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None
 
 
@@ -2759,11 +2777,12 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
         profile_role="anonymous",
     )
     metadata = classifier.classify_line(
-        '{"url":"https://app.example.test","screenshot_path":"/scanner/output/app.png",'
-        '"screenshot_path_rel":"app.png","status_code":200}'
+        '{"url":"https://app.example.test","screenshot_path":"/screenshots/screenshot/app.example.test/app.png",'
+        '"screenshot_path_rel":"app.example.test/app.png","status_code":200}'
     )
     assert metadata["screenshots"] == [{
-        "url": "https://app.example.test", "artifact_path": "screenshots/app.png",
+        "url": "https://app.example.test",
+        "artifact_path": "screenshots/screenshot/app.example.test/app.png",
         "status_code": 200, "title": "", "technologies": [], "captured_at": "",
         "visual_hash": "", "source_run_id": "run-httpx", "profile_role": "anonymous",
     }]
@@ -2772,7 +2791,7 @@ def test_httpx_json_output_carries_safe_screenshot_metadata_only():
 
 def test_dalfox_discovery_jsonl_preserves_bounded_parameter_evidence():
     state = DalfoxParameterObservationState(
-        "dalfox https://App.Example.test/search?q=one --only-discovery "
+        "dalfox scan https://App.Example.test/search?q=one --only-discovery "
         "--skip-mining-dict --format jsonl",
         "run-dalfox",
     )
@@ -2819,7 +2838,7 @@ def test_dalfox_discovery_jsonl_preserves_bounded_parameter_evidence():
 
 def test_dalfox_discovery_jsonl_fails_closed_on_untrusted_or_malformed_rows():
     command = (
-        "dalfox https://app.example.test/search?q=one --only-discovery "
+        "dalfox scan https://app.example.test/search?q=one --only-discovery "
         "--skip-mining-dict --format jsonl"
     )
     invalid_commands = (
@@ -2856,7 +2875,7 @@ def test_dalfox_discovery_jsonl_fails_closed_on_untrusted_or_malformed_rows():
 
 def test_dalfox_discovery_jsonl_rejects_new_rows_after_the_fixed_cap():
     state = DalfoxParameterObservationState(
-        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format=jsonl",
+        "dalfox scan https://app.example.test --only-discovery --skip-mining-dict --format=jsonl",
         "run-dalfox",
     )
     assert state.metadata(json.dumps({"meta": {
@@ -2883,7 +2902,7 @@ def test_dalfox_parameter_observations_survive_run_event_wire_round_trip():
 
     capture = Capture()
     classifier = OutputSignalClassifier(
-        "dalfox https://app.example.test --only-discovery --skip-mining-dict --format jsonl",
+        "dalfox scan https://app.example.test --only-discovery --skip-mining-dict --format jsonl",
         source_run_id="run-dalfox",
     )
     capture_event_with_signals(capture, classifier, json.dumps({"meta": {
@@ -2917,7 +2936,7 @@ def _dalfox_xss_context(**overrides):
 
 def _dalfox_xss_classifier(context=None):
     return OutputSignalClassifier(
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery "
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-discovery "
         "--skip-mining --format jsonl",
         source_run_id="run-dalfox-xss",
         dalfox_xss_context=context or _dalfox_xss_context(),
@@ -2945,6 +2964,7 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
     plan = reviewed_dalfox_xss_command_plan(evidence)
 
     assert plan is not None
+    assert plan.command.startswith("dalfox scan ")
     assert plan.request_limit is not None
     assert plan.request_limit == DALFOX_XSS_REQUEST_LIMIT == 256
     assert plan.time_limit_seconds == DALFOX_XSS_TIME_LIMIT_SECONDS == 90
@@ -3325,10 +3345,10 @@ def test_reviewed_dalfox_xss_context_and_rows_fail_closed():
         "scan_duration_ms": 2500,
     }})
     commands = (
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-mining --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p q:query --skip-discovery --format jsonl",
-        "dalfox https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
-        "dalfox https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-mining --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p q:query --skip-discovery --format jsonl",
+        "dalfox scan https://app.example.test/search?q=one -p other:query --skip-discovery --skip-mining --format jsonl",
+        "dalfox scan https://other.example.test/search?q=one -p q:query --skip-discovery --skip-mining --format jsonl",
     )
     assert all("dalfox_xss_scan" not in _source_detail(OutputSignalClassifier(
         command,

@@ -21,7 +21,7 @@ def normalize_httpx_screenshot(
     url = _safe_url(item.get("url") or item.get("input"))
     relative_artifact = _safe_artifact_path(item.get("screenshot_path_rel"))
     artifact = (
-        _join_artifact_path(output_directory, relative_artifact)
+        _join_httpx_screenshot_path(output_directory, relative_artifact)
         if relative_artifact
         else _safe_artifact_path(item.get("screenshot") or item.get("screenshot_path"))
     )
@@ -71,6 +71,15 @@ def _join_artifact_path(output_directory: Any, artifact_path: Any) -> str:
     if not directory or not artifact:
         return ""
     return _safe_artifact_path(str(PurePosixPath(directory) / PurePosixPath(artifact)))
+
+
+def _join_httpx_screenshot_path(output_directory: Any, artifact_path: Any) -> str:
+    artifact = _safe_artifact_path(artifact_path)
+    if not artifact:
+        return ""
+    if PurePosixPath(artifact).parts[0] != "screenshot":
+        artifact = str(PurePosixPath("screenshot") / artifact)
+    return _join_artifact_path(output_directory, artifact)
 
 
 def screenshot_output_directory(command: str) -> str:

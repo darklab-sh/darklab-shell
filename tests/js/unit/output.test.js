@@ -51,6 +51,7 @@ function loadOutputFns({
     setTabCommandOutcomeSummary,
     refreshCommandOutcomeSummaries,
     resetHighVolumeOutputState,
+    _followOutputAfterAppend,
     _restoreOutputTailAfterLayout,
     syncOutputPrefixes,
     _setTsMode,
@@ -1105,9 +1106,9 @@ describe('appendLine', () => {
     expect(_getTabs()[0].rawLines).toHaveLength(0)
   })
 
-  it('re-sticks restored output to the tail after delayed layout growth', () => {
+  it('re-sticks followed output after layout without overriding later user intent', () => {
     const timers = []
-    const { _restoreOutputTailAfterLayout, _getTabs } = loadOutputFns({
+    const { _followOutputAfterAppend, _restoreOutputTailAfterLayout, _getTabs } = loadOutputFns({
       appConfig: { max_output_lines: 100 },
       extraGlobals: {
         setTimeout: (fn, delay) => {
@@ -1146,6 +1147,18 @@ describe('appendLine', () => {
     scrollHeight = 1800
     timers.filter(timer => timer.delay > 64).forEach(timer => timer.fn())
     expect(scrollTop).toBe(1800)
+    expect(tab.suppressOutputScrollTracking).toBe(false)
+
+    timers.length = 0
+    scrollTop = 0
+    tab.followOutput = true
+    _followOutputAfterAppend(out, tab)
+
+    expect(timers.map(timer => timer.delay)).toEqual([0])
+    tab.followOutput = false
+    timers[0].fn()
+
+    expect(scrollTop).toBe(0)
     expect(tab.suppressOutputScrollTracking).toBe(false)
   })
 

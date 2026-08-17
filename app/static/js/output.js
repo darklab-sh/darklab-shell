@@ -1769,7 +1769,11 @@ function _followOutputAfterAppend(out, tab, { afterLargeBatch = false } = {}) {
     _restoreOutputTailAfterLayout(out, tab);
     return;
   }
-  setTimeout(() => _stickOutputToBottom(out, tab), 0);
+  setTimeout(() => {
+    const live = _outputGetTab(tab.id);
+    if (!live || live.followOutput === false) return;
+    _stickOutputToBottom(out, live);
+  }, 0);
 }
 
 function _syncTabRawLines(tab, rawLine) {

@@ -104,9 +104,21 @@ Atlas can preview external scanner reports before saving any rows. Alongside Nuc
 
 Coverage stays factual: a saved run counts only when its target, tool, outcome, version, and evidence match the frozen check. Each target keeps its full-cycle totals even when the worklist spans several pages. **Fix first** ranks current issues without making untested checks look complete, and the **Retest queue** groups two to ten findings only when they share the same safe, credential-free plan. Completed and archived cycles are read-only, and team viewers can inspect the work without changing it.
 
+### Run a one-off Project probe
+
+Use a Project probe when you want one reviewed command without starting or changing an Assessment cycle:
+
+```text
+probe list --project example-project
+probe plan httpx --project example-project https://app.example.test
+probe run httpx --project example-project https://app.example.test
+```
+
+Probes accept an active Project slug or stable id and only use confirmed, compatible Project targets. Planning is read-only; running shows the exact bounded command, waits for confirmation, streams in the same tab, and saves an ordinary Project-linked run in History. Supported web tools can add an enabled HTTP profile by name or id, while Nuclei remains anonymous because its templates can't enforce a saved profile's exact path boundary. See [Project probes](FEATURES.md#project-probes) for the action matrix, permissions, autocomplete, profile, Nuclei-template, and failure guidance.
+
 ### Use reviewed actions and integrations
 
-Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action. The full list of maintained actions and their safety boundaries is in [Project Workspaces](FEATURES.md#project-workspaces).
+Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action.
 
 Operators can optionally connect ZAP for reviewed external web scans or a private Interactsh-compatible service for blind-XSS callbacks. Both integrations are off by default, use separate workers, and keep scanner credentials and callback details out of visible commands and browser storage. See [ZAP and OAST worker setup](CONFIGURATION.md#running-zap-and-oast-workers).
 

@@ -82,7 +82,23 @@ def _tokens_start_with(command_tokens: list[str], prefix_tokens: list[str]) -> b
     return all(cmd.lower() == prefix.lower() for cmd, prefix in zip(command_tokens, prefix_tokens))
 
 
-def _flag_matches_token(flag: str, token: str) -> bool:
+def _grouped_short_flag_members(token: str, groupable_flags: set[str]) -> set[str] | None:
+    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
+        return None
+    if not token[1:].isalpha() or not token[1:].islower():
+        return None
+    members = {f"-{char}" for char in token[1:]}
+    if not members or not members.issubset(groupable_flags):
+        return None
+    return members
+
+
+def _flag_matches_token(
+    flag: str,
+    token: str,
+    *,
+    groupable_flags: set[str],
+) -> bool:
     if not flag:
         return False
     if flag.startswith("--"):
@@ -90,27 +106,9 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
         if token == flag:
             return True
-        # Combined short-flag group matching: `-ve` matches `-e`.
-        # Only applies when the token looks like a POSIX short-flag bundle:
-        # single dash, all-lowercase alphabetic, at most 4 chars (e.g. -ef, -zvn).
-        # Mixed-case tokens such as ProjectDiscovery's -oD or nmap's -sV are
-        # long-form/specialized single-dash options and must match exactly.
-        if (token.startswith('-') and not token.startswith('--')
-                and len(token) <= 4 and token[1:].isalpha() and token[1:].islower()):
-            return flag[1] in token[1:]
-        return False
+        members = _grouped_short_flag_members(token, groupable_flags)
+        return bool(members and flag in members)
     return token == flag
-
-
-def _grouped_short_flag_members(token: str, allow_grouping_flags: set[str]) -> set[str] | None:
-    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
-        return None
-    if not token[1:].isalpha() or not token[1:].islower():
-        return None
-    members = {f"-{char}" for char in token[1:]}
-    if not members or not members.issubset(allow_grouping_flags):
-        return None
-    return members
 
 
 def _allowed_prefix_matches_with_grouping(
@@ -175,13 +173,20 @@ def _is_exempted_nmap_output_token(token: str, exempt_flags: set[str]) -> bool:
     )
 
 
-def is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
+def is_denied(
+    command: str,
+    deny_entries: list[str],
+    *,
+    exempt_flags: set[str] | None = None,
+    allow_grouping: dict[str, set[str]] | None = None,
+) -> bool:
     """Return True if command matches any deny entry."""
     command_tokens = split_command_argv(command)
     if not command_tokens:
         return False
 
     exempt_flags = exempt_flags or set()
+    allow_grouping = allow_grouping or {}
     for d in deny_entries:
         deny_tokens = split_command_argv(d)
         if not deny_tokens:
@@ -199,10 +204,30 @@ def is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] |
         if not _tokens_start_with(command_tokens, tool_prefix):
             continue
 
+        # A command must opt in to short-flag grouping. Once it does, a
+        # one-letter deny may match a grouped token only when every member is
+        # either explicitly groupable or another one-letter deny at the same
+        # command prefix. This preserves nc's `-zve` safety check without
+        # mistaking specialized options such as httpx's `-rl` for `-r -l`.
+        groupable_flags = set(allow_grouping.get(command_tokens[0].lower(), set()))
+        if groupable_flags:
+            for sibling in deny_entries:
+                sibling_tokens = split_command_argv(sibling)
+                if len(sibling_tokens) < 2:
+                    continue
+                sibling_prefix = sibling_tokens[:-1]
+                if len(sibling_prefix) != len(tool_prefix):
+                    continue
+                if not _tokens_start_with(sibling_prefix, tool_prefix):
+                    continue
+                sibling_flag = sibling_tokens[-1]
+                if re.fullmatch(r"-[a-z]", sibling_flag):
+                    groupable_flags.add(sibling_flag)
+
         tail = command_tokens[len(tool_prefix):]
         for idx, token in enumerate(tail):
             if not (
-                _flag_matches_token(flag, token)
+                _flag_matches_token(flag, token, groupable_flags=groupable_flags)
                 or (command_tokens[0].lower() == "nmap" and _nmap_output_deny_matches(flag, token))
             ):
                 continue

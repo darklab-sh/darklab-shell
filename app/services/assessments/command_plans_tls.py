@@ -9,21 +9,20 @@ import ipaddress
 import shlex
 
 from services.assessments.command_plan_contracts import CommandPlan
+from services.assessments.command_target_urls import default_https_target
 
 
 def tls_command_plans(target_type: str, target_value: str) -> dict[str, CommandPlan]:
     """Return the fixed certificate and configuration plans for one host."""
     endpoint = target_value
-    web_host = target_value
     if target_type == "ip":
         try:
             if ipaddress.ip_address(target_value).version == 6:
                 endpoint = f"[{target_value}]:443"
-                web_host = f"[{target_value}]"
         except ValueError:
             return {}
     quoted_endpoint = shlex.quote(endpoint)
-    quoted_url = shlex.quote(f"https://{web_host}")
+    quoted_url = shlex.quote(default_https_target(target_type, target_value))
     return {
         "sslyze": CommandPlan(
             f"sslyze --certinfo {quoted_endpoint}",

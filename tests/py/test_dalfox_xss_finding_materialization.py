@@ -48,7 +48,7 @@ def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, Any]:
     active_run_id = f"run_dalfox_xss_{suffix}"
     target = f"https://app-{suffix}.example.test/search?q=one"
     source_command = (
-        f"dalfox {target} --only-discovery --skip-mining-dict --format jsonl --no-color"
+        f"dalfox scan {target} --only-discovery --skip-mining-dict --format jsonl --no-color"
     )
     source_state = DalfoxParameterObservationState(source_command, source_run_id)
     source_lines = [

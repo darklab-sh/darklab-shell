@@ -13,6 +13,7 @@ from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 
 from core.output_targets import tokenize_command
+from services.assessments.dalfox_command_tokens import dalfox_scan_target
 from services.intel.canonical import CanonicalizationError, canonical_url
 
 
@@ -232,11 +233,12 @@ class DalfoxXssObservationState:
 
 def _active_command_matches(command: str, context: ReviewedDalfoxXssContext) -> bool:
     tokens = tokenize_command(str(command or ""))
-    if len(tokens) < 2 or tokens[0].casefold() != "dalfox":
+    target = dalfox_scan_target(tokens)
+    if not target:
         return False
     location = _PARAMETER_LOCATIONS.get(context.location, "")
     return (
-        _url(tokens[1]) == context.target
+        _url(target) == context.target
         and _flag_value(tokens, "--format").casefold() == "jsonl"
         and _flag_value(tokens, "-p", "--param") == f"{context.parameter}:{location}"
         and bool(location)

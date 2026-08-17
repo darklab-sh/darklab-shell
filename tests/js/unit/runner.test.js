@@ -889,6 +889,7 @@ function loadRunnerFns({
   welcomeDone = false,
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
+  setTabRunningCommand: setTabRunningCommandOverride = null,
   showToast: showToastOverride = null,
   confirmClearSessionToken: confirmClearSessionTokenOverride = null,
   setComposerPromptMode: setComposerPromptModeOverride = null,
@@ -989,6 +990,10 @@ function loadRunnerFns({
   cmdInput.blur = vi.fn()
 
   const setTabLabel = vi.fn()
+  const setTabRunningCommand = setTabRunningCommandOverride || vi.fn((id, command) => {
+    const tab = normalizedTabs.find((t) => t.id === id)
+    if (tab) tab.command = String(command || '')
+  })
   const setTabStatus = vi.fn((id, nextStatus) => {
     const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) tab.st = nextStatus
@@ -1042,6 +1047,7 @@ function loadRunnerFns({
       addToHistory,
       addToRecentPreview,
       setTabLabel,
+      setTabRunningCommand,
       setTabStatus,
       activateTab,
       appendLine,
@@ -1145,7 +1151,9 @@ function loadRunnerFns({
     interruptPromptLine,
     hasPendingTerminalConfirm,
     cancelPendingTerminalConfirm,
+    cancelAllPendingTerminalConfirms,
     _setPendingTerminalConfirm,
+    updateSessionId,
     runCommand,
     attachActiveRunFromMonitor,
     killActiveRunFromMonitor,
@@ -1155,6 +1163,7 @@ function loadRunnerFns({
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
     _subscribeRunStream,
+    _bindStartedProbeRun,
     pauseBackgroundRunStreamsForStatusMonitor,
     resumeBackgroundRunStreamsAfterStatusMonitor,
     detachRunStreamForTab,
@@ -1177,6 +1186,7 @@ function loadRunnerFns({
     status,
     storage,
     setTabLabel,
+    setTabRunningCommand,
     setTabStatus,
     clearTab,
     activateTab,
@@ -1200,6 +1210,55 @@ function loadRunnerFns({
 }
 
 describe('runner helpers', () => {
+  it('binds a confirmed probe run to the same tab without clearing its transcript', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(pendingBrokerStreamResponse()))
+    const {
+      _bindStartedProbeRun,
+      clearTab,
+      setTabRunningCommand,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1', st: 'idle', runId: null, command: 'probe run ping',
+        rawLines: [{ text: 'Probe plan: Ping', cls: 'builtin-section' }],
+        killed: false, pendingKill: false,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(_bindStartedProbeRun({
+      project_id: 'prj_1',
+      run: {
+        run_id: 'run_probe',
+        command: 'ping -c 4 example.test',
+        stream: '/runs/run_probe/stream',
+        last_event_id: '',
+      },
+    }, 'tab-1')).resolves.toBe(true)
+
+    expect(clearTab).not.toHaveBeenCalled()
+    expect(tabs[0].runId).toBe('run_probe')
+    expect(tabs[0].historyRunId).toBe('run_probe')
+    expect(tabs[0].command).toBe('ping -c 4 example.test')
+    expect(setTabRunningCommand).toHaveBeenCalledWith(
+      'tab-1',
+      'ping -c 4 example.test',
+    )
+    expect(tabs[0].rawLines).toContainEqual({
+      text: 'Probe plan: Ping', cls: 'builtin-section',
+    })
+    expect(appendLine).toHaveBeenCalledWith(
+      '[probe] started run run_probe for Project prj_1',
+      'notice',
+      'tab-1',
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/runs/run_probe/stream?tab_id=tab-1',
+    )
+  })
+
   it('setStatus shows RUNNING only while running and IDLE otherwise', () => {
     const { setStatus, status } = loadRunnerFns()
 
@@ -3416,6 +3475,236 @@ describe('session-token clear', () => {
     expect(updateSessionId).not.toHaveBeenCalled()
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
     expect(status.className).toBe('status-pill ok')
+  })
+})
+
+describe('per-tab terminal confirmations', () => {
+  function pendingExecution(tabId) {
+    return {
+      appendLine: vi.fn(),
+      completePending: vi.fn().mockResolvedValue(undefined),
+      setPending: vi.fn(),
+      setRecordRecent: vi.fn(),
+      setStatus: vi.fn(),
+      state: { tabId, lines: [] },
+    }
+  }
+
+  it('keeps confirmations independent and consumes answers only in the origin tab', async () => {
+    const yesTabOne = vi.fn()
+    const noTabOne = vi.fn()
+    const yesTabTwo = vi.fn()
+    const noTabTwo = vi.fn()
+    const {
+      _setPendingTerminalConfirm,
+      __setActiveTabIdForTest,
+      hasPendingTerminalConfirm,
+      submitCommand,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+    })
+    _setPendingTerminalConfirm({
+      tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onYes: yesTabOne, onNo: noTabOne,
+    })
+    __setActiveTabIdForTest('tab-2')
+    _setPendingTerminalConfirm({
+      tabId: 'tab-2', execution: pendingExecution('tab-2'),
+      onYes: yesTabTwo, onNo: noTabTwo,
+    })
+
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(true)
+    submitCommand('yes')
+    await vi.waitFor(() => expect(yesTabTwo).toHaveBeenCalledOnce())
+    expect(yesTabOne).not.toHaveBeenCalled()
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+
+    __setActiveTabIdForTest('tab-1')
+    submitCommand('no')
+    await vi.waitFor(() => expect(noTabOne).toHaveBeenCalledOnce())
+    expect(noTabTwo).not.toHaveBeenCalled()
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+  })
+
+  it('keeps an accepted confirmation settling in its origin tab', async () => {
+    let resolveLaunch
+    const launch = new Promise(resolve => { resolveLaunch = resolve })
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(pendingBrokerStreamResponse()))
+    const {
+      _bindStartedProbeRun,
+      _setPendingTerminalConfirm,
+      __setActiveTabIdForTest,
+      runBtn,
+      status,
+      submitCommand,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      appendLine,
+      apiFetch,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'probe',
+      tabId: 'tab-1',
+      execution: pendingExecution('tab-1'),
+      onYes: () => launch,
+      onComplete: launched => _bindStartedProbeRun(launched, 'tab-1'),
+    })
+
+    submitCommand('yes')
+    submitCommand('pwd')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[pending] The confirmed action is still starting.',
+      'notice',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(tabs).toHaveLength(2)
+
+    __setActiveTabIdForTest('tab-2')
+    status.className = 'status-pill idle'
+    status.textContent = 'IDLE'
+    resolveLaunch({
+      project_id: 'prj_1',
+      run: {
+        run_id: 'run_probe',
+        command: 'ping -c 4 example.test',
+        stream: '/runs/run_probe/stream',
+        last_event_id: '',
+      },
+    })
+    await vi.waitFor(() => expect(tabs[0].runId).toBe('run_probe'))
+
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[1].st).toBe('idle')
+    expect(status.className).toBe('status-pill idle')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('rejects a second confirmation in one tab and can cancel every pending tab', () => {
+    const cancelOne = vi.fn()
+    const cancelTwo = vi.fn()
+    const {
+      _setPendingTerminalConfirm,
+      cancelAllPendingTerminalConfirms,
+      hasPendingTerminalConfirm,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+    })
+    _setPendingTerminalConfirm({
+      tabId: 'tab-1', execution: pendingExecution('tab-1'), onCancel: cancelOne,
+    })
+    let confirmationError
+    try {
+      _setPendingTerminalConfirm({
+        tabId: 'tab-1', execution: pendingExecution('tab-1'), onCancel: vi.fn(),
+      })
+    } catch (error) {
+      confirmationError = error
+    }
+    expect(confirmationError).toMatchObject({
+      name: 'TerminalConfirmationPendingError',
+      message: 'Finish or cancel the pending confirmation in this tab before starting another probe.',
+    })
+    _setPendingTerminalConfirm({
+      tabId: 'tab-2', execution: pendingExecution('tab-2'), onCancel: cancelTwo,
+    })
+
+    expect(cancelAllPendingTerminalConfirms()).toBe(2)
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelOne).toHaveBeenCalledOnce()
+    expect(cancelTwo).toHaveBeenCalledOnce()
+
+    const cancelProbe = vi.fn()
+    const cancelSessionToken = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelProbe,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'session-token', tabId: 'tab-2', execution: pendingExecution('tab-2'),
+      onCancel: cancelSessionToken,
+    })
+
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: false },
+    }))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(cancelProbe).not.toHaveBeenCalled()
+
+    document.dispatchEvent(new CustomEvent('app:active-project-changed', {
+      detail: { changed: true },
+    }))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(true)
+    expect(cancelProbe).toHaveBeenCalledOnce()
+    expect(cancelSessionToken).not.toHaveBeenCalled()
+
+    document.dispatchEvent(new Event('app:scope-changed'))
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelSessionToken).toHaveBeenCalledOnce()
+
+    const cancelCapabilities = vi.fn()
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelCapabilities,
+    })
+    document.dispatchEvent(new CustomEvent('app:scope-capabilities-changed', {
+      detail: { changed: false, initial: true },
+    }))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(true)
+    expect(cancelCapabilities).not.toHaveBeenCalled()
+
+    document.dispatchEvent(new Event('app:scope-capabilities-changed'))
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(cancelCapabilities).toHaveBeenCalledOnce()
+  })
+
+  it('cancels every pending confirmation when the session identity changes', () => {
+    const updateSessionId = vi.fn()
+    const cancelProbe = vi.fn()
+    const cancelSessionToken = vi.fn()
+    const {
+      _setPendingTerminalConfirm,
+      hasPendingTerminalConfirm,
+      updateSessionId: replaceSessionId,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false },
+        { id: 'tab-2', st: 'idle', runId: null, killed: false, pendingKill: false },
+      ],
+      updateSessionId,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'probe', tabId: 'tab-1', execution: pendingExecution('tab-1'),
+      onCancel: cancelProbe,
+    })
+    _setPendingTerminalConfirm({
+      kind: 'session-token', tabId: 'tab-2', execution: pendingExecution('tab-2'),
+      onCancel: cancelSessionToken,
+    })
+
+    replaceSessionId('session-replacement')
+
+    expect(updateSessionId).toHaveBeenCalledWith('session-replacement')
+    expect(hasPendingTerminalConfirm('tab-1')).toBe(false)
+    expect(hasPendingTerminalConfirm('tab-2')).toBe(false)
+    expect(cancelProbe).toHaveBeenCalledOnce()
+    expect(cancelSessionToken).toHaveBeenCalledOnce()
   })
 })
 
