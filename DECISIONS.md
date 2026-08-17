@@ -187,6 +187,8 @@ Workflow checkpoints remain authoritative for pending, active, and terminal chil
 
 Execution deduplication and coverage stay separate. The execution key uses the exact target identity, action, selected profile identity, credential classification, numeric bounds, and public display command, but deliberately omits the assessment check id. Identical work can therefore launch once while retaining one coverage mapping per frozen check. Finding retest groups keep their existing check-specific key because a shared retest is a different product contract. Both surfaces use the same code-based eligibility check for availability, policy, credential use, excluded action families, and exact-command matching, then provide their own user-facing explanation.
 
+The preview is a short-lived server-owned approval object, not a client-supplied launch plan. It keeps the exact public probe plans and frozen-check mappings for 15 minutes, uses one SHA-256 digest over the complete stable-ordered snapshot, and pages complete items at no more than 100 entries or 1 MiB. Confirmation names only that preview and digest. This keeps large cycle reads bounded and prevents a caller from changing an item between review and start.
+
 ---
 
 ## Atlas Decisions
