@@ -4065,7 +4065,9 @@ describe('shell chrome project workspace', () => {
         ))
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ target: targetStates.find(target => target.id === 'target-1') }),
+          json: () => Promise.resolve({
+            target: { ...targetStates.find(target => target.id === 'target-1'), id: 'target-updated' },
+          }),
         })
       }
       if (url === '/projects/project-1/targets/target-1' && options.method === 'DELETE') {
@@ -4670,17 +4672,16 @@ describe('shell chrome project workspace', () => {
         value: 'darklab.io',
       }),
     }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
-      method: 'DELETE',
-      body: JSON.stringify({ label: 'Primary domain' }),
-    }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-updated/labels', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ label: 'Updated target' }),
     }))
-    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/note', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-updated/note', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ body: 'Retest scope' }),
+    }))
+    expect(apiFetch).not.toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+      method: 'POST',
     }))
     expect(apiFetch.mock.calls
       .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length).toBe(projectFetchesBeforeTargetEdit)

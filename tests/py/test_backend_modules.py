@@ -15300,7 +15300,7 @@ class TestIntelServices:
             "https://xn--bcher-kva.example/a%20b?q=one%20two"
         )
         assert canonical.canonical_entity("url", "https://Example.com:443/path/#section") == (
-            "https://example.com/path"
+            "https://example.com/path/"
         )
         assert canonical.canonical_entity("url", "http://Example.com:80/?b=2&a=1") == (
             "http://example.com/?b=2&a=1"
@@ -15309,8 +15309,9 @@ class TestIntelServices:
             "https://example.com/path/?q=1"
         )
         assert canonical.canonical_entity("url", "HTTP://[2001:0DB8::0001]:8080/path/") == (
-            "http://[2001:db8::1]:8080/path"
+            "http://[2001:db8::1]:8080/path/"
         )
+        assert canonical.canonical_entity("url", "https://Example.com/") == "https://example.com"
         for path in ("../secret", "%2e%2e/secret", "%2e./secret"):
             assert canonical.canonical_entity(
                 "url", f"https://example.test/allowed/{path}"
@@ -24742,7 +24743,7 @@ class TestOutputSignals:
         )
         gobuster_group = gobuster_derived["groups"][0]
         assert gobuster_group["added"][0]["canonical_url"] == "https://tor-stats.darklab.sh/static"
-        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static"
+        assert gobuster_group["added"][0]["redirect_canonical_url"] == "https://tor-stats.darklab.sh/static/"
         assert gobuster_group["removed"][0]["canonical_url"] == "https://tor-stats.darklab.sh/index.html"
 
         katana_derived = run_comparison.compare_derived_changes(
@@ -30012,7 +30013,7 @@ class TestDatabaseInit:
 
         assert [(entity.kind, entity.canonical_value) for entity in result.entities] == [
             ("url", "https://darklab.sh/Login"),
-            ("url", "http://[2001:db8::1]:8080/path"),
+            ("url", "http://[2001:db8::1]:8080/path/"),
             ("ip", "192.0.2.10"),
             ("cve", "CVE-2026-12345"),
             ("hash", f"sha256:{'a' * 64}"),
@@ -32449,6 +32450,17 @@ SQL syntax error near q</response>
                     "name": "Any exact URL",
                     "target_entity_kind": "any",
                     "match_mode": "exact",
+                    "pattern": "HTTPS://DarkLab.SH/admin",
+                },
+            )
+            slash_url_preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "auto-session",
+                "prj-auto-promote",
+                {
+                    "name": "Distinct slash URL",
+                    "target_entity_kind": "any",
+                    "match_mode": "exact",
                     "pattern": "HTTPS://DarkLab.SH/admin/",
                 },
             )
@@ -32457,6 +32469,7 @@ SQL syntax error near q</response>
         assert [item["id"] for item in domain_preview["matches"]] == ["ent-auto-domain"]
         assert [item["id"] for item in port_preview["matches"]] == ["ent-auto-port"]
         assert [item["id"] for item in url_preview["matches"]] == ["ent-auto-url"]
+        assert slash_url_preview["matches"] == []
 
     def test_auto_promote_rule_matches_ui_exposed_mode_kind_pairs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -34020,6 +34033,10 @@ class TestAssessmentHttpProfileExecution:
             scoped_profile,
             {"type": "url", "value": "https://app.example/allowed/./page"},
         ) == "https://app.example/allowed/page"
+        assert _execution_target(
+            scoped_profile,
+            {"type": "url", "value": "https://app.example/allowed/page/"},
+        ) == "https://app.example/allowed/page/"
         for path in (
             "../secret",
             "%2e%2e/secret",

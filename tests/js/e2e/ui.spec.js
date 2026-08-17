@@ -1219,9 +1219,10 @@ test.describe('project workspace modal', () => {
 
     await switchProjectTab(page, 'details')
     await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
-    await expectProjectTargetEditorReady(page, 'Add Target')
+    const targetEditor = await expectProjectTargetEditorReady(page, 'Add Target')
+    await targetEditor.locator('#project-target-type').selectOption('url')
     await fillProjectTargetEditor(page, {
-      value: 'playwright.example',
+      value: 'https://playwright.example/app',
       labels: 'Primary target',
       notes: 'Scope confirmed in browser test',
     })
@@ -1230,7 +1231,9 @@ test.describe('project workspace modal', () => {
     await expect(addTargetSubmit).toBeVisible()
     await addTargetSubmit.click()
     await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
-    const targetRow = page.locator('.project-target-row').filter({ hasText: 'playwright.example' })
+    const targetRow = page.locator('.project-target-row').filter({
+      hasText: 'https://playwright.example/app',
+    })
     await expect(targetRow).toBeVisible()
     await expect(targetRow).toContainText('Primary target')
     await expect(targetRow).toContainText('note')
@@ -1239,7 +1242,7 @@ test.describe('project workspace modal', () => {
     await expectProjectTargetEditorReady(page, 'Save Target')
     await expect(page.locator('#project-target-editor-title')).toHaveText('EDIT TARGET')
     await fillProjectTargetEditor(page, {
-      value: 'projects.playwright.example',
+      value: 'https://playwright.example/app/',
       labels: 'Updated target',
       notes: 'Scope confirmed in browser test',
     })
@@ -1250,10 +1253,15 @@ test.describe('project workspace modal', () => {
     })
     await page.locator('#project-target-submit').click()
     expect((await targetUpdateResponse).ok()).toBe(true)
-    await waitForProjectTargetValue(page, projectId, 'projects.playwright.example')
-    await expect(page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })).toBeVisible({
+    await waitForProjectTargetValue(page, projectId, 'https://playwright.example/app/')
+    const savedTargetRow = page.locator('.project-target-row').filter({
+      hasText: 'https://playwright.example/app/',
+    })
+    await expect(savedTargetRow).toBeVisible({
       timeout: 15_000,
     })
+    await expect(savedTargetRow).toContainText('Updated target')
+    await expect(savedTargetRow).toContainText('note')
 
     const { runRow, command: linkedRunCommand } = await linkExternalRunToOpenProject(page, testInfo)
     await runRow.locator('[data-project-action="edit-run-metadata"]').click()
@@ -1275,7 +1283,9 @@ test.describe('project workspace modal', () => {
     )
 
     await switchProjectTab(page, 'details')
-    const updatedTargetRow = page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })
+    const updatedTargetRow = page.locator('.project-target-row').filter({
+      hasText: 'https://playwright.example/app/',
+    })
     await updatedTargetRow.locator('[data-project-action="delete-target"]').click()
     await expect(page.locator('#confirm-host')).toBeVisible()
     await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()

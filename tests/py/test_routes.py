@@ -8061,6 +8061,23 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         target = json.loads(resp.data)["target"]
+        slash_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "url", "value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
+        slash_target = json.loads(slash_resp.data)["target"]
+        updated_resp = client.put(
+            f"/projects/{project['id']}/targets/{target['id']}",
+            json={"type": "url", "value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
+        updated_target = json.loads(updated_resp.data)["target"]
+        resolved = client.post(
+            f"/projects/{project['id']}/probes/targets/resolve",
+            json={"target_value": "https://portal.darklab.sh/login/"},
+            headers={"X-Session-ID": session_id},
+        )
         listed = client.get(
             f"/projects/{project['id']}/targets",
             headers={"X-Session-ID": session_id},
@@ -8070,24 +8087,45 @@ class TestProjectRoutes:
                 (row["type"], row["canonical_value"]): dict(row)
                 for row in conn.execute(
                     "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
-                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?) "
+                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?, ?) "
                     "ORDER BY type, canonical_value",
-                    (session_id, "https://portal.darklab.sh/login", "portal.darklab.sh"),
+                    (
+                        session_id,
+                        "https://portal.darklab.sh/login",
+                        "https://portal.darklab.sh/login/",
+                        "portal.darklab.sh",
+                    ),
                 ).fetchall()
             }
 
         url_row = rows[("url", "https://portal.darklab.sh/login")]
+        updated_url_row = rows[("url", "https://portal.darklab.sh/login/")]
         host_row = rows[("domain", "portal.darklab.sh")]
         listed_targets = json.loads(listed.data)["targets"]
         assert resp.status_code == 201
+        assert slash_resp.status_code == 201
+        assert updated_resp.status_code == 200
+        assert resolved.status_code == 200
         assert listed.status_code == 200
         assert target["type"] == "url"
         assert target["value"] == "https://portal.darklab.sh/login"
         assert target["id"] == url_row["id"]
         assert url_row["host_entity_id"] == host_row["id"]
+        assert slash_target["value"] == "https://portal.darklab.sh/login/"
+        assert slash_target["id"] != target["id"]
+        assert updated_target["value"] == "https://portal.darklab.sh/login/"
+        assert updated_target["id"] == updated_url_row["id"]
+        assert updated_target["id"] == slash_target["id"]
+        assert updated_target["id"] != target["id"]
+        assert updated_url_row["host_entity_id"] == host_row["id"]
+        assert json.loads(resolved.data)["target"] == {
+            "entity_id": updated_target["id"],
+            "type": "url",
+            "value": "https://portal.darklab.sh/login/",
+        }
         assert host_row["team_id"] == ""
         assert [(item["type"], item["value"]) for item in listed_targets] == [
-            ("url", "https://portal.darklab.sh/login")
+            ("url", "https://portal.darklab.sh/login/")
         ]
 
     def test_project_targets_list_supports_pagination_type_search_and_auto_filter(self):

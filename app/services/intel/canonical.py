@@ -154,8 +154,6 @@ def canonical_url(value: str) -> str:
     path = canonical_url_path(parts.path or "")
     if path == "/" and not parts.query:
         path = ""
-    elif not parts.query and path.endswith("/"):
-        path = path.rstrip("/")
     query = quote(unquote(parts.query), safe="=&;:@/?")
     canonical = urlunsplit((scheme, netloc, path, query, ""))
     if len(canonical.encode("utf-8")) > MAX_CANONICAL_VALUE_BYTES:

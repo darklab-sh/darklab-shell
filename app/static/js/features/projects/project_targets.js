@@ -158,7 +158,7 @@ let exportedDarklabProjectTargets = null;
           body: JSON.stringify(payload),
         });
         const data = await resp.json().catch(() => ({}));
-        const savedTargetId = targetId || String(data && data.target && data.target.id || '');
+        const savedTargetId = String(data && data.target && data.target.id || targetId);
         if (!savedTargetId) {
           throw new Error('Target saved without an identifier.');
         }
