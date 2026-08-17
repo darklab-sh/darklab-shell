@@ -51,6 +51,7 @@ def print_collection(
 
 def print_table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
     if not rows:
+        print("No results.")
         return
     headers = tuple(_field_header(field) for field in fields)
     rendered_rows = [[_format_table_value(row.get(field)) for field in fields] for row in rows]
@@ -65,8 +66,7 @@ def print_table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
 
 
 def _field_header(field: str) -> str:
-    aliases = {
-        "byte_size": "BYTES",
+    aliases = {"byte_size": "BYTES",
         "canonical_value": "VALUE",
         "display_name": "NAME",
         "exit_code": "EXIT",

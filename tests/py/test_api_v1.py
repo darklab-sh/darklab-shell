@@ -8794,8 +8794,8 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                 }
             if path == "/projects/prj_cli/assessments" and method == "GET":
                 return {
-                    "assessments": [assessment],
-                    "total": 1,
+                    "assessments": [] if (params or {}).get("status") == "completed" else [assessment],
+                    "total": 0 if (params or {}).get("status") == "completed" else 1,
                     "limit": 50,
                     "offset": 0,
                     "has_more": False,
@@ -8894,6 +8894,11 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
         "tls",
         "combined",
     ]
+
+    assert cli_main.main([
+        "assessment", "list", "prj_cli", "--status", "completed",
+    ]) == 0
+    assert capsys.readouterr().out == "No results.\n"
 
     assert cli_main.main(["assessment", "show", "prj_cli", "asmt_cli"]) == 0
     show_output = capsys.readouterr().out
