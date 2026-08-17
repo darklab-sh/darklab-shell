@@ -666,6 +666,8 @@ After a claim, the assessment adapter rebuilds that item's probe plan from its p
 
 Assessment-batch cancellation uses the same serialized gate as child claims, so recording `canceling` prevents another worker from claiming new work. It marks pending and unbound launching children canceled, closes their checkpoint ordinals, and asks the ordinary scoped process boundary to stop each bound run. A bound child stays `running` until ordinary run finalization reports its real exit; only then does the batch classify it as succeeded, canceled, or `could_not_cancel`. The parent reaches `canceled` only after no pending, launching, or running child remains, never retries a child after cancellation intent, and derives its public counts from those durable child outcomes.
 
+Assessment complete, archive, and delete requests and Project deletion lock that same claim gate before changing lifecycle state. If any matching batch is queued, running, or already canceling, the transaction records cancellation for all of them and commits no assessment or Project mutation. Browser responses return `assessment_batch_cancellation_pending`, a primary `batch_id`, and the complete `batch_ids`; API v1 puts the same values in its normal error envelope. The caller must retry the lifecycle action after settlement so the app rechecks current permissions, state, and intent. A later Project deletion removes terminal batch coordinators and preview snapshots before deleting the Project, while ordinary child runs and their evidence follow the existing Project retention rules.
+
 ### Project Routes
 
 | Method | Endpoint | Description |

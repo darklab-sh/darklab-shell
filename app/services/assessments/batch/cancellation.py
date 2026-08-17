@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -213,6 +213,35 @@ def record_cancel_signal_failure(batch_id: str, run_id: str) -> bool:
     return changed.rowcount == 1
 
 
+def signal_batch_cancellation_runs(
+    session_id: str,
+    batch_runs: Iterable[tuple[str, Iterable[str]]],
+    *,
+    team_id: str = "",
+    cancel_run_fn: Callable[..., bool] = request_active_run_cancellation,
+) -> int:
+    """Signal committed batch children and retain every failed request."""
+    signal_failures = 0
+    for batch_id, run_ids in batch_runs:
+        for run_id in run_ids:
+            try:
+                cancel_run_fn(run_id, session_id, team_id=team_id)
+            except Exception as exc:
+                signal_failures += 1
+                record_cancel_signal_failure(batch_id, run_id)
+                log.warning(
+                    "ASSESSMENT_BATCH_CANCEL_SIGNAL_FAILED",
+                    extra={
+                        "batch_id": batch_id,
+                        "run_id": run_id,
+                        "error_type": type(exc).__name__,
+                        "session": get_log_session_id(session_id),
+                        "team_id": str(team_id or ""),
+                    },
+                )
+    return signal_failures
+
+
 def cancel_assessment_batch(
     session_id: str,
     batch_id: str,
@@ -230,23 +259,12 @@ def cancel_assessment_batch(
             conn.rollback()
             return None
         conn.commit()
-    signal_failures = 0
-    for run_id in run_ids:
-        try:
-            cancel_run_fn(run_id, session_id, team_id=team_id)
-        except Exception as exc:
-            signal_failures += 1
-            record_cancel_signal_failure(batch_id, run_id)
-            log.warning(
-                "ASSESSMENT_BATCH_CANCEL_SIGNAL_FAILED",
-                extra={
-                    "batch_id": batch_id,
-                    "run_id": run_id,
-                    "error_type": type(exc).__name__,
-                    "session": get_log_session_id(session_id),
-                    "team_id": str(team_id or ""),
-                },
-            )
+    signal_failures = signal_batch_cancellation_runs(
+        session_id,
+        ((batch_id, run_ids),),
+        team_id=team_id,
+        cancel_run_fn=cancel_run_fn,
+    )
     batch = get_batch_parent(session_id, batch_id, team_id=team_id)
     return {
         "batch": batch or {},
@@ -258,4 +276,5 @@ __all__ = [
     "cancel_assessment_batch",
     "record_cancel_signal_failure",
     "request_batch_cancellation_on_conn",
+    "signal_batch_cancellation_runs",
 ]

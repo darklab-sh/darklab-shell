@@ -162,6 +162,9 @@ class ModuleSizeBudget:
 
 
 _MODULE_SIZE_RATCHET = (
+    ModuleSizeBudget(
+        "app/blueprints/assessment_batch_lifecycle.py", 53, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/connectors/oast_correlations.py", 284, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/oast_correlation_lifecycle.py", 174, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/oast_config.py", 75, "split-package-ratchet"),
@@ -273,6 +276,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_artifacts.py", 155, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_auto_promote.py", 204, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_core.py", 412, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_delete.py", 57, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_findings.py", 272, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_finding_evidence.py", 146, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_finding_triage.py", 142, "split-package-ratchet"),
@@ -996,6 +1000,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/cancellation.py", 70, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/batch/lifecycle_events.py", 82, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/lifecycle_guard.py",
+        143,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/services/assessments/batch/parent_completion.py", 122, "split-package-ratchet"

@@ -13,6 +13,9 @@ import pytest
 from conftest import reusable_test_app
 from core.database_access import get_db_connect
 from services.assessments.base_action_catalog import ACTIONS
+from services.assessments.batch.preview_compiler import compile_batch_preview
+from services.assessments.batch.start import start_assessment_batch
+from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
@@ -102,6 +105,31 @@ def _preview_counts() -> tuple[int, int, int]:
             int(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
             for table in ("workflow_executions", "runs", "audit_events")
         )
+
+
+def _start_batch(
+    session_id: str,
+    project_id: str,
+    assessment_id: str,
+) -> dict[str, object]:
+    preview = compile_batch_preview(session_id, project_id, assessment_id)
+    return start_assessment_batch(
+        session_id,
+        project_id,
+        assessment_id,
+        preview_id=str(preview["preview_id"]),
+        plan_digest=preview["plan_digest"],
+        confirmed=True,
+    )
+
+
+def _assessment_status(assessment_id: str) -> str:
+    with get_db_connect()() as conn:
+        row = conn.execute(
+            "SELECT status FROM project_assessments WHERE id = ?",
+            (assessment_id,),
+        ).fetchone()
+    return str(row["status"] if row else "")
 
 
 def test_browser_preview_create_read_and_page_are_owner_scoped_and_side_effect_free(
@@ -298,3 +326,128 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
         browser.get_json()["preview"]["plan_digest"]
         == api.get_json()["preview"]["plan_digest"]
     )
+
+
+@pytest.mark.parametrize("prefix", ["", "/api/v1"])
+@pytest.mark.parametrize("next_status", ["completed", "archived"])
+def test_assessment_lifecycle_waits_for_batch_cancellation_and_requires_a_fresh_request(
+    client,
+    route_cycle,
+    prefix,
+    next_status,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    batch = _start_batch(session_id, project_id, assessment_id)
+    batch_id = str(batch["batch_id"])
+    headers = _api_headers(session_id) if prefix else _browser_headers(session_id)
+    route = f"{prefix}/projects/{project_id}/assessments/{assessment_id}"
+
+    pending = client.patch(route, headers=headers, json={"status": next_status})
+
+    assert pending.status_code == 409
+    payload = pending.get_json()
+    if prefix:
+        assert payload["error"]["code"] == "assessment_batch_cancellation_pending"
+        assert payload["error"]["details"] == {
+            "batch_id": batch_id,
+            "batch_ids": [batch_id],
+        }
+    else:
+        assert payload["code"] == "assessment_batch_cancellation_pending"
+        assert payload["batch_id"] == batch_id
+        assert payload["batch_ids"] == [batch_id]
+    assert _assessment_status(assessment_id) == "active"
+    assert get_batch_parent(session_id, batch_id)["status"] == "canceled"
+
+    applied = client.patch(route, headers=headers, json={"status": next_status})
+
+    assert applied.status_code == 200
+    assert applied.get_json()["assessment"]["status"] == next_status
+
+
+@pytest.mark.parametrize("prefix", ["", "/api/v1"])
+def test_assessment_delete_waits_for_batch_cancellation_before_deleting(
+    client,
+    route_cycle,
+    prefix,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    batch = _start_batch(session_id, project_id, assessment_id)
+    batch_id = str(batch["batch_id"])
+    archived_at = datetime.now(timezone.utc).isoformat()
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE project_assessments SET status = 'archived', completed_at = ?, "
+            "archived_at = ? WHERE id = ?",
+            (archived_at, archived_at, assessment_id),
+        )
+        conn.commit()
+    headers = _api_headers(session_id) if prefix else _browser_headers(session_id)
+    route = f"{prefix}/projects/{project_id}/assessments/{assessment_id}"
+
+    pending = client.delete(route, headers=headers)
+
+    assert pending.status_code == 409
+    payload = pending.get_json()
+    if prefix:
+        assert payload["error"]["details"]["batch_id"] == batch_id
+    else:
+        assert payload["batch_id"] == batch_id
+    assert _assessment_status(assessment_id) == "archived"
+    assert get_batch_parent(session_id, batch_id)["status"] == "canceled"
+
+    deleted = client.delete(route, headers=headers)
+
+    assert deleted.status_code == 200
+    assert _assessment_status(assessment_id) == ""
+
+
+def test_project_delete_cancels_every_active_batch_then_cleans_coordinator_state(
+    client,
+    route_cycle,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    batch_ids = {
+        str(_start_batch(session_id, project_id, assessment_id)["batch_id"])
+        for _index in range(2)
+    }
+    assert len(batch_ids) == 2
+
+    pending = client.delete(
+        f"/projects/{project_id}",
+        headers=_browser_headers(session_id),
+    )
+
+    assert pending.status_code == 409
+    payload = pending.get_json()
+    assert payload["code"] == "assessment_batch_cancellation_pending"
+    assert set(payload["batch_ids"]) == batch_ids
+    assert payload["batch_id"] in batch_ids
+    with get_db_connect()() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+    assert {
+        str(get_batch_parent(session_id, batch_id)["status"])
+        for batch_id in batch_ids
+    } == {"canceled"}
+
+    deleted = client.delete(
+        f"/projects/{project_id}",
+        headers=_browser_headers(session_id),
+    )
+
+    assert deleted.status_code == 200
+    with get_db_connect()() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM projects WHERE id = ?", (project_id,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM workflow_executions WHERE project_id = ? "
+            "AND execution_kind = 'assessment_batch'",
+            (project_id,),
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM assessment_batch_previews WHERE project_id = ?",
+            (project_id,),
+        ).fetchone() is None

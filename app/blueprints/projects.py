@@ -495,7 +495,6 @@ from blueprints.projects_core import (  # noqa: E402,F401
     projects_active_set,
     projects_activity,
     projects_create,
-    projects_delete,
     projects_entities_list,
     projects_get,
     projects_list,
@@ -505,6 +504,7 @@ from blueprints.projects_core import (  # noqa: E402,F401
     projects_summary,
     projects_update,
 )
+from blueprints.projects_delete import projects_delete  # noqa: E402,F401
 from blueprints.projects_targets import (  # noqa: E402,F401
     projects_targets_create,
     projects_targets_delete,
