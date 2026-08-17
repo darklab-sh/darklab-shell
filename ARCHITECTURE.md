@@ -289,7 +289,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview without starting a coordinator or run. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/assessment-batches` | Rebuilds and confirms one current preview, atomically materializes its immutable batch, and fills the currently fair launch slots. |
 | `GET` | `/api/v1/projects/<project_id>/assessment-batches` | Returns a cursor-paged owner-scoped list of durable assessment batches, optionally narrowed to one assessment cycle. |
+| `POST` | `/api/v1/projects/<project_id>/assessment-batches/<batch_id>/cancel` | Records cancellation before signaling active child runs and returns the current truthful rollup. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>` | Returns one durable batch with current aggregate progress and immutable launch context. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>/items` | Returns a count- and byte-bounded page of durable items with their latest attempt state. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>/events` | Returns the sanitized durable event stream after an acknowledged sequence cursor. |
@@ -703,7 +705,9 @@ Assessment complete, archive, and delete requests and Project deletion lock that
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview for a browser viewer without starting work. |
 | `GET` | `/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
 | `GET` | `/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
+| `POST` | `/projects/<project_id>/assessments/<assessment_id>/assessment-batches` | Rebuilds and confirms one current preview, atomically materializes its immutable batch, and fills the currently fair launch slots. |
 | `GET` | `/projects/<project_id>/assessment-batches` | Returns a cursor-paged owner-scoped list of durable assessment batches, optionally narrowed to one assessment cycle. |
+| `POST` | `/projects/<project_id>/assessment-batches/<batch_id>/cancel` | Records cancellation before signaling active child runs and returns the current truthful rollup. |
 | `GET` | `/assessment-batches/<batch_id>` | Returns one durable batch with current aggregate progress and immutable launch context. |
 | `GET` | `/assessment-batches/<batch_id>/items` | Returns a count- and byte-bounded page of durable items with their latest attempt state. |
 | `GET` | `/assessment-batches/<batch_id>/events` | Returns the sanitized durable event stream after an acknowledged sequence cursor. |

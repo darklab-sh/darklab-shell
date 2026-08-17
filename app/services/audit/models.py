@@ -44,6 +44,7 @@ class AuditTargetType(str, Enum):
     RISK_ESCALATION = "risk_escalation"
     ASSESSMENT = "assessment"
     ASSESSMENT_CHECK = "assessment_check"
+    ASSESSMENT_BATCH = "assessment_batch"
     HTTP_PROFILE = "http_profile"
 
 
@@ -129,6 +130,8 @@ class AuditEventType(str, Enum):
     ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
     ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
+    ASSESSMENT_BATCH_START = "assessment_batch.start"
+    ASSESSMENT_BATCH_CANCEL = "assessment_batch.cancel"
     PROBE_LAUNCH = "probe.launch"
     ASSESSMENT_OAST_RESERVE = "assessment.oast_reserve"
     ASSESSMENT_ZAP_JOB_SUBMIT = "assessment.zap_job_submit"
@@ -376,6 +379,16 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.BEST_EFFORT,
         detail_keys=ASSESSMENT_ACTION_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_BATCH_START.value: _spec(
+        AuditEventType.ASSESSMENT_BATCH_START,
+        AuditTargetType.ASSESSMENT_BATCH,
+        RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.ASSESSMENT_BATCH_CANCEL.value: _spec(
+        AuditEventType.ASSESSMENT_BATCH_CANCEL,
+        AuditTargetType.ASSESSMENT_BATCH,
+        RecordingMode.BEST_EFFORT,
     ),
     AuditEventType.PROBE_LAUNCH.value: _spec(
         AuditEventType.PROBE_LAUNCH,

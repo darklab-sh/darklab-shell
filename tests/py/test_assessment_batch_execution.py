@@ -992,6 +992,30 @@ def test_batch_cancellation_retains_a_failed_signal_until_the_run_settles(batch_
     assert parent["progress"]["could_not_cancel"] == 1
 
 
+def test_batch_cancellation_retains_a_rejected_signal_until_the_run_settles(
+    batch_builder,
+):
+    batch = batch_builder()
+    _make_batch_child_active(batch, run_id="run-batch-signal-rejected")
+
+    requested = cancel_assessment_batch(
+        batch["session_id"],
+        batch["batch_id"],
+        cancel_run_fn=lambda *_args, **_kwargs: False,
+    )
+
+    assert requested is not None
+    assert requested["signal_failures"] == 1
+    assert requested["batch"]["status"] == "canceling"
+    settled = finalize_assessment_batch_run("run-batch-signal-rejected", 0)
+    assert settled is not None
+    assert settled["status"] == "failed"
+    assert settled["error_code"] == "could_not_cancel"
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+    assert parent is not None
+    assert parent["progress"]["could_not_cancel"] == 1
+
+
 def test_surface_neutral_run_cancellation_uses_the_scoped_process_group(monkeypatch):
     from services.runs import cancellation
 

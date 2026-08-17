@@ -166,7 +166,9 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compile a 15-minute server-owned assessment-batch preview from explicit target, category, policy, item-limit, and concurrency choices. This viewer-safe route doesn't start commands. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>` | Read the compact summary and approval digest for one current owner-scoped preview. |
 | `GET` | `/api/v1/assessment-batch-previews/<preview_id>/items` | Page through complete preview items with `cursor` and `limit`; pages contain at most 100 items and 1 MiB. |
+| `POST` | `/api/v1/projects/<project_id>/assessments/<assessment_id>/assessment-batches` | Confirm the current preview digest and start its bounded, Project-linked work. The same confirmation is idempotent, and standard work needs its separate acknowledgement. |
 | `GET` | `/api/v1/projects/<project_id>/assessment-batches` | List durable batches newest first, optionally filtered by `assessment_id`; `cursor` and `limit` provide stable pages of at most 100 batches. |
+| `POST` | `/api/v1/projects/<project_id>/assessment-batches/<batch_id>/cancel` | Stop new claims, cancel unstarted items, signal active runs, and return truthful signal-failure counts. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>` | Read one durable batch, including its immutable selection, saved concurrency, current status, and progress counts. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>/items` | Page through durable items and their latest attempt with `cursor` and `limit`; pages contain at most 100 items and 1 MiB. |
 | `GET` | `/api/v1/assessment-batches/<batch_id>/events` | Follow sanitized batch events after a sequence `cursor`; `has_more` and `next_cursor` tell a client when to continue paging. |

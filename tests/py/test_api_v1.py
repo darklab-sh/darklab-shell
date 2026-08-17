@@ -353,6 +353,8 @@ _API_V1_TEAM_SCOPED_WRITE_ROUTES = {
     "api_project_manual_finding_update": "Capability.TRIAGE_FINDINGS",
     "api_osv_advisory_lookup": "Capability.TRIAGE_FINDINGS",
     "api_project_assessment_action_launch": "Capability.RUN_COMMANDS",
+    "api_assessment_batch_start": "Capability.RUN_COMMANDS",
+    "api_assessment_batch_cancel": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlations": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_correlation": "Capability.RUN_COMMANDS",
     "api_project_assessment_oast_launch": "Capability.RUN_COMMANDS",
@@ -7691,6 +7693,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     batch_preview_read_path = "/assessment-batch-previews/{preview_id}"
     batch_preview_items_path = batch_preview_read_path + "/items"
     batch_list_path = "/projects/{project_id}/assessment-batches"
+    batch_start_path = assessment_path + "/assessment-batches"
+    batch_cancel_path = (
+        "/projects/{project_id}/assessment-batches/{batch_id}/cancel"
+    )
     batch_path = "/assessment-batches/{batch_id}"
     batch_items_path = batch_path + "/items"
     batch_events_path = batch_path + "/events"
@@ -7712,6 +7718,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[batch_preview_read_path]) == {"get"}
     assert set(paths[batch_preview_items_path]) == {"get"}
     assert set(paths[batch_list_path]) == {"get"}
+    assert set(paths[batch_start_path]) == {"post"}
+    assert set(paths[batch_cancel_path]) == {"post"}
     assert set(paths[batch_path]) == {"get"}
     assert set(paths[batch_items_path]) == {"get"}
     assert set(paths[batch_events_path]) == {"get"}
@@ -7757,6 +7765,17 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert paths[batch_list_path]["get"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchList"}
+    assert schemas["AssessmentBatchStartRequest"]["additionalProperties"] is False
+    assert schemas["AssessmentBatchStartRequest"]["properties"]["confirmed"] == {
+        "type": "boolean",
+        "enum": [True],
+    }
+    assert paths[batch_start_path]["post"]["responses"]["202"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchStartResponse"}
+    assert paths[batch_cancel_path]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchCancelResponse"}
     assert schemas["AssessmentBatchItemPage"]["properties"]["items"][
         "maxItems"
     ] == 100

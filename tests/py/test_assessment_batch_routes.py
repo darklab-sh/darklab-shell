@@ -234,6 +234,133 @@ def test_api_preview_uses_the_same_digest_pages_and_stable_errors(client, route_
     assert invalid_cursor.get_json()["error"]["code"] == "invalid_preview_cursor"
 
 
+@pytest.mark.parametrize("prefix", ["", "/api/v1"])
+def test_batch_start_is_idempotent_audited_and_cancel_is_project_scoped(
+    client,
+    route_cycle,
+    monkeypatch,
+    prefix,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    headers = _api_headers(session_id) if prefix else _browser_headers(session_id)
+    preview_route = (
+        f"{prefix}/projects/{project_id}/assessments/{assessment_id}/batch-previews"
+    )
+    preview = client.post(preview_route, headers=headers, json={}).get_json()["preview"]
+    monkeypatch.setattr(
+        "services.assessments.batch.lifecycle_actions.launch_assessment_batch",
+        lambda batch_id: {
+            "status": "queued",
+            "batch_id": batch_id,
+            "launched": 0,
+            "reason_code": "fairness_limit",
+        },
+    )
+    payload = {
+        "preview_id": preview["preview_id"],
+        "plan_digest": preview["plan_digest"],
+        "confirmed": True,
+    }
+    start_route = (
+        f"{prefix}/projects/{project_id}/assessments/{assessment_id}/assessment-batches"
+    )
+
+    first = client.post(start_route, headers=headers, json=payload)
+    replay = client.post(start_route, headers=headers, json=payload)
+
+    assert first.status_code == replay.status_code == 202
+    first_payload = first.get_json()
+    replay_payload = replay.get_json()
+    batch_id = first_payload["batch"]["batch_id"]
+    assert replay_payload["batch"]["batch_id"] == batch_id
+    assert first_payload["launch"]["launched"] == 0
+    with get_db_connect()() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE id = ?",
+            (batch_id,),
+        ).fetchone()["n"] == 1
+        event_types = [
+            str(row["event_type"])
+            for row in conn.execute(
+                "SELECT event_type FROM audit_events WHERE target_id = ? "
+                "ORDER BY created, id",
+                (batch_id,),
+            ).fetchall()
+        ]
+    assert event_types == ["assessment_batch.start", "assessment_batch.start"]
+
+    hidden = client.post(
+        f"{prefix}/projects/prj_wrong/assessment-batches/{batch_id}/cancel",
+        headers=headers,
+        json={},
+    )
+    assert hidden.status_code == 404
+    hidden_payload = hidden.get_json()
+    assert (
+        hidden_payload.get("code") == "batch_not_found"
+        or hidden_payload["error"]["code"] == "batch_not_found"
+    )
+    canceled = client.post(
+        f"{prefix}/projects/{project_id}/assessment-batches/{batch_id}/cancel",
+        headers=headers,
+        json={},
+    )
+    assert canceled.status_code == 200
+    assert canceled.get_json()["batch"]["status"] == "canceled"
+    with get_db_connect()() as conn:
+        cancel_event = conn.execute(
+            "SELECT details FROM audit_events WHERE target_id = ? "
+            "AND event_type = 'assessment_batch.cancel'",
+            (batch_id,),
+        ).fetchone()
+    assert cancel_event is not None
+    assert project_id in str(cancel_event["details"])
+
+
+@pytest.mark.parametrize("prefix", ["", "/api/v1"])
+def test_batch_start_and_cancel_reject_unbounded_or_unsupported_bodies(
+    client,
+    route_cycle,
+    prefix,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    headers = _api_headers(session_id) if prefix else _browser_headers(session_id)
+    start_route = (
+        f"{prefix}/projects/{project_id}/assessments/{assessment_id}/assessment-batches"
+    )
+    invalid = client.post(start_route, headers=headers, json={"unexpected": True})
+    oversized = client.post(
+        start_route,
+        headers={**headers, "Content-Type": "application/json"},
+        data='{"preview_id":"' + "x" * (16 * 1024) + '"}',
+    )
+    bad_cancel = client.post(
+        f"{prefix}/projects/{project_id}/assessment-batches/wfx_missing/cancel",
+        headers=headers,
+        json={"force": True},
+    )
+
+    assert invalid.status_code == 400
+    invalid_payload = invalid.get_json()
+    assert (
+        invalid_payload.get("code") == "invalid_batch_start"
+        or invalid_payload["error"]["code"] == "invalid_batch_start"
+    )
+    assert oversized.status_code == 413
+    oversized_payload = oversized.get_json()
+    assert (
+        oversized_payload.get("code") == "batch_mutation_request_too_large"
+        or oversized_payload["error"]["code"]
+        == "batch_mutation_request_too_large"
+    )
+    assert bad_cancel.status_code == 400
+    bad_cancel_payload = bad_cancel.get_json()
+    assert (
+        bad_cancel_payload.get("code") == "invalid_batch_cancel"
+        or bad_cancel_payload["error"]["code"] == "invalid_batch_cancel"
+    )
+
+
 def test_browser_and_api_batch_reads_share_bounded_pages_and_stable_rollups(
     client,
     route_cycle,
@@ -433,6 +560,20 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
         browser.get_json()["preview"]["plan_digest"]
         == api.get_json()["preview"]["plan_digest"]
     )
+    for prefix, headers, preview in (
+        ("", _browser_headers(viewer, team_id), browser.get_json()["preview"]),
+        ("/api/v1", _api_headers(viewer, team_id), api.get_json()["preview"]),
+    ):
+        denied = client.post(
+            f"{prefix}/projects/{project_id}/assessments/{assessment_id}/assessment-batches",
+            headers=headers,
+            json={
+                "preview_id": preview["preview_id"],
+                "plan_digest": preview["plan_digest"],
+                "confirmed": True,
+            },
+        )
+        assert denied.status_code == 403
 
 
 @pytest.mark.parametrize("prefix", ["", "/api/v1"])

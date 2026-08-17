@@ -9,6 +9,7 @@ from typing import Any
 
 from prometheus_client import Counter, Histogram
 
+from services.metrics import assessment_batch_lifecycle as assessment_batch_lifecycle_metrics
 from services.metrics import assessment_batches as assessment_batch_metrics
 
 
@@ -84,6 +85,9 @@ LABEL_CARDINALITY_POLICIES: dict[str, dict[str, dict[str, Any]]] = {
     },
 }
 LABEL_CARDINALITY_POLICIES.update(assessment_batch_metrics.LABEL_CARDINALITY_POLICIES)
+LABEL_CARDINALITY_POLICIES.update(
+    assessment_batch_lifecycle_metrics.LABEL_CARDINALITY_POLICIES
+)
 
 METRIC_DEFINITIONS = (
     WORKFLOW_EXECUTIONS_FINISHED,
@@ -94,6 +98,7 @@ METRIC_DEFINITIONS = (
     WORKFLOW_CANCELLATIONS,
     WORKFLOW_RECOVERY_ACTIONS_TOTAL,
     *assessment_batch_metrics.METRIC_DEFINITIONS,
+    *assessment_batch_lifecycle_metrics.METRIC_DEFINITIONS,
 )
 HISTOGRAM_DEFINITIONS = (WORKFLOW_EXECUTION_DURATION, WORKFLOW_STEP_DURATION)
 

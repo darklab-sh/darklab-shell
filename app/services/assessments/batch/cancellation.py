@@ -225,7 +225,7 @@ def signal_batch_cancellation_runs(
     for batch_id, run_ids in batch_runs:
         for run_id in run_ids:
             try:
-                cancel_run_fn(run_id, session_id, team_id=team_id)
+                signaled = cancel_run_fn(run_id, session_id, team_id=team_id)
             except Exception as exc:
                 signal_failures += 1
                 record_cancel_signal_failure(batch_id, run_id)
@@ -239,6 +239,20 @@ def signal_batch_cancellation_runs(
                         "team_id": str(team_id or ""),
                     },
                 )
+                continue
+            if signaled:
+                continue
+            signal_failures += 1
+            record_cancel_signal_failure(batch_id, run_id)
+            log.warning(
+                "ASSESSMENT_BATCH_CANCEL_SIGNAL_REJECTED",
+                extra={
+                    "batch_id": batch_id,
+                    "run_id": run_id,
+                    "session": get_log_session_id(session_id),
+                    "team_id": str(team_id or ""),
+                },
+            )
     return signal_failures
 
 

@@ -670,6 +670,23 @@
         ],
         "type": "object"
       },
+      "AssessmentBatchCancelResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/AssessmentBatch"
+          },
+          "signal_failures": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch",
+          "signal_failures"
+        ],
+        "type": "object"
+      },
       "AssessmentBatchCheckMapping": {
         "additionalProperties": false,
         "properties": {
@@ -971,6 +988,32 @@
           "items",
           "next_cursor",
           "has_more"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchLaunchSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "launched": {
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "batch_id",
+          "launched",
+          "reason_code"
         ],
         "type": "object"
       },
@@ -1501,6 +1544,56 @@
         },
         "required": [
           "batch"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "plan_digest": {
+            "maxLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "preview_id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "standard_confirmed": {
+            "default": false,
+            "type": "boolean"
+          },
+          "tab_id": {
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_id",
+          "plan_digest",
+          "confirmed"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/AssessmentBatch"
+          },
+          "launch": {
+            "$ref": "#/components/schemas/AssessmentBatchLaunchSummary"
+          }
+        },
+        "required": [
+          "batch",
+          "launch"
         ],
         "type": "object"
       },
@@ -15037,6 +15130,111 @@
         "summary": "List durable assessment batches for a Project"
       }
     },
+    "/projects/{project_id}/assessment-batches/{batch_id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchCancelResponse"
+                }
+              }
+            },
+            "description": "Cancellation state and signal failures"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment-batch lifecycle request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot run assessment commands"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project, assessment, preview, or batch not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Confirmation, lifecycle, or concurrency conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request exceeds the 16 KiB limit"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Request truthful assessment-batch cancellation"
+      }
+    },
     "/projects/{project_id}/assessments": {
       "get": {
         "parameters": [
@@ -15661,6 +15859,121 @@
             "description": "Rate limit exceeded"
           }
         }
+      }
+    },
+    "/projects/{project_id}/assessments/{assessment_id}/assessment-batches": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentBatchStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentBatchStartResponse"
+                }
+              }
+            },
+            "description": "Batch accepted and fair launch slots filled"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid assessment-batch lifecycle request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Team role cannot run assessment commands"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project, assessment, preview, or batch not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Confirmation, lifecycle, or concurrency conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request exceeds the 16 KiB limit"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "summary": "Start a confirmed bounded assessment batch"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/batch-previews": {

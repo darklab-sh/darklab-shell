@@ -32,6 +32,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_atlas_profile.py",
     "openapi_assessment_actions.py",
     "openapi_assessment_batch_lifecycle.py",
+    "openapi_assessment_batch_mutations.py",
     "openapi_assessment_batches.py",
     "openapi_assessment_deltas.py",
     "openapi_assessment_evidence.py",
@@ -264,6 +265,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_assessment_actions.py", 162, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_batches.py", 120, "split-package-ratchet"),
     ModuleSizeBudget(
+        "app/blueprints/projects_assessment_batch_mutations.py",
+        196,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/blueprints/projects_assessment_batch_previews.py",
         110,
         "split-package-ratchet",
@@ -303,6 +309,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_assessment_action_launch.py", 186, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_actions.py", 167, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_batches.py", 145, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/blueprints/api_v1_assessment_batch_mutations.py",
+        192,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_previews.py",
         122,
@@ -367,6 +378,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_batch_lifecycle.py",
         390,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_batch_mutations.py",
+        137,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -648,6 +664,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/metrics/assessments.py", 340, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/metrics/assessment_batches.py", 45, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/metrics/assessment_batch_lifecycle.py",
+        44,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/metrics/probes.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/auto_promote.py", 963, "cohesive-ratchet"),
@@ -1022,6 +1043,16 @@ _MODULE_SIZE_RATCHET = (
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
+        "app/services/assessments/batch/lifecycle_actions.py",
+        88,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/lifecycle_contracts.py",
+        83,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/batch/parent_completion.py", 122, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/batch/plan_policy.py", 180, "split-package-ratchet"),
@@ -1160,8 +1191,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 286
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "bad5d509f0f78f8dd9b90344919dd7f1196e3fc0fbf89b2d265175c518db6e9e"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 290
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "4c48cd9d3154fc2be9a4010e9fed83ae8dd898cce3ce4d244ce1017ce564ed21"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),
