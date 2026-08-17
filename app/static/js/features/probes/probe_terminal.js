@@ -201,17 +201,27 @@ function formatProbeCatalog(catalog) {
     const availability = action.availability?.available
       ? ''
       : ` — unavailable: ${action.availability?.reason || action.availability?.code || 'not available'}`;
-    lines.push(`  ${action.id}  ${action.label} [${action.policy_level}] (${(action.target_types || []).join(', ')})${availability}`);
+    const exclusions = (action.exclusions || []).length
+      ? ` — excludes: ${action.exclusions.join(', ')}`
+      : '';
+    lines.push(`  ${action.id}  ${action.label} [${action.policy_level}] (${(action.target_types || []).join(', ')})${availability}${exclusions}`);
   });
   if ((catalog.service_recommendations || []).length) {
     lines.push('Service recommendations:');
     catalog.service_recommendations.forEach((item) => {
       const profile = item.nmap_profile ? `, profile ${item.nmap_profile}` : '';
-      lines.push(`  ${item.action_id}${profile}  ${item.label}`);
+      const rationale = item.rationale ? ` — ${item.rationale}` : '';
+      lines.push(`  ${item.action_id}${profile}  ${item.label}${rationale}`);
     });
   }
-  lines.push(`Nmap profiles: ${(catalog.nmap_profiles || []).map(item => item.key).join(', ') || 'none'}`);
-  lines.push(`Nuclei profiles: ${(catalog.nuclei_profiles || []).map(item => item.key).join(', ') || 'none'}`);
+  const profiles = (items) => (items || []).map((item) => {
+    if (item.availability?.available !== false) return item.key;
+    const reason = item.availability?.reason || item.availability?.code || 'not available';
+    return `${item.key} (unavailable: ${reason})`;
+  }).join(', ') || 'none';
+  lines.push(`Nmap profiles: ${profiles(catalog.nmap_profiles)}`);
+  lines.push(`Nuclei profiles: ${profiles(catalog.nuclei_profiles)}`);
+  lines.push(`Excluded from probes: ${(catalog.exclusions || []).join(', ') || 'none'}`);
   return lines;
 }
 
@@ -239,6 +249,9 @@ function formatProbePlan(plan) {
   }
   if (!plan.availability?.available) {
     lines.push(`  Unavailable: ${plan.availability?.reason || plan.availability?.code || 'not available'}`);
+  }
+  if ((plan.feature_gates || []).length) {
+    lines.push(`  Missing features: ${plan.feature_gates.join(', ')}`);
   }
   if (plan.launch_authorization?.authorized === false) {
     lines.push(`  Launch permission: ${plan.launch_authorization.reason || 'You do not have permission to launch this probe.'}`);

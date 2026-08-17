@@ -97,16 +97,31 @@ describe('Project probe terminal', () => {
     expect(formatProbeCatalog({
       actions: [{
         id: 'ping', label: 'Ping', policy_level: 'safe', target_types: ['domain', 'ip'],
+        exclusions: ['raw_packets'],
         availability: { available: true },
       }],
       nmap_profiles: [{ key: 'safe' }],
-      nuclei_profiles: [{ key: 'safe' }],
-      service_recommendations: [],
+      nuclei_profiles: [{
+        key: 'intrusive',
+        availability: {
+          available: false,
+          code: 'intrusive_actions_disabled',
+          reason: "Intrusive probe actions aren't enabled.",
+        },
+      }],
+      service_recommendations: [{
+        action_id: 'nmap', nmap_profile: 'smb', label: 'Review SMB',
+        rationale: 'Confirm the discovered SMB surface.',
+      }],
+      exclusions: ['zap', 'oast_allocation'],
     })).toEqual([
       'Probe actions:',
-      '  ping  Ping [safe] (domain, ip)',
+      '  ping  Ping [safe] (domain, ip) — excludes: raw_packets',
+      'Service recommendations:',
+      '  nmap, profile smb  Review SMB — Confirm the discovered SMB surface.',
       'Nmap profiles: safe',
-      'Nuclei profiles: safe',
+      "Nuclei profiles: intrusive (unavailable: Intrusive probe actions aren't enabled.)",
+      'Excluded from probes: zap, oast_allocation',
     ]);
     const lines = formatProbePlan({
       project_id: 'prj_1',
@@ -124,7 +139,8 @@ describe('Project probe terminal', () => {
       },
       expected_evidence: ['run'],
       plan_digest: 'a'.repeat(64),
-      availability: { available: true },
+      availability: { available: false, code: 'feature_unavailable' },
+      feature_gates: ['ping'],
     });
     expect(lines).toContain('  Command: ping -c 4 example.test');
     expect(lines).toContain('  HTTP profile: User session (user)');
@@ -132,6 +148,7 @@ describe('Project probe terminal', () => {
       '  HTTP scope: hosts example.test; roots https://example.test/app; include /app; exclude /app/private',
     );
     expect(lines).toContain(`  Approval digest: ${'a'.repeat(12)}`);
+    expect(lines).toContain('  Missing features: ping');
     expect(lines.join('\n')).not.toContain('a'.repeat(64));
   });
 

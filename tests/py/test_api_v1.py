@@ -8471,6 +8471,19 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         "display_command": "httpx -u https://probe.example -sf [protected]",
         "plan_digest": "b" * 64,
     }
+    unavailable_plan = {
+        **plan,
+        "action": {"id": "dnsrecon", "label": "DNSRecon"},
+        "availability": {
+            "available": False,
+            "code": "feature_unavailable",
+            "reason": "Required probe features aren't available.",
+        },
+        "feature_gates": ["dnsrecon"],
+        "launchable": False,
+        "display_command": "",
+        "plan_digest": "c" * 64,
+    }
 
     class FakeClient:
         def __init__(self, _config):
@@ -8509,6 +8522,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                     {
                         "id": "sqlmap", "label": "SQLmap", "policy_level": "standard",
                         "target_types": ["url"],
+                        "exclusions": ["destructive_sql"],
                         "availability": {"available": True},
                     },
                 ]
@@ -8523,7 +8537,13 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                     "catalog": {
                         "actions": actions,
                         "nmap_profiles": [{"key": "safe"}],
-                        "nuclei_profiles": [{"key": "safe"}],
+                        "nuclei_profiles": [{
+                            "key": "intrusive",
+                            "availability": {
+                                "available": False,
+                                "reason": "Intrusive probe actions aren't enabled.",
+                            },
+                        }],
                         "service_recommendations": ([{
                             "action_id": "nmap",
                             "nmap_profile": "smb",
@@ -8531,6 +8551,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                             "label": "Review SMB services",
                             "rationale": "Confirm the discovered SMB surface.",
                         }] if service == "microsoft-ds" else []),
+                        "exclusions": ["zap", "oast_allocation"],
                     },
                 }
             if method == "POST" and path.endswith("/targets/resolve"):
@@ -8543,6 +8564,12 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                         "http_profile_id": "User session", "nuclei_profile": "safe",
                     }
                     return {"plan": protected_plan}
+                if body and body.get("action_id") == "dnsrecon":
+                    assert body == {
+                        "action_id": "dnsrecon", "entity_id": "ent_probe",
+                        "nuclei_profile": "safe",
+                    }
+                    return {"plan": unavailable_plan}
                 assert body == {
                     "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
                 }
@@ -8606,6 +8633,8 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "nmap" in service_output
     assert "smb" in service_output
     assert "Confirm the discovered SMB surface." in service_output
+    assert "Intrusive probe actions aren't enabled." in service_output
+    assert "Excluded from probes: zap,oast_allocation" in service_output
     assert calls[-1][2] == {"service": "microsoft-ds", "target_type": "ip"}
 
     assert cli_main.main([
@@ -8625,6 +8654,13 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "ping -c 4 probe.example" in preview_output
     assert f"Approval digest: {'a' * 12}" in preview_output
     assert "a" * 64 not in preview_output
+
+    assert cli_main.main([
+        "probe", "plan", "dnsrecon", "probe.example", "--project", "prj_probe",
+    ]) == 0
+    unavailable_output = capsys.readouterr().out
+    assert "Required probe features aren't available." in unavailable_output
+    assert "Missing features: dnsrecon" in unavailable_output
 
     assert cli_main.main([
         "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",

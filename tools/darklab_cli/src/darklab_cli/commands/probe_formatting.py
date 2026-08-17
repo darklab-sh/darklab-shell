@@ -48,6 +48,9 @@ def print_probe_plan(plan: dict[str, Any]) -> None:
     print(f"Approval digest: {str(plan.get('plan_digest') or '')[:12]}")
     if not availability.get("available"):
         print(f"Unavailable: {availability.get('reason') or availability.get('code') or 'not available'}")
+    feature_gates = plan.get("feature_gates")
+    if isinstance(feature_gates, list) and feature_gates:
+        print(f"Missing features: {', '.join(str(value) for value in feature_gates)}")
     if authorization.get("authorized") is False:
         print(f"Launch permission: {authorization.get('reason') or 'You do not have permission to launch this probe.'}")
 
