@@ -945,6 +945,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/contracts.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/events.py", 310, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/batch/plan_policy.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/policy.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/rollup.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/storage.py", 400, "split-package-ratchet"),

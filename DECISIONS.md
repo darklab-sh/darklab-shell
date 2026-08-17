@@ -185,6 +185,8 @@ One user-facing parent owns ordered chunks of at most 32 child items, preserving
 
 Workflow checkpoints remain authoritative for pending, active, and terminal child state. Batch progress is a deterministic rollup over those attempts, with unavailable and cancellation outcomes classified from fixed reason codes instead of another mutable item status. A dedicated batch event table is the exception to workflow's derived event view: heterogeneous item progress needs an immutable parent-wide sequence that can cross chunk boundaries and resume after the last acknowledged event. The event rows contain bounded ids, state, reason codes, counts, and retry lineage; commands, target values, private arguments, output, and credentials don't belong there.
 
+Execution deduplication and coverage stay separate. The execution key uses the exact target identity, action, selected profile identity, credential classification, numeric bounds, and public display command, but deliberately omits the assessment check id. Identical work can therefore launch once while retaining one coverage mapping per frozen check. Finding retest groups keep their existing check-specific key because a shared retest is a different product contract. Both surfaces use the same code-based eligibility check for availability, policy, credential use, excluded action families, and exact-command matching, then provide their own user-facing explanation.
+
 ---
 
 ## Atlas Decisions

@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from typing import Any
+
 import pytest
 
 from conftest import make_test_app
@@ -18,6 +21,11 @@ from services.assessments.batch.contracts import (
     BATCH_PREVIEW_TTL_SECONDS,
 )
 from services.assessments.batch.events import append_batch_event, list_batch_events
+from services.assessments.batch.plan_policy import (
+    batch_execution_key,
+    evaluate_shared_batch,
+    retest_group_key,
+)
 from services.assessments.batch.policy import (
     batch_chunk_sizes,
     normalize_batch_concurrency,
@@ -88,6 +96,86 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
     )
     assert settled.status == "canceled"
     assert settled.settled == settled.total == 2
+
+    first_plan: dict[str, Any] = {
+        "assessment_id": "asm-policy",
+        "check_id": "chk-one",
+        "profile_key": "network",
+        "profile_version": "1.0",
+        "action": {"key": "command:nmap", "id": "nmap"},
+        "target": {
+            "entity_id": "ent-policy",
+            "type": "domain",
+            "value": "policy.example",
+        },
+        "policy_level": "safe",
+        "http_profile": {"role": "none", "id": "", "credential_use": "none"},
+        "bounds": {
+            "target_count": 1,
+            "fan_out": 1,
+            "request_limit": None,
+            "time_limit_seconds": 600,
+            "credential_use": "none",
+        },
+        "display_command": "nmap -sV --host-timeout 600s policy.example",
+        "launchable": True,
+        "unavailable_reason": "",
+    }
+    second_plan = {**first_plan, "check_id": "chk-two"}
+    assert batch_execution_key(first_plan) == batch_execution_key(second_plan)
+    assert retest_group_key(first_plan) != retest_group_key(second_plan)
+    changed_bounds = deepcopy(second_plan)
+    changed_bounds["bounds"]["time_limit_seconds"] = 300
+    assert batch_execution_key(first_plan) != batch_execution_key(changed_bounds)
+    changed_command = {**second_plan, "display_command": "nmap policy.example"}
+    assert batch_execution_key(first_plan) != batch_execution_key(changed_command)
+
+    decision = evaluate_shared_batch(
+        [first_plan, second_plan],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+    )
+    assert decision.allowed is True
+    assert evaluate_shared_batch(
+        [first_plan],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+    ).code == "too_few_items"
+    standard_plan = {**second_plan, "policy_level": "standard"}
+    assert evaluate_shared_batch(
+        [first_plan, standard_plan],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+    ).code == "policy_excluded"
+    credentialed_plan = deepcopy(second_plan)
+    credentialed_plan["bounds"]["credential_use"] = "protected_http_profile"
+    assert evaluate_shared_batch(
+        [first_plan, credentialed_plan],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+    ).code == "credentialed"
+    assert evaluate_shared_batch(
+        [first_plan, changed_command],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+    ).code == "command_mismatch"
+    excluded_plan = {
+        **second_plan,
+        "action": {"key": "command:schemathesis", "id": "schemathesis"},
+    }
+    assert evaluate_shared_batch(
+        [first_plan, excluded_plan],
+        minimum_items=2,
+        maximum_items=10,
+        allowed_policy_levels={"safe"},
+        excluded_actions={"command:schemathesis"},
+        require_exact_command=False,
+    ).code == "action_excluded"
 
 
 def test_assessment_batch_storage_events_and_migration_are_backend_neutral():
