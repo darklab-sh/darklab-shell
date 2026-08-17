@@ -15,6 +15,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Assessment batches now share a complete child-run launch boundary with durable workflows.**
+  - **Why:** A mixed assessment plan needs to launch independently rendered commands without weakening the workflow engine's run binding, privacy, or recovery guarantees.
+  - **What:** Workflow template and collection rendering now lives in a workflow-only adapter that produces a surface-neutral child launch specification. The shared downstream launcher accepts the execution command, public display command, private values, and trusted run context directly, while existing workflow fan-out keeps its current output, limits, Project linking, and failure behavior.
+  - **Tests:** Existing durable workflow integration coverage now pins the adapter's public/private command split and empty trusted-argument behavior. Architecture ratchets budget both new focused modules while keeping the existing fan-out launcher baselines unchanged.
+
 - **Fresh Compose deployments prepare managed Nuclei templates automatically.**
   - **Why:** A first Nuclei probe shouldn't require an undocumented manual update before its reviewed plan becomes available.
   - **What:** Development and production Compose stacks keep `/tmp/nuclei-templates` in a named volume. Web-container startup runs one bounded `nuclei -update-templates` attempt only when the manifest is missing, and logs whether the cache was skipped, populated, or unavailable without copying the updater's output into container logs. The shell healthcheck's startup grace covers the complete bounded attempt, so a slow first download doesn't mark the container unhealthy. A failed update never blocks the rest of the app, installed snapshots aren't refreshed in the background, and the existing immutable-manifest check still guards every plan and launch. Operators can disable the bootstrap when startup must not make an outbound request.

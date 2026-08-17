@@ -933,8 +933,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_child_failures.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_cancellation.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_parent_completion.py", 120, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workflows/child_launch_spec.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_launch.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_child_run.py", 185, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/workflows/fanout_workflow_adapter.py", 80, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/workflows/fanout_launch_state.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/transitions.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nuclei_profiles.py", 100, "split-package-ratchet"),

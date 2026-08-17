@@ -1813,11 +1813,12 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
 
     def fake_start(**kwargs):
         launched.append({
-            key: kwargs[key]
+            key: kwargs.get(key, ()) if key == "trusted_execution_args" else kwargs[key]
             for key in (
                 "original_command",
                 "display_command",
                 "private_values",
+                "trusted_execution_args",
                 "session_id",
                 "team_id",
                 "workspace_cwd",
@@ -1873,6 +1874,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     assert all(item["link_project_id"] == "prj_workflow_context" for item in launched)
     assert all(item["owner_client_id"] == "client-workflow-context" for item in launched)
     assert all(item["owner_tab_id"] == "tab-workflow-context" for item in launched)
+    assert all(item["trusted_execution_args"] == () for item in launched)
     assert stored["status"] == "completed"
 
     collection_source = {
