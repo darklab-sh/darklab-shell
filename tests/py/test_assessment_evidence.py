@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 import uuid
 
@@ -341,6 +342,20 @@ def test_saved_dalfox_parameter_evidence_resolves_one_exact_project_observation(
         )
     assert overflow.items == ()
     assert overflow.overflow is True
+
+    query_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    class EmptyConnection:
+        def execute(self, sql, params):
+            query_calls.append((sql, params))
+            return SimpleNamespace(fetchall=lambda: [])
+
+    empty = list_project_dalfox_parameter_options(
+        EmptyConnection(), session_id, "", project_id, target,
+    )
+    assert empty.items == ()
+    assert "LIKE 'dalfox %'" not in query_calls[0][0]
+    assert "dalfox %" in query_calls[0][1]
 
 
 def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_drift(

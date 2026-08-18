@@ -806,6 +806,7 @@ def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(
 
 
 def test_run_finalization_can_suppress_only_the_child_notification(monkeypatch):
+    from blueprints import run as run_routes
     from services.runs import finalization
 
     notifications: list[str] = []
@@ -855,6 +856,25 @@ def test_run_finalization_can_suppress_only_the_child_notification(monkeypatch):
         save_completed_run_fn=lambda *_args, **_kwargs: None,
     )
     assert notifications == ["run-ordinary"]
+
+    adapter_values: dict[str, object] = {}
+    monkeypatch.setattr(
+        finalization,
+        "finalize_completed_run",
+        lambda *_args, **kwargs: adapter_values.update(kwargs) or {},
+    )
+    run_routes._finalize_completed_run(
+        "run-adapter",
+        "batch-owner",
+        "",
+        "",
+        "ping -c 4 example.test",
+        started,
+        0,
+        capture,
+        suppress_run_complete_notification=True,
+    )
+    assert adapter_values["suppress_run_complete_notification"] is True
 
 
 def _add_batch_notification_channels(batch: dict[str, str]) -> None:

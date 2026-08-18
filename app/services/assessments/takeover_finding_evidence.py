@@ -66,7 +66,7 @@ def _project_dns_rows(
     current_run_id: str,
 ) -> list[Any]:
     tail = (
-        " AND r.id != ? AND r.command LIKE 'dnsx %' "
+        " AND r.id != ? AND r.command LIKE ? "
         "ORDER BY COALESCE(r.finished, r.started) DESC, r.id DESC LIMIT ?"
     )
     prefix = (
@@ -77,11 +77,23 @@ def _project_dns_rows(
     if team_id:
         return conn.execute(
             prefix + "r.team_id = ? AND r.team_id != ''" + tail,
-            (project_id, team_id, current_run_id, TAKEOVER_EVIDENCE_MAX_RUNS + 1),
+            (
+                project_id,
+                team_id,
+                current_run_id,
+                "dnsx %",
+                TAKEOVER_EVIDENCE_MAX_RUNS + 1,
+            ),
         ).fetchall()
     return conn.execute(
         prefix + "r.session_id = ? AND r.team_id = ''" + tail,
-        (project_id, session_id, current_run_id, TAKEOVER_EVIDENCE_MAX_RUNS + 1),
+        (
+            project_id,
+            session_id,
+            current_run_id,
+            "dnsx %",
+            TAKEOVER_EVIDENCE_MAX_RUNS + 1,
+        ),
     ).fetchall()
 
 

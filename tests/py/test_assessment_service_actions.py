@@ -86,6 +86,7 @@ from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_P
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments.nuclei_recommendation_evidence import (
+    NUCLEI_RECOMMENDATION_MAX_RUNS,
     NucleiTargetSignals,
     load_nuclei_recommendation_signals,
 )
@@ -149,6 +150,10 @@ from services.assessments.takeover_detection import evaluate_takeover_signal
 from services.assessments.takeover_confirmation import (
     NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
     confirm_takeover_with_nuclei,
+)
+from services.assessments.takeover_finding_evidence import (
+    TAKEOVER_EVIDENCE_MAX_RUNS,
+    project_takeover_evidence,
 )
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
@@ -523,8 +528,11 @@ def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
         },
     }])
 
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+
     class FakeConn:
-        def execute(self, query, _params):
+        def execute(self, query, params):
+            calls.append((query, params))
             if "e.attributes_json" in query:
                 return SimpleNamespace(fetchall=lambda: [{
                     "id": "ent_port",
@@ -559,6 +567,16 @@ def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
     assert signals.inferred_cve_count == 1
     assert signals.dangling_record_count == 0
     assert signals.truncated is False
+    run_query, run_params = next(
+        (query, params) for query, params in calls if "r.output_preview" in query
+    )
+    assert "LIKE 'httpx %'" not in run_query
+    assert "LIKE 'dnsx %'" not in run_query
+    assert run_params[-3:] == (
+        "httpx %",
+        "dnsx %",
+        NUCLEI_RECOMMENDATION_MAX_RUNS + 1,
+    )
 
 
 def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_runs(
@@ -1718,8 +1736,16 @@ def test_schemathesis_action_options_are_bounded_and_selected_in_project_scope(m
     assert context.reviewed_schema == reviewed
     assert context.public_selection()["selected"]["operation_count"] == 2
     assert calls[0][1][-1] == SCHEMATHESIS_ARTIFACT_OPTION_LIMIT + 1
+    assert calls[0][1][-6:-1] == (
+        "application/json%",
+        "application/openapi+json%",
+        "application/vnd.oai.openapi+json%",
+        "%.json",
+        "%.json",
+    )
     assert "pl.project_id = p.id" in calls[0][0]
     assert "a.byte_size <= ?" in calls[0][0]
+    assert "LIKE 'application/json%'" not in calls[0][0]
 
     overflow_rows = [
         {**row, "id": f"rfa_{index:016x}"}
@@ -2163,6 +2189,23 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
 
         def add_event(self, event):
             self.events.append(event)
+
+    query_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    class EmptyConnection:
+        def execute(self, sql, params):
+            query_calls.append((sql, params))
+            return SimpleNamespace(fetchall=lambda: [])
+
+    project_evidence = project_takeover_evidence(
+        EmptyConnection(), "session-1", "", "project-1", "run-current", [],
+    )
+    assert project_evidence is not None
+    assert "LIKE 'dnsx %'" not in query_calls[0][0]
+    assert query_calls[0][1][-2:] == (
+        "dnsx %",
+        TAKEOVER_EVIDENCE_MAX_RUNS + 1,
+    )
 
     direct_potential = evaluate_takeover_signal({
         "hostname": "app.example.test", "cname_chain": ["app.vendor.test."],
