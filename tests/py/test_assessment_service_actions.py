@@ -1073,12 +1073,61 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
 def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, monkeypatch):
     from contextlib import contextmanager
 
-    from services.nuclei import template_refresh
+    from services.nuclei import template_lock, template_refresh
     from services.nuclei.template_lock import (
         NucleiTemplateLockBusy,
         managed_nuclei_template_lock,
     )
     from services.runs.lifecycle import real_command_popen_argv
+
+    existing_lock_path = tmp_path / "existing-nuclei.lock"
+    existing_lock_path.touch(mode=0o660)
+    real_open = template_lock.os.open
+    existing_open_flags = []
+
+    def record_existing_open(path, flags, mode=0o777):
+        existing_open_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    with monkeypatch.context() as lock_patch:
+        lock_patch.setattr(template_lock.os, "open", record_existing_open)
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=existing_lock_path,
+        ):
+            pass
+
+    assert len(existing_open_flags) == 1
+    assert not existing_open_flags[0] & template_lock.os.O_CREAT
+
+    created_lock_path = tmp_path / "created-nuclei.lock"
+    created_open_flags = []
+
+    def record_created_open(path, flags, mode=0o777):
+        created_open_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    with monkeypatch.context() as lock_patch:
+        lock_patch.setattr(template_lock.os, "open", record_created_open)
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=created_lock_path,
+        ):
+            pass
+
+    assert len(created_open_flags) == 2
+    assert not created_open_flags[0] & template_lock.os.O_CREAT
+    assert created_open_flags[1] & template_lock.os.O_CREAT
+    assert created_open_flags[1] & template_lock.os.O_EXCL
+
+    unsafe_lock_path = tmp_path / "unsafe-nuclei.lock"
+    unsafe_lock_path.symlink_to(existing_lock_path)
+    with pytest.raises(template_lock.NucleiTemplateLockError):
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=unsafe_lock_path,
+        ):
+            pytest.fail("a symlink must not be accepted as the lock file")
 
     lock_path = tmp_path / "nuclei.lock"
     with managed_nuclei_template_lock(exclusive=True, lock_path=lock_path):

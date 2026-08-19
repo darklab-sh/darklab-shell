@@ -37,10 +37,16 @@ def managed_nuclei_template_lock(
 ) -> Iterator[int]:
     """Hold a shared scan lock or exclusive maintenance lock."""
     path = Path(lock_path)
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     try:
-        descriptor = os.open(path, flags, 0o660)
+        try:
+            descriptor = os.open(path, flags)
+        except FileNotFoundError:
+            try:
+                descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o660)
+            except FileExistsError:
+                descriptor = os.open(path, flags)
     except OSError as exc:
         raise NucleiTemplateLockError("managed Nuclei template lock is unavailable") from exc
     try:
