@@ -5295,6 +5295,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "/api/v1/history?limit=10",
         headers=api_headers,
     )
+    active_assessment_plan_resp = client.get(
+        "/history/active?include_assessment_batches=1",
+        headers=browser_headers,
+    )
     http_profile_delete_resp = client.delete(
         f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
         headers=browser_headers,
@@ -5415,6 +5419,14 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert json.loads(api_history_page_resp.data)["runs"][0]["assessment_batch"] == (
         assessment_provenance
     )
+    active_assessment_plans = json.loads(active_assessment_plan_resp.data)[
+        "assessment_batches"
+    ]["batches"]
+    assert [item["batch_id"] for item in active_assessment_plans] == [
+        retry_batch["batch_id"]
+    ]
+    assert active_assessment_plans[0]["project_id"] == project["id"]
+    assert active_assessment_plans[0]["progress"]["total"] == retry_batch["item_count"]
     assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201

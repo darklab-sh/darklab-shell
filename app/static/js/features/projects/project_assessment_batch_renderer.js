@@ -303,6 +303,7 @@ function createProjectAssessmentBatchRenderer(context, actions) {
         command: String(item?.display_command || ''),
       }));
       open.classList.add('btn-compact');
+      open.dataset.assessmentBatchFocusKey = `open-run:${String(item.run_id)}`;
       row.appendChild(open);
     }
     return row;
@@ -454,6 +455,7 @@ function createProjectAssessmentBatchRenderer(context, actions) {
         select.appendChild(option);
       });
       select.addEventListener('change', () => act.selectBatch(projectId, assessment.id, select.value));
+      select.dataset.assessmentBatchFocusKey = 'batch-history';
       field.appendChild(select);
       body.appendChild(field);
     }
@@ -476,6 +478,7 @@ function createProjectAssessmentBatchRenderer(context, actions) {
         button => act.cancelBatch(projectId, assessment.id, button),
         { disabled: st.canceling || !canRun },
       );
+      cancel.dataset.assessmentBatchFocusKey = 'cancel-batch';
       if (!canRun) cancel.title = 'View-only team members cannot cancel assessment batches.';
       controls.appendChild(cancel);
     } else if (!['canceling'].includes(String(batch?.status || '')) && assessment?.status === 'active') {
@@ -494,6 +497,8 @@ function createProjectAssessmentBatchRenderer(context, actions) {
 
   function render(projectId, assessment, detail, st) {
     const section = element('section', 'project-assessment-section project-assessment-batch');
+    section.dataset.projectId = String(projectId || '');
+    section.dataset.assessmentId = String(assessment?.id || '');
     const active = assessment?.status === 'active';
     section.appendChild(heading(
       active ? 'Run assessment plan' : 'Assessment batch history',

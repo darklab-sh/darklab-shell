@@ -1047,6 +1047,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout_launch_state.py", 170, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/transitions.py", 80, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/__init__.py", 0, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/active_monitor.py", 199, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/contracts.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/claim.py", 225, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/claim_fairness.py", 129, "split-package-ratchet"),

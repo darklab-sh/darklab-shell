@@ -14,6 +14,10 @@ from conftest import reusable_test_app
 from core.database_access import get_db_connect
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.preview_compiler import compile_batch_preview
+from services.assessments.batch.active_monitor import (
+    active_assessment_batch_monitor_state,
+    safe_active_assessment_batch_monitor_state,
+)
 from services.assessments.batch.cancellation import cancel_assessment_batch
 from services.assessments.batch.start import start_assessment_batch
 from services.assessments.batch.storage_read import get_batch_parent
@@ -489,6 +493,102 @@ def test_batch_start_and_cancel_reject_unbounded_or_unsupported_bodies(
         bad_cancel_payload.get("code") == "invalid_batch_cancel"
         or bad_cancel_payload["error"]["code"] == "invalid_batch_cancel"
     )
+
+
+def test_active_batch_monitor_state_is_owner_scoped_and_keeps_live_commands_public(
+    client,
+    route_cycle,
+):
+    del client
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    batch = _start_batch(session_id, project_id, assessment_id)
+    batch_id = str(batch["batch_id"])
+    with get_db_connect()() as conn:
+        children = conn.execute(
+            "SELECT step_id, ordinal FROM workflow_execution_children "
+            "WHERE execution_id = ? ORDER BY step_id, ordinal",
+            (batch_id,),
+        ).fetchall()
+        assert len(children) == 2
+        conn.execute(
+            "UPDATE workflow_executions SET status = 'running' WHERE id = ?",
+            (batch_id,),
+        )
+        conn.execute(
+            "UPDATE workflow_execution_children SET status = 'running', run_id = ?, "
+            "started = ? WHERE execution_id = ? AND step_id = ? AND ordinal = ?",
+            (
+                "run-monitor-public",
+                "2026-08-17T12:00:00Z",
+                batch_id,
+                children[0]["step_id"],
+                children[0]["ordinal"],
+            ),
+        )
+        conn.commit()
+
+    state = active_assessment_batch_monitor_state(session_id)
+
+    assert state["truncated"] is False
+    batches = state["batches"]
+    assert isinstance(batches, list)
+    assert len(batches) == 1
+    monitored = batches[0]
+    assert isinstance(monitored, dict)
+    assert monitored["batch_id"] == batch_id
+    assert monitored["project_id"] == project_id
+    assert monitored["assessment_id"] == assessment_id
+    assert monitored["project_name"] == "Batch route Project"
+    progress = monitored["progress"]
+    assert isinstance(progress, dict)
+    assert progress["running"] == 1
+    assert progress["pending"] == 1
+    active_commands = monitored["active_commands"]
+    assert isinstance(active_commands, list)
+    assert len(active_commands) == 1
+    command = active_commands[0]
+    assert isinstance(command, dict)
+    assert command["item_index"] == 0
+    assert command["action_id"]
+    assert "batch-route.example.test" in command["display_command"]
+    assert command["status"] == "running"
+    assert command["run_id"] == "run-monitor-public"
+    assert command["started"] == "2026-08-17T12:00:00Z"
+    assert command["target"] == {
+        "type": "domain",
+        "value": "batch-route.example.test",
+    }
+    assert "execution_command" not in command
+    assert active_assessment_batch_monitor_state(
+        "tok_batch_monitor_foreign_" + uuid.uuid4().hex
+    ) == {"batches": [], "truncated": False}
+
+
+def test_active_batch_monitor_failure_does_not_hide_live_run_monitoring(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    def fail_monitor_read(*_args, **_kwargs):
+        raise RuntimeError("monitor read failed")
+
+    monkeypatch.setattr(
+        "services.assessments.batch.active_monitor.active_assessment_batch_monitor_state",
+        fail_monitor_read,
+    )
+    with caplog.at_level("WARNING"):
+        state = safe_active_assessment_batch_monitor_state(
+            "private-session",
+            log_context={"session": "masked-session"},
+        )
+
+    assert state == {"batches": [], "truncated": False, "unavailable": True}
+    record = next(
+        item
+        for item in caplog.records
+        if item.message == "ACTIVE_ASSESSMENT_BATCH_MONITOR_ERROR"
+    )
+    assert getattr(record, "session", "") == "masked-session"
+    assert "private-session" not in caplog.text
 
 
 def test_browser_and_api_batch_reads_share_bounded_pages_and_stable_rollups(

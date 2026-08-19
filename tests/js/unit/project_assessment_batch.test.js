@@ -654,4 +654,63 @@ describe('Project assessment batches', () => {
     )
     manager.invalidate()
   })
+
+  it('updates only the batch monitor while polling and preserves scroll and focus', async () => {
+    let polled = false
+    const completedBatch = {
+      ...activeBatch,
+      status: 'completed',
+      progress: {
+        ...activeBatch.progress,
+        running: 0,
+        succeeded: 1,
+        settled: 1,
+      },
+    }
+    const projectWorkspaceRequest = vi.fn(async (url) => {
+      const value = String(url)
+      if (value.startsWith('/projects/prj_batch_1/assessment-batches?')) {
+        return response({ batches: [activeBatch], has_more: false })
+      }
+      if (value === '/assessment-batches/wfx_batch_1') {
+        polled = true
+        return response({ batch: completedBatch })
+      }
+      if (value.endsWith('/items?cursor=0&limit=100')) {
+        return response({
+          items: [{ ...batchItem, status: polled ? 'succeeded' : 'running' }],
+          next_cursor: null,
+        })
+      }
+      if (value.includes('/events?')) {
+        return response({ events: [], next_cursor: null, has_more: false })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const renderViews = vi.fn()
+    const manager = createProjectAssessmentBatchManager(
+      context(projectWorkspaceRequest),
+      { renderViews },
+    )
+    await manager.load('prj_batch_1', assessment.id, { render: false })
+
+    const scrollHost = document.createElement('div')
+    scrollHost.className = 'project-explorer-body'
+    const section = manager.renderSection('prj_batch_1', assessment, detail)
+    scrollHost.appendChild(section)
+    document.body.appendChild(scrollHost)
+    scrollHost.scrollTop = 73
+    const openRun = section.querySelector('[data-assessment-batch-focus-key^="open-run:"]')
+    openRun.focus()
+
+    await vi.advanceTimersByTimeAsync(2500)
+    await vi.waitFor(() => expect(section.textContent).toContain('Completed'))
+
+    expect(renderViews).not.toHaveBeenCalled()
+    expect(document.querySelector('.project-assessment-batch')).toBe(section)
+    expect(scrollHost.scrollTop).toBe(73)
+    expect(document.activeElement?.dataset?.assessmentBatchFocusKey).toBe('open-run:run_batch_1')
+    expect(section.textContent).toContain('Succeeded')
+    manager.invalidate()
+  })
 })

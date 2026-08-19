@@ -50,6 +50,7 @@ from services.history.run_metadata import (
     normalize_history_filter_text as _normalize_history_filter_text,
 )
 from core.process import active_runs_for_session
+from services.assessments.batch.active_monitor import safe_active_assessment_batch_monitor_state
 from services.audit.context import route_audit_fields
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
@@ -386,6 +387,7 @@ def get_active_history_runs():
     client_id = str(request.headers.get("X-Client-ID", "") or "").strip()[:128]
     runs = active_runs_for_session(session_id, client_id=client_id, team_id=owner_scope.team_id)
     include_scheduled = _truthy_request_arg("include_scheduled")
+    include_assessment_batches = _truthy_request_arg("include_assessment_batches")
     if runs:
         run_ids = [str(run.get("run_id") or "") for run in runs if str(run.get("run_id") or "")]
         scheduled_by_run = schedule_refs_for_active_runs(run_ids)
@@ -397,13 +399,21 @@ def get_active_history_runs():
             if include_scheduled or not run.get("scheduled"):
                 filtered_runs.append(run)
         runs = filtered_runs
+    payload: dict[str, object] = {"runs": runs}
+    if include_assessment_batches:
+        payload["assessment_batches"] = safe_active_assessment_batch_monitor_state(
+            session_id,
+            team_id=owner_scope.team_id,
+            log_context={"ip": get_client_ip(), "session": get_log_session_id(session_id)},
+        )
     log.debug("ACTIVE_RUNS_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "count": len(runs),
         "include_scheduled": include_scheduled,
+        "include_assessment_batches": include_assessment_batches,
     })
-    return jsonify({"runs": runs})
+    return jsonify(payload)
 
 
 @history_bp.route("/history/<run_id>/compare-candidates")

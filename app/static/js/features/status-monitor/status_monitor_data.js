@@ -20,6 +20,23 @@ const DarklabStatusMonitorData = (() => {
       return Array.isArray(data?.runs) ? data.runs : [];
     }
 
+    async function loadActiveWork() {
+      const resp = await apiFetch(
+        '/history/active?include_scheduled=1&include_assessment_batches=1',
+      );
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      const assessmentBatches = _safeObject(data?.assessment_batches);
+      return {
+        runs: Array.isArray(data?.runs) ? data.runs : [],
+        assessmentBatches: {
+          batches: Array.isArray(assessmentBatches.batches) ? assessmentBatches.batches : [],
+          truncated: Boolean(assessmentBatches.truncated),
+          unavailable: Boolean(assessmentBatches.unavailable),
+        },
+      };
+    }
+
     async function loadSystemStatus() {
       const startedAt = Date.now();
       const resp = await apiFetch('/status');
@@ -91,6 +108,7 @@ const DarklabStatusMonitorData = (() => {
 
     return {
       loadActiveRuns,
+      loadActiveWork,
       loadSystemStatus,
       loadWorkspaceStatus,
       loadSessionStats,

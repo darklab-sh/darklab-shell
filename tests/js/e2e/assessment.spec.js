@@ -5,6 +5,7 @@ import { test, expect } from '@playwright/test'
 import {
   browserSessionId,
   ensurePromptReady,
+  openRailAction,
   seedProjectMonitoringFixture,
 } from './helpers.js'
 
@@ -239,6 +240,35 @@ async function installAssessmentBatchLifecycleFixture(page) {
     },
   })
   }
+  await page.route('**/history/active**', async (route) => {
+    const activeBatch = state.launched && !state.canceling
+      ? {
+          ...batch(state.retried ? retryBatchId : batchId),
+          project_name: 'Assessment batch project',
+          active_commands: [{
+            item_index: 0,
+            action_id: 'ping',
+            display_command: 'ping -c 4 -W 2 127.0.0.1',
+            status: 'running',
+            run_id: state.retried
+              ? 'run_assessment_batch_retry_playwright'
+              : 'run_assessment_batch_playwright',
+            target: { type: 'ip', value: '127.0.0.1' },
+          }],
+        }
+      : null
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        runs: [],
+        assessment_batches: {
+          batches: activeBatch ? [activeBatch] : [],
+          truncated: false,
+        },
+      }),
+    })
+  })
   await page.route(/\/(?:batch-previews|assessment-batch-previews|assessment-batches)(?:[/?]|$)/, async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -530,6 +560,44 @@ test.describe('project assessment qualification', () => {
     await expect(section).toContainText('Assessment batch')
     await expect(section).toContainText('Running')
     await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+
+    const explorerBody = page.locator('#project-explorer-body')
+    const scrollBeforePoll = await explorerBody.evaluate((node) => {
+      node.style.height = '220px'
+      node.style.overflow = 'auto'
+      node.scrollTop = node.scrollHeight
+      return node.scrollTop
+    })
+    expect(scrollBeforePoll).toBeGreaterThan(0)
+    await section.getByRole('button', { name: 'Open run' }).evaluate((node) => {
+      node.focus({ preventScroll: true })
+    })
+    const polledBatch = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === '/assessment-batches/wfx_assessment_batch_playwright'
+    })
+    expect((await polledBatch).status()).toBe(200)
+    await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePoll)
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await openRailAction(page, 'status-monitor')
+    const monitor = page.locator('#status-monitor')
+    await expect(monitor).toBeVisible()
+    await expect(monitor.locator('.status-monitor-assessment-section')).toContainText(
+      'Assessment batch project',
+    )
+    await expect(monitor.locator('.status-monitor-assessment-section')).toContainText(
+      'ping -c 4 -W 2 127.0.0.1',
+    )
+    await monitor.getByRole('button', { name: 'View batch' }).click()
+    await expect(monitor).toBeHidden()
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-explorer-body .project-assessment-batch')).toContainText(
+      'wfx_assessment_batch_playwright',
+    )
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page, { timeout: 30_000 })

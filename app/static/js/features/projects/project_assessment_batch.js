@@ -63,6 +63,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       previewItemsLoading: false,
       previewDirty: false,
       pollTimer: null,
+      renderAssessment: null,
+      renderDetail: null,
       selection: {
         ...DEFAULT_SELECTION,
         excludedTargetIds: new Set(),
@@ -117,6 +119,82 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       st.pollTimer = null;
       void refreshBatch(st, { render: true });
     }, delay ?? (hidden ? 10000 : 2500));
+  }
+
+  function scrollContainersFor(section) {
+    const containers = [];
+    let current = section?.parentElement || null;
+    while (current) {
+      if (current.classList?.contains('project-explorer-body')
+          || current.classList?.contains('project-mobile-detail-body')) {
+        containers.push({ element: current, top: current.scrollTop, left: current.scrollLeft });
+      }
+      current = current.parentElement;
+    }
+    return containers;
+  }
+
+  function restorePolledFocus(section, focusKey) {
+    if (!focusKey) return;
+    const keyedTarget = [...section.querySelectorAll('[data-assessment-batch-focus-key]')]
+      .find(node => node.dataset.assessmentBatchFocusKey === focusKey);
+    const target = keyedTarget?.matches?.('select.app-select-native')
+      ? keyedTarget.nextElementSibling?.querySelector('.app-select-trigger')
+      : keyedTarget;
+    restoreFocus(target);
+  }
+
+  function renderPolledSections(st) {
+    if (typeof document === 'undefined' || !st.renderAssessment) return false;
+    const sections = [...document.querySelectorAll('.project-assessment-batch')]
+      .filter(section => (
+        section.dataset.projectId === st.projectId
+        && section.dataset.assessmentId === st.assessmentId
+      ));
+    let updated = false;
+    sections.forEach((section) => {
+      const currentMonitor = section.querySelector(':scope > .project-assessment-batch-monitor');
+      if (!currentMonitor) return;
+      const active = document.activeElement;
+      const keyedActive = active?.closest?.('[data-assessment-batch-focus-key]');
+      const enhancedSelect = active?.closest?.('.app-select')?.previousElementSibling;
+      const focusKey = section.contains(active)
+        ? String(
+          keyedActive?.dataset?.assessmentBatchFocusKey
+          || enhancedSelect?.dataset?.assessmentBatchFocusKey
+          || '',
+        )
+        : '';
+      const scrollContainers = scrollContainersFor(section);
+      const nextSection = renderer.render(
+        st.projectId,
+        st.renderAssessment,
+        st.renderDetail,
+        st,
+      );
+      const nextMonitor = nextSection.querySelector(':scope > .project-assessment-batch-monitor');
+      if (!nextMonitor) return;
+      currentMonitor.replaceWith(nextMonitor);
+
+      const currentError = section.querySelector(':scope > .project-assessment-batch-error');
+      const nextError = nextSection.querySelector(':scope > .project-assessment-batch-error');
+      if (currentError && nextError) currentError.replaceWith(nextError);
+      else if (currentError) currentError.remove();
+      else if (nextError) section.querySelector(':scope > .project-assessment-section-heading')?.after(nextError);
+
+      ctx.enhanceAppSelects?.(nextMonitor);
+      scrollContainers.forEach(snapshot => {
+        snapshot.element.scrollTop = snapshot.top;
+        snapshot.element.scrollLeft = snapshot.left;
+      });
+      restorePolledFocus(section, focusKey);
+      scrollContainers.forEach(snapshot => {
+        snapshot.element.scrollTop = snapshot.top;
+        snapshot.element.scrollLeft = snapshot.left;
+      });
+      updated = true;
+    });
+    return updated;
   }
 
   async function requestJson(url, options, fallback) {
@@ -201,7 +279,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       schedulePoll(st, 10000);
       return false;
     } finally {
-      if (render && st.generation === generation) renderViews();
+      if (render && st.generation === generation) renderPolledSections(st);
     }
   }
 
@@ -559,6 +637,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     const assessmentId = String(assessment?.id || '');
     if (!projectId || !assessmentId) return null;
     const st = ensure(projectId, assessmentId);
+    st.renderAssessment = assessment;
+    st.renderDetail = detail;
     if (st.loaded && !st.batch && assessment?.status !== 'active') return null;
     return renderer.render(projectId, assessment, detail, st, { mobile });
   }
