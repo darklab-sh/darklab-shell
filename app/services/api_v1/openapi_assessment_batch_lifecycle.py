@@ -70,6 +70,29 @@ def assessment_batch_lifecycle_schemas() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
+        "AssessmentBatchDiagnostic": {
+            "type": "object",
+            "required": [
+                "code",
+                "level",
+                "title",
+                "message",
+                "affected_command_count",
+                "recommended_action",
+            ],
+            "properties": {
+                "code": {"type": "string", "enum": ["nuclei_template_loading_failed"]},
+                "level": {"type": "string", "enum": ["error"]},
+                "title": {"type": "string"},
+                "message": {"type": "string"},
+                "affected_command_count": {"type": "integer", "minimum": 1, "maximum": 512},
+                "recommended_action": {
+                    "type": "string",
+                    "enum": ["refresh_nuclei_templates_and_retry"],
+                },
+            },
+            "additionalProperties": False,
+        },
         "AssessmentBatch": {
             "type": "object",
             "required": [
@@ -85,6 +108,7 @@ def assessment_batch_lifecycle_schemas() -> dict[str, Any]:
                 "chunk_count",
                 "concurrency",
                 "progress",
+                "diagnostics",
                 "next_event_sequence",
                 "created",
                 "updated",
@@ -104,6 +128,11 @@ def assessment_batch_lifecycle_schemas() -> dict[str, Any]:
                 "chunk_count": {"type": "integer", "minimum": 1, "maximum": 16},
                 "concurrency": _ref("AssessmentBatchConcurrency"),
                 "progress": _ref("AssessmentBatchProgress"),
+                "diagnostics": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "items": _ref("AssessmentBatchDiagnostic"),
+                },
                 "next_event_sequence": {"type": "integer", "minimum": 1},
                 "created": {"type": "string"},
                 "updated": {"type": "string"},

@@ -22,6 +22,9 @@ from services.assessments.batch.events import list_batch_events
 from services.assessments.batch.execution import launch_assessment_batch
 from services.assessments.batch.finalization import finalize_assessment_batch_run
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
+from services.assessments.batch.nuclei_failure_diagnosis import (
+    is_nuclei_template_failure,
+)
 from services.assessments.batch.recovery import (
     recover_assessment_batch,
     recover_assessment_batches,
@@ -297,6 +300,62 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
         "item_run_bound",
     ]
     assert all("target" not in _mapping(event["details"]) for event in events)
+
+
+def test_nuclei_template_failure_diagnosis_collapses_affected_commands(batch_builder):
+    batch = batch_builder(item_count=3)
+    created = "2026-08-17 12:01:00"
+    outputs = (
+        "[FTL] Could not load templates from '/tmp/nuclei-templates'",
+        "[ERR] no templates provided for scan",
+        "[FTL] target host could not be resolved",
+    )
+    with get_db_connect()() as conn:
+        for index, output in enumerate(outputs):
+            run_id = f"run-nuclei-template-{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, "
+                "finished, exit_code, output_search_text) VALUES (?, ?, 'external', "
+                "?, ?, ?, 1, ?)",
+                (
+                    run_id,
+                    batch["session_id"],
+                    f"nuclei -u https://target-{index}.example.test",
+                    created,
+                    created,
+                    output,
+                ),
+            )
+            conn.execute(
+                "UPDATE assessment_batch_items SET action_id = 'nuclei', "
+                "action_key = 'command:nuclei' WHERE batch_id = ? AND item_index = ?",
+                (batch["batch_id"], index),
+            )
+            conn.execute(
+                "UPDATE workflow_execution_children SET run_id = ?, status = 'failed', "
+                "exit_code = 1, error_code = 'child_failed', finished = ? "
+                "WHERE execution_id = ? AND step_id = 'chunk_0001' AND ordinal = ?",
+                (run_id, created, batch["batch_id"], index),
+            )
+        conn.commit()
+
+    parent = get_batch_parent(batch["session_id"], batch["batch_id"])
+
+    assert parent is not None
+    assert parent["diagnostics"] == [{
+        "code": "nuclei_template_loading_failed",
+        "level": "error",
+        "title": "Nuclei couldn't load the managed templates",
+        "message": (
+            "2 Nuclei commands failed while loading or validating the managed "
+            "template snapshot. Update the templates, rebuild the retry preview, "
+            "and review it before starting a new batch."
+        ),
+        "affected_command_count": 2,
+        "recommended_action": "refresh_nuclei_templates_and_retry",
+    }]
+    assert is_nuclei_template_failure("Template validation error: unsupported field")
+    assert not is_nuclei_template_failure(outputs[-1])
 
 
 def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(

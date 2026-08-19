@@ -499,6 +499,20 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     return panel;
   }
 
+  function batchDiagnostics(batch) {
+    const diagnostics = Array.isArray(batch?.diagnostics) ? batch.diagnostics : [];
+    const diagnosis = diagnostics.find(item => item?.code === 'nuclei_template_loading_failed');
+    if (!diagnosis) return null;
+    const panel = element('aside', 'project-assessment-batch-diagnostic is-error');
+    const top = element('div', 'project-assessment-batch-diagnostic-heading');
+    top.append(
+      element('strong', '', diagnosis?.title || "Nuclei couldn't load the managed templates"),
+      badge(`${Number(diagnosis?.affected_command_count || 0)} affected`, 'red'),
+    );
+    panel.append(top, element('p', '', diagnosis?.message || 'Update the managed templates before retrying these commands.'));
+    return panel;
+  }
+
   function renderMonitor(projectId, assessment, st) {
     const batch = st.batch;
     const body = element('div', 'project-assessment-batch-monitor');
@@ -528,6 +542,8 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const chips = element('div', 'project-assessment-batch-chip-list');
     rollup.forEach(([label, value]) => chips.appendChild(badge(`${label}: ${value}`, 'muted')));
     body.appendChild(chips);
+    const diagnosticPanel = batchDiagnostics(batch);
+    if (diagnosticPanel) body.appendChild(diagnosticPanel);
 
     if (st.batches.length > 1) {
       const field = element('label', 'project-assessment-batch-history-select');
@@ -568,11 +584,27 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       controls.appendChild(cancel);
     } else if (!['canceling'].includes(String(batch?.status || '')) && assessment?.status === 'active') {
       if (hasRetryableBatchProgress(batch)) {
-        controls.appendChild(actionButton(
-          st.previewing ? 'Building retry preview…' : 'Retry failed or unfinished',
-          () => act.retryBatch(projectId, assessment.id),
-          { primary: true, disabled: st.previewing },
-        ));
+        const templateDiagnosis = (Array.isArray(batch?.diagnostics) ? batch.diagnostics : [])
+          .find(item => item?.recommended_action === 'refresh_nuclei_templates_and_retry');
+        const canRun = ctx.canRunCommands?.() !== false;
+        if (templateDiagnosis && canRun) {
+          controls.appendChild(actionButton(
+            st.previewing || st.refreshingTemplates
+              ? 'Updating templates and building retry…'
+              : 'Update templates and retry failed commands',
+            button => act.updateTemplatesAndRetryBatch(projectId, assessment.id, button),
+            {
+              primary: true,
+              disabled: st.previewing || st.refreshingTemplates || st.starting,
+            },
+          ));
+        } else {
+          controls.appendChild(actionButton(
+            st.previewing ? 'Building retry preview…' : 'Retry failed or unfinished',
+            () => act.retryBatch(projectId, assessment.id),
+            { primary: true, disabled: st.previewing },
+          ));
+        }
       }
       controls.appendChild(actionButton('New assessment plan', () => act.newPlan(projectId, assessment.id)));
     }

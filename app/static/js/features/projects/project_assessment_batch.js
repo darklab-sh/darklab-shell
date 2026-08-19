@@ -31,6 +31,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     selectBatch,
     setSelection,
     startBatch,
+    updateTemplatesAndRetryBatch,
   });
 
   function stateKey(projectId, assessmentId) {
@@ -407,6 +408,20 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       requestJson,
       selectionPayload,
     });
+  }
+
+  async function updateTemplatesAndRetryBatch(projectId, assessmentId, returnFocus = null) {
+    const st = stateFor(projectId, assessmentId);
+    if (st.previewing || st.refreshingTemplates || st.starting) return false;
+    const prepared = await createAssessmentBatchRetryPreview(st, {
+      loadPreviewItemPage,
+      logFailure,
+      renderViews,
+      requestJson,
+      selectionPayload,
+    });
+    if (!prepared) return false;
+    return refreshNucleiTemplates(projectId, assessmentId, returnFocus);
   }
 
   function restoreFocus(target) {

@@ -605,6 +605,13 @@
           "created": {
             "type": "string"
           },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentBatchDiagnostic"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
           "failure_code": {
             "type": "string"
           },
@@ -662,6 +669,7 @@
           "chunk_count",
           "concurrency",
           "progress",
+          "diagnostics",
           "next_event_sequence",
           "created",
           "updated",
@@ -749,6 +757,49 @@
           "target",
           "owner",
           "instance"
+        ],
+        "type": "object"
+      },
+      "AssessmentBatchDiagnostic": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_command_count": {
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "code": {
+            "enum": [
+              "nuclei_template_loading_failed"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "error"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "recommended_action": {
+            "enum": [
+              "refresh_nuclei_templates_and_retry"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "level",
+          "title",
+          "message",
+          "affected_command_count",
+          "recommended_action"
         ],
         "type": "object"
       },

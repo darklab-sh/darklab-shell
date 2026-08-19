@@ -680,6 +680,105 @@ describe('Project assessment batches', () => {
     manager.invalidate()
   })
 
+  it('collapses Nuclei template failures into an update-and-retry preview path', async () => {
+    const terminalBatch = {
+      ...activeBatch,
+      status: 'failed',
+      diagnostics: [{
+        code: 'nuclei_template_loading_failed',
+        level: 'error',
+        title: "Nuclei couldn't load the managed templates",
+        message: '3 Nuclei commands failed while loading or validating the managed template snapshot.',
+        affected_command_count: 3,
+        recommended_action: 'refresh_nuclei_templates_and_retry',
+      }],
+      progress: {
+        ...activeBatch.progress,
+        running: 0,
+        failed: 3,
+        settled: 3,
+        total: 3,
+      },
+    }
+    const nucleiPreflight = {
+      state: 'ready',
+      launchable: true,
+      refresh_enabled: true,
+      command_count: 3,
+      release_version: 'v10.4.7',
+      refreshed_at: '2026-08-18T12:00:00Z',
+      validation_state: 'passed',
+      nuclei_version: 'v3.4.10',
+      content_digest: `sha256:${'1'.repeat(64)}`,
+    }
+    const retryPreview = {
+      ...preview,
+      preview_id: 'abp_retry_nuclei',
+      source_batch_id: terminalBatch.batch_id,
+      candidate_item_count: 3,
+      selected_item_count: 3,
+      summary: {
+        ...preview.summary,
+        nuclei_preflight: nucleiPreflight,
+        source_batch_id: terminalBatch.batch_id,
+        source_item_count: 3,
+        source_retry_eligible_item_count: 3,
+        source_succeeded_item_count: 0,
+      },
+    }
+    const rebuiltPreview = {
+      ...retryPreview,
+      preview_id: 'abp_retry_nuclei_rebuilt',
+      plan_digest: 'b'.repeat(64),
+    }
+    const requests = []
+    const projectWorkspaceRequest = vi.fn(async (url, options = {}) => {
+      const value = String(url)
+      requests.push({ url: value, options })
+      if (value.startsWith('/projects/prj_batch_1/assessment-batches?')) {
+        return response({ batches: [terminalBatch], has_more: false })
+      }
+      if (value.endsWith('/items?cursor=0&limit=100')) {
+        return response({ items: [{ ...batchItem, action_id: 'nuclei', status: 'failed' }], next_cursor: null })
+      }
+      if (value.endsWith('/events?cursor=0&limit=100')) {
+        return response({ events: [], has_more: false })
+      }
+      if (value.endsWith('/retry-previews')) return response({ preview: retryPreview })
+      if (value.includes('/nuclei-templates/refresh')) {
+        return response({ preview: rebuiltPreview, refresh: { status: 'updated' } })
+      }
+      if (value.startsWith('/assessment-batch-previews/')) {
+        return response({ items: [previewItems[0]], next_cursor: null })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const ctx = context(projectWorkspaceRequest)
+    const manager = createProjectAssessmentBatchManager(ctx, { renderViews: vi.fn() })
+    await manager.load('prj_batch_1', assessment.id, { render: false })
+
+    let surface = render(manager)
+    expect(surface.textContent).toContain("Nuclei couldn't load the managed templates")
+    expect(surface.textContent).toContain('3 affected')
+    const updateAndRetry = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent === 'Update templates and retry failed commands')
+    updateAndRetry.click()
+    await vi.waitFor(() => expect(
+      manager.stateFor('prj_batch_1', assessment.id).preview?.preview_id,
+    ).toBe(rebuiltPreview.preview_id))
+
+    expect(requests.some(item => item.url.endsWith('/retry-previews'))).toBe(true)
+    expect(requests.some(item => item.url.includes('/nuclei-templates/refresh'))).toBe(true)
+    expect(requests.some(item => item.url.endsWith(`/${terminalBatch.batch_id}/retry`))).toBe(false)
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Managed Nuclei templates updated. Review the rebuilt plan before starting it.',
+    )
+    surface = render(manager)
+    expect(surface.textContent).toContain('Start retry')
+    expect(surface.textContent).toContain('Commands that already succeeded remain unchanged')
+    manager.invalidate()
+  })
+
   it('refreshes every command page the user has loaded while polling', async () => {
     let refreshed = false
     const pageItems = (start, count) => Array.from({ length: count }, (_, offset) => ({
