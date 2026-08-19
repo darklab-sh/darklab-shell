@@ -709,6 +709,7 @@ Assessment complete, archive, and delete requests and Project deletion lock that
 | `GET` | `/projects/<project_id>/assessments/<assessment_id>` | Returns one scoped cycle with rollups and a filtered, bounded check page. |
 | `PATCH` | `/projects/<project_id>/assessments/<assessment_id>` | Renames an active cycle or moves it forward to completed or archived. |
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/batch-previews` | Compiles and stores one current bounded assessment-batch preview for a browser viewer without starting work. |
+| `POST` | `/projects/<project_id>/assessments/<assessment_id>/batch-previews/<preview_id>/nuclei-templates/refresh` | Updates the managed Nuclei templates and rebuilds the preview so an operator can review the exact new template snapshot before starting work. |
 | `GET` | `/assessment-batch-previews/<preview_id>` | Returns one current owner-scoped compact assessment-batch preview summary. |
 | `GET` | `/assessment-batch-previews/<preview_id>/items` | Returns a count- and byte-bounded page of complete preview items and frozen-check mappings. |
 | `POST` | `/projects/<project_id>/assessments/<assessment_id>/assessment-batches` | Rebuilds and confirms one current preview, atomically materializes its immutable batch, and fills the currently fair launch slots. |

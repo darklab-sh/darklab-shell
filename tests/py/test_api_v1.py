@@ -7922,6 +7922,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "oversized",
         "invalid",
         "unreadable",
+        "maintenance",
         "incompatible",
         "unavailable",
     ]

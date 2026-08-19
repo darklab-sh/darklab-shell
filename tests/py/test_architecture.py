@@ -282,6 +282,11 @@ _MODULE_SIZE_RATCHET = (
         124,
         "split-package-ratchet",
     ),
+    ModuleSizeBudget(
+        "app/blueprints/projects_assessment_nuclei_templates.py",
+        84,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/blueprints/projects_assessment_checks.py", 238, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 165, "split-package-ratchet"),
     ModuleSizeBudget(
@@ -1117,6 +1122,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/assessments/batch/nuclei_preflight.py", 110, "split-package-ratchet"
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/nuclei_lock.py", 40, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/nuclei_refresh.py", 89, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/preview_classification.py", 102, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_cleanup.py", 29, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_compiler.py", 32, "split-package-ratchet"),
@@ -1287,8 +1298,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 294
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "f77b8606674e4b446194c0d1fddb7cd4d60c0b5c7d90fe92afae29c42fdbe7be"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 295
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "b7d532f8173a0ac7cba826c5656be654d44844cbeb51b20b2223f86b870f9ee4"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

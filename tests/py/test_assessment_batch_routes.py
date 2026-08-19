@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, cast
 import uuid
 
 import pytest
@@ -332,6 +333,71 @@ def test_api_preview_uses_the_same_digest_pages_and_stable_errors(client, route_
     )
     assert invalid_cursor.status_code == 400
     assert invalid_cursor.get_json()["error"]["code"] == "invalid_preview_cursor"
+
+
+def test_browser_nuclei_refresh_rebuilds_the_complete_preview_and_digest(
+    client,
+    route_cycle,
+    monkeypatch,
+):
+    session_id, project_id, assessment_id, _target_id = route_cycle
+    _replace_standard_action_with_nuclei(assessment_id)
+    runtime = [_runtime()]
+    for module in (
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+    ):
+        monkeypatch.setattr(module, lambda: runtime[0])
+    preview = cast(dict[str, Any], compile_batch_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        {"include_standard": True},
+    ))
+    old_digest = str(preview["plan_digest"])
+    old_template_digest = str(
+        preview["summary"]["nuclei_preflight"]["content_digest"]
+    )
+
+    def refresh_templates(**_kwargs):
+        snapshot = NucleiTemplateCacheSnapshot(
+            "ready",
+            "v10.4.8",
+            "sha256:" + "2" * 64,
+            120,
+            "2026-08-19T12:00:00Z",
+        )
+        runtime[0] = ProbePlanningRuntime(
+            available_features=_runtime().available_features,
+            intrusive_actions_enabled=True,
+            template_snapshot=snapshot,
+            template_health=NucleiTemplateHealth(
+                "ready", snapshot, "passed", "v3.4.10"
+            ),
+        )
+        return {
+            "status": "updated",
+            "release_version": snapshot.release_version,
+            "content_digest": snapshot.content_digest,
+        }
+
+    monkeypatch.setattr(
+        "services.assessments.batch.nuclei_refresh.refresh_managed_nuclei_templates",
+        refresh_templates,
+    )
+    route = (
+        f"/projects/{project_id}/assessments/{assessment_id}/batch-previews/"
+        f"{preview['preview_id']}/nuclei-templates/refresh"
+    )
+    response = client.post(route, headers=_browser_headers(session_id), json={})
+
+    assert response.status_code == 200
+    rebuilt = cast(dict[str, Any], response.get_json()["preview"])
+    assert rebuilt["preview_id"] != preview["preview_id"]
+    assert rebuilt["plan_digest"] != old_digest
+    assert rebuilt["summary"]["nuclei_preflight"]["content_digest"] != old_template_digest
+    assert rebuilt["summary"]["nuclei_preflight"]["release_version"] == "v10.4.8"
+    assert rebuilt["selected_item_count"] == preview["selected_item_count"]
 
 
 @pytest.mark.parametrize("prefix", ["", "/api/v1"])
@@ -827,6 +893,13 @@ def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
         browser.get_json()["preview"]["plan_digest"]
         == api.get_json()["preview"]["plan_digest"]
     )
+    refresh_denied = client.post(
+        f"/projects/{project_id}/assessments/{assessment_id}/batch-previews/"
+        f"{browser.get_json()['preview']['preview_id']}/nuclei-templates/refresh",
+        headers=_browser_headers(viewer, team_id),
+        json={},
+    )
+    assert refresh_denied.status_code == 403
     for prefix, headers, preview in (
         ("", _browser_headers(viewer, team_id), browser.get_json()["preview"]),
         ("/api/v1", _api_headers(viewer, team_id), api.get_json()["preview"]),

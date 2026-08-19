@@ -1072,8 +1072,15 @@
             "maxLength": 64,
             "type": "string"
           },
+          "operator_action": {
+            "maxLength": 240,
+            "type": "string"
+          },
           "reason_code": {
             "type": "string"
+          },
+          "refresh_enabled": {
+            "type": "boolean"
           },
           "refreshed_at": {
             "type": "string"
@@ -1100,6 +1107,7 @@
               "oversized",
               "invalid",
               "unreadable",
+              "maintenance",
               "incompatible",
               "unavailable"
             ],
@@ -1127,7 +1135,9 @@
           "stale_after_seconds",
           "reason_code",
           "launchable",
-          "command_count"
+          "command_count",
+          "refresh_enabled",
+          "operator_action"
         ],
         "type": "object"
       },

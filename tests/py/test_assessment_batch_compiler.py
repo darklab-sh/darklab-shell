@@ -314,6 +314,8 @@ def test_compiler_includes_nuclei_preflight_for_selected_nuclei_work(batch_cycle
         "reason_code": "",
         "launchable": True,
         "command_count": 1,
+        "refresh_enabled": True,
+        "operator_action": "Ask an operator with Run commands access to update the managed templates.",
     }
 
 

@@ -130,6 +130,7 @@ class AuditEventType(str, Enum):
     ASSESSMENT_EVIDENCE_LINK = "assessment.evidence_link"
     ASSESSMENT_EVIDENCE_UNLINK = "assessment.evidence_unlink"
     ASSESSMENT_ACTION_LAUNCH = "assessment.action_launch"
+    ASSESSMENT_NUCLEI_TEMPLATE_REFRESH = "assessment.nuclei_template_refresh"
     ASSESSMENT_BATCH_START = "assessment_batch.start"
     ASSESSMENT_BATCH_RETRY = "assessment_batch.retry"
     ASSESSMENT_BATCH_CANCEL = "assessment_batch.cancel"
@@ -382,6 +383,11 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditTargetType.ASSESSMENT_CHECK,
         RecordingMode.BEST_EFFORT,
         detail_keys=ASSESSMENT_ACTION_DETAIL_KEYS,
+    ),
+    AuditEventType.ASSESSMENT_NUCLEI_TEMPLATE_REFRESH.value: _spec(
+        AuditEventType.ASSESSMENT_NUCLEI_TEMPLATE_REFRESH,
+        AuditTargetType.ASSESSMENT,
+        RecordingMode.BEST_EFFORT,
     ),
     AuditEventType.ASSESSMENT_BATCH_START.value: _spec(
         AuditEventType.ASSESSMENT_BATCH_START,

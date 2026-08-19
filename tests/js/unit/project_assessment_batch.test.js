@@ -327,6 +327,8 @@ describe('Project assessment batches', () => {
                 reason_code: 'template_validation_failed',
                 launchable: false,
                 command_count: 1,
+                refresh_enabled: true,
+                operator_action: 'Ask an operator with Run commands access to update the managed templates.',
               },
             },
           },
@@ -363,6 +365,8 @@ describe('Project assessment batches', () => {
     expect(surface.textContent).toContain('Nuclei template preflight must pass')
     expect([...surface.querySelectorAll('button')].find(button => button.textContent === 'Run assessment plan').disabled).toBe(true)
     expect(surface.textContent).toContain('Read-only: ask for operator access')
+    expect(surface.textContent).toContain('Ask an operator with Run commands access')
+    expect(surface.textContent).not.toContain('Update templates and rebuild preview')
 
     const refresh = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Refresh preview')
@@ -393,6 +397,23 @@ describe('Project assessment batches', () => {
           reason_code: 'template_cache_stale',
           launchable: true,
           command_count: 1,
+          refresh_enabled: true,
+          operator_action: 'Ask an operator with Run commands access to update the managed templates.',
+        },
+      },
+    }
+    const refreshedPreview = {
+      ...standardPreview,
+      preview_id: 'abp_batch_refreshed',
+      plan_digest: 'b'.repeat(64),
+      summary: {
+        ...standardPreview.summary,
+        nuclei_preflight: {
+          ...standardPreview.summary.nuclei_preflight,
+          state: 'ready',
+          content_digest: `sha256:${'2'.repeat(64)}`,
+          refreshed_at: '2026-08-19T12:00:00Z',
+          reason_code: '',
         },
       },
     }
@@ -402,6 +423,9 @@ describe('Project assessment batches', () => {
         return response({ batches: [] })
       }
       if (String(url).endsWith('/batch-previews')) return response({ preview: standardPreview })
+      if (String(url).endsWith('/nuclei-templates/refresh')) {
+        return response({ preview: refreshedPreview, refresh: { status: 'updated' } })
+      }
       if (String(url).startsWith('/assessment-batch-previews/')) {
         return response({ items: previewItems.map(item => ({ ...item, selected: true })), next_cursor: null })
       }
@@ -432,15 +456,30 @@ describe('Project assessment batches', () => {
     const start = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Run assessment plan')
     start.click()
+    await vi.waitFor(() => expect(st.preview?.preview_id).toBe('abp_batch_refreshed'))
+    expect(startBody).toBeNull()
+    expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      confirmId: 'update_nuclei_templates',
+      tone: 'warning',
+      refocusOnResolve: false,
+      actions: expect.arrayContaining([
+        expect.objectContaining({ id: 'update_nuclei_templates', role: 'primary' }),
+        expect.objectContaining({ id: 'continue_nuclei_snapshot' }),
+        expect.objectContaining({ id: 'cancel' }),
+      ]),
+    }))
+    expect(ctx.setProjectWorkspaceMessage).toHaveBeenCalledWith(
+      'Managed Nuclei templates updated. Review the rebuilt plan before starting it.',
+    )
+
+    surface = render(manager)
+    const refreshedStart = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent === 'Run assessment plan')
+    refreshedStart.click()
     await vi.waitFor(() => expect(startBody).not.toBeNull())
 
     expect(startBody.standard_confirmed).toBe(true)
-    expect(startBody.nuclei_snapshot_confirmed).toBe(true)
-    expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
-      confirmId: 'continue_nuclei_snapshot',
-      tone: 'warning',
-      refocusOnResolve: false,
-    }))
+    expect(startBody.nuclei_snapshot_confirmed).toBe(false)
     expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
       confirmId: 'start_standard',
       tone: 'warning',

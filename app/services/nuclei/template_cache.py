@@ -22,6 +22,11 @@ from services.nuclei.template_cache_files import (
     regular_stat,
     stat_key,
 )
+from services.nuclei.template_lock import (
+    NucleiTemplateLockBusy,
+    NucleiTemplateLockError,
+    managed_nuclei_template_lock,
+)
 
 
 MAX_CHECKSUM_BYTES = 8 * 1024 * 1024
@@ -53,8 +58,21 @@ def managed_nuclei_template_snapshot(
     template_dir: str | Path = MANAGED_TEMPLATE_DIR,
     *,
     config_path: str | Path | None = None,
+    acquire_lock: bool = True,
 ) -> NucleiTemplateCacheSnapshot:
     root = Path(template_dir)
+    if acquire_lock and os.path.abspath(root) == os.path.abspath(MANAGED_TEMPLATE_DIR):
+        try:
+            with managed_nuclei_template_lock(exclusive=False, blocking=False):
+                return managed_nuclei_template_snapshot(
+                    root,
+                    config_path=config_path,
+                    acquire_lock=False,
+                )
+        except NucleiTemplateLockBusy:
+            return NucleiTemplateCacheSnapshot("maintenance")
+        except NucleiTemplateLockError:
+            return NucleiTemplateCacheSnapshot("unreadable")
     checksum = root / ".checksum"
     root_stat = regular_stat(root, directory=True)
     checksum_stat = regular_stat(checksum)
@@ -79,11 +97,17 @@ def nuclei_template_cache_unavailable_reason(snapshot: NucleiTemplateCacheSnapsh
         "oversized": "has an oversized manifest",
         "invalid": "has an invalid manifest",
         "unreadable": "can't be read safely",
+        "maintenance": "is being updated",
     }.get(snapshot.state, "isn't ready")
     return (
-        f"The managed Nuclei template cache {state}. Run nuclei -update-templates "
-        "explicitly, then review this action again."
+        f"The managed Nuclei template cache {state}. Use the assessment preflight's "
+        "managed template refresh, then review this action again."
     )
+
+
+def clear_nuclei_template_snapshot_cache() -> None:
+    """Forget cached manifest identities after a managed-cache replacement."""
+    _snapshot_for_files.cache_clear()
 
 
 @lru_cache(maxsize=16)

@@ -20417,22 +20417,8 @@ class TestDerivedCommandRegistry:
                         session_id=session_id,
                         cfg=cfg,
                     )
-                    assert nuclei_update.allowed, nuclei_update.reason
-                    rewritten_update, update_notice = commands.rewrite_command(
-                        nuclei_update.exec_command,
-                        session_id=session_id,
-                        cfg=cfg,
-                    )
-                    assert update_notice is None
-                    update_tokens = commands.split_command_argv(
-                        rewritten_update
-                    )
-                    assert update_tokens[0] == "nuclei"
-                    assert "-ud" in update_tokens
-                    assert all(
-                        not token.startswith("XDG_CONFIG_HOME=")
-                        for token in update_tokens
-                    )
+                    assert not nuclei_update.allowed
+                    assert "Command not allowed" in nuclei_update.reason
 
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",

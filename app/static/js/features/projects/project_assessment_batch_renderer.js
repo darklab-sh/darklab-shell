@@ -324,6 +324,13 @@ function createProjectAssessmentBatchRenderer(context, actions) {
         "Nuclei work can't start until an operator repairs or updates the managed template cache and rebuilds this preview.",
       ));
     }
+    if (ctx.canRunCommands?.() === false || preflight.refresh_enabled === false) {
+      panel.appendChild(element(
+        'p',
+        '',
+        preflight.operator_action || 'Ask an operator with Run commands access to update the managed templates.',
+      ));
+    }
     return panel;
   }
 
@@ -430,12 +437,27 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const canRun = ctx.canRunCommands?.() !== false;
     const emptyRetry = retry && Number(st.preview?.selected_item_count || 0) === 0;
     const nucleiBlocked = st.preview?.summary?.nuclei_preflight?.launchable === false;
+    const nucleiSummary = st.preview?.summary?.nuclei_preflight || null;
+    const canRefreshNuclei = canRun
+      && nucleiSummary
+      && nucleiSummary.refresh_enabled !== false
+      && (nucleiBlocked || nucleiSummary.state === 'stale');
+    if (canRefreshNuclei) {
+      startActions.appendChild(actionButton(
+        st.refreshingTemplates ? 'Updating templates…' : 'Update templates and rebuild preview',
+        button => act.refreshNucleiTemplates(projectId, assessment.id, button),
+        {
+          primary: nucleiBlocked,
+          disabled: st.refreshingTemplates || st.starting || st.previewDirty,
+        },
+      ));
+    }
     const start = actionButton(
       st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),
       button => act.startBatch(projectId, assessment.id, button),
       {
         primary: true,
-        disabled: st.starting || st.previewDirty || !canRun || emptyRetry || nucleiBlocked,
+        disabled: st.starting || st.refreshingTemplates || st.previewDirty || !canRun || emptyRetry || nucleiBlocked,
       },
     );
     if (!canRun) start.title = 'View-only team members can preview plans but cannot start commands.';

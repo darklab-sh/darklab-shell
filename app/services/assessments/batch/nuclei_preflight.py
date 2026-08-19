@@ -10,6 +10,10 @@ from typing import Any
 
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.nuclei.template_health import NucleiTemplateHealth
+from services.nuclei.template_refresh import (
+    managed_nuclei_template_refresh_enabled,
+    refresh_operator_action,
+)
 
 
 class NucleiPreflightTracker:
@@ -33,7 +37,12 @@ class NucleiPreflightTracker:
     def public(self) -> dict[str, object] | None:
         if not self._commands:
             return None
-        return {**self.health.public(), "command_count": len(self._commands)}
+        return {
+            **self.health.public(),
+            "command_count": len(self._commands),
+            "refresh_enabled": managed_nuclei_template_refresh_enabled(),
+            "operator_action": refresh_operator_action(),
+        }
 
     def summary(self) -> dict[str, object]:
         public = self.public()

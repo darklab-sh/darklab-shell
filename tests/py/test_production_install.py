@@ -1412,11 +1412,15 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"' in entrypoint
     assert 'chown scanner:appuser "$NUCLEI_TEMPLATES_DIR"' in entrypoint
     assert 'chmod 0750 "$NUCLEI_TEMPLATES_DIR"' in entrypoint
+    assert 'NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"' in entrypoint
+    assert 'chown appuser:appuser "$NUCLEI_TEMPLATE_LOCK_PATH"' in entrypoint
+    assert 'chmod 0660 "$NUCLEI_TEMPLATE_LOCK_PATH"' in entrypoint
     cache_prepare = entrypoint.index("\nprepare_managed_nuclei_cache\n")
+    lock_prepare = entrypoint.index('NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"')
     cache_bootstrap = entrypoint.index(
         "\n/usr/local/libexec/darklab-bootstrap-nuclei-templates\n"
     )
-    assert cache_prepare < cache_bootstrap < entrypoint.index("exec gosu appuser gunicorn")
+    assert cache_prepare < lock_prepare < cache_bootstrap < entrypoint.index("exec gosu appuser gunicorn")
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager

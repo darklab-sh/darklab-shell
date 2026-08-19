@@ -15,14 +15,14 @@ def assessment_batch_nuclei_preflight_schema() -> dict[str, Any]:
             "state", "source_label", "release_version", "content_digest",
             "manifest_entry_count", "refreshed_at", "validation_state",
             "nuclei_version", "stale_after_seconds", "reason_code",
-            "launchable", "command_count",
+            "launchable", "command_count", "refresh_enabled", "operator_action",
         ],
         "properties": {
             "state": {
                 "type": "string",
                 "enum": [
                     "ready", "stale", "missing", "oversized", "invalid",
-                    "unreadable", "incompatible", "unavailable",
+                    "unreadable", "maintenance", "incompatible", "unavailable",
                 ],
             },
             "source_label": {"type": "string", "enum": ["Managed local cache"]},
@@ -42,6 +42,8 @@ def assessment_batch_nuclei_preflight_schema() -> dict[str, Any]:
             "reason_code": {"type": "string"},
             "launchable": {"type": "boolean"},
             "command_count": {"type": "integer", "minimum": 1, "maximum": 512},
+            "refresh_enabled": {"type": "boolean"},
+            "operator_action": {"type": "string", "maxLength": 240},
         },
         "additionalProperties": False,
     }

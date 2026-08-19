@@ -792,7 +792,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         template_dir, config_path=config_path,
     ).release_version == ""
     assert managed_nuclei_template_snapshot(tmp_path / "missing").state == "missing"
-    assert "nuclei -update-templates" in nuclei_template_cache_unavailable_reason(
+    assert "managed template refresh" in nuclei_template_cache_unavailable_reason(
         NucleiTemplateCacheSnapshot("missing")
     )
     provenance = nuclei_template_provenance(
@@ -909,7 +909,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     )
     unavailable = build_assessment_action_plan(row, target, "prj_nuclei")
     assert unavailable["launchable"] is False
-    assert "nuclei -update-templates" in unavailable["unavailable_reason"]
+    assert "managed template refresh" in unavailable["unavailable_reason"]
     monkeypatch.setattr(
         action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: template_snapshot,
     )
@@ -980,6 +980,147 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     ) as changed:
         assessment_run_launch_context(plan)
     assert changed.value.code == "nuclei_template_cache_changed"
+
+
+def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypatch):
+    from services.nuclei import template_refresh_worker as worker
+
+    live = tmp_path / "nuclei-templates"
+    live.mkdir()
+    old_manifest = f"{live}/http/old.yaml,{'a' * 32};"
+    (live / ".checksum").write_text(old_manifest, encoding="utf-8")
+    live_config_dir = tmp_path / "live-config"
+    live_config_dir.mkdir()
+    live_config = live_config_dir / ".templates-config.json"
+    live_config.write_text(json.dumps({
+        "nuclei-templates-directory": str(live),
+        "nuclei-templates-version": "v10.4.6",
+    }), encoding="utf-8")
+    monkeypatch.setattr(worker, "MANAGED_TEMPLATE_DIR", str(live))
+    monkeypatch.setenv("NUCLEI_CONFIG_DIR", str(live_config_dir))
+
+    validation_return_code = 0
+
+    def fake_run(args, **kwargs):
+        if "-update-templates" in args:
+            stage = Path(args[args.index("-ud") + 1])
+            (stage / "http").mkdir(exist_ok=True)
+            (stage / ".checksum").write_text(
+                f"{stage}/http/new.yaml,{'b' * 32};",
+                encoding="utf-8",
+            )
+            config = Path(kwargs["env"]["XDG_CONFIG_HOME"]) / "nuclei" / ".templates-config.json"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(json.dumps({
+                "nuclei-templates-directory": str(stage),
+                "nuclei-templates-version": "v10.4.7",
+            }), encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0)
+        return subprocess.CompletedProcess(args, validation_return_code)
+
+    monkeypatch.setattr(worker.subprocess, "run", fake_run)
+    stage = tmp_path / "stage-success"
+    stage.mkdir()
+    config_root = tmp_path / "config-success"
+    config_root.mkdir()
+    updated = worker._run("/usr/local/bin/nuclei", stage, config_root)
+
+    assert updated["status"] == "updated"
+    assert updated["release_version"] == "v10.4.7"
+    assert "new.yaml" in (live / ".checksum").read_text(encoding="utf-8")
+    installed_config = json.loads(live_config.read_text(encoding="utf-8"))
+    assert installed_config["nuclei-templates-directory"] == str(live)
+
+    installed_manifest = (live / ".checksum").read_text(encoding="utf-8")
+    validation_return_code = 1
+    failed_stage = tmp_path / "stage-failure"
+    failed_stage.mkdir()
+    failed_config = tmp_path / "config-failure"
+    failed_config.mkdir()
+    failed = worker._run("/usr/local/bin/nuclei", failed_stage, failed_config)
+
+    assert failed == {"status": "failed", "reason_code": "staged_cache_incompatible"}
+    assert (live / ".checksum").read_text(encoding="utf-8") == installed_manifest
+
+
+def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from services.nuclei import template_refresh
+    from services.nuclei.template_lock import (
+        NucleiTemplateLockBusy,
+        managed_nuclei_template_lock,
+    )
+    from services.runs.lifecycle import real_command_popen_argv
+
+    lock_path = tmp_path / "nuclei.lock"
+    with managed_nuclei_template_lock(exclusive=True, lock_path=lock_path):
+        with pytest.raises(NucleiTemplateLockBusy):
+            with managed_nuclei_template_lock(
+                exclusive=False,
+                lock_path=lock_path,
+            ):
+                pytest.fail("a scan lock must not cross maintenance")
+
+    @contextmanager
+    def fake_lock(**_kwargs):
+        yield 1
+
+    monkeypatch.setattr(template_refresh, "managed_nuclei_template_lock", fake_lock)
+    monkeypatch.setattr(template_refresh, "SCANNER_PREFIX", [])
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "true")
+    calls = []
+
+    def fake_worker(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            json.dumps({
+                "status": "updated",
+                "release_version": "v10.4.7",
+                "content_digest": "sha256:" + "c" * 64,
+            }),
+            "",
+        )
+
+    refreshed = template_refresh.refresh_managed_nuclei_templates(
+        active_batch_exists=lambda: False,
+        run_command=fake_worker,
+    )
+    assert refreshed["status"] == "updated"
+    assert calls[0][0][-2:] == ["-m", "services.nuclei.template_refresh_worker"]
+    assert calls[0][1]["stderr"] is subprocess.DEVNULL
+
+    with pytest.raises(template_refresh.NucleiTemplateRefreshError) as active:
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: True,
+            run_command=lambda *_args, **_kwargs: pytest.fail("worker must not run"),
+        )
+    assert active.value.code == "nuclei_template_refresh_batch_active"
+
+    prepared = PreparedRealCommand(
+        registry_command="nuclei -u https://app.example.test",
+        execution_command="nuclei -u https://app.example.test",
+        command="nuclei -ud /tmp/nuclei-templates -u https://app.example.test",
+        rewrite_notice=None,
+        validation=cast(Any, None),
+        missing_runtime=None,
+        display_missing_runtime=None,
+        env_overrides={},
+        secret_env_names=[],
+    )
+    digest = "sha256:" + "d" * 64
+    argv = real_command_popen_argv(
+        prepared,
+        nuclei_template_digest=digest,
+        scanner_prefix=(),
+        stdbuf_bin=None,
+        shell_bin="/bin/sh",
+    )
+    assert argv[1:4] == ["-m", "services.nuclei.template_run", "--expected-digest"]
+    assert argv[4:6] == [digest, "--"]
+    assert argv[-3:] == ["/bin/sh", "-c", prepared.command]
 
 
 def test_local_openapi_review_keeps_only_bounded_read_operations_and_internal_refs():

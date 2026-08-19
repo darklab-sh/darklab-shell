@@ -10,6 +10,7 @@ import hmac
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.preview_digest import batch_preview_digest
 from services.assessments.batch.nuclei_preflight import validate_batch_nuclei_preflight
+from services.assessments.batch.nuclei_lock import assessment_batch_nuclei_cache_lock
 from services.assessments.batch.preview_storage import get_batch_preview
 from services.assessments.batch.start_rebuild import rebuild_confirmed_batch_preview
 from services.assessments.batch.start_replay import confirmed_batch_replay
@@ -87,49 +88,50 @@ def start_assessment_batch(
             "The assessment batch approval doesn't match this cycle preview.",
             status_code=409,
         )
-    current_draft = rebuild_confirmed_batch_preview(
-        session_id,
-        project_id,
-        assessment_id,
-        preview,
-        source_batch_id=normalized_source,
-        team_id=team_id,
-    )
-    validate_batch_nuclei_preflight(
-        current_draft.summary,
-        stale_confirmed=nuclei_snapshot_confirmed,
-    )
-    current_digest = batch_preview_digest(current_draft)
-    if not hmac.compare_digest(current_digest, stored_digest):
-        raise AssessmentBatchError(
-            "batch_preview_stale",
-            "The assessment batch plan changed; create and review a new preview.",
-            status_code=409,
+    with assessment_batch_nuclei_cache_lock(preview.get("summary")):
+        current_draft = rebuild_confirmed_batch_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            preview,
+            source_batch_id=normalized_source,
+            team_id=team_id,
         )
-    selected_items = sum(int(item.selected) for item in current_draft.items)
-    if not selected_items:
-        raise AssessmentBatchError(
-            "empty_batch_retry",
-            "No failed or unfinished commands are currently eligible to retry.",
-            status_code=409,
+        validate_batch_nuclei_preflight(
+            current_draft.summary,
+            stale_confirmed=nuclei_snapshot_confirmed,
         )
-    return materialize_confirmed_batch(
-        session_id=session_id,
-        team_id=team_id,
-        project_id=project_id,
-        assessment_id=assessment_id,
-        preview_id=preview_id,
-        preview_digest=digest,
-        item_count=selected_items,
-        concurrency=current_draft.concurrency,
-        standard_confirmed=standard_confirmed,
-        source_batch_id=normalized_source,
-        actor_member_id=actor_member_id,
-        actor_role=actor_role,
-        owner_client_id=owner_client_id,
-        owner_tab_id=owner_tab_id,
-        max_active=max_active,
-    )
+        current_digest = batch_preview_digest(current_draft)
+        if not hmac.compare_digest(current_digest, stored_digest):
+            raise AssessmentBatchError(
+                "batch_preview_stale",
+                "The assessment batch plan changed; create and review a new preview.",
+                status_code=409,
+            )
+        selected_items = sum(int(item.selected) for item in current_draft.items)
+        if not selected_items:
+            raise AssessmentBatchError(
+                "empty_batch_retry",
+                "No failed or unfinished commands are currently eligible to retry.",
+                status_code=409,
+            )
+        return materialize_confirmed_batch(
+            session_id=session_id,
+            team_id=team_id,
+            project_id=project_id,
+            assessment_id=assessment_id,
+            preview_id=preview_id,
+            preview_digest=digest,
+            item_count=selected_items,
+            concurrency=current_draft.concurrency,
+            standard_confirmed=standard_confirmed,
+            source_batch_id=normalized_source,
+            actor_member_id=actor_member_id,
+            actor_role=actor_role,
+            owner_client_id=owner_client_id,
+            owner_tab_id=owner_tab_id,
+            max_active=max_active,
+        )
 
 
 __all__ = ["start_assessment_batch"]

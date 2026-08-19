@@ -27,6 +27,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     loadMorePreviewItems,
     newPlan,
     retryBatch,
+    refreshNucleiTemplates,
     selectBatch,
     setSelection,
     startBatch,
@@ -47,6 +48,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       error: '',
       planning: false,
       previewing: false,
+      refreshingTemplates: false,
       starting: false,
       canceling: false,
       batches: [],
@@ -369,7 +371,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
 
   async function createPreview(projectId, assessmentId) {
     const st = stateFor(projectId, assessmentId);
-    if (st.previewing || st.starting) return false;
+    if (st.previewing || st.refreshingTemplates || st.starting) return false;
     st.previewing = true;
     st.error = '';
     renderViews();
@@ -413,10 +415,48 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
   }
 
   async function confirmAction(options, returnFocus) {
+    return (await chooseAction(options, returnFocus)) === options.confirmId;
+  }
+
+  async function chooseAction(options, returnFocus) {
     if (typeof ctx.showConfirm !== 'function') return false;
     const choice = await ctx.showConfirm({ ...options, refocusOnResolve: false });
     restoreFocus(returnFocus);
-    return choice === options.confirmId;
+    return choice;
+  }
+
+  async function refreshNucleiTemplates(projectId, assessmentId, returnFocus = null) {
+    const st = stateFor(projectId, assessmentId);
+    const previewId = String(st.preview?.preview_id || '');
+    if (!previewId || st.refreshingTemplates || st.starting) return false;
+    st.refreshingTemplates = true;
+    st.error = '';
+    renderViews();
+    try {
+      const payload = await requestJson(
+        `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/batch-previews/${encodeURIComponent(previewId)}/nuclei-templates/refresh`,
+        { method: 'POST', body: JSON.stringify({}) },
+        'Could not update the managed Nuclei templates.',
+      );
+      st.preview = payload?.preview || null;
+      st.previewItems = [];
+      st.previewItemsCursor = null;
+      st.previewDirty = false;
+      st.planning = true;
+      await loadPreviewItemPage(st);
+      ctx.setProjectWorkspaceMessage?.(
+        'Managed Nuclei templates updated. Review the rebuilt plan before starting it.',
+      );
+      return true;
+    } catch (err) {
+      st.error = err?.message || 'Could not update the managed Nuclei templates.';
+      logFailure('PROJECT_ASSESSMENT_NUCLEI_TEMPLATE_REFRESH_FAILED', err, st);
+      return false;
+    } finally {
+      st.refreshingTemplates = false;
+      renderViews();
+      restoreFocus(returnFocus);
+    }
   }
 
   function standardConfirmationNote(preview) {
@@ -431,29 +471,39 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
 
   async function startBatch(projectId, assessmentId, returnFocus = null) {
     const st = stateFor(projectId, assessmentId);
-    if (!st.preview || st.previewDirty || st.starting) return false;
+    if (!st.preview || st.previewDirty || st.starting || st.refreshingTemplates) return false;
     const standard = Boolean(st.preview?.summary?.requires_standard_confirmation);
     const retry = Boolean(st.preview?.source_batch_id);
     const nucleiPreflight = st.preview?.summary?.nuclei_preflight || null;
     let nucleiSnapshotConfirmed = false;
     if (nucleiPreflight?.state === 'stale') {
-      nucleiSnapshotConfirmed = await confirmAction({
+      const actions = [{ id: 'cancel', label: 'Cancel', role: 'cancel' }];
+      if (nucleiPreflight.refresh_enabled !== false) {
+        actions.push({
+          id: 'update_nuclei_templates',
+          label: 'Update templates and rebuild preview',
+          role: 'primary',
+        });
+      }
+      actions.push({
+        id: 'continue_nuclei_snapshot',
+        label: 'Continue with current snapshot',
+        role: 'secondary',
+        tone: 'warning',
+      });
+      const nucleiChoice = await chooseAction({
         body: {
           text: 'Continue with stale managed Nuclei templates?',
-          note: `${Number(nucleiPreflight.command_count || 0)} planned Nuclei commands will use template release ${String(nucleiPreflight.release_version || 'unknown')} and the exact snapshot digest shown in the preview. Updating and rebuilding the preview is recommended when network access is available.`,
+          note: `${Number(nucleiPreflight.command_count || 0)} planned Nuclei commands will use template release ${String(nucleiPreflight.release_version || 'unknown')} and the exact snapshot digest shown in the preview. ${String(nucleiPreflight.operator_action || 'Updating and rebuilding the preview is recommended when network access is available.')}`,
         },
         tone: 'warning',
-        confirmId: 'continue_nuclei_snapshot',
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          {
-            id: 'continue_nuclei_snapshot',
-            label: 'Continue with current snapshot',
-            role: 'secondary',
-            tone: 'warning',
-          },
-        ],
+        confirmId: 'update_nuclei_templates',
+        actions,
       }, returnFocus);
+      if (nucleiChoice === 'update_nuclei_templates') {
+        return refreshNucleiTemplates(projectId, assessmentId, returnFocus);
+      }
+      nucleiSnapshotConfirmed = nucleiChoice === 'continue_nuclei_snapshot';
       if (!nucleiSnapshotConfirmed) return false;
     }
     const confirmId = retry ? 'start_retry' : (standard ? 'start_standard' : 'start');

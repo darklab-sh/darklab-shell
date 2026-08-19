@@ -19,6 +19,7 @@ from core.database import db_connect
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+from services.nuclei.template_health import NucleiTemplateHealth
 from services.projects.links import link_run_to_project_on_conn
 from services.runs.contracts import RunSpawnError
 
@@ -34,10 +35,17 @@ def _probe_runtime(monkeypatch):
         "services.assessments.probe_runtime.resolve_runtime_command",
         lambda command: f"/usr/bin/{command}",
     )
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
+    )
     monkeypatch.setattr(
-        "services.assessments.probe_runtime.managed_nuclei_template_snapshot",
-        lambda: NucleiTemplateCacheSnapshot(
-            "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
+        "services.assessments.probe_runtime.template_cache.managed_nuclei_template_snapshot",
+        lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_runtime.template_health.managed_nuclei_template_health",
+        lambda **_kwargs: NucleiTemplateHealth(
+            "ready", snapshot, "passed", "v3.4.10",
         ),
     )
 

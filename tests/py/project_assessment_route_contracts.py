@@ -19,6 +19,8 @@ def _expected_capability(path: str, method: str) -> str:
     if "/assessment-batches" in path:
         return "RUN_COMMANDS"
     if "/assessments/" in path or path.endswith("/assessments"):
+        if path.endswith("/nuclei-templates/refresh"):
+            return "RUN_COMMANDS"
         if path.endswith(("/zap-plan", "/batch-previews")):
             return ""
         if any(

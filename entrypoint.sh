@@ -200,6 +200,28 @@ prepare_managed_nuclei_cache() {
 
 prepare_managed_nuclei_cache
 
+# The web process coordinates cache maintenance while scans run as the scanner
+# user. Create the shared lock before dropping privileges so both identities can
+# open it, but only appuser owns its metadata in the sticky /tmp directory.
+NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"
+if [ -L "$NUCLEI_TEMPLATE_LOCK_PATH" ] \
+    || { [ -e "$NUCLEI_TEMPLATE_LOCK_PATH" ] && [ ! -f "$NUCLEI_TEMPLATE_LOCK_PATH" ]; }; then
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=unsafe_path" >&2
+    exit 1
+fi
+touch "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=create_failed" >&2
+    exit 1
+}
+chown appuser:appuser "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=owner_failed" >&2
+    exit 1
+}
+chmod 0660 "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=mode_failed" >&2
+    exit 1
+}
+
 # A fresh deployment should be able to preview reviewed Nuclei probes without
 # first running a manual terminal command. Bootstrap only an empty managed
 # cache; existing snapshots remain unchanged until an operator updates them.

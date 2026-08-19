@@ -424,20 +424,20 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.17d3908c5dd0.js",
-      "hash": "59eb0f4260a355ddb7d6a50c91afae00580b42ec926d64536f2644e455435ad5"
+      "path": "/static/build/static-project-assessment.8204d4577fa9.js",
+      "hash": "d19ff8926db6e2a3064392ecf018b0ff99a1bbe5e18bbfba90f83041c03b4c4a"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
       "path": "/static/build/static-project-assessment-actions.3ba0fef9fdf7.js",
       "hash": "259e34b91e935228ddb8d3a96b3261a755fae92396666d54820d636970afdf9a"
     },
     "/static/js/features/projects/project_assessment_batch.js": {
-      "path": "/static/build/static-project-assessment-batch.34a7e06b5c0d.js",
-      "hash": "d934fea306764429a7d49b16cc2dfd173e70f2b2c1183b3cf99078cb4814351e"
+      "path": "/static/build/static-project-assessment-batch.f8fb33e0eda9.js",
+      "hash": "85a3d7f78e492b4c186c67fe41f30bfca609fbfe2afc85650c4656767957e5d8"
     },
     "/static/js/features/projects/project_assessment_batch_renderer.js": {
-      "path": "/static/build/static-project-assessment-batch-renderer.3a3beaff6860.js",
-      "hash": "1bf8ca233ef9235bc135ce825b14c6fc459e5529e8a72335758d9986af4587c1"
+      "path": "/static/build/static-project-assessment-batch-renderer.2f95d0a191a3.js",
+      "hash": "2cc1fffad7e5882debc0f6f9a7706a4dbc30e5e42e6802df35ca4942b5e81ac2"
     },
     "/static/js/features/projects/project_assessment_batch_retry.js": {
       "path": "/static/build/static-project-assessment-batch-retry.600ff0a3482b.js",
