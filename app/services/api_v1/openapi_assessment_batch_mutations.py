@@ -36,6 +36,7 @@ def assessment_batch_mutation_schemas() -> dict[str, Any]:
                     "pattern": "^[0-9a-f]{64}$",
                 },
                 "confirmed": {"type": "boolean", "enum": [True]},
+                "nuclei_snapshot_confirmed": {"type": "boolean", "default": False},
                 "standard_confirmed": {"type": "boolean", "default": False},
                 "tab_id": {"type": "string", "maxLength": 128},
             },

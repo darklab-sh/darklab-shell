@@ -11,7 +11,8 @@ from typing import Any, cast
 import pytest
 
 from conftest import reusable_test_app
-from core.database_access import get_db_connect
+from core.database_access import get_db_backend, get_db_connect
+from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.events import list_batch_events
@@ -22,18 +23,23 @@ from services.assessments.batch.start import start_assessment_batch
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+from services.nuclei.template_health import NucleiTemplateHealth
 from services.projects.crud import create_project, delete_project
 from services.projects.targets import add_project_target
 
 
 def _runtime() -> ProbePlanningRuntime:
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.7", "sha256:" + "1" * 64, 100, "2026-08-18T12:00:00Z"
+    )
     return ProbePlanningRuntime(
         available_features=frozenset(
             {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
         ),
         intrusive_actions_enabled=True,
-        template_snapshot=NucleiTemplateCacheSnapshot(
-            "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+        template_snapshot=snapshot,
+        template_health=NucleiTemplateHealth(
+            "ready", snapshot, "passed", "v3.4.10"
         ),
     )
 
@@ -94,6 +100,30 @@ def _start(
         confirmed=True,
         **cast(Any, values),
     )
+
+
+def _replace_standard_action_with_nuclei(assessment_id: str) -> None:
+    with get_db_connect()() as conn:
+        dialect = dialect_for_backend(get_db_backend())
+        assessment = conn.execute(
+            "SELECT profile_snapshot FROM project_assessments WHERE id = ?",
+            (assessment_id,),
+        ).fetchone()
+        snapshot = dialect.decode_json_dict(assessment["profile_snapshot"])
+        check = next(
+            item for item in snapshot["checks"] if item["key"] == "service_discovery"
+        )
+        check["recommended_action"] = "command:nuclei"
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (dialect.json_param(snapshot), assessment_id),
+        )
+        conn.execute(
+            "UPDATE project_assessment_checks SET recommended_action_key = ? "
+            "WHERE assessment_id = ? AND check_key = ?",
+            ("command:nuclei", assessment_id, "service_discovery"),
+        )
+        conn.commit()
 
 
 def test_confirmed_start_copies_every_selected_item_and_mapping_once(batch_cycle):
@@ -214,8 +244,12 @@ def test_confirmed_start_copies_every_selected_item_and_mapping_once(batch_cycle
     assert claimed["started_execution_id"] == batch["batch_id"]
 
 
-def test_standard_items_need_a_separate_confirmation(batch_cycle):
+def test_standard_items_and_nuclei_preflight_need_separate_confirmation(
+    batch_cycle,
+    monkeypatch,
+):
     session_id, project_id, assessment_id = batch_cycle
+    _replace_standard_action_with_nuclei(assessment_id)
     preview = compile_batch_preview(
         session_id,
         project_id,
@@ -234,6 +268,76 @@ def test_standard_items_need_a_separate_confirmation(batch_cycle):
         standard_confirmed=True,
     )
     assert batch["item_count"] == preview["selected_item_count"] == 3
+
+    base_runtime = _runtime()
+    stale_runtime = ProbePlanningRuntime(
+        available_features=base_runtime.available_features,
+        intrusive_actions_enabled=base_runtime.intrusive_actions_enabled,
+        template_snapshot=base_runtime.template_snapshot,
+        template_health=NucleiTemplateHealth(
+            "stale",
+            base_runtime.template_snapshot,
+            "passed",
+            "v3.4.10",
+            reason_code="template_cache_stale",
+        ),
+    )
+    for module in (
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+    ):
+        monkeypatch.setattr(module, lambda: stale_runtime)
+    stale_preview = compile_batch_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        {"include_standard": True, "item_limit": 3},
+    )
+    assert stale_preview["summary"]["nuclei_preflight"]["state"] == "stale"
+    with pytest.raises(AssessmentBatchError) as stale_confirmation:
+        _start(session_id, project_id, assessment_id, stale_preview)
+    assert stale_confirmation.value.code == "nuclei_template_confirmation_required"
+    stale_batch = _start(
+        session_id,
+        project_id,
+        assessment_id,
+        stale_preview,
+        nuclei_snapshot_confirmed=True,
+        standard_confirmed=True,
+    )
+    assert stale_batch["item_count"] == stale_preview["selected_item_count"]
+
+    incompatible_runtime = ProbePlanningRuntime(
+        available_features=base_runtime.available_features,
+        intrusive_actions_enabled=base_runtime.intrusive_actions_enabled,
+        template_snapshot=base_runtime.template_snapshot,
+        template_health=NucleiTemplateHealth(
+            "incompatible",
+            base_runtime.template_snapshot,
+            "failed",
+            "v3.4.10",
+            reason_code="template_validation_failed",
+        ),
+    )
+    for module in (
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+    ):
+        monkeypatch.setattr(module, lambda: incompatible_runtime)
+    incompatible_preview = compile_batch_preview(
+        session_id,
+        project_id,
+        assessment_id,
+        {"include_standard": True, "item_limit": 3},
+    )
+    with pytest.raises(AssessmentBatchError) as blocked:
+        _start(session_id, project_id, assessment_id, incompatible_preview)
+    assert blocked.value.code == "nuclei_template_preflight_blocked"
+    assert blocked.value.details == {
+        "state": "incompatible",
+        "reason_code": "template_validation_failed",
+        "command_count": 1,
+    }
 
 
 def test_start_rejects_scope_drift_and_rolls_back_partial_materialization(batch_cycle):

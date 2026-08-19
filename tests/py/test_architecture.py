@@ -33,6 +33,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_assessment_actions.py",
     "openapi_assessment_batch_lifecycle.py",
     "openapi_assessment_batch_mutations.py",
+    "openapi_assessment_batch_nuclei.py",
     "openapi_assessment_batch_retries.py",
     "openapi_assessment_batches.py",
     "openapi_assessment_deltas.py",
@@ -395,6 +396,11 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/api_v1/openapi_assessment_batch_mutations.py",
         137,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/services/api_v1/openapi_assessment_batch_nuclei.py",
+        55,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -1108,6 +1114,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/policy.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/provenance.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_builder.py", 385, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/nuclei_preflight.py", 110, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/preview_classification.py", 102, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_cleanup.py", 29, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_compiler.py", 32, "split-package-ratchet"),

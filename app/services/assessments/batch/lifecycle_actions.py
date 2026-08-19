@@ -36,6 +36,7 @@ def start_confirmed_assessment_batch(
             preview_id=str(confirmation.get("preview_id") or ""),
             plan_digest=confirmation.get("plan_digest"),
             confirmed=confirmation.get("confirmed"),
+            nuclei_snapshot_confirmed=confirmation.get("nuclei_snapshot_confirmed", False),
             standard_confirmed=confirmation.get("standard_confirmed", False),
             team_id=team_id,
             actor_member_id=actor_member_id,
@@ -85,7 +86,4 @@ def request_assessment_batch_cancellation(
     return result
 
 
-__all__ = [
-    "request_assessment_batch_cancellation",
-    "start_confirmed_assessment_batch",
-]
+__all__ = ["request_assessment_batch_cancellation", "start_confirmed_assessment_batch"]

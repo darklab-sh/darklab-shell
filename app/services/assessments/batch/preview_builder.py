@@ -34,10 +34,8 @@ from services.assessments.batch.preview_estimate import (
     duration_bound_seconds,
     estimate_batch_duration,
 )
-from services.assessments.batch.preview_models import (
-    BatchCheckMapping,
-    BatchPreviewItem,
-)
+from services.assessments.batch.preview_models import BatchCheckMapping, BatchPreviewItem
+from services.assessments.batch.nuclei_preflight import NucleiPreflightTracker
 from services.assessments.batch.preview_selection import BatchPreviewSelection
 from services.assessments.batch.preview_summary import build_preview_summary
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
@@ -60,9 +58,9 @@ class _CompiledItem:
 
 def _canonical_size(value: object) -> int:
     return len(
-        json.dumps(
-            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        ).encode("utf-8")
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "utf-8"
+        )
     )
 
 
@@ -205,6 +203,7 @@ class BatchPreviewBuilder:
         self.check_count = 0
         self.mapping_count = 0
         self.build_bytes = 0
+        self.nuclei_preflight = NucleiPreflightTracker(runtime.template_health)
 
     def observe(self, row: Any) -> None:
         """Classify and, when eligible, merge one streamed frozen check row."""
@@ -230,6 +229,7 @@ class BatchPreviewBuilder:
         self._remember_hints(row)
         action_key = str(row["recommended_action_key"] or "")
         action_id = action_key.partition(":")[2]
+        self.nuclei_preflight.observe(action_id, row, self.selection.include_standard)
         try:
             plan = _plan(row, self.project_id, action_id, self.runtime)
         except (AssessmentBatchError, ProbeError) as exc:
@@ -278,9 +278,7 @@ class BatchPreviewBuilder:
             action_id=action_id,
             target=_target(row),
             plan=plan,
-            duration_bound_seconds=duration_bound_seconds(
-                action_id, plan.get("bounds")
-            ),
+            duration_bound_seconds=duration_bound_seconds(action_id, plan.get("bounds")),
             selected=(
                 str(row["policy_level"] or "") == "safe"
                 or self.selection.include_standard
@@ -347,7 +345,7 @@ class BatchPreviewBuilder:
             _public_item(item) for item in sorted(self.compiled.values(), key=_sort_key)
         )
         selected = [item for item in items if item.selected]
-        if not selected and not allow_empty:
+        if not selected and not allow_empty and not self.nuclei_preflight:
             raise AssessmentBatchError(
                 "empty_batch_plan",
                 "No supported assessment commands are selected. Include standard "
@@ -378,6 +376,7 @@ class BatchPreviewBuilder:
             source=source,
             estimate=estimate,
         )
+        summary.update(self.nuclei_preflight.summary())
         self.build_bytes += _canonical_size(self.selection.public()) + _canonical_size(
             summary
         )

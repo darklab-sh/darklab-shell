@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.api_v1 import openapi_assessment_batch_retries as retries
+from services.api_v1.openapi_assessment_batch_nuclei import assessment_batch_nuclei_preflight_schema
 
 
 def _ref(name: str) -> dict[str, str]:
@@ -15,10 +16,7 @@ def _ref(name: str) -> dict[str, str]:
 
 
 def _response(description: str, schema: str) -> dict[str, Any]:
-    return {
-        "description": description,
-        "content": {"application/json": {"schema": _ref(schema)}},
-    }
+    return {"description": description, "content": {"application/json": {"schema": _ref(schema)}}}
 
 
 def _error(description: str) -> dict[str, Any]:
@@ -28,6 +26,7 @@ def _error(description: str) -> dict[str, Any]:
 def assessment_batch_preview_schemas() -> dict[str, Any]:
     string_list = {"type": "array", "items": {"type": "string"}}
     return retries.augment_assessment_batch_preview_schemas({
+        "AssessmentBatchNucleiPreflight": assessment_batch_nuclei_preflight_schema(),
         "AssessmentBatchPreviewSelection": {
             "type": "object",
             "properties": {
@@ -104,6 +103,7 @@ def assessment_batch_preview_schemas() -> dict[str, Any]:
                     "type": "array",
                     "items": {"type": "object", "additionalProperties": True},
                 },
+                "nuclei_preflight": _ref("AssessmentBatchNucleiPreflight"),
                 "enabled_http_profile_count": {"type": "integer"},
                 "credentialed_http_profile_count": {"type": "integer"},
                 "credentialed_work_remains_individual": {"type": "boolean"},

@@ -29,6 +29,7 @@ from services.assessments.batch.preview_selection import normalize_preview_selec
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+from services.nuclei.template_health import NucleiTemplateHealth
 from services.projects.crud import create_project, delete_project
 from services.projects.targets import add_project_target
 
@@ -60,13 +61,17 @@ def batch_cycle(monkeypatch: pytest.MonkeyPatch):
         conn.commit()
     cycle = create_assessment_cycle(session_id, project_id, "network")
     assessment_id = str(cycle["assessment"]["id"])
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.7", "sha256:" + "1" * 64, 100, "2026-08-18T12:00:00Z"
+    )
     runtime = ProbePlanningRuntime(
         available_features=frozenset(
             {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
         ),
         intrusive_actions_enabled=True,
-        template_snapshot=NucleiTemplateCacheSnapshot(
-            "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+        template_snapshot=snapshot,
+        template_health=NucleiTemplateHealth(
+            "ready", snapshot, "passed", "v3.4.10"
         ),
     )
     monkeypatch.setattr(
@@ -111,6 +116,30 @@ def _duplicate_ping_check(assessment_id: str) -> None:
             "last_evidence_at, created_at, updated_at "
             "FROM project_assessment_checks WHERE assessment_id = ? AND check_key = 'host_reachability'",
             ("chk-batch-duplicate-" + uuid.uuid4().hex, assessment_id),
+        )
+        conn.commit()
+
+
+def _replace_standard_action_with_nuclei(assessment_id: str) -> None:
+    with get_db_connect()() as conn:
+        dialect = dialect_for_backend(get_db_backend())
+        assessment = conn.execute(
+            "SELECT profile_snapshot FROM project_assessments WHERE id = ?",
+            (assessment_id,),
+        ).fetchone()
+        snapshot = dialect.decode_json_dict(assessment["profile_snapshot"])
+        check = next(
+            item for item in snapshot["checks"] if item["key"] == "service_discovery"
+        )
+        check["recommended_action"] = "command:nuclei"
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (dialect.json_param(snapshot), assessment_id),
+        )
+        conn.execute(
+            "UPDATE project_assessment_checks SET recommended_action_key = ? "
+            "WHERE assessment_id = ? AND check_key = ?",
+            ("command:nuclei", assessment_id, "service_discovery"),
         )
         conn.commit()
 
@@ -219,6 +248,7 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
     assert summary["selected_categories"] == ["discovery"]
     assert summary["fan_out"] == 2
     assert summary["credential_classification"] == "none"
+    assert "nuclei_preflight" not in summary
     assert summary["target_review_hints"] == [
         {
             "target_entity_id": target_id,
@@ -255,6 +285,36 @@ def test_compiler_defaults_to_safe_deduplicates_and_explains_standard_work(batch
             == 0
         )
         assert conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"] >= 0
+
+
+def test_compiler_includes_nuclei_preflight_for_selected_nuclei_work(batch_cycle):
+    session_id, project_id, assessment_id, _target_id = batch_cycle
+    _replace_standard_action_with_nuclei(assessment_id)
+
+    preview = cast(
+        dict[str, Any],
+        compile_batch_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            {"include_standard": True},
+        ),
+    )
+
+    assert preview["summary"]["nuclei_preflight"] == {
+        "state": "ready",
+        "source_label": "Managed local cache",
+        "release_version": "v10.4.7",
+        "content_digest": "sha256:" + "1" * 64,
+        "manifest_entry_count": 100,
+        "refreshed_at": "2026-08-18T12:00:00Z",
+        "validation_state": "passed",
+        "nuclei_version": "v3.4.10",
+        "stale_after_seconds": 604800,
+        "reason_code": "",
+        "launchable": True,
+        "command_count": 1,
+    }
 
 
 def test_compiler_requires_explicit_standard_selection_and_rejects_truncation(
@@ -393,10 +453,12 @@ def test_preview_selection_accepts_the_200_target_project_boundary_only():
 
 
 def test_preview_builder_rejects_only_after_the_50000_check_boundary():
+    snapshot = NucleiTemplateCacheSnapshot("missing", "", "", 0)
     runtime = ProbePlanningRuntime(
         available_features=frozenset(),
         intrusive_actions_enabled=False,
-        template_snapshot=NucleiTemplateCacheSnapshot("missing", "", "", 0),
+        template_snapshot=snapshot,
+        template_health=NucleiTemplateHealth("missing", snapshot),
     )
     builder = BatchPreviewBuilder(
         "prj-check-boundary",

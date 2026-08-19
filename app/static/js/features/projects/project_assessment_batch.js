@@ -434,6 +434,28 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     if (!st.preview || st.previewDirty || st.starting) return false;
     const standard = Boolean(st.preview?.summary?.requires_standard_confirmation);
     const retry = Boolean(st.preview?.source_batch_id);
+    const nucleiPreflight = st.preview?.summary?.nuclei_preflight || null;
+    let nucleiSnapshotConfirmed = false;
+    if (nucleiPreflight?.state === 'stale') {
+      nucleiSnapshotConfirmed = await confirmAction({
+        body: {
+          text: 'Continue with stale managed Nuclei templates?',
+          note: `${Number(nucleiPreflight.command_count || 0)} planned Nuclei commands will use template release ${String(nucleiPreflight.release_version || 'unknown')} and the exact snapshot digest shown in the preview. Updating and rebuilding the preview is recommended when network access is available.`,
+        },
+        tone: 'warning',
+        confirmId: 'continue_nuclei_snapshot',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          {
+            id: 'continue_nuclei_snapshot',
+            label: 'Continue with current snapshot',
+            role: 'secondary',
+            tone: 'warning',
+          },
+        ],
+      }, returnFocus);
+      if (!nucleiSnapshotConfirmed) return false;
+    }
     const confirmId = retry ? 'start_retry' : (standard ? 'start_standard' : 'start');
     const confirmed = await confirmAction({
       body: {
@@ -488,6 +510,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
             preview_id: st.preview.preview_id,
             plan_digest: st.preview.plan_digest,
             confirmed: true,
+            nuclei_snapshot_confirmed: nucleiSnapshotConfirmed,
             standard_confirmed: standard,
           }),
         },

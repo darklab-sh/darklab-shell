@@ -9,6 +9,7 @@ import hmac
 
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.preview_digest import batch_preview_digest
+from services.assessments.batch.nuclei_preflight import validate_batch_nuclei_preflight
 from services.assessments.batch.preview_storage import get_batch_preview
 from services.assessments.batch.start_rebuild import rebuild_confirmed_batch_preview
 from services.assessments.batch.start_replay import confirmed_batch_replay
@@ -33,6 +34,7 @@ def start_assessment_batch(
     preview_id: str,
     plan_digest: object,
     confirmed: object,
+    nuclei_snapshot_confirmed: object = False,
     standard_confirmed: object = False,
     team_id: str = "",
     source_batch_id: str = "",
@@ -53,6 +55,11 @@ def start_assessment_batch(
         raise AssessmentBatchError(
             "invalid_batch_confirmation",
             "standard_confirmed must be true or false.",
+        )
+    if not isinstance(nuclei_snapshot_confirmed, bool):
+        raise AssessmentBatchError(
+            "invalid_batch_confirmation",
+            "nuclei_snapshot_confirmed must be true or false.",
         )
     digest = _approval_digest(plan_digest)
     normalized_source = str(source_batch_id or "").strip()
@@ -87,6 +94,10 @@ def start_assessment_batch(
         preview,
         source_batch_id=normalized_source,
         team_id=team_id,
+    )
+    validate_batch_nuclei_preflight(
+        current_draft.summary,
+        stale_confirmed=nuclei_snapshot_confirmed,
     )
     current_digest = batch_preview_digest(current_draft)
     if not hmac.compare_digest(current_digest, stored_digest):

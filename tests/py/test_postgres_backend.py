@@ -4887,6 +4887,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from services.assessments.batch.start import start_assessment_batch
     from services.assessments.coverage import reconcile_run_evidence_on_conn
     from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+    from services.nuclei.template_health import NucleiTemplateHealth
     from services.projects import findings as project_findings
 
     conn = postgres_schema.conn
@@ -4897,29 +4898,29 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(
-        "services.assessments.batch.preview_draft.probe_planning_runtime",
-        lambda: ProbePlanningRuntime(
+    def _batch_runtime():
+        snapshot = NucleiTemplateCacheSnapshot(
+            "ready", "v10.4.7", "sha256:" + "1" * 64, 100,
+            "2026-08-18T12:00:00Z",
+        )
+        return ProbePlanningRuntime(
             available_features=frozenset(
                 {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
             ),
             intrusive_actions_enabled=True,
-            template_snapshot=NucleiTemplateCacheSnapshot(
-                "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+            template_snapshot=snapshot,
+            template_health=NucleiTemplateHealth(
+                "ready", snapshot, "passed", "v3.4.10"
             ),
-        ),
+        )
+
+    monkeypatch.setattr(
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        _batch_runtime,
     )
     monkeypatch.setattr(
         "services.assessments.batch.retry_draft.probe_planning_runtime",
-        lambda: ProbePlanningRuntime(
-            available_features=frozenset(
-                {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
-            ),
-            intrusive_actions_enabled=True,
-            template_snapshot=NucleiTemplateCacheSnapshot(
-                "ready", "v10.4.7", "sha256:" + "1" * 64, 100
-            ),
-        ),
+        _batch_runtime,
     )
 
     client = app.test_client()

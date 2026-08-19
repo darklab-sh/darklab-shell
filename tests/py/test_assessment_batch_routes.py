@@ -11,7 +11,8 @@ import uuid
 import pytest
 
 from conftest import reusable_test_app
-from core.database_access import get_db_connect
+from core.database_access import get_db_backend, get_db_connect
+from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.preview_compiler import compile_batch_preview
 from services.assessments.batch.active_monitor import (
@@ -24,6 +25,7 @@ from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.probe_runtime import ProbePlanningRuntime
 from services.assessments.storage import create_assessment_cycle
 from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+from services.nuclei.template_health import NucleiTemplateHealth
 from services.projects.crud import create_project, delete_project
 from services.projects.targets import add_project_target
 
@@ -40,15 +42,43 @@ def _register_token(token: str) -> None:
 
 
 def _runtime() -> ProbePlanningRuntime:
+    snapshot = NucleiTemplateCacheSnapshot(
+        "ready", "v10.4.7", "sha256:" + "1" * 64, 100, "2026-08-18T12:00:00Z"
+    )
     return ProbePlanningRuntime(
         available_features=frozenset(
             {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
         ),
         intrusive_actions_enabled=True,
-        template_snapshot=NucleiTemplateCacheSnapshot(
-            "ready", "v10.4.7", "sha256:" + "1" * 64, 100
+        template_snapshot=snapshot,
+        template_health=NucleiTemplateHealth(
+            "ready", snapshot, "passed", "v3.4.10"
         ),
     )
+
+
+def _replace_standard_action_with_nuclei(assessment_id: str) -> None:
+    with get_db_connect()() as conn:
+        dialect = dialect_for_backend(get_db_backend())
+        assessment = conn.execute(
+            "SELECT profile_snapshot FROM project_assessments WHERE id = ?",
+            (assessment_id,),
+        ).fetchone()
+        snapshot = dialect.decode_json_dict(assessment["profile_snapshot"])
+        check = next(
+            item for item in snapshot["checks"] if item["key"] == "service_discovery"
+        )
+        check["recommended_action"] = "command:nuclei"
+        conn.execute(
+            "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
+            (dialect.json_param(snapshot), assessment_id),
+        )
+        conn.execute(
+            "UPDATE project_assessment_checks SET recommended_action_key = ? "
+            "WHERE assessment_id = ? AND check_key = ?",
+            ("command:nuclei", assessment_id, "service_discovery"),
+        )
+        conn.commit()
 
 
 @pytest.fixture
@@ -220,6 +250,7 @@ def test_browser_preview_create_read_and_page_are_owner_scoped_and_side_effect_f
     assert preview["project_id"] == project_id
     assert preview["assessment_id"] == assessment_id
     assert preview["summary"]["selected_target_entity_ids"] == [target_id]
+    assert "nuclei_preflight" not in preview["summary"]
     assert preview["selected_item_count"] == 2
     assert preview["candidate_item_count"] == 3
     assert _preview_counts() == before
@@ -258,6 +289,7 @@ def test_browser_preview_create_read_and_page_are_owner_scoped_and_side_effect_f
 
 def test_api_preview_uses_the_same_digest_pages_and_stable_errors(client, route_cycle):
     session_id, project_id, assessment_id, _target_id = route_cycle
+    _replace_standard_action_with_nuclei(assessment_id)
     route = f"/api/v1/projects/{project_id}/assessments/{assessment_id}/batch-previews"
     headers = _api_headers(session_id)
 
@@ -271,6 +303,7 @@ def test_api_preview_uses_the_same_digest_pages_and_stable_errors(client, route_
     preview = created.get_json()["preview"]
     assert preview["selected_item_count"] == 3
     assert preview["summary"]["requires_standard_confirmation"] is True
+    assert preview["summary"]["nuclei_preflight"]["command_count"] == 1
     assert preview["concurrency"]["batch"] == 3
     preview_id = preview["preview_id"]
     summary = client.get(

@@ -27,7 +27,6 @@ def start_confirmed_assessment_batch_retry(
     owner_client_id: str = "",
     owner_tab_id: str = "",
 ) -> dict[str, object]:
-    """Materialize a new retry lineage and fill its currently fair slots."""
     try:
         batch = start_assessment_batch(
             session_id,
@@ -36,6 +35,7 @@ def start_confirmed_assessment_batch_retry(
             preview_id=str(confirmation.get("preview_id") or ""),
             plan_digest=confirmation.get("plan_digest"),
             confirmed=confirmation.get("confirmed"),
+            nuclei_snapshot_confirmed=confirmation.get("nuclei_snapshot_confirmed", False),
             standard_confirmed=confirmation.get("standard_confirmed", False),
             team_id=team_id,
             source_batch_id=source_batch_id,

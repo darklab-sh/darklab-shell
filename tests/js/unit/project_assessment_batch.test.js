@@ -284,6 +284,7 @@ describe('Project assessment batches', () => {
       preview_id: preview.preview_id,
       plan_digest: preview.plan_digest,
       confirmed: true,
+      nuclei_snapshot_confirmed: false,
       standard_confirmed: false,
     })
     expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
@@ -313,6 +314,20 @@ describe('Project assessment batches', () => {
             summary: {
               ...preview.summary,
               requires_standard_confirmation: standard,
+              nuclei_preflight: {
+                state: 'incompatible',
+                source_label: 'Managed local cache',
+                release_version: 'v10.4.7',
+                content_digest: `sha256:${'1'.repeat(64)}`,
+                manifest_entry_count: 100,
+                refreshed_at: '2026-08-10T12:00:00Z',
+                validation_state: 'failed',
+                nuclei_version: 'v3.4.10',
+                stale_after_seconds: 604800,
+                reason_code: 'template_validation_failed',
+                launchable: false,
+                command_count: 1,
+              },
             },
           },
         })
@@ -344,6 +359,8 @@ describe('Project assessment batches', () => {
     ).toBe(true))
     surface = render(manager)
     expect(surface.textContent).toContain('Selection changed. Refresh the preview before starting.')
+    expect(surface.textContent).toContain('Managed Nuclei template preflight')
+    expect(surface.textContent).toContain('Nuclei template preflight must pass')
     expect([...surface.querySelectorAll('button')].find(button => button.textContent === 'Run assessment plan').disabled).toBe(true)
     expect(surface.textContent).toContain('Read-only: ask for operator access')
 
@@ -363,6 +380,20 @@ describe('Project assessment batches', () => {
       summary: {
         ...preview.summary,
         requires_standard_confirmation: true,
+        nuclei_preflight: {
+          state: 'stale',
+          source_label: 'Managed local cache',
+          release_version: 'v10.4.7',
+          content_digest: `sha256:${'1'.repeat(64)}`,
+          manifest_entry_count: 100,
+          refreshed_at: '2026-08-10T12:00:00Z',
+          validation_state: 'passed',
+          nuclei_version: 'v3.4.10',
+          stale_after_seconds: 604800,
+          reason_code: 'template_cache_stale',
+          launchable: true,
+          command_count: 1,
+        },
       },
     }
     let startBody = null
@@ -396,12 +427,20 @@ describe('Project assessment batches', () => {
     await vi.waitFor(() => expect(st.preview?.preview_id).toBe(preview.preview_id))
 
     surface = render(manager)
+    expect(surface.textContent).toContain('Managed Nuclei template preflight')
+    expect(surface.textContent).toContain('v10.4.7')
     const start = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Run assessment plan')
     start.click()
     await vi.waitFor(() => expect(startBody).not.toBeNull())
 
     expect(startBody.standard_confirmed).toBe(true)
+    expect(startBody.nuclei_snapshot_confirmed).toBe(true)
+    expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      confirmId: 'continue_nuclei_snapshot',
+      tone: 'warning',
+      refocusOnResolve: false,
+    }))
     expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
       confirmId: 'start_standard',
       tone: 'warning',
@@ -591,6 +630,7 @@ describe('Project assessment batches', () => {
       plan_digest: retryPreview.plan_digest,
       confirmed: true,
       standard_confirmed: false,
+      nuclei_snapshot_confirmed: false,
     })
     expect(ctx.showConfirm.mock.calls.at(-1)[0].body.text)
       .toBe('Retry failed or unfinished assessment commands?')

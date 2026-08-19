@@ -7246,6 +7246,7 @@ def test_api_v1_openapi_generator_snapshot_is_current():
 def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
     from services.api_v1.openapi import openapi_spec
     from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+    from services.nuclei.template_health import NucleiTemplateHealth
 
     client = get_client()
     token = _token(client)
@@ -7260,8 +7261,14 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
         "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
     )
     monkeypatch.setattr(
-        "services.assessments.probe_runtime.managed_nuclei_template_snapshot",
+        "services.assessments.probe_runtime.template_cache.managed_nuclei_template_snapshot",
         lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        "services.assessments.probe_runtime.template_health.managed_nuclei_template_health",
+        lambda **_kwargs: NucleiTemplateHealth(
+            "ready", snapshot, "passed", "v3.4.10"
+        ),
     )
     monkeypatch.setattr(
         "services.assessments.probe_runtime.resolve_runtime_command",
@@ -7905,6 +7912,20 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "type": "string",
         "format": "date-time",
     }
+    assert schemas["AssessmentBatchPreviewSummary"]["properties"]["nuclei_preflight"] == {
+        "$ref": "#/components/schemas/AssessmentBatchNucleiPreflight",
+    }
+    assert schemas["AssessmentBatchNucleiPreflight"]["properties"]["state"]["enum"] == [
+        "ready",
+        "stale",
+        "missing",
+        "oversized",
+        "invalid",
+        "unreadable",
+        "incompatible",
+        "unavailable",
+    ]
+    assert "nuclei_snapshot_confirmed" in schemas["AssessmentBatchStartRequest"]["properties"]
     assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
         "maxItems"
     ] == 64

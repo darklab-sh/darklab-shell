@@ -18,14 +18,13 @@ from services.assessments.batch.preview_models import (
     BatchPreviewDraft,
     BatchPreviewItem,
 )
+from services.assessments.batch.nuclei_preflight import blocked_nuclei_preflight
 from services.assessments.probe_plan_digest import probe_plan_digest
 
 
 def _is_hex_digest(value: object) -> bool:
     normalized = str(value or "")
-    return len(normalized) == 64 and all(
-        char in "0123456789abcdef" for char in normalized
-    )
+    return len(normalized) == 64 and all(char in "0123456789abcdef" for char in normalized)
 
 
 def _validate_mapping(item: BatchPreviewItem, mapping: BatchCheckMapping) -> None:
@@ -88,7 +87,8 @@ def validate_preview_draft(draft: BatchPreviewDraft) -> tuple[int, int, int, int
         raise AssessmentBatchError(
             "invalid_batch_preview", "Assessment batch preview scope is invalid."
         )
-    if len(draft.items) > BATCH_HARD_ITEM_LIMIT or (not draft.items and not draft.source_batch_id):
+    empty_allowed = bool(draft.source_batch_id) or blocked_nuclei_preflight(draft.summary)
+    if len(draft.items) > BATCH_HARD_ITEM_LIMIT or (not draft.items and not empty_allowed):
         raise AssessmentBatchError(
             "invalid_batch_preview",
             f"Assessment batch previews require between 1 and {BATCH_HARD_ITEM_LIMIT} items.",
@@ -115,7 +115,7 @@ def validate_preview_draft(draft: BatchPreviewDraft) -> tuple[int, int, int, int
                     "Assessment checks may map to only one item.",
                 )
             check_ids.add(mapping.check_id)
-    if (not selected and not draft.source_batch_id) or mappings > BATCH_MAX_TOTAL_CHECK_MAPPINGS:
+    if (not selected and not empty_allowed) or mappings > BATCH_MAX_TOTAL_CHECK_MAPPINGS:
         raise AssessmentBatchError(
             "invalid_batch_preview", "Assessment batch preview selection is invalid."
         )

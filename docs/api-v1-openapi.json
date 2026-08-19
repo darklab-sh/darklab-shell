@@ -1049,6 +1049,88 @@
         ],
         "type": "object"
       },
+      "AssessmentBatchNucleiPreflight": {
+        "additionalProperties": false,
+        "properties": {
+          "command_count": {
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "content_digest": {
+            "pattern": "^(?:sha256:[a-f0-9]{64})?$",
+            "type": "string"
+          },
+          "launchable": {
+            "type": "boolean"
+          },
+          "manifest_entry_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "nuclei_version": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "refreshed_at": {
+            "type": "string"
+          },
+          "release_version": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "source_label": {
+            "enum": [
+              "Managed local cache"
+            ],
+            "type": "string"
+          },
+          "stale_after_seconds": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "stale",
+              "missing",
+              "oversized",
+              "invalid",
+              "unreadable",
+              "incompatible",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "validation_state": {
+            "enum": [
+              "not_run",
+              "passed",
+              "failed",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "source_label",
+          "release_version",
+          "content_digest",
+          "manifest_entry_count",
+          "refreshed_at",
+          "validation_state",
+          "nuclei_version",
+          "stale_after_seconds",
+          "reason_code",
+          "launchable",
+          "command_count"
+        ],
+        "type": "object"
+      },
       "AssessmentBatchPreview": {
         "additionalProperties": false,
         "properties": {
@@ -1395,6 +1477,9 @@
           "maximum_item_duration_bound_seconds": {
             "type": "integer"
           },
+          "nuclei_preflight": {
+            "$ref": "#/components/schemas/AssessmentBatchNucleiPreflight"
+          },
           "potential_covered_check_count": {
             "type": "integer"
           },
@@ -1673,6 +1758,10 @@
             "enum": [
               true
             ],
+            "type": "boolean"
+          },
+          "nuclei_snapshot_confirmed": {
+            "default": false,
             "type": "boolean"
           },
           "plan_digest": {

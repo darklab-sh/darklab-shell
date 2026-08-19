@@ -60,6 +60,21 @@ function formatDuration(seconds) {
   return `${value} sec`;
 }
 
+function formatRefreshAge(value) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) return 'Unknown';
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds >= 86400) return `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ago`;
+  return 'Just now';
+}
+
+function shortDigest(value) {
+  const digest = String(value || '');
+  return digest.length > 24 ? `${digest.slice(0, 15)}…${digest.slice(-8)}` : (digest || 'Unavailable');
+}
+
 function summaryCard(label, value, note = '') {
   const card = element('div', 'project-assessment-batch-summary-card');
   card.append(element('span', '', label), element('strong', '', value));
@@ -271,6 +286,47 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     return panel;
   }
 
+  function nucleiPreflight(summary) {
+    const preflight = summary?.nuclei_preflight;
+    if (!preflight) return null;
+    const state = String(preflight.state || 'unavailable');
+    const panel = element('aside', `project-assessment-batch-preflight is-${state}`);
+    const top = element('div', 'project-assessment-batch-preflight-heading');
+    top.append(
+      element('strong', '', 'Managed Nuclei template preflight'),
+      badge(state, preflight.launchable ? (state === 'stale' ? 'amber' : 'green') : 'red'),
+    );
+    const grid = element('div', 'project-assessment-batch-preflight-grid');
+    const detail = (label, value, { code = false } = {}) => {
+      const item = element('div');
+      item.append(element('span', '', label), element(code ? 'code' : 'strong', '', value));
+      return item;
+    };
+    grid.append(
+      detail('Planned commands', Number(preflight.command_count || 0)),
+      detail('Template release', preflight.release_version || 'Unknown'),
+      detail('Refreshed', formatRefreshAge(preflight.refreshed_at)),
+      detail('Validation', preflight.validation_state || 'not run'),
+      detail('Nuclei version', preflight.nuclei_version || 'Unknown'),
+      detail('Snapshot digest', shortDigest(preflight.content_digest), { code: true }),
+    );
+    panel.append(top, grid);
+    if (state === 'stale') {
+      panel.appendChild(element(
+        'p',
+        '',
+        'The cache passed validation but is older than the maintained freshness window. Update it and rebuild the preview when network access is available, or explicitly continue with this pinned snapshot.',
+      ));
+    } else if (!preflight.launchable) {
+      panel.appendChild(element(
+        'p',
+        '',
+        "Nuclei work can't start until an operator repairs or updates the managed template cache and rebuilds this preview.",
+      ));
+    }
+    return panel;
+  }
+
   function commandItem(item, { monitor = false } = {}) {
     const row = element('article', 'project-assessment-batch-command');
     const top = element('div', 'project-assessment-batch-command-heading');
@@ -360,6 +416,8 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       ));
     }
     body.append(previewSummary(st.preview));
+    const preflight = nucleiPreflight(st.preview.summary);
+    if (preflight) body.appendChild(preflight);
     const excluded = exclusions(st.preview.summary);
     if (excluded) body.appendChild(excluded);
     const commandHeading = element('div', 'project-assessment-batch-command-list-heading');
@@ -371,14 +429,19 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const startActions = element('div', 'project-assessment-batch-actions');
     const canRun = ctx.canRunCommands?.() !== false;
     const emptyRetry = retry && Number(st.preview?.selected_item_count || 0) === 0;
+    const nucleiBlocked = st.preview?.summary?.nuclei_preflight?.launchable === false;
     const start = actionButton(
       st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),
       button => act.startBatch(projectId, assessment.id, button),
-      { primary: true, disabled: st.starting || st.previewDirty || !canRun || emptyRetry },
+      {
+        primary: true,
+        disabled: st.starting || st.previewDirty || !canRun || emptyRetry || nucleiBlocked,
+      },
     );
     if (!canRun) start.title = 'View-only team members can preview plans but cannot start commands.';
     startActions.appendChild(start);
     if (emptyRetry) startActions.appendChild(element('small', '', 'Nothing can be retried from this batch right now.'));
+    if (nucleiBlocked) startActions.appendChild(element('small', '', 'Nuclei template preflight must pass before this plan can start.'));
     if (!canRun) startActions.appendChild(element('small', '', 'Read-only: ask for operator access to start this batch.'));
     body.appendChild(startActions);
     return body;
