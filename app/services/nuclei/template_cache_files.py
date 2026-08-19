@@ -14,8 +14,10 @@ def default_nuclei_config_path() -> Path:
     base = os.environ.get("NUCLEI_CONFIG_DIR")
     if base:
         return Path(base) / ".templates-config.json"
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    return Path(xdg or Path.home() / ".config") / "nuclei" / ".templates-config.json"
+    # This is the fixed container-owned sibling of the managed template tree.
+    return Path(  # nosec B108
+        "/tmp/nuclei-templates/config/nuclei/.templates-config.json"
+    )
 
 
 def regular_stat(path: Path, *, directory: bool = False) -> Any | None:

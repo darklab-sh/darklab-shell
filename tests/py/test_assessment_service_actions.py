@@ -985,7 +985,9 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
 def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypatch):
     from services.nuclei import template_refresh_worker as worker
 
-    live = tmp_path / "nuclei-templates"
+    volume = tmp_path / "nuclei-templates"
+    volume.mkdir()
+    live = volume / "current"
     live.mkdir()
     old_manifest = f"{live}/http/old.yaml,{'a' * 32};"
     (live / ".checksum").write_text(old_manifest, encoding="utf-8")
@@ -1030,6 +1032,13 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
     assert "new.yaml" in (live / ".checksum").read_text(encoding="utf-8")
     installed_config = json.loads(live_config.read_text(encoding="utf-8"))
     assert installed_config["nuclei-templates-directory"] == str(live)
+    installed_snapshot = managed_nuclei_template_snapshot(
+        live,
+        config_path=live_config,
+        acquire_lock=False,
+    )
+    assert installed_snapshot.state == "ready"
+    assert installed_snapshot.release_version == "v10.4.7"
 
     installed_manifest = (live / ".checksum").read_text(encoding="utf-8")
     validation_return_code = 1
@@ -1092,6 +1101,23 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
     assert calls[0][0][-2:] == ["-m", "services.nuclei.template_refresh_worker"]
     assert calls[0][1]["stderr"] is subprocess.DEVNULL
 
+    def failed_worker(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            json.dumps({"status": "failed", "reason_code": "template_install_failed"}),
+            "",
+        )
+
+    with pytest.raises(
+        template_refresh.NucleiTemplateRefreshError,
+        match="couldn't be installed",
+    ):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=failed_worker,
+        )
+
     with pytest.raises(template_refresh.NucleiTemplateRefreshError) as active:
         template_refresh.refresh_managed_nuclei_templates(
             active_batch_exists=lambda: True,
@@ -1102,7 +1128,7 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
     prepared = PreparedRealCommand(
         registry_command="nuclei -u https://app.example.test",
         execution_command="nuclei -u https://app.example.test",
-        command="nuclei -ud /tmp/nuclei-templates -u https://app.example.test",
+        command="nuclei -ud /tmp/nuclei-templates/current -u https://app.example.test",
         rewrite_notice=None,
         validation=cast(Any, None),
         missing_runtime=None,

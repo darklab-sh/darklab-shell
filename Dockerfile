@@ -509,7 +509,8 @@ RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates
+ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates/current
+ENV NUCLEI_CONFIG_DIR=/tmp/nuclei-templates/config/nuclei
 ENV HOME=/tmp
 ENV PYTHONPATH=/app
 WORKDIR /app
@@ -554,8 +555,10 @@ COPY deploy/third-party-licenses/ /usr/share/doc/darklab-shell/licenses/
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/container/stage_runtime_source.sh /usr/local/libexec/darklab-stage-runtime-source
 COPY scripts/container/bootstrap_nuclei_templates.sh /usr/local/libexec/darklab-bootstrap-nuclei-templates
+COPY scripts/container/prepare_nuclei_template_cache.sh /usr/local/libexec/darklab-prepare-nuclei-template-cache
 RUN chmod +x /entrypoint.sh /usr/local/libexec/darklab-stage-runtime-source \
-    /usr/local/libexec/darklab-bootstrap-nuclei-templates
+    /usr/local/libexec/darklab-bootstrap-nuclei-templates \
+    /usr/local/libexec/darklab-prepare-nuclei-template-cache
 
 ARG APP_PORT=8888
 EXPOSE ${APP_PORT}

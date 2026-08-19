@@ -19,6 +19,7 @@ from services.nuclei.template_cache_files import default_nuclei_config_path
 from services.nuclei.template_health import VALIDATION_TIMEOUT_SECONDS
 from services.nuclei.template_refresh_files import (
     install_staged_template_cache,
+    rebase_staged_template_manifest,
     staged_release_config,
 )
 
@@ -69,13 +70,23 @@ def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
     if validation.returncode != 0:
         return {"status": "failed", "reason_code": "staged_cache_incompatible"}
     live_dir = Path(MANAGED_TEMPLATE_DIR)
-    config_payload = staged_release_config(config_path, live_dir)
-    install_staged_template_cache(
-        stage_dir,
-        live_dir,
-        default_nuclei_config_path(),
-        config_payload,
-    )
+    try:
+        rebase_staged_template_manifest(stage_dir, live_dir)
+    except (OSError, ValueError):
+        return {"status": "failed", "reason_code": "staged_manifest_rebase_failed"}
+    try:
+        config_payload = staged_release_config(config_path, live_dir)
+    except ValueError:
+        return {"status": "failed", "reason_code": "staged_release_metadata_invalid"}
+    try:
+        install_staged_template_cache(
+            stage_dir,
+            live_dir,
+            default_nuclei_config_path(),
+            config_payload,
+        )
+    except (OSError, ValueError):
+        return {"status": "failed", "reason_code": "template_install_failed"}
     return {
         "status": "updated",
         "release_version": snapshot.release_version,

@@ -29,6 +29,23 @@ from services.nuclei.template_refresh_worker import (
 log = logging.getLogger("shell")
 REFRESH_PROCESS_TIMEOUT_SECONDS = UPDATE_TIMEOUT_SECONDS + 120
 MAX_WORKER_RESPONSE_BYTES = 4096
+_REFRESH_FAILURE_MESSAGES = {
+    "template_update_failed": (
+        "The managed template download failed; the previous cache was kept. "
+        "Check outbound access and try again."
+    ),
+    "staged_cache_incompatible": (
+        "The downloaded templates aren't compatible with the installed Nuclei version; "
+        "the previous cache was kept."
+    ),
+    "template_install_failed": (
+        "The validated template cache couldn't be installed; the previous cache was kept."
+    ),
+}
+_DEFAULT_REFRESH_FAILURE_MESSAGE = (
+    "The downloaded template cache didn't pass the managed-cache checks; "
+    "the previous cache was kept."
+)
 
 
 class NucleiTemplateRefreshError(RuntimeError):
@@ -112,13 +129,12 @@ def refresh_managed_nuclei_templates(
         reason_code = (
             str(result.get("reason_code") or "template_refresh_failed")
             if isinstance(result, dict)
-            else "template_refresh_failed"
+            else "worker_response_invalid"
         )
         log.warning("NUCLEI_TEMPLATE_REFRESH_FAILED", extra={"reason_code": reason_code})
         raise NucleiTemplateRefreshError(
             "nuclei_template_refresh_failed",
-            "The managed template refresh failed; the previous cache was kept. "
-            "Check outbound access and try again.",
+            _REFRESH_FAILURE_MESSAGES.get(reason_code, _DEFAULT_REFRESH_FAILURE_MESSAGE),
             status_code=503,
         )
     clear_nuclei_template_snapshot_cache()

@@ -293,7 +293,8 @@ def test_standard_items_and_nuclei_preflight_need_separate_confirmation(
         assessment_id,
         {"include_standard": True, "item_limit": 3},
     )
-    assert stale_preview["summary"]["nuclei_preflight"]["state"] == "stale"
+    stale_summary = cast(dict[str, Any], stale_preview["summary"])
+    assert stale_summary["nuclei_preflight"]["state"] == "stale"
     with pytest.raises(AssessmentBatchError) as stale_confirmation:
         _start(session_id, project_id, assessment_id, stale_preview)
     assert stale_confirmation.value.code == "nuclei_template_confirmation_required"

@@ -426,7 +426,7 @@ The architecture suite enforces this decision. It keeps an explicit compatibilit
 
 The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because the `/data` segment is immediately preceded by `m` (the last character of `darklab.sh`), which satisfies `\w` in the lookbehind.
 
-Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
+Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates/current` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
 
 ### Workspace Shell Conveniences Stay App-Mediated
 

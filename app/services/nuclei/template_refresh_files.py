@@ -8,11 +8,70 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import uuid
 
-from services.nuclei.template_cache import MAX_CONFIG_BYTES
+from services.nuclei.template_cache import (
+    MAX_CHECKSUM_BYTES,
+    MAX_CHECKSUM_ENTRIES,
+    MAX_CONFIG_BYTES,
+)
 from services.nuclei.template_cache_files import read_bounded, regular_stat
+
+
+_CHECKSUM_RE = re.compile(r"[a-fA-F0-9]{32}")
+
+
+def rebase_staged_template_manifest(
+    stage_dir: Path,
+    live_dir: Path,
+    *,
+    recorded_root: Path | None = None,
+) -> None:
+    """Replace staging-only absolute paths before promoting the snapshot."""
+    checksum = stage_dir / ".checksum"
+    payload = read_bounded(checksum, MAX_CHECKSUM_BYTES)
+    if payload is None:
+        raise ValueError("staged template manifest is unavailable")
+    stage_root = os.path.abspath(recorded_root or stage_dir)
+    live_root = os.path.abspath(live_dir)
+    rebased: list[str] = []
+    try:
+        raw_entries = payload.decode("utf-8", errors="strict").split(";")
+    except UnicodeDecodeError as exc:
+        raise ValueError("staged template manifest is invalid") from exc
+    for raw_entry in raw_entries:
+        if not raw_entry.strip():
+            continue
+        if len(rebased) >= MAX_CHECKSUM_ENTRIES or "," not in raw_entry:
+            raise ValueError("staged template manifest is invalid")
+        raw_path, raw_digest = raw_entry.rsplit(",", 1)
+        digest = raw_digest.strip().lower()
+        candidate = os.path.abspath(
+            raw_path if os.path.isabs(raw_path) else Path(stage_root) / raw_path
+        )
+        if os.path.commonpath((stage_root, candidate)) != stage_root \
+            or not _CHECKSUM_RE.fullmatch(digest):
+            raise ValueError("staged template manifest is invalid")
+        relative = os.path.relpath(candidate, stage_root)
+        rebased.append(f"{os.path.join(live_root, relative)},{digest};")
+    if not rebased:
+        raise ValueError("staged template manifest is invalid")
+    replacement = stage_dir / f".darklab-checksum-{uuid.uuid4().hex}.tmp"
+    descriptor = os.open(
+        replacement,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o640,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("".join(rebased))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(replacement, checksum)
+    finally:
+        replacement.unlink(missing_ok=True)
 
 
 def staged_release_config(config_path: Path, live_dir: Path) -> bytes:
@@ -85,4 +144,8 @@ def install_staged_template_cache(
         marker_temp.unlink(missing_ok=True)
 
 
-__all__ = ["install_staged_template_cache", "staged_release_config"]
+__all__ = [
+    "install_staged_template_cache",
+    "rebase_staged_template_manifest",
+    "staged_release_config",
+]

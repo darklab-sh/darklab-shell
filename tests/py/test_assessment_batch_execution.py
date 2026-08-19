@@ -306,7 +306,7 @@ def test_nuclei_template_failure_diagnosis_collapses_affected_commands(batch_bui
     batch = batch_builder(item_count=3)
     created = "2026-08-17 12:01:00"
     outputs = (
-        "[FTL] Could not load templates from '/tmp/nuclei-templates'",
+        "[FTL] Could not load templates from '/tmp/nuclei-templates/current'",
         "[ERR] no templates provided for scan",
         "[FTL] target host could not be resolved",
     )

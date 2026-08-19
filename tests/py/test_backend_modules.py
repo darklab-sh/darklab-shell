@@ -21985,7 +21985,7 @@ class TestRewriteCaseInsensitive:
 
     def test_nuclei_uppercase(self):
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
-        assert "-ud /tmp/nuclei-templates" in cmd
+        assert "-ud /tmp/nuclei-templates/current" in cmd
 
 
 # ── run broker event storage ─────────────────────────────────────────────────
@@ -24876,8 +24876,8 @@ class TestOutputSignals:
                 "schema_version": 1,
                 "tool": "nuclei",
                 "source_kind": "managed_cache",
-                "source_label": "Managed /tmp/nuclei-templates cache",
-                "update_directory": "/tmp/nuclei-templates",
+                "source_label": "Managed /tmp/nuclei-templates/current cache",
+                "update_directory": "/tmp/nuclei-templates/current",
             },
         }
 
@@ -30063,7 +30063,7 @@ class TestDatabaseInit:
         payload = "\n".join((
             json.dumps({
                 "template-id": "ssl/expired-cert",
-                "template-path": "/tmp/nuclei-templates/ssl/expired-cert.yaml",
+                "template-path": "/tmp/nuclei-templates/current/ssl/expired-cert.yaml",
                 "matched-at": "https://darklab.sh",
                 "info": {
                     "name": "Expired TLS certificate",
@@ -30090,7 +30090,9 @@ class TestDatabaseInit:
         assert result.findings[0].external_id == "ssl/expired-cert"
         assert result.findings[0].severity == "high"
         assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
-        assert result.findings[0].source_detail["template_path"] == "/tmp/nuclei-templates/ssl/expired-cert.yaml"
+        assert result.findings[0].source_detail["template_path"] == (
+            "/tmp/nuclei-templates/current/ssl/expired-cert.yaml"
+        )
         assert result.findings[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.entities[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.warnings == []
