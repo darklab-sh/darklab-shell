@@ -1178,6 +1178,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/batch/storage_read.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/nuclei_profiles.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/nuclei/template_cache.py", 170, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/nuclei/template_cache_files.py", 70, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/nuclei/template_health.py", 230, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/historical_urls.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/epss.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/intel/kev.py", 110, "split-package-ratchet"),

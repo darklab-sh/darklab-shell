@@ -3378,6 +3378,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "refreshed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "release_version": {
             "maxLength": 64,
             "type": "string"
@@ -3404,7 +3408,8 @@
           "source_label",
           "release_version",
           "content_digest",
-          "manifest_entry_count"
+          "manifest_entry_count",
+          "refreshed_at"
         ],
         "type": "object"
       },
@@ -10260,6 +10265,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "refreshed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "release_version": {
             "type": "string"
           },
@@ -10282,7 +10291,8 @@
           "source_label",
           "release_version",
           "content_digest",
-          "manifest_entry_count"
+          "manifest_entry_count",
+          "refreshed_at"
         ],
         "type": "object"
       },

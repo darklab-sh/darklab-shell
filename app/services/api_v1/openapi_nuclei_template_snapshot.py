@@ -11,7 +11,7 @@ def nuclei_template_snapshot_schema() -> dict[str, Any]:
         "type": "object",
         "required": [
             "state", "source_label", "release_version", "content_digest",
-            "manifest_entry_count",
+            "manifest_entry_count", "refreshed_at",
         ],
         "properties": {
             "state": {
@@ -25,6 +25,7 @@ def nuclei_template_snapshot_schema() -> dict[str, Any]:
                 "pattern": "^(?:sha256:[a-f0-9]{64})?$",
             },
             "manifest_entry_count": {"type": "integer", "minimum": 0, "maximum": 25000},
+            "refreshed_at": {"type": "string", "format": "date-time"},
         },
         "additionalProperties": False,
     }

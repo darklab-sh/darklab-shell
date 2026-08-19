@@ -7901,6 +7901,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "type": "string",
         "pattern": "^(?:sha256:[a-f0-9]{64})?$",
     }
+    assert schemas["AssessmentNucleiTemplateSnapshot"]["properties"]["refreshed_at"] == {
+        "type": "string",
+        "format": "date-time",
+    }
     assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
         "maxItems"
     ] == 64

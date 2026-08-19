@@ -48,7 +48,10 @@ def _empty_or(schema_name: str) -> dict[str, Any]:
 
 def _template_snapshot() -> dict[str, Any]:
     return _object(
-        ["state", "source_label", "release_version", "content_digest", "manifest_entry_count"],
+        [
+            "state", "source_label", "release_version", "content_digest",
+            "manifest_entry_count", "refreshed_at",
+        ],
         {
             "state": {
                 "type": "string",
@@ -58,6 +61,7 @@ def _template_snapshot() -> dict[str, Any]:
             "release_version": {"type": "string"},
             "content_digest": {"type": "string"},
             "manifest_entry_count": {"type": "integer", "minimum": 0},
+            "refreshed_at": {"type": "string", "format": "date-time"},
         },
     )
 

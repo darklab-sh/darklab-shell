@@ -4,7 +4,10 @@
 import hashlib
 import io
 import json
+from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -193,6 +196,7 @@ from services.runs.start_contracts import RunStartHandlers
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from services.nuclei.provenance import nuclei_template_provenance
+from services.nuclei import template_health
 from services.nuclei.template_cache import (
     NucleiTemplateCacheSnapshot,
     managed_nuclei_template_snapshot,
@@ -688,7 +692,10 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         f"{template_dir}/http/exposure.yaml,{'a' * 32};"
         f"{template_dir}/ssl/certificate.yaml,{'b' * 32};"
     )
-    (template_dir / ".checksum").write_text(checksum_rows, encoding="utf-8")
+    checksum_path = template_dir / ".checksum"
+    checksum_path.write_text(checksum_rows, encoding="utf-8")
+    refreshed = datetime(2026, 8, 18, 12, tzinfo=UTC)
+    os.utime(checksum_path, (refreshed.timestamp(), refreshed.timestamp()))
     config_path = tmp_path / ".templates-config.json"
     config_path.write_text(json.dumps({
         "nuclei-templates-directory": str(template_dir),
@@ -702,7 +709,84 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         release_version="v10.4.3",
         content_digest="sha256:b045f0d45961f8defc264a57b85d22e0f2f6dd964c130f2e5f9e5bd30e95a694",
         manifest_entry_count=2,
+        refreshed_at="2026-08-18T12:00:00Z",
     )
+    health_calls: list[list[str]] = []
+
+    def _healthy_nuclei(args, **_kwargs):
+        health_calls.append(args)
+        if "-version" in args:
+            return subprocess.CompletedProcess(args, 0, "Nuclei Engine Version: v3.4.10", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    template_health.clear_nuclei_template_health_cache()
+    monkeypatch.setattr(template_health.subprocess, "run", _healthy_nuclei)
+    current_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+    )
+    assert current_health.state == "ready"
+    assert current_health.validation_state == "passed"
+    assert current_health.nuclei_version == "v3.4.10"
+    assert current_health.launchable is True
+    assert current_health.public()["refreshed_at"] == "2026-08-18T12:00:00Z"
+    assert template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+    ) == current_health
+    assert len(health_calls) == 2
+    stale_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=8),
+        run_command=_healthy_nuclei,
+    )
+    assert stale_health.state == "stale"
+    assert stale_health.launchable is True
+    assert stale_health.reason_code == "template_cache_stale"
+
+    def _incompatible_nuclei(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 0 if "-version" in args else 1, "v3.4.10", "invalid template",
+        )
+
+    incompatible_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        run_command=_incompatible_nuclei,
+    )
+    assert incompatible_health.state == "incompatible"
+    assert incompatible_health.launchable is False
+    assert incompatible_health.reason_code == "template_validation_failed"
+
+    def _timed_out_nuclei(args, **_kwargs):
+        if "-version" in args:
+            return subprocess.CompletedProcess(args, 0, "v3.4.10", "")
+        raise subprocess.TimeoutExpired(args, 90)
+
+    unavailable_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        run_command=_timed_out_nuclei,
+    )
+    assert unavailable_health.state == "unavailable"
+    assert unavailable_health.validation_state == "unavailable"
+    assert unavailable_health.launchable is False
+    missing_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=NucleiTemplateCacheSnapshot("missing"),
+        run_command=lambda *_args, **_kwargs: pytest.fail("missing cache must not run Nuclei"),
+    )
+    assert missing_health.state == "missing"
+    assert missing_health.validation_state == "not_run"
+    assert missing_health.launchable is False
     config_path.write_text("[]", encoding="utf-8")
     assert managed_nuclei_template_snapshot(
         template_dir, config_path=config_path,

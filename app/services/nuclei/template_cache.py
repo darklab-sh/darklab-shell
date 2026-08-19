@@ -12,10 +12,16 @@ import json
 import os
 from pathlib import Path
 import re
-import stat
 from typing import Any
 
 from services.nuclei.provenance import MANAGED_TEMPLATE_DIR
+from services.nuclei.template_cache_files import (
+    default_nuclei_config_path,
+    read_bounded,
+    refreshed_at,
+    regular_stat,
+    stat_key,
+)
 
 
 MAX_CHECKSUM_BYTES = 8 * 1024 * 1024
@@ -30,6 +36,7 @@ class NucleiTemplateCacheSnapshot:
     release_version: str = ""
     content_digest: str = ""
     manifest_entry_count: int = 0
+    refreshed_at: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -38,6 +45,7 @@ class NucleiTemplateCacheSnapshot:
             "release_version": self.release_version,
             "content_digest": self.content_digest,
             "manifest_entry_count": self.manifest_entry_count,
+            "refreshed_at": self.refreshed_at,
         }
 
 
@@ -48,18 +56,18 @@ def managed_nuclei_template_snapshot(
 ) -> NucleiTemplateCacheSnapshot:
     root = Path(template_dir)
     checksum = root / ".checksum"
-    root_stat = _regular_stat(root, directory=True)
-    checksum_stat = _regular_stat(checksum)
+    root_stat = regular_stat(root, directory=True)
+    checksum_stat = regular_stat(checksum)
     if root_stat is None or checksum_stat is None:
         return NucleiTemplateCacheSnapshot("missing")
     if checksum_stat.st_size > MAX_CHECKSUM_BYTES:
         return NucleiTemplateCacheSnapshot("oversized")
-    selected_config = Path(config_path) if config_path else _default_config_path()
-    config_stat = _regular_stat(selected_config)
-    config_key = _stat_key(config_stat)
+    selected_config = Path(config_path) if config_path else default_nuclei_config_path()
+    config_stat = regular_stat(selected_config)
+    config_key = stat_key(config_stat)
     return _snapshot_for_files(
-        str(root.absolute()), str(checksum), _stat_key(checksum_stat),
-        str(selected_config), config_key,
+        str(root.absolute()), str(checksum), stat_key(checksum_stat),
+        refreshed_at(checksum_stat), str(selected_config), config_key,
     )
 
 
@@ -83,11 +91,12 @@ def _snapshot_for_files(
     root_text: str,
     checksum_text: str,
     checksum_key: tuple[int, ...],
+    refreshed_at_text: str,
     config_text: str,
     config_key: tuple[int, ...],
 ) -> NucleiTemplateCacheSnapshot:
     del checksum_key, config_key
-    payload = _read_bounded(Path(checksum_text), MAX_CHECKSUM_BYTES)
+    payload = read_bounded(Path(checksum_text), MAX_CHECKSUM_BYTES)
     if payload is None:
         return NucleiTemplateCacheSnapshot("unreadable")
     try:
@@ -99,7 +108,7 @@ def _snapshot_for_files(
     canonical = "".join(f"{path}\0{digest}\n" for path, digest in sorted(entries))
     digest = "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     version = _release_version(Path(config_text), Path(root_text))
-    return NucleiTemplateCacheSnapshot("ready", version, digest, len(entries))
+    return NucleiTemplateCacheSnapshot("ready", version, digest, len(entries), refreshed_at_text)
 
 
 def _checksum_entries(payload: bytes, root: Path) -> list[tuple[str, str]]:
@@ -124,7 +133,7 @@ def _checksum_entries(payload: bytes, root: Path) -> list[tuple[str, str]]:
 
 
 def _release_version(config_path: Path, root: Path) -> str:
-    payload = _read_bounded(config_path, MAX_CONFIG_BYTES)
+    payload = read_bounded(config_path, MAX_CONFIG_BYTES)
     if payload is None:
         return ""
     try:
@@ -136,38 +145,3 @@ def _release_version(config_path: Path, root: Path) -> str:
     configured = os.path.abspath(str(config.get("nuclei-templates-directory") or ""))
     version = str(config.get("nuclei-templates-version") or "").strip()
     return version if configured == os.path.abspath(root) and _VERSION_RE.fullmatch(version) else ""
-
-
-def _default_config_path() -> Path:
-    base = os.environ.get("NUCLEI_CONFIG_DIR")
-    if base:
-        return Path(base) / ".templates-config.json"
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    return Path(xdg or Path.home() / ".config") / "nuclei" / ".templates-config.json"
-
-
-def _regular_stat(path: Path, *, directory: bool = False):
-    try:
-        value = path.lstat()
-    except OSError:
-        return None
-    expected = stat.S_ISDIR if directory else stat.S_ISREG
-    return value if expected(value.st_mode) and not path.is_symlink() else None
-
-
-def _stat_key(value) -> tuple[int, ...]:
-    return () if value is None else (value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-
-
-def _read_bounded(path: Path, limit: int) -> bytes | None:
-    info = _regular_stat(path)
-    if info is None or info.st_size > limit:
-        return None
-    try:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as handle:
-            payload = handle.read(limit + 1)
-            return payload if len(payload) <= limit else None
-    except OSError:
-        return None
