@@ -5060,6 +5060,33 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "UPDATE workflow_executions SET status = 'failed' WHERE id = %s",
         (started_batch["batch_id"],),
     )
+    nuclei_failure_run_id = "run-pg-nuclei-failure-" + uuid.uuid4().hex
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, "
+        "exit_code, output_search_text) VALUES (%s, %s, 'external', %s, %s, %s, 1, %s)",
+        (
+            nuclei_failure_run_id,
+            session_id,
+            "nuclei -u https://darklab.sh",
+            "2026-04-17 12:00:00",
+            "2026-04-17 12:01:00",
+            "[FTL] Could not load templates from the managed cache",
+        ),
+    )
+    conn.execute(
+        "UPDATE assessment_batch_items SET action_id = 'nuclei', "
+        "action_key = 'command:nuclei' WHERE batch_id = %s AND item_index = %s",
+        (started_batch["batch_id"], claimed_batch_item["item_index"]),
+    )
+    conn.execute(
+        "UPDATE workflow_execution_children SET run_id = %s, exit_code = 1, "
+        "error_code = 'child_failed', finished = %s WHERE id = %s",
+        (
+            nuclei_failure_run_id,
+            "2026-04-17 12:01:00",
+            claimed_batch_item["child"]["id"],
+        ),
+    )
     conn.execute(
         "INSERT INTO notification_channels "
         "(id, session_token, team_id, kind, label, secrets_json, config_json, "
@@ -5069,6 +5096,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (session_id, "2026-08-17 12:00:00", "2026-08-17 12:00:00"),
     )
     conn.commit()
+    postgres_batch_diagnosis_resp = client.get(
+        f"/assessment-batches/{started_batch['batch_id']}",
+        headers=browser_headers,
+    )
     postgres_batch_notification = enqueue_terminal_batch_summary(
         str(started_batch["batch_id"])
     )
@@ -5370,6 +5401,12 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert replayed_batch["batch_id"] == started_batch["batch_id"]
     assert claimed_batch_item["status"] == "claimed"
     assert claimed_batch_item["item"]["display_command"]
+    postgres_batch_diagnosis = json.loads(postgres_batch_diagnosis_resp.data)["batch"]
+    assert postgres_batch_diagnosis_resp.status_code == 200
+    assert postgres_batch_diagnosis["diagnostics"][0]["code"] == (
+        "nuclei_template_loading_failed"
+    )
+    assert postgres_batch_diagnosis["diagnostics"][0]["affected_command_count"] == 1
     assert postgres_batch_notification == replayed_postgres_batch_notification
     assert int(postgres_batch_notification_count) == 1
     assert retry_preview_resp.status_code == 201

@@ -344,6 +344,32 @@ async function installAssessmentBatchLifecycleFixture(page) {
       })
       return
     }
+    if (path.endsWith('/batch-previews') && request.method() === 'POST') {
+      const response = await route.fetch()
+      const payload = await response.json()
+      payload.preview.summary.nuclei_preflight = {
+        state: 'stale',
+        source_label: 'Managed local cache',
+        release_version: 'v10.4.7',
+        content_digest: `sha256:${'1'.repeat(64)}`,
+        manifest_entry_count: 100,
+        refreshed_at: '2026-08-10T12:00:00Z',
+        validation_state: 'passed',
+        nuclei_version: 'v3.4.10',
+        stale_after_seconds: 604800,
+        reason_code: 'template_cache_stale',
+        launchable: true,
+        command_count: 1,
+        refresh_enabled: true,
+        operator_action: 'Update the managed templates when network access is available.',
+      }
+      await route.fulfill({
+        response,
+        contentType: 'application/json',
+        body: JSON.stringify(payload),
+      })
+      return
+    }
     if (/\/projects\/[^/]+\/assessment-batches$/.test(path) && request.method() === 'GET') {
       await route.fulfill({
         status: 200,
@@ -543,9 +569,17 @@ test.describe('project assessment qualification', () => {
     await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
     await expect(section.locator('.project-assessment-batch-command').first()).toBeVisible()
     await expect(section).toContainText('Planning estimate')
+    await expect(section).toContainText('Managed Nuclei template preflight')
+    await expect(section).toContainText('stale')
+    await expect(section).toContainText('v10.4.7')
 
     await section.getByRole('button', { name: 'Run assessment plan' }).click()
     const confirm = page.locator('#confirm-host')
+    await expect(confirm).toContainText('Continue with stale managed Nuclei templates?')
+    await expect(confirm.getByRole('button', {
+      name: 'Update templates and rebuild preview',
+    })).toBeVisible()
+    await confirmAssessmentAction(page, 'continue_nuclei_snapshot')
     await expect(confirm).toContainText('Run this assessment plan?')
     const startResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -555,6 +589,7 @@ test.describe('project assessment qualification', () => {
     expect((await startResponse).status()).toBe(202)
     expect(fixture.startBody).toMatchObject({
       confirmed: true,
+      nuclei_snapshot_confirmed: true,
       standard_confirmed: false,
     })
     await expect(section).toContainText('Assessment batch')
