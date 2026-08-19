@@ -9,6 +9,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
   - [Headless assessment and evidence parity](#headless-assessment-and-evidence-parity)
+  - [Preflight managed Nuclei templates before assessment plans](#preflight-managed-nuclei-templates-before-assessment-plans)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Retire the local Nuclei kin-openapi compatibility patch](#retire-the-local-nuclei-kin-openapi-compatibility-patch)
@@ -96,6 +97,19 @@ Close the adjacent API and external CLI gaps independently of the one-off-probe 
 - [ ] Add external CLI support for Project HTTP-profile list/create/show/update/delete operations. Accept only references to protected values and never echo submitted secret material.
 - [ ] Split new external CLI parsers, handlers, and formatters into focused ratcheted modules rather than growing the main command module. Give new API/OpenAPI modules their required architecture budgets and allowlist entries when they are added.
 - [ ] Add end-to-end API and CLI tests for each command, including help output, JSON stability, authentication, roles, conflict responses, rate/request bounds, and PostgreSQL parity. Update documentation, generated OpenAPI, test inventories/counts, `CHANGELOG.md`, and release drafts with each delivered command family.
+
+### Preflight managed Nuclei templates before assessment plans
+
+Prevent a full assessment plan from launching multiple Nuclei commands against a stale or incompatible managed template cache. Keep template refresh separate from target scans so every approved batch remains tied to one reviewed template snapshot.
+
+- [ ] Extend the managed-template snapshot with a bounded last-refreshed signal and a compatibility result produced by the installed Nuclei binary. Cache validation by Nuclei version and template digest, and distinguish ready, stale, missing, invalid, unreadable, and incompatible states without contacting scan targets.
+- [ ] When a preview contains Nuclei work, show the installed template release, digest, refresh age, validation state, and number of planned Nuclei commands in one preflight summary. Do not interrupt plans that contain no Nuclei work.
+- [ ] If the cache is stale but valid, prompt once before launch with **Update templates and rebuild preview** as the recommended action, **Continue with current snapshot** for deliberately pinned or offline deployments, and **Cancel**. Block launch when the cache is invalid or incompatible.
+- [ ] Add an explicit operator-controlled refresh action that updates the shared managed cache once under a global maintenance lock. Bound its runtime and output, preserve the last known-good cache after download or validation failure, prevent scans from reading a partially updated cache, and keep private environment details out of logs and responses.
+- [ ] After a successful refresh, validate the new cache, rebuild the complete assessment preview, and require a fresh approval digest. Never update templates after a batch starts, and keep every Nuclei child in one batch pinned to the same snapshot.
+- [ ] Respect deployments that disable startup template downloads or have no outbound network access. Users without permission to mutate the deployment-wide cache should see the installed state and the exact operator action required instead of receiving an unusable refresh control.
+- [ ] Recognize template-loading and compatibility failures from Nuclei output. Collapse repeated failures into one batch-level diagnosis with the affected command count and an **Update templates and retry failed commands** path while retaining each ordinary run and its evidence.
+- [ ] Cover current, stale, invalid, incompatible, refresh-failure, concurrent-refresh, offline, permission, preview-rebuild, digest-change, batch-retry, restart, SQLite, PostgreSQL, and source/bundled browser paths. Update the user, operator, architecture, testing, changelog, and release-draft documentation when the work ships.
 
 ## Known Issues
 
