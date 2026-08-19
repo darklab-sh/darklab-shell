@@ -9,10 +9,21 @@
 cache_dir="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates/current}"
 config_dir="${NUCLEI_CONFIG_DIR:-/tmp/nuclei-templates/config/nuclei}"
 volume_root="${NUCLEI_TEMPLATE_VOLUME_ROOT:-/tmp/nuclei-templates}"
+python_bin="${DARKLAB_PYTHON_BIN:-/usr/local/bin/python}"
 
 unsafe_directory() {
     path="$1"
     [ -L "$path" ] || { [ -e "$path" ] && [ ! -d "$path" ]; }
+}
+
+rollback_legacy_migration() {
+    rollback_status=0
+    for entry in "$migration_dir"/* "$migration_dir"/.[!.]* "$migration_dir"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        mv "$entry" "$volume_root/" || rollback_status=1
+    done
+    rmdir "$migration_dir" || rollback_status=1
+    return "$rollback_status"
 }
 
 if unsafe_directory "$volume_root"; then
@@ -49,13 +60,15 @@ if [ "$cache_dir" = "$volume_root/current" ] \
         [ "$entry" = "$volume_root/config" ] && continue
         mv "$entry" "$migration_dir/" || {
             echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=legacy-migration-move" >&2
+            rollback_legacy_migration || \
+                echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=legacy-migration-rollback" >&2
             exit 1
         }
     done
     if ! NUCLEI_TEMPLATE_MIGRATION_DIR="$migration_dir" \
         NUCLEI_TEMPLATE_MIGRATION_SOURCE="$volume_root" \
         NUCLEI_TEMPLATE_MIGRATION_DESTINATION="$cache_dir" \
-        python -c '
+        "$python_bin" -c '
 import os
 from pathlib import Path
 from services.nuclei.template_refresh_files import rebase_staged_template_manifest
@@ -65,7 +78,10 @@ rebase_staged_template_manifest(
     recorded_root=Path(os.environ["NUCLEI_TEMPLATE_MIGRATION_SOURCE"]),
 )
 '; then
-        echo "NUCLEI_TEMPLATE_CACHE_MIGRATION_MANIFEST_INVALID" >&2
+        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=legacy-migration-manifest" >&2
+        rollback_legacy_migration || \
+            echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=legacy-migration-rollback" >&2
+        exit 1
     fi
     mv "$migration_dir" "$cache_dir" || {
         echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=legacy-migration-commit" >&2

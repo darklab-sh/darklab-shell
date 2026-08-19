@@ -8,6 +8,7 @@ from __future__ import annotations
 from core.database_access import get_db_connect
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.nuclei_preflight import batch_nuclei_preflight
+from services.assessments.batch.nuclei_refresh_preview import rebuild_refreshed_preview
 from services.assessments.batch.preview_storage import (
     get_batch_preview,
     store_batch_preview,
@@ -72,13 +73,8 @@ def refresh_and_rebuild_batch_preview(
         )
     except NucleiTemplateRefreshError as exc:
         raise AssessmentBatchError(exc.code, str(exc), status_code=exc.status_code) from exc
-    rebuilt = rebuild_confirmed_batch_preview(
-        session_id,
-        project_id,
-        assessment_id,
-        preview,
-        source_batch_id=source_batch_id,
-        team_id=team_id,
+    rebuilt = rebuild_refreshed_preview(
+        session_id, project_id, assessment_id, preview, source_batch_id, team_id,
     )
     return {
         "refresh": refresh,

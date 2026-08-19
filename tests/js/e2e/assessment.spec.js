@@ -209,10 +209,12 @@ async function installAssessmentBatchLifecycleFixture(page) {
     assessmentId: '',
     startBody: null,
     retryBody: null,
+    preview: null,
   }
   const batchId = 'wfx_assessment_batch_playwright'
   const retryBatchId = 'wfx_assessment_batch_retry_playwright'
   const retryPreviewId = 'abp_assessment_batch_retry_playwright'
+  const refreshedPreviewId = 'abp_assessment_batch_refreshed_playwright'
   const batch = (id = batchId) => {
     const retry = id === retryBatchId
     const canceled = !retry && state.canceling
@@ -344,6 +346,28 @@ async function installAssessmentBatchLifecycleFixture(page) {
       })
       return
     }
+    if (path.endsWith('/nuclei-templates/refresh') && request.method() === 'POST') {
+      const refreshed = structuredClone(state.preview)
+      refreshed.preview_id = refreshedPreviewId
+      refreshed.plan_digest = 'c'.repeat(64)
+      refreshed.summary.nuclei_preflight = {
+        ...refreshed.summary.nuclei_preflight,
+        state: 'ready',
+        content_digest: `sha256:${'2'.repeat(64)}`,
+        refreshed_at: '2026-08-19T12:00:00Z',
+        reason_code: '',
+      }
+      state.preview = refreshed
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          preview: refreshed,
+          refresh: { status: 'updated', release_version: 'v10.4.7' },
+        }),
+      })
+      return
+    }
     if (path.endsWith('/batch-previews') && request.method() === 'POST') {
       const response = await route.fetch()
       const payload = await response.json()
@@ -363,6 +387,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         refresh_enabled: true,
         operator_action: 'Update the managed templates when network access is available.',
       }
+      state.preview = payload.preview
       await route.fulfill({
         response,
         contentType: 'application/json',
@@ -430,6 +455,26 @@ async function installAssessmentBatchLifecycleFixture(page) {
             policy_level: 'safe',
             display_command: 'ping -c 4 -W 2 127.0.0.1',
             check_mappings: [{ check_id: 'asmc_retry_playwright' }],
+          }],
+          next_cursor: null,
+        }),
+      })
+      return
+    }
+    if (path === `/assessment-batch-previews/${refreshedPreviewId}/items`
+        && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [{
+            item_index: 0,
+            selected: true,
+            action: { id: 'ping' },
+            target: { type: 'ip', value: '127.0.0.1' },
+            policy_level: 'safe',
+            display_command: 'ping -c 4 -W 2 127.0.0.1',
+            check_mappings: [{ check_id: 'asmc_batch_playwright' }],
           }],
           next_cursor: null,
         }),
@@ -573,13 +618,28 @@ test.describe('project assessment qualification', () => {
     await expect(section).toContainText('stale')
     await expect(section).toContainText('v10.4.7')
 
+    const templateRefresh = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname.endsWith('/nuclei-templates/refresh')
+    })
+    await section.getByRole('button', {
+      name: 'Update templates and rebuild preview',
+    }).click()
+    expect((await templateRefresh).status()).toBe(200)
+    await expect(section.getByRole('button', {
+      name: 'Update templates and rebuild preview',
+    })).toHaveCount(0)
+    await expect(section.getByRole('button', { name: 'Run assessment plan' })).toBeEnabled()
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await openAssessment(page)
+    await expect(section).toContainText('ping -c 4 -W 2 127.0.0.1')
+    await expect(section.getByRole('button', { name: 'Run assessment plan' })).toBeEnabled()
+
     await section.getByRole('button', { name: 'Run assessment plan' }).click()
     const confirm = page.locator('#confirm-host')
-    await expect(confirm).toContainText('Continue with stale managed Nuclei templates?')
-    await expect(confirm.getByRole('button', {
-      name: 'Update templates and rebuild preview',
-    })).toBeVisible()
-    await confirmAssessmentAction(page, 'continue_nuclei_snapshot')
     await expect(confirm).toContainText('Run this assessment plan?')
     const startResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -589,7 +649,7 @@ test.describe('project assessment qualification', () => {
     expect((await startResponse).status()).toBe(202)
     expect(fixture.startBody).toMatchObject({
       confirmed: true,
-      nuclei_snapshot_confirmed: true,
+      nuclei_snapshot_confirmed: false,
       standard_confirmed: false,
     })
     await expect(section).toContainText('Assessment batch')

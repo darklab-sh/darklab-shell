@@ -475,7 +475,21 @@ describe('Project assessment batches', () => {
     surface = render(manager)
     const refreshedStart = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Run assessment plan')
-    refreshedStart.click()
+    expect(refreshedStart.disabled).toBe(false)
+    expect([...surface.querySelectorAll('button')]
+      .some(button => button.textContent === 'Update templates and rebuild preview')).toBe(false)
+
+    manager.invalidate('prj_batch_1', { preserveDrafts: true })
+    expect(st.preview?.preview_id).toBe('abp_batch_refreshed')
+    expect(st.loaded).toBe(false)
+    await manager.load('prj_batch_1', assessment.id, { render: false })
+    surface = render(manager)
+    const restoredStart = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent === 'Run assessment plan')
+    expect(restoredStart.disabled).toBe(false)
+    expect([...surface.querySelectorAll('button')]
+      .some(button => button.textContent === 'Update templates and rebuild preview')).toBe(false)
+    restoredStart.click()
     await vi.waitFor(() => expect(startBody).not.toBeNull())
 
     expect(startBody.standard_confirmed).toBe(true)

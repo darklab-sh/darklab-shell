@@ -104,12 +104,26 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     st.pollTimer = null;
   }
 
-  function invalidate(projectId = '') {
+  function invalidate(projectId = '', { preserveDrafts = false } = {}) {
     const id = String(projectId || '');
     [...states.entries()].forEach(([key, st]) => {
       if (id && st.projectId !== id) return;
       clearPoll(st);
       st.generation += 1;
+      if (preserveDrafts && st.planning) {
+        st.loaded = false;
+        st.loading = false;
+        st.loadPromise = null;
+        st.batches = [];
+        st.selectedBatchId = '';
+        st.batch = null;
+        st.batchItems = [];
+        st.batchItemsCursor = null;
+        st.batchItemsLoading = false;
+        st.events = [];
+        st.eventCursor = 0;
+        return;
+      }
       states.delete(key);
     });
   }

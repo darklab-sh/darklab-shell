@@ -1128,6 +1128,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/assessments/batch/nuclei_refresh.py", 89, "split-package-ratchet"
     ),
+    ModuleSizeBudget(
+        "app/services/assessments/batch/nuclei_refresh_preview.py", 43, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/assessments/batch/preview_classification.py", 102, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_cleanup.py", 29, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/preview_compiler.py", 32, "split-package-ratchet"),

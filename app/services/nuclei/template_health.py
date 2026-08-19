@@ -21,7 +21,6 @@ from services.nuclei.template_cache import (
     managed_nuclei_template_snapshot,
 )
 
-
 DEFAULT_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 MAX_STALE_AFTER_SECONDS = 365 * 24 * 60 * 60
 VERSION_TIMEOUT_SECONDS = 5
@@ -65,6 +64,7 @@ def managed_nuclei_template_health(
     current_time: datetime | None = None,
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
     run_command: _RunCommand | None = None,
+    command_prefix: tuple[str, ...] = (),
 ) -> NucleiTemplateHealth:
     """Validate one immutable cache snapshot without contacting a scan target."""
     selected = snapshot or managed_nuclei_template_snapshot(template_dir)
@@ -87,17 +87,18 @@ def managed_nuclei_template_health(
         )
     if run_command is None:
         binary_key = _binary_key(resolved_binary)
-        version = _cached_binary_version(resolved_binary, binary_key)
+        version = _cached_binary_version(resolved_binary, binary_key, command_prefix)
         validation = _cached_validation(
             resolved_binary,
             binary_key,
             version,
             selected.content_digest,
             os.path.abspath(template_dir),
+            command_prefix,
         )
     else:
-        version = _binary_version(resolved_binary, run_command)
-        validation = _validate_templates(resolved_binary, template_dir, run_command)
+        version = _binary_version(resolved_binary, run_command, command_prefix)
+        validation = _validate_templates(resolved_binary, template_dir, run_command, command_prefix)
     if validation == "failed":
         return NucleiTemplateHealth(
             "incompatible", selected, validation, version, threshold,
@@ -134,9 +135,11 @@ def _binary_key(binary_path: str) -> tuple[int, ...]:
 
 
 @lru_cache(maxsize=8)
-def _cached_binary_version(binary_path: str, binary_key: tuple[int, ...]) -> str:
+def _cached_binary_version(
+    binary_path: str, binary_key: tuple[int, ...], command_prefix: tuple[str, ...],
+) -> str:
     del binary_key
-    return _binary_version(binary_path, subprocess.run)
+    return _binary_version(binary_path, subprocess.run, command_prefix)
 
 
 @lru_cache(maxsize=32)
@@ -146,15 +149,18 @@ def _cached_validation(
     binary_version: str,
     content_digest: str,
     template_dir: str,
+    command_prefix: tuple[str, ...],
 ) -> str:
     del binary_key, binary_version, content_digest
-    return _validate_templates(binary_path, template_dir, subprocess.run)
+    return _validate_templates(binary_path, template_dir, subprocess.run, command_prefix)
 
 
-def _binary_version(binary_path: str, run_command: _RunCommand) -> str:
+def _binary_version(
+    binary_path: str, run_command: _RunCommand, command_prefix: tuple[str, ...],
+) -> str:
     try:
         completed = run_command(
-            [binary_path, "-version"],
+            [*command_prefix, binary_path, "-version"],
             check=False,
             capture_output=True,
             text=True,
@@ -171,8 +177,10 @@ def _validate_templates(
     binary_path: str,
     template_dir: str,
     run_command: _RunCommand,
+    command_prefix: tuple[str, ...],
 ) -> str:
     command = [
+        *command_prefix,
         binary_path,
         "-validate",
         "-t", os.path.abspath(template_dir),

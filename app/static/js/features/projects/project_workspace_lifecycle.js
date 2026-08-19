@@ -253,7 +253,7 @@ let exportedDarklabProjectWorkspaceLifecycle = null;
         ctx.invalidateProjectEntities?.();
         ctx.invalidateProjectArtifacts?.();
         ctx.invalidateProjectWebSurface?.();
-        ctx.invalidateProjectAssessment?.();
+        ctx.invalidateProjectAssessment?.('', { preserveBatchDrafts: true });
         ctx.invalidateProjectOverview?.();
         ctx.invalidateProjectMonitoring?.();
         ensureSelectedProject();

@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.aa3f5624a225.js",
-      "hash": "43ca570ad48437ae0446eab7f786004abfa51e46da6262c23d71f9d854ecafb5",
+      "path": "/static/build/shell-bootstrap.6b918200984d.js",
+      "hash": "c2370081aa27532ce7540f0666599b696d1f203f68de5a11c9c63f3195955669",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -260,7 +260,7 @@
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "36096e9f07d4243858c606286536e468ae4df543696a4d66647ca17765f17578",
         "/static/js/shell_bootstrap.entry.js": "3eac50c34a8e11eddc8a42a323d52308b417c777c6d05e66f16b9d40e84448f3",
-        "/static/js/shell_chrome.js": "65d0f8907f81f429cbb9b514f5a22563d1f90936eb002afa5e8d651e80527bdf",
+        "/static/js/shell_chrome.js": "9834e6db3fa155e6a02b76db11d1e5aa88ffcd8c8e5b7d305ead2f86fef7aaab",
         "/static/js/tabs.js": "9ce291966d50e6244ff1ede4d9c7cf5484735e24ab0a3dae9be74552131b33ce",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
         "/static/js/ui/cleanup_reasons.js": "51a7d0c8cd780bc72234b7d4bf0b0ad69f1cf9bdd143a157fa0cccd719d54d4c",
@@ -424,16 +424,16 @@
       "hash": "2c6f9e64a3dbf233ed8ae70c1e3c104de92e349c9e6f6bbf4d64a93b8ea82fe6"
     },
     "/static/js/features/projects/project_assessment.js": {
-      "path": "/static/build/static-project-assessment.ce25d7810409.js",
-      "hash": "63de1a9f19d3b14c8722fa540232289a656215447f5bf9cee776ed17b2abbec8"
+      "path": "/static/build/static-project-assessment.48f870e753a1.js",
+      "hash": "c204051cd049c60089a5f26f1e823e1c25aa8e5577d3d215b804f03b333ea34b"
     },
     "/static/js/features/projects/project_assessment_actions.js": {
       "path": "/static/build/static-project-assessment-actions.3ba0fef9fdf7.js",
       "hash": "259e34b91e935228ddb8d3a96b3261a755fae92396666d54820d636970afdf9a"
     },
     "/static/js/features/projects/project_assessment_batch.js": {
-      "path": "/static/build/static-project-assessment-batch.940f7c755a52.js",
-      "hash": "ede66b32c93b95fe54eb6cb22d7c00a86e49bc5e689886cbee760caf28592125"
+      "path": "/static/build/static-project-assessment-batch.70f0f7b788cd.js",
+      "hash": "6a036da1a3004840c4ef8d462cc5c9ed1bcc8e7487b8cedb49be875162b41f9d"
     },
     "/static/js/features/projects/project_assessment_batch_renderer.js": {
       "path": "/static/build/static-project-assessment-batch-renderer.aad54d9572e5.js",
@@ -576,8 +576,8 @@
       "hash": "e1ec806005aee21e98feeeb356ca2b7719d95d4412a4322c29e46056128dc00d"
     },
     "/static/js/features/projects/project_workspace_lifecycle.js": {
-      "path": "/static/build/static-project-workspace-lifecycle.f4b905abce48.js",
-      "hash": "177433ce14509a5c6e336b4f15d745aae83b2d350bf3a7c42f1186600f1b4c81"
+      "path": "/static/build/static-project-workspace-lifecycle.c4d9df512b89.js",
+      "hash": "d6a729a69c825d505e1154f996754d8f349bb2270e6d9340ca3af2b7f8adcbb5"
     },
     "/static/js/features/projects/project_workspace_renderer.js": {
       "path": "/static/build/static-project-workspace-renderer.c9e7ee2747dd.js",

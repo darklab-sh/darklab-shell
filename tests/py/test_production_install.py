@@ -1273,6 +1273,7 @@ esac
             "NUCLEI_TEMPLATE_VOLUME_ROOT": str(legacy_root),
             "NUCLEI_TEMPLATES_DIR": str(legacy_root / "current"),
             "NUCLEI_CONFIG_DIR": str(legacy_root / "config" / "nuclei"),
+            "DARKLAB_PYTHON_BIN": sys.executable,
             "PYTHONPATH": str(ROOT / "app"),
         },
         check=False,
@@ -1286,6 +1287,38 @@ esac
     )
     assert (legacy_root / "current" / "http").is_dir()
     assert (legacy_root / "config" / "nuclei").is_dir()
+
+    failed_migration_root = tmp_path / "failed-legacy-volume"
+    failed_migration_root.mkdir()
+    (failed_migration_root / "http").mkdir()
+    failed_manifest = f"{failed_migration_root}/http/test.yaml,{'b' * 32};"
+    (failed_migration_root / ".checksum").write_text(
+        failed_manifest,
+        encoding="utf-8",
+    )
+    failed_migration = subprocess.run(
+        ["sh", str(prepare)],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "NUCLEI_TEMPLATE_VOLUME_ROOT": str(failed_migration_root),
+            "NUCLEI_TEMPLATES_DIR": str(failed_migration_root / "current"),
+            "NUCLEI_CONFIG_DIR": str(failed_migration_root / "config" / "nuclei"),
+            "DARKLAB_PYTHON_BIN": str(tmp_path / "missing-python"),
+            "PYTHONPATH": str(ROOT / "app"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert failed_migration.returncode != 0
+    assert "stage=legacy-migration-manifest" in failed_migration.stderr
+    assert (failed_migration_root / ".checksum").read_text(encoding="utf-8") == (
+        failed_manifest
+    )
+    assert not (failed_migration_root / "current").exists()
+    assert not (failed_migration_root / ".darklab-nuclei-migration").exists()
 
 
 def test_development_source_staging_normalizes_private_files_and_fails_closed(

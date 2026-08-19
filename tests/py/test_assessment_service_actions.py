@@ -739,6 +739,24 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         current_time=refreshed + timedelta(days=1),
     ) == current_health
     assert len(health_calls) == 2
+    health_calls.clear()
+    prefixed_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+        run_command=_healthy_nuclei,
+        command_prefix=("sudo", "-u", "scanner"),
+    )
+    assert prefixed_health.launchable is True
+    assert health_calls == [
+        ["sudo", "-u", "scanner", "/usr/local/bin/nuclei", "-version"],
+        [
+            "sudo", "-u", "scanner", "/usr/local/bin/nuclei", "-validate",
+            "-t", str(template_dir), "-ud", str(template_dir),
+            "-disable-update-check", "-no-color", "-silent",
+        ],
+    ]
     stale_health = template_health.managed_nuclei_template_health(
         template_dir,
         snapshot=template_snapshot,

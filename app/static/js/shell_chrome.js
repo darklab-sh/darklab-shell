@@ -3369,7 +3369,9 @@ let importedProjectWorkspaceShell;
       invalidateProjectEntities: (projectId = '') => _projectEntitiesControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectArtifacts: (projectId = '') => _projectArtifactsControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectWebSurface: (projectId = '') => _projectWebSurfaceControllerIfReady()?.invalidate?.(projectId),
-      invalidateProjectAssessment: (projectId = '') => _projectAssessmentControllerIfReady()?.invalidate?.(projectId),
+      invalidateProjectAssessment: (projectId = '', options = {}) => (
+        _projectAssessmentControllerIfReady()?.invalidate?.(projectId, options)
+      ),
       invalidateProjectOverview: (projectId = '') => _projectOverviewControllerIfReady()?.invalidate?.(projectId),
       invalidateProjectMonitoring: (projectId = '') => _projectMonitoringControllerIfReady()?.invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,

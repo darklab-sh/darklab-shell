@@ -26,7 +26,10 @@ class ProbePlanningRuntime:
 def probe_planning_runtime() -> ProbePlanningRuntime:
     """Resolve readiness once so every plan in one preview uses the same state."""
     snapshot = template_cache.managed_nuclei_template_snapshot()
-    health = template_health.managed_nuclei_template_health(snapshot=snapshot)
+    health = template_health.managed_nuclei_template_health(
+        snapshot=snapshot,
+        command_prefix=tuple(app_config.SCANNER_PREFIX),
+    )
     features = {action_id for action_id in ACTIONS if resolve_runtime_command(action_id)}
     features.add("reviewed_nse_profiles")
     if snapshot.state == "ready":

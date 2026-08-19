@@ -74,7 +74,7 @@ function createProjectAssessmentController(context) {
     st.detailRefreshKind = '';
   }
 
-  function invalidate(projectId = '') {
+  function invalidate(projectId = '', { preserveBatchDrafts = false } = {}) {
     const id = String(projectId || '');
     const targets = id ? [states.get(id)] : Array.from(states.values());
     targets.filter(Boolean).forEach((st) => {
@@ -90,7 +90,7 @@ function createProjectAssessmentController(context) {
     httpProfileManager.invalidate(id);
     oastManager.invalidate(id);
     zapManager.invalidate(id);
-    batchManager.invalidate(id);
+    batchManager.invalidate(id, { preserveDrafts: preserveBatchDrafts });
   }
 
   async function responseError(resp, fallback) {

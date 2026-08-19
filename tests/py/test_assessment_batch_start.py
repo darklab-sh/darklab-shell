@@ -339,6 +339,26 @@ def test_standard_items_and_nuclei_preflight_need_separate_confirmation(
         "reason_code": "template_validation_failed",
         "command_count": 1,
     }
+    from services.assessments.batch import nuclei_refresh
+
+    monkeypatch.setattr(
+        nuclei_refresh,
+        "refresh_managed_nuclei_templates",
+        lambda **_kwargs: {"status": "updated", "release_version": "v10.4.8"},
+    )
+    with pytest.raises(AssessmentBatchError) as unready_refresh:
+        nuclei_refresh.refresh_and_rebuild_batch_preview(
+            session_id,
+            project_id,
+            assessment_id,
+            str(incompatible_preview["preview_id"]),
+        )
+    assert unready_refresh.value.code == "nuclei_template_refresh_unready"
+    assert unready_refresh.value.details == {
+        "state": "incompatible",
+        "validation_state": "failed",
+        "reason_code": "template_validation_failed",
+    }
 
 
 def test_start_rejects_scope_drift_and_rolls_back_partial_materialization(batch_cycle):
