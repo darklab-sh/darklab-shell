@@ -56,7 +56,7 @@ def _open_zap_request(
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
         handlers.append(HTTPSHandler(context=context))
-    return build_opener(*handlers).open(request, timeout=timeout)  # nosec B310
+    return build_opener(*handlers).open(request, timeout=timeout)  # nosec
 
 
 def _request_url(

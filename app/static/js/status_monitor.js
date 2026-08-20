@@ -14,6 +14,9 @@ import {
   DarklabStatusMonitorData as importedStatusMonitorData,
 } from './features/status-monitor/status_monitor_data.js';
 import {
+  DarklabStatusMonitorAssessments as importedStatusMonitorAssessments,
+} from './features/status-monitor/status_monitor_assessments.js';
+import {
   DarklabStatusMonitorResources as importedStatusMonitorResources,
 } from './features/status-monitor/status_monitor_resources.js';
 import {
@@ -35,6 +38,7 @@ import {
   getConstellationFullDayPreference as importedGetConstellationFullDayPreference,
 } from './features/preferences/preferences.js';
 import { restoreHistoryRun as importedRestoreHistoryRun } from './features/history/history_restore_bridge.js';
+import { openProjectAssessment as importedOpenProjectAssessment } from './features/projects/project_context_bridge.js';
 import { setRuntimeHandlers as importedSetRuntimeHandlers } from './runtime_bridge.js';
 import { bindMobileSheet as importedBindMobileSheet } from './ui/mobile_sheet.js';
 import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.js';
@@ -63,6 +67,8 @@ let exportedConstellationTestHelpers = null;
     || _statusMonitorGlobalValue('DarklabStatusMonitorCore')
   );
   if (!_statusMonitorCore) throw new Error('DarklabStatusMonitorCore is unavailable');
+  const _statusMonitorAssessments = importedStatusMonitorAssessments;
+  if (!_statusMonitorAssessments) throw new Error('DarklabStatusMonitorAssessments is unavailable');
   const getTabsFn = (
     (typeof importedGetTabs !== 'undefined' && importedGetTabs)
     || _statusMonitorGlobalFunction('getTabs')
@@ -77,6 +83,7 @@ let exportedConstellationTestHelpers = null;
   const restoreHistoryRunFn = (
     typeof importedRestoreHistoryRun !== 'undefined' && importedRestoreHistoryRun
   ) || _statusMonitorGlobalFunction('restoreHistoryRun');
+  const openProjectAssessmentFn = importedOpenProjectAssessment;
   const activateTabFn = (
     (typeof importedActivateTab !== 'undefined' && importedActivateTab)
     || _statusMonitorGlobalFunction('activateTab')
@@ -115,6 +122,7 @@ let exportedConstellationTestHelpers = null;
   let openFollowupTimer = null;
   let isOpen = false;
   let cachedRuns = [];
+  let cachedAssessmentBatches = { batches: [], truncated: false, unavailable: false };
   let cachedStatus = null;
   let cachedWorkspace = null;
   let cachedStats = null;
@@ -1111,8 +1119,8 @@ let exportedConstellationTestHelpers = null;
     }
   }
 
-  async function _loadActiveRuns() {
-    return _statusMonitorData().loadActiveRuns();
+  async function _loadActiveWork() {
+    return _statusMonitorData().loadActiveWork();
   }
 
   async function _loadSystemStatus() {
@@ -1148,8 +1156,10 @@ let exportedConstellationTestHelpers = null;
   }
 
   async function _refreshActiveRunCache({ render = false, renderWhileOpen = true } = {}) {
-    const runs = await _loadActiveRuns();
+    const activeWork = await _loadActiveWork();
+    const runs = activeWork.runs;
     cachedRuns = runs;
+    cachedAssessmentBatches = activeWork.assessmentBatches;
     runs.forEach(run => _runResourceUsage(run));
     if (render || (renderWhileOpen && isOpen)) _renderDashboard(runs);
     if (!runs.length) {
@@ -3154,11 +3164,33 @@ let exportedConstellationTestHelpers = null;
     return grid;
   }
 
+  function _openAssessmentBatch(batch) {
+    const projectId = String(batch?.project_id || '');
+    const assessmentId = String(batch?.assessment_id || '');
+    const batchId = String(batch?.batch_id || '');
+    if (!projectId || !assessmentId || !batchId || typeof openProjectAssessmentFn !== 'function') {
+      if (typeof showToastFn === 'function') showToastFn('Assessment batch is unavailable', 'error');
+      return Promise.resolve(false);
+    }
+    closeStatusMonitor();
+    return Promise.resolve(openProjectAssessmentFn(projectId, { assessmentId, batchId }));
+  }
+
+  function _renderAssessmentBatchSection(state) {
+    return _statusMonitorAssessments.renderSection(state, {
+      onOpenBatch: _openAssessmentBatch,
+    });
+  }
+
   function _renderVisualShowcaseSection(activeRuns, options = {}) {
     const section = document.createElement('section');
     section.className = 'status-monitor-showcase';
     section.appendChild(_renderPulseStrip(activeRuns));
     section.appendChild(_renderActiveRunsSection(activeRuns, options));
+    if ((options.assessmentBatchState?.batches || []).length
+        || options.assessmentBatchState?.unavailable) {
+      section.appendChild(_renderAssessmentBatchSection(options.assessmentBatchState));
+    }
     section.append(_renderVisualShowcaseGrid(), _renderEventTicker());
     return section;
   }
@@ -3178,6 +3210,22 @@ let exportedConstellationTestHelpers = null;
       const pulse = section.querySelector(':scope > .status-monitor-pulse-strip');
       if (pulse) pulse.after(fresh);
       else section.appendChild(fresh);
+    }
+    const batchState = options.assessmentBatchState || { batches: [] };
+    const assessmentSection = section.querySelector(':scope > .status-monitor-assessment-section');
+    if (batchState.batches?.length || batchState.unavailable) {
+      if (assessmentSection) {
+        _statusMonitorAssessments.updateSection(assessmentSection, batchState, {
+          onOpenBatch: _openAssessmentBatch,
+        });
+      } else {
+        const fresh = _renderAssessmentBatchSection(batchState);
+        const runs = section.querySelector(':scope > .status-monitor-runs-section');
+        if (runs) runs.after(fresh);
+        else section.prepend(fresh);
+      }
+    } else if (assessmentSection) {
+      assessmentSection.remove();
     }
     const grid = section.querySelector(':scope > .status-monitor-showcase-grid');
     const nextSignature = _visualGridSignature();
@@ -3687,9 +3735,13 @@ let exportedConstellationTestHelpers = null;
   function _renderDashboard(runs, options = {}) {
     if (!listEl || !summaryEl) return;
     const activeRuns = Array.isArray(runs) ? runs : [];
+    const renderOptions = {
+      ...options,
+      assessmentBatchState: options.assessmentBatchState || cachedAssessmentBatches,
+    };
     const showcase = listEl.querySelector(':scope > .status-monitor-showcase')
-      || _renderVisualShowcaseSection(activeRuns, options);
-    if (showcase.parentElement === listEl) _updateVisualShowcaseSection(showcase, activeRuns, options);
+      || _renderVisualShowcaseSection(activeRuns, renderOptions);
+    if (showcase.parentElement === listEl) _updateVisualShowcaseSection(showcase, activeRuns, renderOptions);
     const fallbackSummary = activeRuns.length === 1 ? '1 active run' : `${activeRuns.length} active runs`;
     if (summaryEl.dataset) {
       if (!options.loadingActiveRuns && latestPulseData?.summaryPrefix) {
@@ -3698,7 +3750,17 @@ let exportedConstellationTestHelpers = null;
         delete summaryEl.dataset.statusMonitorSummaryPrefix;
       }
     }
-    summaryEl.textContent = options.loadingActiveRuns ? 'Loading active runs...' : (latestPulseData?.meta || fallbackSummary);
+    const batchCount = Number(renderOptions.assessmentBatchState?.batches?.length || 0);
+    const summaryPrefix = latestPulseData?.summaryPrefix || fallbackSummary;
+    const workSummaryPrefix = batchCount
+      ? `${summaryPrefix} · ${batchCount} assessment ${batchCount === 1 ? 'plan' : 'plans'}`
+      : summaryPrefix;
+    if (summaryEl.dataset && !options.loadingActiveRuns) {
+      summaryEl.dataset.statusMonitorSummaryPrefix = workSummaryPrefix;
+    }
+    summaryEl.textContent = options.loadingActiveRuns
+      ? 'Loading active runs...'
+      : `${workSummaryPrefix} · ${_statusMonitorUptimeText()} uptime`;
     _replaceDashboardChildren([
       showcase,
       _renderServicesSection(),

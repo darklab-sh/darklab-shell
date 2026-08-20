@@ -9,6 +9,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from core.database_access import get_db_connect
+from services.assessments.batch.lifecycle_guard import (
+    BatchLifecycleCancellation,
+    request_assessment_lifecycle_cancellation_on_conn,
+    signal_lifecycle_cancellation,
+)
 from services.assessments.contracts import (
     ASSESSMENT_MAX_TITLE_LEN,
     ASSESSMENT_STATUSES,
@@ -105,7 +110,7 @@ def _update_cycle(
     *,
     team_id: str,
     actor_member_id: str,
-) -> dict[str, Any]:
+) -> dict[str, Any] | BatchLifecycleCancellation:
     unknown = sorted(set(payload) - {"title", "status"})
     if unknown:
         raise AssessmentError("assessment update contains unsupported fields")
@@ -144,6 +149,16 @@ def _update_cycle(
     status_changed = next_status != current_status
     if not title_changed and not status_changed:
         raise AssessmentError("assessment update did not change anything")
+    if status_changed:
+        cancellation = request_assessment_lifecycle_cancellation_on_conn(
+            conn,
+            session_id,
+            project_id,
+            assessment_id,
+            team_id=team_id,
+        )
+        if cancellation is not None:
+            return cancellation
 
     changed_at = now()
     completed_at = row["completed_at"]
@@ -203,7 +218,7 @@ def update_assessment_cycle(
     team_id: str = "",
     actor_member_id: str = "",
     conn: Any = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | BatchLifecycleCancellation:
     """Update an active cycle or move it forward through its lifecycle."""
     normalized_session_id = _normalize_required(session_id, "session")
     normalized_project_id = _normalize_required(project_id, "project")
@@ -233,6 +248,12 @@ def update_assessment_cycle(
             actor_member_id=normalized_actor_member_id,
         )
         opened.commit()
+        if isinstance(updated, BatchLifecycleCancellation):
+            signal_lifecycle_cancellation(
+                updated,
+                normalized_session_id,
+                team_id=normalized_team_id,
+            )
         return updated
 
 
@@ -273,14 +294,16 @@ def delete_assessment_cycle(
     *,
     team_id: str = "",
     conn: Any = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | BatchLifecycleCancellation:
     """Delete one archived cycle tree while preserving every source record."""
     normalized_session_id = _normalize_required(session_id, "session")
     normalized_project_id = _normalize_required(project_id, "project")
     normalized_assessment_id = _normalize_required(assessment_id, "id")
     normalized_team_id = str(team_id or "").strip()
 
-    def _delete(active_conn: Any) -> dict[str, Any]:
+    def _delete(
+        active_conn: Any,
+    ) -> dict[str, Any] | BatchLifecycleCancellation:
         row = _load_assessment(
             active_conn,
             normalized_session_id,
@@ -292,6 +315,15 @@ def delete_assessment_cycle(
             raise AssessmentConflict("archived projects are read-only")
         if str(row["status"] or "") != "archived":
             raise AssessmentConflict("only archived assessments can be deleted")
+        cancellation = request_assessment_lifecycle_cancellation_on_conn(
+            active_conn,
+            normalized_session_id,
+            normalized_project_id,
+            normalized_assessment_id,
+            team_id=normalized_team_id,
+        )
+        if cancellation is not None:
+            return cancellation
         preview = assessment_deletion_preview(active_conn, row)
         delete_assessment_reconciliation_on_conn(active_conn, normalized_assessment_id)
         active_conn.execute(
@@ -324,4 +356,10 @@ def delete_assessment_cycle(
     with get_db_connect()() as opened:
         deleted = _delete(opened)
         opened.commit()
+        if isinstance(deleted, BatchLifecycleCancellation):
+            signal_lifecycle_cancellation(
+                deleted,
+                normalized_session_id,
+                team_id=normalized_team_id,
+            )
         return deleted

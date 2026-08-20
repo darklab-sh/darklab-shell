@@ -54,7 +54,17 @@ def normalize_fanout_policy(value: object) -> FanoutPolicy:
     return FanoutPolicy(failure_mode, retries, max_parallel, max_failures)
 
 
-_NON_RETRYABLE_FAILURES = frozenset({"scope_rejected", "cancelled", "permission_denied"})
+_NON_RETRYABLE_FAILURES = frozenset({
+    "cancelled",
+    "feature_unavailable",
+    "permission_denied",
+    "plan_changed",
+    "policy_changed",
+    "profile_unavailable",
+    "scope_rejected",
+    "scope_unavailable",
+    "target_unavailable",
+})
 
 
 def should_retry(policy: FanoutPolicy, *, attempt: int, error_code: str = "") -> bool:

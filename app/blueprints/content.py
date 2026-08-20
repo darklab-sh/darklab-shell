@@ -32,6 +32,7 @@ from services.commands.registry import (
 from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
 from services.intel.registry import app_native_secret_consumers, provider_status_catalog
+from services.assessments.batch.settings import assessment_batch_settings
 from services.cve_risk.store import get_configured_feed_status
 from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
 from services.workflows.user_workflows import list_user_workflows
@@ -117,6 +118,7 @@ def _prompt_label(workspace_enabled: bool) -> str:
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
+    batch_settings = assessment_batch_settings(cfg)
     scheduler_config = cfg.get("scheduler")
     scheduler_default_timezone = "UTC"
     if isinstance(scheduler_config, dict):
@@ -153,6 +155,12 @@ def _frontend_config_payload():
         "assessment_intrusive_actions_enabled": bool(
             cfg.get("assessment_intrusive_actions_enabled", False)
         ),
+        "assessment_batch_limits": {
+            "item_limit": batch_settings.item_limit,
+            "max_parallel": batch_settings.max_parallel,
+            "max_owner_parallel": batch_settings.max_owner_parallel,
+            "max_instance_parallel": batch_settings.max_instance_parallel,
+        },
         "ai_enabled":              bool(cfg.get("ai_enabled", False)),
         "ai_feature_summary":      bool(cfg.get("ai_feature_summary", False)),
         "ai_feature_next_commands": bool(cfg.get("ai_feature_next_commands", False)),

@@ -104,6 +104,10 @@ class TestMetricsEndpoint:
         expected_names = [
             "darklab_app_start_time_seconds",
             "darklab_assessment_active_cycles",
+            "darklab_assessment_batches_active",
+            "darklab_assessment_batch_queue_depth",
+            "darklab_assessment_batches_retained",
+            "darklab_assessment_batch_items_retained",
             "darklab_db_size_bytes",
             "darklab_db_table_rows",
             "darklab_db_fts_orphans",
@@ -287,6 +291,9 @@ class TestMetricsEndpoint:
         )
         app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
         app_metrics.record_workspace_evictions(2, "manual")
+        from services.metrics import assessment_batches as assessment_batch_metrics
+        from services.metrics import assessment_batch_lifecycle as batch_lifecycle_metrics
+        from services.metrics import assessment_batch_observability as batch_observability_metrics
         from services.metrics import assessments as assessment_metrics
         from services.metrics import probes as probe_metrics
         from services.metrics import workflows as workflow_metrics
@@ -303,6 +310,16 @@ class TestMetricsEndpoint:
         assessment_metrics.record_assessment_connector_operation(
             "provider_private", "callback_private", "job_private", float("nan")
         )
+        assessment_batch_metrics.record_assessment_batch_recovery_action("recovered")
+        batch_lifecycle_metrics.record_assessment_batch_action("start", "accepted")
+        batch_observability_metrics.record_assessment_batch_launch("launched", 0.25)
+        batch_observability_metrics.record_assessment_batch_launch("private", 0.5)
+        batch_observability_metrics.record_assessment_batch_rejection("policy_changed")
+        batch_observability_metrics.record_assessment_batch_rejection("private_reason")
+        batch_observability_metrics.record_assessment_batch_deferral(
+            "owner_parallel_limit"
+        )
+        batch_observability_metrics.record_assessment_batch_deferral("private_reason")
         probe_metrics.record_probe_operation("launch", "success", protected=True)
         probe_metrics.record_probe_operation("resolve", "rejected")
         probe_metrics.record_probe_operation("raw_phase", "raw_outcome")
@@ -401,6 +418,33 @@ class TestMetricsEndpoint:
         assert 'darklab_workflow_capture_failures_total{reason="required_missing"}' in body
         assert re.search(r"darklab_workflow_cancellations_total [1-9]", body)
         assert 'darklab_workflow_recovery_actions_total{action="recovered"}' in body
+        assert (
+            'darklab_assessment_batch_recovery_actions_total{action="recovered"}'
+            in body
+        )
+        assert (
+            'darklab_assessment_batch_lifecycle_actions_total{action="start",'
+            'outcome="accepted"}' in body
+        )
+        assert (
+            'darklab_assessment_batch_launch_latency_seconds_bucket{le="0.5",'
+            'outcome="launched"}' in body
+        )
+        assert (
+            'darklab_assessment_batch_launch_latency_seconds_count{outcome="failed"}'
+            in body
+        )
+        assert 'darklab_assessment_batch_rejections_total{reason="policy"}' in body
+        assert 'darklab_assessment_batch_rejections_total{reason="other"}' in body
+        assert (
+            'darklab_assessment_batch_concurrency_deferrals_total{reason="owner"}'
+            in body
+        )
+        assert (
+            'darklab_assessment_batch_concurrency_deferrals_total{reason="other"}'
+            in body
+        )
+        assert "private_reason" not in body
 
 
 class TestMetricsDefinitionDrift:

@@ -483,6 +483,16 @@ class ProjectDigestsConfig(_ConfigModel):
     first_send_lookback_hours: StrictInt = 24
 
 
+class AssessmentBatchesConfig(_ConfigModel):
+    item_limit: StrictInt = Field(default=128, ge=1, le=512)
+    max_active_per_owner: StrictInt = Field(default=3, ge=1, le=8)
+    max_parallel: StrictInt = Field(default=8, ge=1, le=8)
+    max_owner_parallel: StrictInt = Field(default=16, ge=1, le=32)
+    max_instance_parallel: StrictInt = Field(default=32, ge=1, le=64)
+    retention_days: StrictInt = Field(default=30, ge=0, le=3650)
+    max_runtime_seconds: StrictInt = Field(default=14400, ge=60, le=604800)
+
+
 class CveRiskConfig(_ConfigModel):
     bootstrap_enabled: StrictBool = True
     refresh_enabled: StrictBool = False
@@ -860,6 +870,7 @@ _NESTED_CONFIG_MODELS = {
     "scheduler": SchedulerConfig,
     "watchers": WatchersConfig,
     "project_digests": ProjectDigestsConfig,
+    "assessment_batches": AssessmentBatchesConfig,
     "cve_risk": CveRiskConfig,
     "oast_connector": OastConnectorConfig,
     "zap_connector": ZapConnectorConfig,
@@ -1546,6 +1557,15 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "project_digests": {
             "default_cadence_preset": "daily",
             "first_send_lookback_hours": 24,
+        },
+        "assessment_batches": {
+            "item_limit": 128,
+            "max_active_per_owner": 3,
+            "max_parallel": 8,
+            "max_owner_parallel": 16,
+            "max_instance_parallel": 32,
+            "retention_days": 30,
+            "max_runtime_seconds": 14400,
         },
         "cve_risk": {
             "bootstrap_enabled": True,

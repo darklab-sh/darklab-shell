@@ -277,6 +277,14 @@ function _createHistoryEntry(run, isStarred, options = {}) {
       : `Workflow ${run.workflow_execution_id}`;
     meta.appendChild(workflowBadge);
   }
+  if (run.assessment_batch_id) {
+    const batchBadge = _historyMetaKindBadge('assessment-batch', 'batch');
+    const itemIndex = Number(run.assessment_batch_item_index);
+    batchBadge.title = Number.isInteger(itemIndex) && itemIndex >= 0
+      ? `Assessment batch ${run.assessment_batch_id}, item ${itemIndex + 1}`
+      : `Assessment batch ${run.assessment_batch_id}`;
+    meta.appendChild(batchBadge);
+  }
   _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');
   timeEl.textContent = time;

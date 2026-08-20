@@ -872,6 +872,7 @@ def finalize_completed_run(
     owner_tab_id="",
     link_project_id: str | None = "",
     completion_policy: RunCompletionPolicy | None = None,
+    suppress_run_complete_notification: bool = False,
     cfg: Mapping[str, Any] | None = None,
     save_completed_run_fn: Callable = save_completed_run,
 ):
@@ -924,16 +925,17 @@ def finalize_completed_run(
         "project_target_count": int(finalize_summary.get("project_target_count") or 0),
     })
     app_metrics.record_completed_run(original_command, run_kind_for_cmd_type(cmd_type), exit_code, elapsed, capture)
-    enqueue_run_complete(
-        run_id=run_id,
-        session_id=session_id,
-        command=original_command,
-        exit_code=exit_code,
-        run_kind=run_kind_for_cmd_type(cmd_type),
-        team_id=team_id,
-        finalize_summary=finalize_summary,
-        cfg=active_cfg,
-    )
+    if not suppress_run_complete_notification:
+        enqueue_run_complete(
+            run_id=run_id,
+            session_id=session_id,
+            command=original_command,
+            exit_code=exit_code,
+            run_kind=run_kind_for_cmd_type(cmd_type),
+            team_id=team_id,
+            finalize_summary=finalize_summary,
+            cfg=active_cfg,
+        )
     try:
         from services.watchers.finalize import finalize_watcher_run  # noqa: PLC0415
 

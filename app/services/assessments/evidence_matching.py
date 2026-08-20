@@ -24,6 +24,7 @@ from services.intel.canonical import (
     canonical_url,
     parse_canonical_port,
 )
+from services.workflows.execution_kinds import WORKFLOW_EXECUTION_KIND
 
 _DNS_ROOTS = frozenset({"dig", "dnsrecon", "dnsx"})
 _HTTP_ROOTS = frozenset({"curl", "dalfox", "ffuf", "gobuster", "httpx", "katana", "nuclei", "sqlmap"})
@@ -115,8 +116,9 @@ def _scan_observation_identities(conn: Any, run_id: str) -> set[EvidenceIdentity
 def _workflow_actions(conn: Any, run_id: str) -> set[str]:
     rows = conn.execute(
         "SELECT we.workflow_id, wes.step_id FROM workflow_execution_steps wes "
-        "JOIN workflow_executions we ON we.id = wes.execution_id WHERE wes.run_id = ?",
-        (run_id,),
+        "JOIN workflow_executions we ON we.id = wes.execution_id "
+        "WHERE we.execution_kind = ? AND wes.run_id = ?",
+        (WORKFLOW_EXECUTION_KIND, run_id),
     ).fetchall()
     return {
         value

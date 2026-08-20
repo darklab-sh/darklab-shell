@@ -639,6 +639,24 @@ body #history-panel { background: var(--theme-chrome-bg); }
   gap: 7px;
 }
 
+.history-run-provenance-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.history-run-provenance-label {
+  min-width: 0;
+}
+
+.history-run-provenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .history-run-workflow-label {
   line-height: 1.3;
 }

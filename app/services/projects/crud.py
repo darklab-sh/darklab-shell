@@ -11,6 +11,11 @@ import logging
 
 from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
+from services.assessments.batch.lifecycle_guard import (
+    BatchLifecycleCancellation,
+    request_project_lifecycle_cancellation_on_conn,
+    signal_lifecycle_cancellation,
+)
 from services.projects.models import normalize_project_payload
 from services.projects.preferences import clear_active_project_preference
 from services.projects.queries import get_project
@@ -114,6 +119,12 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
             deleted = delete_project(session_id, project_id, team_id=team_id, conn=opened)
             if deleted:
                 opened.commit()
+                if isinstance(deleted, BatchLifecycleCancellation):
+                    signal_lifecycle_cancellation(
+                        deleted,
+                        session_id,
+                        team_id=team_id,
+                    )
             return deleted
     else:
         owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
@@ -123,6 +134,24 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
         ).fetchone()
         if not project:
             return False
+        cancellation = request_project_lifecycle_cancellation_on_conn(
+            conn,
+            session_id,
+            project_id,
+            team_id=team_id,
+        )
+        if cancellation is not None:
+            return cancellation
+        conn.execute(
+            "DELETE FROM assessment_batch_previews WHERE project_id = ?",
+            (project_id,),
+        )
+        conn.execute(
+            "DELETE FROM workflow_executions WHERE project_id = ? "
+            "AND execution_kind = 'assessment_batch' "
+            "AND status IN ('completed', 'failed', 'canceled')",
+            (project_id,),
+        )
         target_rows = conn.execute(
             "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
             (project_id,),

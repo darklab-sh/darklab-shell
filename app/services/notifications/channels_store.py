@@ -356,7 +356,24 @@ def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
         payload["team_id"] = event.team_id
     if event.trigger == TRIGGER_PROJECT_DIGEST:
         payload["project_digest"] = _project_digest_event_context(event.payload)
+    if str(event.payload.get("notification_kind") or "") == "assessment_batch":
+        payload["run_id"] = ""
+        payload["assessment_batch"] = _assessment_batch_event_context(event.payload)
     return payload
+
+
+def _assessment_batch_event_context(payload: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "batch_id": str(payload.get("batch_id") or ""),
+        "project_id": str(payload.get("project_id") or ""),
+        "assessment_id": str(payload.get("assessment_id") or ""),
+        "status": str(payload.get("status") or ""),
+        "url": str(
+            payload.get("assessment_batch_url")
+            or payload.get("assessment_batch_path")
+            or ""
+        ),
+    }
 
 
 def _project_digest_event_context(payload: Mapping[str, Any]) -> dict[str, str]:

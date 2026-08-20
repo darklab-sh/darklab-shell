@@ -4,7 +4,10 @@
 import hashlib
 import io
 import json
+from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -86,6 +89,7 @@ from services.assessments.nuclei_takeover_identity import NUCLEI_TAKEOVER_JSON_P
 from services.assessments.nuclei_takeover_observations import ReviewedNucleiTakeoverTemplate
 from services.assessments.nuclei_takeover_command import reviewed_takeover_command_plan
 from services.assessments.nuclei_recommendation_evidence import (
+    NUCLEI_RECOMMENDATION_MAX_RUNS,
     NucleiTargetSignals,
     load_nuclei_recommendation_signals,
 )
@@ -150,6 +154,10 @@ from services.assessments.takeover_confirmation import (
     NUCLEI_TAKEOVER_CONFIRMATION_VERSION,
     confirm_takeover_with_nuclei,
 )
+from services.assessments.takeover_finding_evidence import (
+    TAKEOVER_EVIDENCE_MAX_RUNS,
+    project_takeover_evidence,
+)
 from services.assessments.web_surface import normalize_httpx_screenshot
 from services.assessments.version_correlation import correlate_version_observation, materialize_version_findings
 from services.assessments.nuclei_profiles import (
@@ -188,6 +196,7 @@ from services.runs.start_contracts import RunStartHandlers
 from services.intel.epss import normalize_epss_rows
 from services.intel.kev import normalize_kev_catalog
 from services.nuclei.provenance import nuclei_template_provenance
+from services.nuclei import template_health
 from services.nuclei.template_cache import (
     NucleiTemplateCacheSnapshot,
     managed_nuclei_template_snapshot,
@@ -523,8 +532,11 @@ def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
         },
     }])
 
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+
     class FakeConn:
-        def execute(self, query, _params):
+        def execute(self, query, params):
+            calls.append((query, params))
             if "e.attributes_json" in query:
                 return SimpleNamespace(fetchall=lambda: [{
                     "id": "ent_port",
@@ -559,6 +571,16 @@ def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
     assert signals.inferred_cve_count == 1
     assert signals.dangling_record_count == 0
     assert signals.truncated is False
+    run_query, run_params = next(
+        (query, params) for query, params in calls if "r.output_preview" in query
+    )
+    assert "LIKE 'httpx %'" not in run_query
+    assert "LIKE 'dnsx %'" not in run_query
+    assert run_params[-3:] == (
+        "httpx %",
+        "dnsx %",
+        NUCLEI_RECOMMENDATION_MAX_RUNS + 1,
+    )
 
 
 def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_runs(
@@ -670,7 +692,10 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         f"{template_dir}/http/exposure.yaml,{'a' * 32};"
         f"{template_dir}/ssl/certificate.yaml,{'b' * 32};"
     )
-    (template_dir / ".checksum").write_text(checksum_rows, encoding="utf-8")
+    checksum_path = template_dir / ".checksum"
+    checksum_path.write_text(checksum_rows, encoding="utf-8")
+    refreshed = datetime(2026, 8, 18, 12, tzinfo=UTC)
+    os.utime(checksum_path, (refreshed.timestamp(), refreshed.timestamp()))
     config_path = tmp_path / ".templates-config.json"
     config_path.write_text(json.dumps({
         "nuclei-templates-directory": str(template_dir),
@@ -684,13 +709,108 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
         release_version="v10.4.3",
         content_digest="sha256:b045f0d45961f8defc264a57b85d22e0f2f6dd964c130f2e5f9e5bd30e95a694",
         manifest_entry_count=2,
+        refreshed_at="2026-08-18T12:00:00Z",
     )
+    health_calls: list[list[str]] = []
+
+    def _healthy_nuclei(args, **_kwargs):
+        health_calls.append(args)
+        if "-version" in args:
+            return subprocess.CompletedProcess(args, 0, "Nuclei Engine Version: v3.4.10", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    template_health.clear_nuclei_template_health_cache()
+    monkeypatch.setattr(template_health.subprocess, "run", _healthy_nuclei)
+    current_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+    )
+    assert current_health.state == "ready"
+    assert current_health.validation_state == "passed"
+    assert current_health.nuclei_version == "v3.4.10"
+    assert current_health.launchable is True
+    assert current_health.public()["refreshed_at"] == "2026-08-18T12:00:00Z"
+    assert template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+    ) == current_health
+    assert len(health_calls) == 2
+    health_calls.clear()
+    prefixed_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=1),
+        run_command=_healthy_nuclei,
+        command_prefix=("sudo", "-u", "scanner"),
+    )
+    assert prefixed_health.launchable is True
+    assert health_calls == [
+        ["sudo", "-u", "scanner", "/usr/local/bin/nuclei", "-version"],
+        [
+            "sudo", "-u", "scanner", "/usr/local/bin/nuclei", "-validate",
+            "-t", str(template_dir), "-ud", str(template_dir),
+            "-disable-update-check", "-no-color", "-silent",
+        ],
+    ]
+    stale_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        current_time=refreshed + timedelta(days=8),
+        run_command=_healthy_nuclei,
+    )
+    assert stale_health.state == "stale"
+    assert stale_health.launchable is True
+    assert stale_health.reason_code == "template_cache_stale"
+
+    def _incompatible_nuclei(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args, 0 if "-version" in args else 1, "v3.4.10", "invalid template",
+        )
+
+    incompatible_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        run_command=_incompatible_nuclei,
+    )
+    assert incompatible_health.state == "incompatible"
+    assert incompatible_health.launchable is False
+    assert incompatible_health.reason_code == "template_validation_failed"
+
+    def _timed_out_nuclei(args, **_kwargs):
+        if "-version" in args:
+            return subprocess.CompletedProcess(args, 0, "v3.4.10", "")
+        raise subprocess.TimeoutExpired(args, 90)
+
+    unavailable_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=template_snapshot,
+        binary_path="/usr/local/bin/nuclei",
+        run_command=_timed_out_nuclei,
+    )
+    assert unavailable_health.state == "unavailable"
+    assert unavailable_health.validation_state == "unavailable"
+    assert unavailable_health.launchable is False
+    missing_health = template_health.managed_nuclei_template_health(
+        template_dir,
+        snapshot=NucleiTemplateCacheSnapshot("missing"),
+        run_command=lambda *_args, **_kwargs: pytest.fail("missing cache must not run Nuclei"),
+    )
+    assert missing_health.state == "missing"
+    assert missing_health.validation_state == "not_run"
+    assert missing_health.launchable is False
     config_path.write_text("[]", encoding="utf-8")
     assert managed_nuclei_template_snapshot(
         template_dir, config_path=config_path,
     ).release_version == ""
     assert managed_nuclei_template_snapshot(tmp_path / "missing").state == "missing"
-    assert "nuclei -update-templates" in nuclei_template_cache_unavailable_reason(
+    assert "managed template refresh" in nuclei_template_cache_unavailable_reason(
         NucleiTemplateCacheSnapshot("missing")
     )
     provenance = nuclei_template_provenance(
@@ -807,7 +927,7 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     )
     unavailable = build_assessment_action_plan(row, target, "prj_nuclei")
     assert unavailable["launchable"] is False
-    assert "nuclei -update-templates" in unavailable["unavailable_reason"]
+    assert "managed template refresh" in unavailable["unavailable_reason"]
     monkeypatch.setattr(
         action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: template_snapshot,
     )
@@ -878,6 +998,222 @@ def test_nuclei_profiles_are_reviewed_explicit_and_safe_by_default(tmp_path, mon
     ) as changed:
         assessment_run_launch_context(plan)
     assert changed.value.code == "nuclei_template_cache_changed"
+
+
+def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypatch):
+    from services.nuclei import template_refresh_worker as worker
+
+    volume = tmp_path / "nuclei-templates"
+    volume.mkdir()
+    live = volume / "current"
+    live.mkdir()
+    old_manifest = f"{live}/http/old.yaml,{'a' * 32};"
+    (live / ".checksum").write_text(old_manifest, encoding="utf-8")
+    live_config_dir = tmp_path / "live-config"
+    live_config_dir.mkdir()
+    live_config = live_config_dir / ".templates-config.json"
+    live_config.write_text(json.dumps({
+        "nuclei-templates-directory": str(live),
+        "nuclei-templates-version": "v10.4.6",
+    }), encoding="utf-8")
+    monkeypatch.setattr(worker, "MANAGED_TEMPLATE_DIR", str(live))
+    monkeypatch.setenv("NUCLEI_CONFIG_DIR", str(live_config_dir))
+
+    validation_return_code = 0
+
+    def fake_run(args, **kwargs):
+        if "-update-templates" in args:
+            stage = Path(args[args.index("-ud") + 1])
+            (stage / "http").mkdir(exist_ok=True)
+            (stage / ".checksum").write_text(
+                f"{stage}/http/new.yaml,{'b' * 32};",
+                encoding="utf-8",
+            )
+            config = Path(kwargs["env"]["XDG_CONFIG_HOME"]) / "nuclei" / ".templates-config.json"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(json.dumps({
+                "nuclei-templates-directory": str(stage),
+                "nuclei-templates-version": "v10.4.7",
+            }), encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0)
+        return subprocess.CompletedProcess(args, validation_return_code)
+
+    monkeypatch.setattr(worker.subprocess, "run", fake_run)
+    stage = tmp_path / "stage-success"
+    stage.mkdir()
+    config_root = tmp_path / "config-success"
+    config_root.mkdir()
+    updated = worker._run("/usr/local/bin/nuclei", stage, config_root)
+
+    assert updated["status"] == "updated"
+    assert updated["release_version"] == "v10.4.7"
+    assert "new.yaml" in (live / ".checksum").read_text(encoding="utf-8")
+    installed_config = json.loads(live_config.read_text(encoding="utf-8"))
+    assert installed_config["nuclei-templates-directory"] == str(live)
+    installed_snapshot = managed_nuclei_template_snapshot(
+        live,
+        config_path=live_config,
+        acquire_lock=False,
+    )
+    assert installed_snapshot.state == "ready"
+    assert installed_snapshot.release_version == "v10.4.7"
+
+    installed_manifest = (live / ".checksum").read_text(encoding="utf-8")
+    validation_return_code = 1
+    failed_stage = tmp_path / "stage-failure"
+    failed_stage.mkdir()
+    failed_config = tmp_path / "config-failure"
+    failed_config.mkdir()
+    failed = worker._run("/usr/local/bin/nuclei", failed_stage, failed_config)
+
+    assert failed == {"status": "failed", "reason_code": "staged_cache_incompatible"}
+    assert (live / ".checksum").read_text(encoding="utf-8") == installed_manifest
+
+
+def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from services.nuclei import template_lock, template_refresh
+    from services.nuclei.template_lock import (
+        NucleiTemplateLockBusy,
+        managed_nuclei_template_lock,
+    )
+    from services.runs.lifecycle import real_command_popen_argv
+
+    existing_lock_path = tmp_path / "existing-nuclei.lock"
+    existing_lock_path.touch(mode=0o660)
+    real_open = template_lock.os.open
+    existing_open_flags = []
+
+    def record_existing_open(path, flags, mode=0o777):
+        existing_open_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    with monkeypatch.context() as lock_patch:
+        lock_patch.setattr(template_lock.os, "open", record_existing_open)
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=existing_lock_path,
+        ):
+            pass
+
+    assert len(existing_open_flags) == 1
+    assert not existing_open_flags[0] & template_lock.os.O_CREAT
+
+    created_lock_path = tmp_path / "created-nuclei.lock"
+    created_open_flags = []
+
+    def record_created_open(path, flags, mode=0o777):
+        created_open_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    with monkeypatch.context() as lock_patch:
+        lock_patch.setattr(template_lock.os, "open", record_created_open)
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=created_lock_path,
+        ):
+            pass
+
+    assert len(created_open_flags) == 2
+    assert not created_open_flags[0] & template_lock.os.O_CREAT
+    assert created_open_flags[1] & template_lock.os.O_CREAT
+    assert created_open_flags[1] & template_lock.os.O_EXCL
+
+    unsafe_lock_path = tmp_path / "unsafe-nuclei.lock"
+    unsafe_lock_path.symlink_to(existing_lock_path)
+    with pytest.raises(template_lock.NucleiTemplateLockError):
+        with managed_nuclei_template_lock(
+            exclusive=False,
+            lock_path=unsafe_lock_path,
+        ):
+            pytest.fail("a symlink must not be accepted as the lock file")
+
+    lock_path = tmp_path / "nuclei.lock"
+    with managed_nuclei_template_lock(exclusive=True, lock_path=lock_path):
+        with pytest.raises(NucleiTemplateLockBusy):
+            with managed_nuclei_template_lock(
+                exclusive=False,
+                lock_path=lock_path,
+            ):
+                pytest.fail("a scan lock must not cross maintenance")
+
+    @contextmanager
+    def fake_lock(**_kwargs):
+        yield 1
+
+    monkeypatch.setattr(template_refresh, "managed_nuclei_template_lock", fake_lock)
+    monkeypatch.setattr(template_refresh, "SCANNER_PREFIX", [])
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "true")
+    calls = []
+
+    def fake_worker(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            json.dumps({
+                "status": "updated",
+                "release_version": "v10.4.7",
+                "content_digest": "sha256:" + "c" * 64,
+            }),
+            "",
+        )
+
+    refreshed = template_refresh.refresh_managed_nuclei_templates(
+        active_batch_exists=lambda: False,
+        run_command=fake_worker,
+    )
+    assert refreshed["status"] == "updated"
+    assert calls[0][0][-2:] == ["-m", "services.nuclei.template_refresh_worker"]
+    assert calls[0][1]["stderr"] is subprocess.DEVNULL
+
+    def failed_worker(args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            json.dumps({"status": "failed", "reason_code": "template_install_failed"}),
+            "",
+        )
+
+    with pytest.raises(
+        template_refresh.NucleiTemplateRefreshError,
+        match="couldn't be installed",
+    ):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=failed_worker,
+        )
+
+    with pytest.raises(template_refresh.NucleiTemplateRefreshError) as active:
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: True,
+            run_command=lambda *_args, **_kwargs: pytest.fail("worker must not run"),
+        )
+    assert active.value.code == "nuclei_template_refresh_batch_active"
+
+    prepared = PreparedRealCommand(
+        registry_command="nuclei -u https://app.example.test",
+        execution_command="nuclei -u https://app.example.test",
+        command="nuclei -ud /tmp/nuclei-templates/current -u https://app.example.test",
+        rewrite_notice=None,
+        validation=cast(Any, None),
+        missing_runtime=None,
+        display_missing_runtime=None,
+        env_overrides={},
+        secret_env_names=[],
+    )
+    digest = "sha256:" + "d" * 64
+    argv = real_command_popen_argv(
+        prepared,
+        nuclei_template_digest=digest,
+        scanner_prefix=(),
+        stdbuf_bin=None,
+        shell_bin="/bin/sh",
+    )
+    assert argv[1:4] == ["-m", "services.nuclei.template_run", "--expected-digest"]
+    assert argv[4:6] == [digest, "--"]
+    assert argv[-3:] == ["/bin/sh", "-c", prepared.command]
 
 
 def test_local_openapi_review_keeps_only_bounded_read_operations_and_internal_refs():
@@ -1718,8 +2054,16 @@ def test_schemathesis_action_options_are_bounded_and_selected_in_project_scope(m
     assert context.reviewed_schema == reviewed
     assert context.public_selection()["selected"]["operation_count"] == 2
     assert calls[0][1][-1] == SCHEMATHESIS_ARTIFACT_OPTION_LIMIT + 1
+    assert calls[0][1][-6:-1] == (
+        "application/json%",
+        "application/openapi+json%",
+        "application/vnd.oai.openapi+json%",
+        "%.json",
+        "%.json",
+    )
     assert "pl.project_id = p.id" in calls[0][0]
     assert "a.byte_size <= ?" in calls[0][0]
+    assert "LIKE 'application/json%'" not in calls[0][0]
 
     overflow_rows = [
         {**row, "id": f"rfa_{index:016x}"}
@@ -2163,6 +2507,23 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
 
         def add_event(self, event):
             self.events.append(event)
+
+    query_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    class EmptyConnection:
+        def execute(self, sql, params):
+            query_calls.append((sql, params))
+            return SimpleNamespace(fetchall=lambda: [])
+
+    project_evidence = project_takeover_evidence(
+        EmptyConnection(), "session-1", "", "project-1", "run-current", [],
+    )
+    assert project_evidence is not None
+    assert "LIKE 'dnsx %'" not in query_calls[0][0]
+    assert query_calls[0][1][-2:] == (
+        "dnsx %",
+        TAKEOVER_EVIDENCE_MAX_RUNS + 1,
+    )
 
     direct_potential = evaluate_takeover_signal({
         "hostname": "app.example.test", "cname_chain": ["app.vendor.test."],

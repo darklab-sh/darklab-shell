@@ -23,8 +23,36 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _assessment_batch_summary(row: dict[str, Any]) -> dict[str, Any] | None:
+    provenance = row.get("assessment_batch")
+    if not isinstance(provenance, dict):
+        return None
+    item = provenance.get("item")
+    if not isinstance(item, dict):
+        return None
+    return {
+        "schema_version": 1,
+        "batch_id": str(provenance.get("batch_id") or ""),
+        "assessment_id": str(provenance.get("assessment_id") or ""),
+        "project_id": str(provenance.get("project_id") or ""),
+        "status": str(provenance.get("status") or ""),
+        "source_batch_id": str(provenance.get("source_batch_id") or ""),
+        "created": provenance.get("created"),
+        "item": {
+            "item_index": _int(item.get("item_index")),
+            "step_id": str(item.get("step_id") or ""),
+            "attempt": _int(item.get("attempt")),
+            "status": str(item.get("status") or ""),
+            "run_id": str(item.get("run_id") or ""),
+            "exit_code": item.get("exit_code"),
+            "check_count": _int(item.get("check_count")),
+        },
+    }
+
+
 def run_summary(row: dict[str, Any]) -> dict[str, Any]:
     run_id = str(row.get("id") or row.get("run_id") or "")
+    assessment_batch = _assessment_batch_summary(row)
     return {
         "id": run_id,
         "command": str(row.get("command") or ""),
@@ -45,6 +73,13 @@ def run_summary(row: dict[str, Any]) -> dict[str, Any]:
         "atlas_finding_count": _int(row.get("atlas_finding_count")),
         "scheduled": _bool(row.get("scheduled")),
         "schedule_id": str(row.get("schedule_id") or ""),
+        "assessment_batch": assessment_batch,
+        "assessment_batch_id": str((assessment_batch or {}).get("batch_id") or ""),
+        "assessment_batch_item_index": (
+            _int(assessment_batch["item"].get("item_index"))
+            if assessment_batch
+            else None
+        ),
     }
 
 

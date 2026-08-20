@@ -1457,7 +1457,7 @@ class TestRewrites:
 
     def test_nuclei_adds_template_dir(self):
         cmd, notice = rewrite_command("nuclei -u https://darklab.sh")
-        assert "-ud /tmp/nuclei-templates" in cmd
+        assert "-ud /tmp/nuclei-templates/current" in cmd
         assert notice is None
 
     def test_nuclei_no_rewrite_if_ud_present(self):

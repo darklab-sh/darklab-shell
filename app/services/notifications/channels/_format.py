@@ -67,6 +67,9 @@ def format_field_value(value: Any) -> str:
 
 
 def notification_title(payload: dict[str, Any]) -> str:
+    if str(payload.get("notification_kind") or "") == "assessment_batch":
+        app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
+        return truncate_text(f"{app_name} assessment batch complete", 120)
     if str(payload.get("trigger") or "") == "project_digest":
         app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
         project_name = str(payload.get("project_name") or "").strip() or "Project"
@@ -80,6 +83,8 @@ def notification_title(payload: dict[str, Any]) -> str:
 
 
 def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    if str(payload.get("notification_kind") or "") == "assessment_batch":
+        return _format_assessment_batch_fields(payload)
     if str(payload.get("trigger") or "") == "project_digest":
         return _format_project_digest_fields(payload)
 
@@ -104,6 +109,28 @@ def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
                 display_value = format_field_value(value)
                 if display_value:
                     fields.append((humanize_key(str(key)), display_value))
+    return fields
+
+
+def _format_assessment_batch_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    summary = payload.get("summary_fields")
+    summary_fields = summary if isinstance(summary, dict) else {}
+    fields: list[tuple[str, str]] = []
+    batch_id = payload.get("batch_id")
+    if batch_id not in ("", None):
+        fields.append(("Batch", truncate_run_id(batch_id)))
+    for key, label in (
+        ("status", "Status"),
+        ("succeeded", "Succeeded"),
+        ("failed", "Failed"),
+        ("unavailable", "Unavailable"),
+        ("canceled", "Canceled"),
+        ("could_not_cancel", "Could Not Cancel"),
+        ("batch_link", "Assessment Batch"),
+    ):
+        value = summary_fields.get(key)
+        if value not in ("", None):
+            fields.append((label, truncate_text(value)))
     return fields
 
 

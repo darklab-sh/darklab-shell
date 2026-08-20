@@ -1560,6 +1560,20 @@ test.describe('project workspace modal', () => {
     await page.getByRole('tab', { name: /Domains\s*1/ }).click()
     await expect(page.locator('#project-explorer-body')).toContainText(fixture.entityValue)
     await expect(page.locator('#project-explorer-body')).toContainText('Auto-promoted: E2E owned domains')
+
+    const entityBody = page.locator('#project-explorer-body')
+    await entityBody.evaluate((node) => {
+      node.style.height = '220px'
+      node.style.overflow = 'auto'
+    })
+    await entityBody.locator('[data-project-action="toggle-project-entity-select"]').click()
+    const entityCheckbox = entityBody.locator('[data-project-entity-select]').first()
+    await entityCheckbox.scrollIntoViewIfNeeded()
+    const scrollBeforeSelection = await entityBody.evaluate(node => node.scrollTop)
+    expect(scrollBeforeSelection).toBeGreaterThan(0)
+    await entityCheckbox.click()
+    await expect(entityBody.locator('.project-entity-selection-count')).toHaveText('1 selected')
+    await expect.poll(() => entityBody.evaluate(node => node.scrollTop)).toBe(scrollBeforeSelection)
   })
 
   test('refreshes an open project when a run stream auto-promotes an Atlas entity', async ({ page }) => {

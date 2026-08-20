@@ -6,7 +6,12 @@
 from flask import jsonify, request
 
 from blueprints import projects as project_routes
+from blueprints.assessment_batch_lifecycle import (
+    assessment_check_filters as _check_filters,
+    batch_lifecycle_pending_response,
+)
 from extensions import limiter
+from services.assessments.batch.lifecycle_guard import BatchLifecycleCancellation
 from services.assessments.contracts import (
     AssessmentConflict,
     AssessmentError,
@@ -34,16 +39,6 @@ def _assessment_error_response(exc: Exception):
     else:
         status = 400
     return jsonify({"error": str(exc)}), status
-
-
-def _check_filters() -> dict[str, str]:
-    return {
-        "category": str(request.args.get("category") or ""),
-        "state": str(request.args.get("state") or ""),
-        "target_type": str(request.args.get("target_type") or ""),
-        "policy_level": str(request.args.get("policy_level") or ""),
-        "evidence_state": str(request.args.get("evidence_state") or ""),
-    }
 
 
 def _audit_details(assessment: dict, *, transition_kind: str, **details):
@@ -191,6 +186,10 @@ def projects_assessments_update(project_id, assessment_id):
         )
     except AssessmentError as exc:
         return _assessment_error_response(exc)
+    if isinstance(change, BatchLifecycleCancellation):
+        return batch_lifecycle_pending_response(
+            change, session_id, team_id=team_id, signal=False
+        )
     assessment = change["assessment"]
     event_type = {
         "complete": AuditEventType.ASSESSMENT_COMPLETE,
@@ -267,6 +266,8 @@ def projects_assessments_delete(project_id, assessment_id):
             team_id=team_id,
             conn=conn,
         )
+        if isinstance(preview, BatchLifecycleCancellation):
+            return preview
         assessment = preview["assessment"]
         counts = preview["will_delete"]
         project_routes.record_event(
@@ -288,6 +289,8 @@ def projects_assessments_delete(project_id, assessment_id):
         deleted = run_project_transaction(_delete)
     except AssessmentError as exc:
         return _assessment_error_response(exc)
+    if isinstance(deleted, BatchLifecycleCancellation):
+        return batch_lifecycle_pending_response(deleted, session_id, team_id=team_id)
     project_routes.log.info("PROJECT_ASSESSMENT_DELETED", extra={
         "ip": project_routes.get_client_ip(),
         "session": project_routes.get_log_session_id(session_id),

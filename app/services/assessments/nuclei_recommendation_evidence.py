@@ -152,13 +152,16 @@ def _load_run_signals(conn, session_id, team_id, project_id, targets, signals) -
         "SELECT r.id, r.output_preview FROM project_links pl JOIN runs r ON r.id = pl.entity_id ",
         "WHERE pl.project_id = ? AND pl.entity_type = 'run' AND ",
         owner_sql,
-        " AND (r.command = 'httpx' OR r.command LIKE 'httpx %' ",
-        "OR r.command = 'dnsx' OR r.command LIKE 'dnsx %') ",
+        " AND (r.command = 'httpx' OR r.command LIKE ? ",
+        "OR r.command = 'dnsx' OR r.command LIKE ?) ",
         "ORDER BY COALESCE(r.finished, r.started) DESC, r.id DESC LIMIT ?",
     ))
     rows = conn.execute(
         query,
-        (project_id, *owner_params, NUCLEI_RECOMMENDATION_MAX_RUNS + 1),
+        (
+            project_id, *owner_params, "httpx %", "dnsx %",
+            NUCLEI_RECOMMENDATION_MAX_RUNS + 1,
+        ),
     ).fetchall()
     dialect = dialect_for_backend(get_db_backend())
     events: list[dict[str, Any]] = []

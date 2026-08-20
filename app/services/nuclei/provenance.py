@@ -19,7 +19,7 @@ def _managed_template_dir() -> str:
     configured = os.environ.get("NUCLEI_TEMPLATES_DIR")
     if configured:
         return str(PurePosixPath(configured))
-    return str(PurePosixPath(os.sep, "tmp", "nuclei-templates"))
+    return str(PurePosixPath(os.sep, "tmp", "nuclei-templates", "current"))
 
 
 MANAGED_TEMPLATE_DIR = _managed_template_dir()

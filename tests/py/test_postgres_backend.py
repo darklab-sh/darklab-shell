@@ -566,6 +566,10 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0071",
         "0072",
         "0073",
+        "0074",
+        "0075",
+        "0076",
+        "0077",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -1663,6 +1667,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         {"status": "completed"},
         conn=conn,
     )
+    assert isinstance(completed, dict)
     assert completed["assessment"]["completed_at"] is not None
     update_assessment_cycle(
         "assessment-lifecycle",
@@ -1687,6 +1692,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         "asm-lifecycle",
         conn=conn,
     )
+    assert isinstance(deleted, dict)
     assert deleted["source_records_deleted"] is False
     assert conn.execute(
         "SELECT id FROM project_assessments WHERE id = 'asm-lifecycle'"
@@ -3996,7 +4002,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "SELECT table_name, column_name, data_type FROM information_schema.columns "
         "WHERE table_schema = current_schema() AND "
         "((table_name = 'workflow_executions' AND column_name IN "
-        "('definition_snapshot', 'input_values', 'variables')) OR "
+        "('execution_kind', 'definition_snapshot', 'input_values', 'variables')) OR "
         "(table_name = 'workflow_execution_steps' AND column_name = 'capture_names') OR "
         "(table_name = 'workflow_execution_children' AND column_name IN "
         "('created', 'started', 'finished')))"
@@ -4006,6 +4012,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         for row in workflow_column_rows
     }
     assert workflow_column_types == {
+        ("workflow_executions", "execution_kind"): "text",
         ("workflow_executions", "definition_snapshot"): "jsonb",
         ("workflow_executions", "input_values"): "jsonb",
         ("workflow_executions", "variables"): "jsonb",
@@ -4026,6 +4033,9 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "idx_workflow_executions_personal_updated",
         "idx_workflow_executions_team_updated",
         "idx_workflow_executions_active",
+        "idx_workflow_executions_kind_personal_updated",
+        "idx_workflow_executions_kind_team_updated",
+        "idx_workflow_executions_kind_active",
         "idx_workflow_execution_steps_execution_step",
         "idx_workflow_execution_steps_execution_order",
         "idx_workflow_execution_steps_run",
@@ -4107,6 +4117,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
             }],
         },
     )
+    workflow = json.loads(workflow_resp.data)["workflow"]
     playbook = json.loads(playbook_resp.data)["workflow"]
     execution_resp = client.post(
         "/workflow-executions",
@@ -4152,8 +4163,8 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         (session_id,),
     ).fetchone()
     workflows_row = conn.execute(
-        "SELECT inputs, steps FROM user_workflows WHERE session_id = %s",
-        (session_id,),
+        "SELECT inputs, steps FROM user_workflows WHERE session_id = %s AND id = %s",
+        (session_id, workflow["id"]),
     ).fetchone()
     starred_count = conn.execute(
         "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = %s",
@@ -4185,7 +4196,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     assert int(starred_count) == 1
     assert workflows_row["inputs"][0]["id"] == "domain"
     assert workflows_row["steps"][0]["cmd"] == "host {{domain}}"
-    assert json.loads(workflow_resp.data)["workflow"]["steps"][0]["cmd"] == "host {{domain}}"
+    assert workflow["steps"][0]["cmd"] == "host {{domain}}"
 
     from core.database import delete_run_artifacts
     from services.workflows.storage import get_execution, list_executions
@@ -4868,7 +4879,15 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core import database as core_database
     from services.atlas.materializer import materialize_run_entities
+    from services.assessments.base_action_catalog import ACTIONS
+    from services.assessments.probe_runtime import ProbePlanningRuntime
+    from services.assessments.batch.claim import claim_next_batch_item
+    from services.assessments.batch.notifications import enqueue_terminal_batch_summary
+    from services.assessments.batch.retention import prune_terminal_assessment_batches
+    from services.assessments.batch.start import start_assessment_batch
     from services.assessments.coverage import reconcile_run_evidence_on_conn
+    from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
+    from services.nuclei.template_health import NucleiTemplateHealth
     from services.projects import findings as project_findings
 
     conn = postgres_schema.conn
@@ -4879,6 +4898,30 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    def _batch_runtime():
+        snapshot = NucleiTemplateCacheSnapshot(
+            "ready", "v10.4.7", "sha256:" + "1" * 64, 100,
+            "2026-08-18T12:00:00Z",
+        )
+        return ProbePlanningRuntime(
+            available_features=frozenset(
+                {*ACTIONS, "reviewed_nse_profiles", "managed_nuclei_templates"}
+            ),
+            intrusive_actions_enabled=True,
+            template_snapshot=snapshot,
+            template_health=NucleiTemplateHealth(
+                "ready", snapshot, "passed", "v3.4.10"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "services.assessments.batch.preview_draft.probe_planning_runtime",
+        _batch_runtime,
+    )
+    monkeypatch.setattr(
+        "services.assessments.batch.retry_draft.probe_planning_runtime",
+        _batch_runtime,
+    )
 
     client = app.test_client()
     bootstrap_session_id = str(uuid.uuid4())
@@ -4972,12 +5015,134 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     assessment = json.loads(assessment_resp.data)
     assessment_id = assessment["assessment"]["id"]
+    batch_preview_resp = client.post(
+        f"/projects/{project['id']}/assessments/{assessment_id}/batch-previews",
+        headers=browser_headers,
+        json={},
+    )
+    batch_preview = json.loads(batch_preview_resp.data)["preview"]
+    started_batch = start_assessment_batch(
+        session_id,
+        project["id"],
+        assessment_id,
+        preview_id=batch_preview["preview_id"],
+        plan_digest=batch_preview["plan_digest"],
+        confirmed=True,
+    )
+    replayed_batch = start_assessment_batch(
+        session_id,
+        project["id"],
+        assessment_id,
+        preview_id=batch_preview["preview_id"],
+        plan_digest=batch_preview["plan_digest"],
+        confirmed=True,
+    )
+    claimed_batch_item = cast(
+        dict[str, Any], claim_next_batch_item(str(started_batch["batch_id"]))
+    )
+    claimed_mapping_rows = conn.execute(
+        "SELECT check_id FROM assessment_batch_item_checks "
+        "WHERE batch_id = %s AND item_index = %s",
+        (started_batch["batch_id"], claimed_batch_item["item_index"]),
+    ).fetchall()
+    claimed_mapped_check_ids = {str(row["check_id"]) for row in claimed_mapping_rows}
+    conn.execute(
+        "UPDATE workflow_execution_children SET status = 'failed', "
+        "error_code = 'launch_failed' WHERE execution_id = %s",
+        (started_batch["batch_id"],),
+    )
+    conn.execute(
+        "UPDATE workflow_execution_steps SET status = 'failed' "
+        "WHERE execution_id = %s",
+        (started_batch["batch_id"],),
+    )
+    conn.execute(
+        "UPDATE workflow_executions SET status = 'failed' WHERE id = %s",
+        (started_batch["batch_id"],),
+    )
+    nuclei_failure_run_id = "run-pg-nuclei-failure-" + uuid.uuid4().hex
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, "
+        "exit_code, output_search_text) VALUES (%s, %s, 'external', %s, %s, %s, 1, %s)",
+        (
+            nuclei_failure_run_id,
+            session_id,
+            "nuclei -u https://darklab.sh",
+            "2026-04-17 12:00:00",
+            "2026-04-17 12:01:00",
+            "[FTL] Could not load templates from the managed cache",
+        ),
+    )
+    conn.execute(
+        "UPDATE assessment_batch_items SET action_id = 'nuclei', "
+        "action_key = 'command:nuclei' WHERE batch_id = %s AND item_index = %s",
+        (started_batch["batch_id"], claimed_batch_item["item_index"]),
+    )
+    conn.execute(
+        "UPDATE workflow_execution_children SET run_id = %s, exit_code = 1, "
+        "error_code = 'child_failed', finished = %s WHERE id = %s",
+        (
+            nuclei_failure_run_id,
+            "2026-04-17 12:01:00",
+            claimed_batch_item["child"]["id"],
+        ),
+    )
+    conn.execute(
+        "INSERT INTO notification_channels "
+        "(id, session_token, team_id, kind, label, secrets_json, config_json, "
+        "triggers_json, muted, created, updated) VALUES "
+        "('ntc_postgres_batch', %s, '', 'webhook', 'Assessment batch', "
+        "'{}'::jsonb, '{}'::jsonb, '[\"run_complete\"]'::jsonb, false, %s, %s)",
+        (session_id, "2026-08-17 12:00:00", "2026-08-17 12:00:00"),
+    )
+    conn.commit()
+    postgres_batch_diagnosis_resp = client.get(
+        f"/assessment-batches/{started_batch['batch_id']}",
+        headers=browser_headers,
+    )
+    postgres_batch_notification = enqueue_terminal_batch_summary(
+        str(started_batch["batch_id"])
+    )
+    replayed_postgres_batch_notification = enqueue_terminal_batch_summary(
+        str(started_batch["batch_id"])
+    )
+    postgres_batch_notification_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM notification_events "
+        "WHERE channel_id = 'ntc_postgres_batch' AND run_id = %s",
+        (started_batch["batch_id"],),
+    ).fetchone()["n"]
+    retry_preview_resp = client.post(
+        f"/api/v1/projects/{project['id']}/assessment-batches/"
+        f"{started_batch['batch_id']}/retry-previews",
+        headers=api_headers,
+        json={},
+    )
+    retry_preview = json.loads(retry_preview_resp.data)["preview"]
+    retry_batch = start_assessment_batch(
+        session_id,
+        project["id"],
+        assessment_id,
+        preview_id=retry_preview["preview_id"],
+        plan_digest=retry_preview["plan_digest"],
+        confirmed=True,
+        source_batch_id=str(started_batch["batch_id"]),
+    )
+    api_batch_preview_resp = client.get(
+        f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}",
+        headers=api_headers,
+    )
+    api_batch_items_resp = client.get(
+        f"/api/v1/assessment-batch-previews/{batch_preview['preview_id']}/items",
+        headers=api_headers,
+    )
     active_resp = client.post(
         "/projects/active",
         headers=browser_headers,
         json={"project_id": project["id"]},
     )
     run_id = "run-" + uuid.uuid4().hex
+    claimed_display_command = str(claimed_batch_item["item"]["display_command"])
+    claimed_command_root = claimed_display_command.split(maxsplit=1)[0]
     conn.execute(
         """
         INSERT INTO runs (
@@ -4989,11 +5154,20 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (
             run_id,
             session_id,
-            "nmap -sT -sV darklab.sh",
+            claimed_display_command,
             "2026-05-17T00:00:00Z",
             "2026-05-17T00:01:00Z",
             "[]",
             "darklab.sh",
+        ),
+    )
+    conn.execute(
+        "UPDATE workflow_execution_children SET run_id = %s, status = 'succeeded', "
+        "exit_code = 0, error_code = '', finished = %s WHERE id = %s",
+        (
+            run_id,
+            "2026-05-17T00:01:00Z",
+            claimed_batch_item["child"]["id"],
         ),
     )
     conn.commit()
@@ -5090,6 +5264,13 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, "2026-05-17T00:00:03Z"),
         )
         assessment_reconciliation = reconcile_run_evidence_on_conn(compat_conn, run_id)
+        reconciled_check_ids = {
+            str(row["check_id"])
+            for row in compat_conn.execute(
+                "SELECT check_id FROM project_assessment_evidence WHERE evidence_id = ?",
+                (run_id,),
+            ).fetchall()
+        }
     conn.commit()
     run_entity_preview_resp = client.post(
         f"/projects/{project['id']}/links/run-entities/preview",
@@ -5100,7 +5281,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     targets_resp = client.get(f"/projects/{project['id']}/targets", headers=browser_headers)
     links_resp = client.get(f"/projects/{project['id']}/links", headers=browser_headers)
     findings_resp = client.get(
-        f"/projects/{project['id']}/findings?command_root=nmap&severity=high&scope=finding",
+        f"/projects/{project['id']}/findings?command_root={claimed_command_root}"
+        "&severity=high&scope=finding",
         headers=browser_headers,
     )
     findings_review_resp = client.post(
@@ -5129,6 +5311,26 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
         headers=api_headers,
     )
+    browser_history_detail_resp = client.get(
+        f"/history/{run_id}?json=1",
+        headers=browser_headers,
+    )
+    project_runs_resp = client.get(
+        f"/projects/{project['id']}/runs",
+        headers=browser_headers,
+    )
+    api_history_detail_resp = client.get(
+        f"/api/v1/history/{run_id}",
+        headers=api_headers,
+    )
+    api_history_page_resp = client.get(
+        "/api/v1/history?limit=10",
+        headers=api_headers,
+    )
+    active_assessment_plan_resp = client.get(
+        "/history/active?include_assessment_batches=1",
+        headers=browser_headers,
+    )
     http_profile_delete_resp = client.delete(
         f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
         headers=browser_headers,
@@ -5141,6 +5343,28 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         "SELECT attributes_json FROM entities WHERE session_id = %s AND type = 'port' AND canonical_value = %s",
         (session_id, "darklab.sh:443/tcp"),
     ).fetchone()
+    conn.execute(
+        "UPDATE workflow_executions SET status = 'failed', finished = %s "
+        "WHERE id IN (%s, %s)",
+        (
+            "2026-05-01 00:00:00",
+            started_batch["batch_id"],
+            retry_batch["batch_id"],
+        ),
+    )
+    conn.commit()
+    pruned_batches = prune_terminal_assessment_batches(
+        cfg={"assessment_batches": {"retention_days": 30}},
+        now=datetime(2026, 8, 17, tzinfo=timezone.utc),
+    )
+    retained_batch_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM assessment_batches WHERE execution_id IN (%s, %s)",
+        (started_batch["batch_id"], retry_batch["batch_id"]),
+    ).fetchone()["n"]
+    retained_run_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM runs WHERE id = %s",
+        (run_id,),
+    ).fetchone()["n"]
 
     assert token_resp.status_code == 200
     assert command_catalog_resp.status_code == 200
@@ -5171,8 +5395,34 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     }
     assert json.loads(http_profile_update_resp.data)["profile"]["enabled"] is False
     assert assessment_resp.status_code == 201
+    assert batch_preview_resp.status_code == 201
+    assert batch_preview["selected_item_count"] >= 1
+    assert started_batch["item_count"] == batch_preview["selected_item_count"]
+    assert replayed_batch["batch_id"] == started_batch["batch_id"]
+    assert claimed_batch_item["status"] == "claimed"
+    assert claimed_batch_item["item"]["display_command"]
+    postgres_batch_diagnosis = json.loads(postgres_batch_diagnosis_resp.data)["batch"]
+    assert postgres_batch_diagnosis_resp.status_code == 200
+    assert postgres_batch_diagnosis["diagnostics"][0]["code"] == (
+        "nuclei_template_loading_failed"
+    )
+    assert postgres_batch_diagnosis["diagnostics"][0]["affected_command_count"] == 1
+    assert postgres_batch_notification == replayed_postgres_batch_notification
+    assert int(postgres_batch_notification_count) == 1
+    assert retry_preview_resp.status_code == 201
+    assert retry_preview["source_batch_id"] == started_batch["batch_id"]
+    assert 1 <= retry_preview["selected_item_count"] <= started_batch["item_count"]
+    assert retry_batch["source_batch_id"] == started_batch["batch_id"]
+    assert retry_batch["batch_id"] != started_batch["batch_id"]
+    assert json.loads(api_batch_preview_resp.data)["preview"] == batch_preview
+    api_batch_items = json.loads(api_batch_items_resp.data)
+    assert len(api_batch_items["items"]) == batch_preview["candidate_item_count"]
+    assert api_batch_items["next_cursor"] is None
     assert assessment_reconciliation["checks_matched"] >= 1
     assert assessment_reconciliation["evidence_linked"] >= 1
+    assert assessment_reconciliation["checks_considered"] == len(claimed_mapped_check_ids)
+    assert reconciled_check_ids
+    assert reconciled_check_ids <= claimed_mapped_check_ids
     assert browser_assessment_resp.status_code == 200
     browser_assessment = json.loads(browser_assessment_resp.data)
     assert browser_assessment["checks"]["total"] >= 1
@@ -5181,12 +5431,40 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert json.loads(api_assessment_list_resp.data)["assessments"][0]["id"] == assessment_id
     assert api_assessment_detail_resp.status_code == 200
     api_assessment = json.loads(api_assessment_detail_resp.data)
-    service_check = next(
-        check for check in api_assessment["checks"]["checks"]
-        if check["check_key"] == "service_discovery"
+    api_checks_by_id = {
+        check["id"]: check for check in api_assessment["checks"]["checks"]
+    }
+    assert all(
+        api_checks_by_id[check_id]["state"] in {"covered", "needs_review"}
+        for check_id in reconciled_check_ids
     )
-    assert service_check["state"] == "covered"
-    assert service_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
+    reconciled_check = api_checks_by_id[sorted(reconciled_check_ids)[0]]
+    assert reconciled_check["evidence_previews"]["evidence"][0]["evidence_id"] == run_id
+    assessment_provenance = reconciled_check["evidence_previews"]["evidence"][0][
+        "assessment_batch"
+    ]
+    assert assessment_provenance["batch_id"] == started_batch["batch_id"]
+    assert assessment_provenance["item"]["check_count"] >= 1
+    browser_history_detail = json.loads(browser_history_detail_resp.data)
+    assert browser_history_detail["assessment_batch"] == assessment_provenance
+    assert json.loads(project_runs_resp.data)["runs"][0]["assessment_batch"] == (
+        assessment_provenance
+    )
+    api_history_detail = json.loads(api_history_detail_resp.data)["run"]
+    assert api_history_detail["assessment_batch"] == assessment_provenance
+    assert api_history_detail["assessment_batch_id"] == started_batch["batch_id"]
+    assert api_history_detail["assessment_batch_item_index"] == 0
+    assert json.loads(api_history_page_resp.data)["runs"][0]["assessment_batch"] == (
+        assessment_provenance
+    )
+    active_assessment_plans = json.loads(active_assessment_plan_resp.data)[
+        "assessment_batches"
+    ]["batches"]
+    assert [item["batch_id"] for item in active_assessment_plans] == [
+        retry_batch["batch_id"]
+    ]
+    assert active_assessment_plans[0]["project_id"] == project["id"]
+    assert active_assessment_plans[0]["progress"]["total"] == retry_batch["item_count"]
     assert http_profile_delete_resp.status_code == 200
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201
@@ -5227,6 +5505,9 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
     assert port_row is not None
     assert port_row["attributes_json"] == {"service": "https", "version": "nginx"}
+    assert pruned_batches == 2
+    assert retained_batch_count == 0
+    assert retained_run_count == 1
 
 
 @pytest.mark.postgres
@@ -5252,7 +5533,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(
-        "services.assessments.probe_service.resolve_runtime_command",
+        "services.assessments.probe_runtime.resolve_runtime_command",
         lambda action_id: action_id if action_id in {"httpx", "ping"} else None,
     )
     monkeypatch.setattr(http_profile_runtime, "_scanner_user_exists", lambda: False)

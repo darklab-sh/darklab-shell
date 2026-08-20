@@ -9,6 +9,10 @@ from typing import Any
 
 from prometheus_client import Counter, Histogram
 
+from services.metrics import assessment_batch_lifecycle as assessment_batch_lifecycle_metrics
+from services.metrics import assessment_batch_observability as assessment_batch_observability_metrics
+from services.metrics import assessment_batches as assessment_batch_metrics
+
 
 WORKFLOW_DURATION_BUCKETS = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0, 3600.0, 14400.0)
 WORKFLOW_EXECUTION_OUTCOMES = frozenset({"completed", "failed", "canceled"})
@@ -81,6 +85,13 @@ LABEL_CARDINALITY_POLICIES: dict[str, dict[str, dict[str, Any]]] = {
         "action": {"kind": "enum", "values": WORKFLOW_RECOVERY_ACTIONS, "fallback": "failed"},
     },
 }
+LABEL_CARDINALITY_POLICIES.update(assessment_batch_metrics.LABEL_CARDINALITY_POLICIES)
+LABEL_CARDINALITY_POLICIES.update(
+    assessment_batch_lifecycle_metrics.LABEL_CARDINALITY_POLICIES
+)
+LABEL_CARDINALITY_POLICIES.update(
+    assessment_batch_observability_metrics.LABEL_CARDINALITY_POLICIES
+)
 
 METRIC_DEFINITIONS = (
     WORKFLOW_EXECUTIONS_FINISHED,
@@ -90,8 +101,15 @@ METRIC_DEFINITIONS = (
     WORKFLOW_CAPTURE_FAILURES,
     WORKFLOW_CANCELLATIONS,
     WORKFLOW_RECOVERY_ACTIONS_TOTAL,
+    *assessment_batch_metrics.METRIC_DEFINITIONS,
+    *assessment_batch_lifecycle_metrics.METRIC_DEFINITIONS,
+    *assessment_batch_observability_metrics.METRIC_DEFINITIONS,
 )
-HISTOGRAM_DEFINITIONS = (WORKFLOW_EXECUTION_DURATION, WORKFLOW_STEP_DURATION)
+HISTOGRAM_DEFINITIONS = (
+    WORKFLOW_EXECUTION_DURATION,
+    WORKFLOW_STEP_DURATION,
+    *assessment_batch_observability_metrics.HISTOGRAM_DEFINITIONS,
+)
 
 
 def _enum(value: str, allowed: frozenset[str], fallback: str) -> str:

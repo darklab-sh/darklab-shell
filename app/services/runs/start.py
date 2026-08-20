@@ -42,6 +42,7 @@ def start_brokered_run(
     run_created_hook: Callable[[str, object | None], None] | None = None,
     run_finalized_hook: Callable[[str, dict[str, Any]], None] | None = None,
     run_cleanup_hook: Callable[[], None] | None = None,
+    suppress_run_complete_notification: bool = False,
 ) -> BrokeredRunStartResult:
     output_signal_context = validated_run_output_signal_context(output_signal_context)
     completion_policy = completion_policy_for_signal_context(
@@ -121,7 +122,6 @@ def start_brokered_run(
             status=private_data.status_for_exit_code(exit_code),
             exit_code=exit_code,
         )
-
     prepared_real = private_data.prepare_real_command(
         handlers,
         original_command,
@@ -163,7 +163,6 @@ def start_brokered_run(
             status="failed",
             exit_code=127,
         )
-
     start_kwargs = real_start_kwargs(
         owner_client_id=owner_client_id,
         owner_tab_id=owner_tab_id,
@@ -213,6 +212,7 @@ def start_brokered_run(
             "owner_tab_id": owner_tab_id,
             "link_project_id": link_project_id,
             "run_finalized_hook": run_finalized_hook,
+            "suppress_run_complete_notification": suppress_run_complete_notification,
             **({"completion_policy": completion_policy} if completion_policy else {}),
             **({"run_cleanup_hook": run_cleanup_hook} if run_cleanup_hook else {}),
         },

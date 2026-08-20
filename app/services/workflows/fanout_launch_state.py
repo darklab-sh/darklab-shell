@@ -13,6 +13,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.workflows.fanout_checkpoint import FanoutCheckpoint, checkpoint_from_payload
 from services.workflows.fanout_child_failures import resolve_failed_fanout_child
+from services.workflows.fanout_kind_events import record_child_settled_on_conn
 from services.workflows.fanout_parent_completion import finalize_fanout_parent_on_conn
 
 
@@ -33,7 +34,8 @@ def _begin_locked(conn: Any) -> str:
 def _context(conn: Any, child_id: str, lock_sql: str) -> Any:
     return conn.execute(
         "SELECT c.*, s.status AS parent_status, s.started AS parent_started, "
-        "s.fanout_checkpoint, e.status AS execution_status, e.definition_snapshot "
+        "s.fanout_checkpoint, e.status AS execution_status, e.execution_kind, "
+        "e.definition_snapshot "
         "FROM workflow_execution_children c "
         "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
         "AND s.step_id = c.step_id "
@@ -109,6 +111,13 @@ def fail_launching_fanout_child(
             now=finished,
         )
         _save_checkpoint(conn, row, resolution.checkpoint)
+        record_child_settled_on_conn(
+            conn,
+            row,
+            status="failed",
+            error_code=normalized_error,
+            retry_child_id=resolution.retry_child_id,
+        )
         parent_transition = finalize_fanout_parent_on_conn(
             conn,
             row,
@@ -138,7 +147,7 @@ def finalize_empty_fanout_parent(
         row = conn.execute(
             "SELECT s.execution_id, s.step_id, s.status AS parent_status, "
             "s.started AS parent_started, s.fanout_checkpoint, "
-            "e.status AS execution_status, e.definition_snapshot "
+            "e.status AS execution_status, e.execution_kind, e.definition_snapshot "
             "FROM workflow_execution_steps s "
             "JOIN workflow_executions e ON e.id = s.execution_id "
             "WHERE s.execution_id = ? AND s.step_id = ?" + lock_sql,  # nosec

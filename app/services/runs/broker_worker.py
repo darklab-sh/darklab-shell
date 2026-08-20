@@ -143,6 +143,7 @@ def brokered_real_run_worker(
     completion_policy: RunCompletionPolicy | None = None,
     run_finalized_hook=None,
     run_cleanup_hook=None,
+    suppress_run_complete_notification: bool = False,
     cfg: Mapping[str, Any] | None = None,
     trufflehog_output_filter_cls: Callable[[str], Any],
     publish_broker_captured_line_fn: Callable[..., Any],
@@ -352,6 +353,8 @@ def brokered_real_run_worker(
         }
         if completion_policy is not None:
             finalize_kwargs["completion_policy"] = completion_policy
+        if suppress_run_complete_notification:
+            finalize_kwargs["suppress_run_complete_notification"] = True
         finalize_info = finalize_completed_run_fn(
             run_id,
             session_id,

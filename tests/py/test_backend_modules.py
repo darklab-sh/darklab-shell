@@ -2969,6 +2969,10 @@ class TestLoadConfig:
                       max_per_session: 7
                     project_digests:
                       default_cadence_preset: weekly
+                    assessment_batches:
+                      item_limit: 64
+                      max_parallel: 4
+                      retention_days: 14
                     zap_connector:
                       enabled: true
                       base_url: https://zap.example.test/
@@ -3007,6 +3011,11 @@ class TestLoadConfig:
         assert cfg.get("project_digests", {}).get("default_cadence_preset") == "weekly"
         assert cfg["project_digests"]["first_send_lookback_hours"] == 24
         assert cfg.project_digests.default_cadence_preset == "weekly"
+        assert cfg["assessment_batches"]["item_limit"] == 64
+        assert cfg["assessment_batches"]["max_active_per_owner"] == 3
+        assert cfg["assessment_batches"]["max_parallel"] == 4
+        assert cfg["assessment_batches"]["retention_days"] == 14
+        assert cfg.assessment_batches.max_runtime_seconds == 14400
         assert cfg["zap_connector"] == {
             "enabled": True,
             "base_url": "https://zap.example.test",
@@ -8175,6 +8184,10 @@ class TestPostgresMigrations:
             "0071",
             "0072",
             "0073",
+            "0074",
+            "0075",
+            "0076",
+            "0077",
         ]
         for table_name in (
             "runs",
@@ -9505,7 +9518,7 @@ class TestPostgresMigrations:
         )
 
         future_delta = Migration(
-            "0074",
+            "9999",
             "dialect_specific_guard_fixture",
             statements=(),
             sqlite_statements=(
@@ -9557,7 +9570,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0073"
+        assert rows[-1]["version"] == "0077"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10021,6 +10034,10 @@ class TestPostgresMigrations:
             "0071",
             "0072",
             "0073",
+            "0074",
+            "0075",
+            "0076",
+            "0077",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10058,7 +10075,11 @@ class TestPostgresMigrations:
         assert "0071" in conn.applied_versions
         assert "0072" in conn.applied_versions
         assert "0073" in conn.applied_versions
-        assert conn.commit_count == 35
+        assert "0074" in conn.applied_versions
+        assert "0075" in conn.applied_versions
+        assert "0076" in conn.applied_versions
+        assert "0077" in conn.applied_versions
+        assert conn.commit_count == 39
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -10211,7 +10232,7 @@ class TestPostgresMigrations:
         from core.migrations.runner import Migration, run_migrations
 
         future_delta = Migration(
-            "0074",
+            "9999",
             "post_baseline_delta",
             statements=(),
             sqlite_statements=("CREATE TABLE post_baseline_delta (id TEXT PRIMARY KEY)",),
@@ -10236,9 +10257,9 @@ class TestPostgresMigrations:
         finally:
             conn.close()
 
-        assert applied == [*[migration.version for migration in MIGRATIONS], "0074"]
+        assert applied == [*[migration.version for migration in MIGRATIONS], "9999"]
         assert table_exists is not None
-        assert "0074" in versions
+        assert "9999" in versions
         migration_events = [
             call for call in log_info.call_args_list
             if call.args and call.args[0] == "MIGRATION_APPLIED"
@@ -20396,22 +20417,8 @@ class TestDerivedCommandRegistry:
                         session_id=session_id,
                         cfg=cfg,
                     )
-                    assert nuclei_update.allowed, nuclei_update.reason
-                    rewritten_update, update_notice = commands.rewrite_command(
-                        nuclei_update.exec_command,
-                        session_id=session_id,
-                        cfg=cfg,
-                    )
-                    assert update_notice is None
-                    update_tokens = commands.split_command_argv(
-                        rewritten_update
-                    )
-                    assert update_tokens[0] == "nuclei"
-                    assert "-ud" in update_tokens
-                    assert all(
-                        not token.startswith("XDG_CONFIG_HOME=")
-                        for token in update_tokens
-                    )
+                    assert not nuclei_update.allowed
+                    assert "Command not allowed" in nuclei_update.reason
 
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
@@ -21978,7 +21985,7 @@ class TestRewriteCaseInsensitive:
 
     def test_nuclei_uppercase(self):
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
-        assert "-ud /tmp/nuclei-templates" in cmd
+        assert "-ud /tmp/nuclei-templates/current" in cmd
 
 
 # ── run broker event storage ─────────────────────────────────────────────────
@@ -24869,8 +24876,8 @@ class TestOutputSignals:
                 "schema_version": 1,
                 "tool": "nuclei",
                 "source_kind": "managed_cache",
-                "source_label": "Managed /tmp/nuclei-templates cache",
-                "update_directory": "/tmp/nuclei-templates",
+                "source_label": "Managed /tmp/nuclei-templates/current cache",
+                "update_directory": "/tmp/nuclei-templates/current",
             },
         }
 
@@ -30056,7 +30063,7 @@ class TestDatabaseInit:
         payload = "\n".join((
             json.dumps({
                 "template-id": "ssl/expired-cert",
-                "template-path": "/tmp/nuclei-templates/ssl/expired-cert.yaml",
+                "template-path": "/tmp/nuclei-templates/current/ssl/expired-cert.yaml",
                 "matched-at": "https://darklab.sh",
                 "info": {
                     "name": "Expired TLS certificate",
@@ -30083,7 +30090,9 @@ class TestDatabaseInit:
         assert result.findings[0].external_id == "ssl/expired-cert"
         assert result.findings[0].severity == "high"
         assert result.findings[0].source_detail["template_id"] == "ssl/expired-cert"
-        assert result.findings[0].source_detail["template_path"] == "/tmp/nuclei-templates/ssl/expired-cert.yaml"
+        assert result.findings[0].source_detail["template_path"] == (
+            "/tmp/nuclei-templates/current/ssl/expired-cert.yaml"
+        )
         assert result.findings[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.entities[0].source_detail["template_provenance"]["source_kind"] == "managed_cache"
         assert result.warnings == []

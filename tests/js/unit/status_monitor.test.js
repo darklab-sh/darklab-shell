@@ -6,6 +6,7 @@ import { fromDomScripts } from './helpers/extract.js'
 
 function loadStatusMonitor({
   runs = [],
+  assessmentBatches = { batches: [], truncated: false },
   status = { uptime: 12, db: 'ok', redis: 'none', server_time: Date.now() },
   workspace = {
     enabled: true,
@@ -84,6 +85,7 @@ function loadStatusMonitor({
   killActiveRunFromMonitor = undefined,
   openHistoryWithFilters = undefined,
   restoreHistoryRun = undefined,
+  openProjectAssessment = undefined,
   pauseBackgroundRunStreamsForStatusMonitor = undefined,
   resumeBackgroundRunStreamsAfterStatusMonitor = undefined,
   tabs = [],
@@ -142,7 +144,10 @@ function loadStatusMonitor({
       json: () => {
         const response = responses[Math.min(responseIndex, responses.length - 1)]
         responseIndex += 1
-        return Promise.resolve({ runs: response })
+        return Promise.resolve({
+          runs: response,
+          assessment_batches: assessmentBatches,
+        })
       },
     })
   })
@@ -154,6 +159,7 @@ function loadStatusMonitor({
       'app/static/js/features/status-monitor/status_monitor_core.js',
       'app/static/js/features/status-monitor/status_monitor_data.js',
       'app/static/js/features/status-monitor/status_monitor_resources.js',
+      'app/static/js/features/status-monitor/status_monitor_assessments.js',
       'app/static/js/status_monitor.js',
     ],
     {
@@ -172,6 +178,7 @@ function loadStatusMonitor({
       ...(attachActiveRunFromMonitor ? { attachActiveRunFromMonitor } : {}),
       ...(attachInteractivePtyCommand ? { attachInteractivePtyCommand } : {}),
       ...(killActiveRunFromMonitor ? { killActiveRunFromMonitor } : {}),
+      ...(openProjectAssessment ? { openProjectAssessment } : {}),
       ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
     `{
@@ -201,6 +208,9 @@ function loadStatusMonitor({
      }
      if (typeof killActiveRunFromMonitor === 'function') {
        window.killActiveRunFromMonitor = killActiveRunFromMonitor;
+     }
+     if (typeof openProjectAssessment === 'function') {
+       window.openProjectAssessment = openProjectAssessment;
      }
      if (typeof bindMobileSheet === 'function') {
        window.bindMobileSheet = bindMobileSheet;
@@ -310,6 +320,79 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM n/a')
 
     closeStatusMonitor()
+  })
+
+  it('shows durable Assessment-plan progress when no child process is live long enough to poll', async () => {
+    const openProjectAssessment = vi.fn(() => Promise.resolve(true))
+    const { openStatusMonitor } = loadStatusMonitor({
+      runs: [],
+      openProjectAssessment,
+      assessmentBatches: {
+        batches: [{
+          batch_id: 'abx_monitor_1',
+          project_id: 'prj_monitor_1',
+          project_name: 'Monitor Project',
+          assessment_id: 'asm_monitor_1',
+          status: 'running',
+          progress: {
+            total: 12,
+            pending: 8,
+            launching: 1,
+            running: 2,
+            succeeded: 1,
+            failed: 0,
+            unavailable: 0,
+            canceled: 0,
+            skipped: 0,
+            could_not_cancel: 0,
+            settled: 1,
+          },
+          active_commands: [{
+            item_index: 3,
+            action_id: 'nuclei',
+            display_command: 'nuclei -u https://monitor.example.test',
+            status: 'running',
+            run_id: 'run_monitor_1',
+            target: { type: 'url', value: 'https://monitor.example.test' },
+          }],
+        }],
+        truncated: false,
+      },
+    })
+
+    await openStatusMonitor({ source: 'test' })
+
+    const section = document.querySelector('.status-monitor-assessment-section')
+    expect(section?.textContent).toContain('Monitor Project')
+    expect(section?.textContent).toContain('1 / 12 settled · 3 active · 8 pending')
+    expect(section?.textContent).toContain('nuclei -u https://monitor.example.test')
+    expect(document.querySelector('.status-monitor-summary')?.textContent)
+      .toContain('1 assessment plan')
+    section.querySelector('button')?.click()
+    await Promise.resolve()
+    expect(openProjectAssessment).toHaveBeenCalledWith('prj_monitor_1', {
+      assessmentId: 'asm_monitor_1',
+      batchId: 'abx_monitor_1',
+    })
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('keeps ordinary run monitoring available when Assessment-plan progress fails', async () => {
+    const { openStatusMonitor } = loadStatusMonitor({
+      runs: [],
+      assessmentBatches: {
+        batches: [],
+        truncated: false,
+        unavailable: true,
+      },
+    })
+
+    await openStatusMonitor({ source: 'test' })
+
+    expect(document.querySelector('.status-monitor-runs-empty')?.textContent)
+      .toBe('No active runs.')
+    expect(document.querySelector('.status-monitor-assessment-section')?.textContent)
+      .toContain('Assessment-plan progress is temporarily unavailable.')
   })
 
   it('labels active runs owned by another live browser as monitor-only', async () => {
@@ -516,7 +599,7 @@ describe('Status Monitor', () => {
 
     await openStatusMonitor({ source: 'test' })
 
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1')).toHaveLength(3)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1&include_assessment_batches=1')).toHaveLength(3)
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 44%')
     expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
 
@@ -556,7 +639,7 @@ describe('Status Monitor', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await vi.advanceTimersByTimeAsync(900)
 
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1')).toHaveLength(2)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active?include_scheduled=1&include_assessment_batches=1')).toHaveLength(2)
     expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 47%')
 
     closeStatusMonitor()
@@ -972,7 +1055,7 @@ describe('Status Monitor', () => {
     const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[activeRun], []] })
 
     const firstOpen = openStatusMonitor({ source: 'test' })
-    expect(apiFetch.mock.calls[0]?.[0]).toBe('/history/active?include_scheduled=1')
+    expect(apiFetch.mock.calls[0]?.[0]).toBe('/history/active?include_scheduled=1&include_assessment_batches=1')
     expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-list')?.textContent).not.toContain('sleep 10')

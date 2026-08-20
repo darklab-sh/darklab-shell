@@ -14,6 +14,7 @@ from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.workflows.fanout_checkpoint import FanoutCheckpoint
 from services.workflows.fanout_policy import FanoutPolicy, normalize_fanout_policy, should_retry
+from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,20 @@ class FanoutFailureResolution:
     skipped_ordinals: tuple[int, ...] = ()
 
 
-def fanout_policy_for_row(row: Any) -> FanoutPolicy:
+def fanout_policy_for_row(conn: Any, row: Any) -> FanoutPolicy:
+    if str(row["execution_kind"] or "") == ASSESSMENT_BATCH_EXECUTION_KIND:
+        batch = conn.execute(
+            "SELECT max_parallel FROM assessment_batches WHERE execution_id = ?",
+            (str(row["execution_id"]),),
+        ).fetchone()
+        if not batch:
+            raise ValueError("assessment batch fan-out policy is unavailable")
+        return normalize_fanout_policy({
+            "failure_mode": "continue",
+            "retries": 3,
+            "max_parallel": int(batch["max_parallel"]),
+            "max_failures": 32,
+        })
     dialect = dialect_for_backend(get_db_backend())
     definition = dialect.decode_json_dict(row["definition_snapshot"])
     raw_steps = definition.get("steps")
@@ -98,7 +112,7 @@ def resolve_failed_fanout_child(
     now: str,
 ) -> FanoutFailureResolution:
     """Create a bounded retry or apply the parent's terminal failure limit."""
-    policy = fanout_policy_for_row(row)
+    policy = fanout_policy_for_row(conn, row)
     ordinal = int(row["ordinal"])
     attempt = int(row["attempt"])
     retry_allowed = (

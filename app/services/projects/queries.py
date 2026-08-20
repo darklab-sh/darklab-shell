@@ -12,6 +12,7 @@ from typing import Any, Callable, TypeVar
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.atlas.scope import metadata_owner_id
+from services.assessments.batch.provenance import attach_assessment_batch_run_provenance
 from services.projects.contracts import MAX_ENTITY_ID_LEN
 from services.projects.metadata import (
     _attach_project_labels,
@@ -267,6 +268,7 @@ def _project_run_rows_to_items(conn, session_id, rows, *, team_id="", include_pr
         item["note"] = run_notes.get(run_id)
         apply_workflow_provenance(item, workflow_provenance.get(run_id))
         runs.append(item)
+    attach_assessment_batch_run_provenance(conn, runs, session_id=session_id, team_id=team_id)
     return runs
 
 

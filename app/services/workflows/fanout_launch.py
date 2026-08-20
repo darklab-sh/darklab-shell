@@ -16,6 +16,7 @@ from services.workflows.fanout_child_run import launch_fanout_child
 from services.workflows.fanout_children import initialize_fanout_children, list_fanout_children
 from services.workflows.fanout_launch_state import finalize_empty_fanout_parent
 from services.workflows.fanout_policy import MAX_RETRIES, normalize_fanout_policy
+from services.workflows.fanout_workflow_adapter import workflow_fanout_launch_spec
 
 
 def _integer(value: object, default: int) -> int:
@@ -126,6 +127,9 @@ def launch_fanout_batch(
         pending = _pending_attempt(children, ordinal)
         if not pending:
             raise WorkflowDefinitionError("workflow fan-out pending child is unavailable")
+        launch_spec = workflow_fanout_launch_spec(
+            current, step, plans[ordinal], collection_name,
+        )
         claimed = claim_fanout_child(
             execution_id,
             step_id,
@@ -136,11 +140,10 @@ def launch_fanout_batch(
             continue
         launch, outcome = launch_fanout_child(
             current,
-            step,
-            plans[ordinal],
+            step_id,
             claimed,
-            collection_name,
             current_role,
+            launch_spec,
         )
         if launch:
             launched.append(launch)

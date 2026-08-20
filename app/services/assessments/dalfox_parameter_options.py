@@ -121,12 +121,12 @@ def _candidate_run_rows(
         "JOIN project_links pl ON pl.project_id = p.id ",
         "JOIN runs r ON r.id = pl.entity_id ",
         "LEFT JOIN run_output_artifacts art ON art.run_id = r.id ",
-        "WHERE p.id = ? AND pl.entity_type = 'run' AND LOWER(r.command) LIKE 'dalfox %' AND ",
+        "WHERE p.id = ? AND pl.entity_type = 'run' AND LOWER(r.command) LIKE ? AND ",
         project_sql, " AND ", run_sql,
         " ORDER BY r.finished DESC, r.id DESC LIMIT ?",
     ))
     return conn.execute(sql, (
-        project_id, *project_params, *run_params, DALFOX_PARAMETER_OPTION_MAX_RUNS + 1,
+        project_id, "dalfox %", *project_params, *run_params, DALFOX_PARAMETER_OPTION_MAX_RUNS + 1,
     )).fetchall()
 
 

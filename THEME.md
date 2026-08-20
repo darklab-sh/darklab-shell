@@ -43,6 +43,7 @@ Every theme provides four colors with fixed meanings. A theme can choose any vis
 - **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment, such as dimmed expiry text, it uses the `dim` token plus the semantic color on the label only. It should not create a second intensity tier of the same color.
 - **All four must stay distinct per theme.** A theme that makes caution look like danger (yellow ≈ red) defeats the point. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme.
 - **In-progress belongs to yellow, not green.** A "running" task is yellow; a "completed success" task is green. This keeps the two states visually distinct even when both are "active" in the loose sense. Use yellow for running, live, pending, and the HUD `RUNNING` pill; use green only for completed success, enabled switches, and current-focus indicators.
+- **Assessment batches use the same state colors.** Queued, running, canceling, and standard-policy review use yellow; completed success uses green; failures and work that couldn't be canceled use red. Unavailable, skipped, and canceled counts stay dim unless the surrounding state is an error. Reuse the shared badge styles instead of adding batch-only colors.
 - **Use existing theme tokens.** Do not introduce surface-local amber / red / green variants. If a surface needs tuning, add a new `--theme-*` chrome token derived from the base semantic token via `color-mix()` in the theme file — never hardcode a one-off color.
 
 ### Documented exceptions

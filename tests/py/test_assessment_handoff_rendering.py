@@ -11,6 +11,7 @@ from services.projects.package_rendering import (
     _package_findings_json_bytes,
     _render_package_index_html,
     _render_package_readme,
+    _render_package_run_html,
 )
 from services.reports.export import _report_manifest_provenance
 from services.reports.rendering import (
@@ -159,6 +160,10 @@ def _package_manifest() -> dict:
             "id": "run_current",
             "command": "nuclei -u example.test",
             "started": "2026-08-05T00:00:00+00:00",
+            "assessment_batch": {
+                "batch_id": "abx_current",
+                "item": {"item_index": 2, "check_count": 3},
+            },
         }],
         "findings": [{
             "id": "finding_current",
@@ -195,6 +200,12 @@ def test_evidence_package_carries_current_and_earlier_assessment_references():
         {},
         [],
     )
+    run_html = _render_package_run_html(
+        manifest["runs"][0],
+        [],
+        manifest,
+        "2026-08-05T01:00:00+00:00",
+    )
     findings_json = json.loads(
         _package_findings_json_bytes(manifest, "2026-08-05T01:00:00+00:00", run_pages)
     )
@@ -214,6 +225,9 @@ def test_evidence_package_carries_current_and_earlier_assessment_references():
         assert "incompatible profile version" in rendered
     assert "1 of 2 applicable checks covered" in html
     assert "Applicable denominator: 2" in readme
+    for rendered in (html, readme, run_html):
+        normalized = rendered.replace("\\_", "_")
+        assert "Assessment batch abx_current · item 3 · 3 mapped checks" in normalized
     assert findings_json["assessment_finding_changes"]["items"][0]["remediation_id"] == "rmd_example"
     assert findings_json["assessment_context"]["checks"][0]["id"] == "check_covered"
     assert findings_json["assessment_context"]["evidence"][0]["source_run"]["tool_versions"] == [
@@ -238,10 +252,26 @@ def test_report_renders_and_records_assessment_finding_change_provenance():
                     "title": "Findings",
                     "enabled": True,
                 },
+                {
+                    "type": "included_runs",
+                    "title": "Included runs",
+                    "enabled": True,
+                },
             ],
             "export": {},
         },
         "counts": {"findings": 1},
+        "runs": [{
+            "id": "run_current",
+            "command": "nuclei -u example.test",
+            "started": "2026-08-05T00:00:00+00:00",
+            "exit_code": 0,
+            "output_line_count": 1,
+            "assessment_batch": {
+                "batch_id": "abx_current",
+                "item": {"item_index": 2, "check_count": 3},
+            },
+        }],
         "findings_by_severity": [],
         "assessment_context": _assessment_context(),
         "assessment_finding_changes": _finding_changes(),
@@ -267,5 +297,6 @@ def test_report_renders_and_records_assessment_finding_change_provenance():
         assert "Earlier CVE evidence" in rendered
         assert "run_previous" in rendered
         assert "incompatible profile version" in rendered
+        assert "Assessment batch abx_current · item 3 · 3 mapped checks" in rendered
     assert provenance["sources"]["assessment_finding_changes"]["assessment"]["id"] == "asmt_current"
     assert provenance["sources"]["assessment_context"]["assessment"]["id"] == "asmt_current"

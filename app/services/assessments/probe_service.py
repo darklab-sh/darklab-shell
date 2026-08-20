@@ -7,37 +7,18 @@ from __future__ import annotations
 
 from typing import Any
 
-import config as app_config
 from core.database_access import get_db_connect
-from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.probe_catalog import probe_catalog
 from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
 from services.assessments.probe_http_profile_plans import probe_http_profile_plan_context
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
 from services.assessments.probe_plans import build_probe_plan
+from services.assessments.probe_runtime import probe_planning_runtime
 from services.assessments.probe_targets import (
     require_probe_project,
     resolve_probe_target,
 )
-from services.commands.registry_validation import resolve_runtime_command
-from services.nuclei.template_cache import managed_nuclei_template_snapshot
-
-
-def _available_features(snapshot) -> set[str]:
-    features = {
-        action_id
-        for action_id in ACTIONS
-        if resolve_runtime_command(action_id)
-    }
-    features.add("reviewed_nse_profiles")
-    if snapshot.state == "ready":
-        features.add("managed_nuclei_templates")
-    return features
-
-
-def _intrusive_actions_enabled() -> bool:
-    return bool(app_config.CFG.get("assessment_intrusive_actions_enabled", False))
 
 
 @observe_probe("catalog")
@@ -51,15 +32,15 @@ def get_probe_catalog(
     observability: ProbeLogContext | None = None,
 ) -> dict[str, Any]:
     """Return the reviewed local probe catalog for one current Project."""
-    snapshot = managed_nuclei_template_snapshot()
+    runtime = probe_planning_runtime()
     with get_db_connect()() as conn:
         require_probe_project(conn, session_id, team_id, project_id)
     return probe_catalog(
         service=service,
         target_type=target_type,
-        template_snapshot=snapshot,
-        available_features=_available_features(snapshot),
-        intrusive_actions_enabled=_intrusive_actions_enabled(),
+        template_snapshot=runtime.template_snapshot,
+        available_features=runtime.available_features,
+        intrusive_actions_enabled=runtime.intrusive_actions_enabled,
     )
 
 
@@ -81,7 +62,7 @@ def get_probe_plan(
             "entity_id_required",
             "Browser probe plans require one confirmed Project entity id.",
         )
-    snapshot = managed_nuclei_template_snapshot()
+    runtime = probe_planning_runtime()
     with get_db_connect()() as conn:
         target = resolve_probe_target(conn, session_id, team_id, request)
         http_profile, http_profile_target, http_profile_unavailable = (
@@ -93,9 +74,9 @@ def get_probe_plan(
     return build_probe_plan(
         request,
         target,
-        available_features=_available_features(snapshot),
-        intrusive_actions_enabled=_intrusive_actions_enabled(),
-        template_snapshot=snapshot,
+        available_features=runtime.available_features,
+        intrusive_actions_enabled=runtime.intrusive_actions_enabled,
+        template_snapshot=runtime.template_snapshot,
         http_profile=http_profile,
         http_profile_target=http_profile_target,
         http_profile_unavailable=http_profile_unavailable,

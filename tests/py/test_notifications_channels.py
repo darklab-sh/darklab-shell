@@ -145,6 +145,36 @@ def test_summary_fields_format_structured_count_maps_as_text():
     assert ("Output Signal Counts", "findings 2, summaries 1") in fields
 
 
+def test_assessment_batch_summary_uses_a_bounded_product_title_and_field_order():
+    payload = {
+        "trigger": "run_complete",
+        "notification_kind": "assessment_batch",
+        "app_name": "Test Shell",
+        "batch_id": "abx_1234567890abcdef1234567890abcdef",
+        "summary_fields": {
+            "status": "completed",
+            "succeeded": 8,
+            "failed": 1,
+            "unavailable": 2,
+            "canceled": 3,
+            "could_not_cancel": 1,
+            "batch_link": "/projects/prj_one/assessment-batches/abx_one",
+        },
+    }
+
+    assert notification_title(payload) == "Test Shell assessment batch complete"
+    assert format_summary_fields(payload) == [
+        ("Batch", "...90abcdef"),
+        ("Status", "completed"),
+        ("Succeeded", "8"),
+        ("Failed", "1"),
+        ("Unavailable", "2"),
+        ("Canceled", "3"),
+        ("Could Not Cancel", "1"),
+        ("Assessment Batch", "/projects/prj_one/assessment-batches/abx_one"),
+    ]
+
+
 def test_project_digest_payload_formats_for_chat_push_and_email_surfaces():
     payload = {
         "trigger": "project_digest",

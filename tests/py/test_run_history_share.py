@@ -698,11 +698,11 @@ class TestRunStreaming:
 
         with mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
-             mock.patch("blueprints.run.pid_pop") as pid_pop, \
-             mock.patch("blueprints.run.active_run_remove") as active_remove, \
-             mock.patch(
-                 "blueprints.run._finalize_completed_run",
-                 return_value={
+            mock.patch("blueprints.run.pid_pop") as pid_pop, \
+            mock.patch("blueprints.run.active_run_remove") as active_remove, \
+            mock.patch(
+                "services.runs.finalization.finalize_completed_run",
+                return_value={
                      "elapsed": 0.2,
                      "active_project_link": {
                          "project_id": "proj-worker",
@@ -738,6 +738,7 @@ class TestRunStreaming:
                 link_project_id=None,
                 run_finalized_hook=finalized_hook,
                 run_cleanup_hook=cleanup_hook,
+                suppress_run_complete_notification=True,
             )
         capture.finalize()
 
@@ -778,6 +779,7 @@ class TestRunStreaming:
         assert published[-1][2]["output_line_count"] == 4
         finalize.assert_called_once()
         assert finalize.call_args.kwargs["link_project_id"] is None
+        assert finalize.call_args.kwargs["suppress_run_complete_notification"] is True
         finalized_hook.assert_called_once_with("run-broker-worker", finalize.return_value)
         cleanup_hook.assert_called_once_with()
         assert fake_proc.stdout is not None
