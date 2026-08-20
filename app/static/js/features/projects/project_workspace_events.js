@@ -879,7 +879,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         event.stopPropagation();
         const entityId = String(entityCheckbox.dataset.projectEntitySelect || '');
         entitiesController()?.toggleSelected(entityId, !!entityCheckbox.checked);
-        ctx.renderProjectExplorer();
+        preserveProjectScroll(renderProjectViews);
         return;
       }
       const findingCheckbox = event.target.closest?.('[data-project-finding-select]');
@@ -1064,7 +1064,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
         } else if (action === 'toggle-project-entity-row') {
           const entityId = String(btn.dataset.entityId || '');
           entitiesController()?.toggleSelected(entityId);
-          ctx.renderProjectExplorer();
+          preserveProjectScroll(renderProjectViews);
           return;
         } else if (action === 'toggle-project-entity-select') {
           const nextMode = !ctx.entitySelectMode();
@@ -1074,7 +1074,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
           }
           entitiesController()?.setSelectMode(nextMode);
           if (!nextMode) entitiesController()?.clearSelection();
-          ctx.renderProjectExplorer();
+          preserveProjectScroll(renderProjectViews);
           return;
         } else if (action === 'select-all-project-entities') {
           if (!activeTeamScopeCan('mutate_projects')) {
@@ -1082,11 +1082,11 @@ let exportedDarklabProjectWorkspaceEvents = null;
             return;
           }
           entitiesController()?.selectAllForActiveTab(ctx.projectSummary?.(projectId));
-          ctx.renderProjectExplorer();
+          preserveProjectScroll(renderProjectViews);
           return;
         } else if (action === 'clear-project-entities') {
           entitiesController()?.clearSelection();
-          ctx.renderProjectExplorer();
+          preserveProjectScroll(renderProjectViews);
           return;
         } else if (action === 'bulk-unlink-project-entities') {
           if (!selectedEntityIds().size) return;

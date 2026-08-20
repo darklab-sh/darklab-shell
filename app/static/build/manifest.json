@@ -572,8 +572,8 @@
       "hash": "8e7d7878d5e48e842f397c0a82914bd15df835dd1d80ce080e5ac4593ef24df5"
     },
     "/static/js/features/projects/project_workspace_events.js": {
-      "path": "/static/build/static-project-workspace-events.d8ab99e84840.js",
-      "hash": "e1ec806005aee21e98feeeb356ca2b7719d95d4412a4322c29e46056128dc00d"
+      "path": "/static/build/static-project-workspace-events.70395fbc0f2b.js",
+      "hash": "1d415777701514e07519848563829e3db14e68871afb2c100e818d3092a688da"
     },
     "/static/js/features/projects/project_workspace_lifecycle.js": {
       "path": "/static/build/static-project-workspace-lifecycle.c4d9df512b89.js",
