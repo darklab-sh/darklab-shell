@@ -358,6 +358,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         reason_code: '',
       }
       state.preview = refreshed
+      await new Promise(resolve => setTimeout(resolve, 125))
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -388,6 +389,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         operator_action: 'Update the managed templates when network access is available.',
       }
       state.preview = payload.preview
+      await new Promise(resolve => setTimeout(resolve, 125))
       await route.fulfill({
         response,
         contentType: 'application/json',
@@ -594,6 +596,11 @@ test.describe('project assessment qualification', () => {
       `Assessment Batch ${Date.now()}`,
     )
     const section = assessment.locator('.project-assessment-batch')
+    const explorerBody = page.locator('#project-explorer-body')
+    await explorerBody.evaluate((node) => {
+      node.style.height = '220px'
+      node.style.overflow = 'auto'
+    })
     await expect(section).toContainText('Safe checks are selected by default')
     const previewButton = section.getByRole('button', { name: 'Preview assessment plan' })
     await expect(previewButton).toBeEnabled()
@@ -605,12 +612,28 @@ test.describe('project assessment qualification', () => {
     await targetChoice.press('Space')
     await expect(previewButton).toBeEnabled()
 
+    const standardChecks = section.getByRole('checkbox', { name: 'Include standard checks' })
+    await standardChecks.scrollIntoViewIfNeeded()
+    const scrollBeforeStandardChecks = await explorerBody.evaluate(node => node.scrollTop)
+    expect(scrollBeforeStandardChecks).toBeGreaterThan(0)
+    await standardChecks.click()
+    await expect(standardChecks).toBeChecked()
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
+      .toBe(scrollBeforeStandardChecks)
+    await standardChecks.click()
+    await expect(standardChecks).not.toBeChecked()
+
     const previewResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return response.request().method() === 'POST' && url.pathname.endsWith('/batch-previews')
     })
+    await previewButton.scrollIntoViewIfNeeded()
+    const scrollBeforePreview = await explorerBody.evaluate(node => node.scrollTop)
     await previewButton.click()
+    await expect(section.getByRole('button', { name: 'Building preview…' })).toBeVisible()
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
     expect((await previewResponse).status()).toBe(201)
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
     await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
     await expect(section.locator('.project-assessment-batch-command').first()).toBeVisible()
     await expect(section).toContainText('Planning estimate')
@@ -623,10 +646,18 @@ test.describe('project assessment qualification', () => {
       return response.request().method() === 'POST'
         && url.pathname.endsWith('/nuclei-templates/refresh')
     })
-    await section.getByRole('button', {
+    const updateTemplates = section.getByRole('button', {
       name: 'Update templates and rebuild preview',
-    }).click()
+    })
+    await updateTemplates.scrollIntoViewIfNeeded()
+    const scrollBeforeTemplateRefresh = await explorerBody.evaluate(node => node.scrollTop)
+    await updateTemplates.click()
+    await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
+      .toBe(scrollBeforeTemplateRefresh)
     expect((await templateRefresh).status()).toBe(200)
+    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
+      .toBe(scrollBeforeTemplateRefresh)
     await expect(section.getByRole('button', {
       name: 'Update templates and rebuild preview',
     })).toHaveCount(0)
@@ -656,10 +687,7 @@ test.describe('project assessment qualification', () => {
     await expect(section).toContainText('Running')
     await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
 
-    const explorerBody = page.locator('#project-explorer-body')
     const scrollBeforePoll = await explorerBody.evaluate((node) => {
-      node.style.height = '220px'
-      node.style.overflow = 'auto'
       node.scrollTop = node.scrollHeight
       return node.scrollTop
     })

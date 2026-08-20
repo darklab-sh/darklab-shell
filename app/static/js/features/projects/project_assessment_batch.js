@@ -151,7 +151,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     return containers;
   }
 
-  function restorePolledFocus(section, focusKey) {
+  function restoreSectionFocus(section, focusKey) {
     if (!focusKey) return;
     const keyedTarget = [...section.querySelectorAll('[data-assessment-batch-focus-key]')]
       .find(node => node.dataset.assessmentBatchFocusKey === focusKey);
@@ -161,7 +161,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     restoreFocus(target);
   }
 
-  function renderPolledSections(st) {
+  function renderUpdatedSections(st, panelSelector) {
     if (typeof document === 'undefined' || !st.renderAssessment) return false;
     const sections = [...document.querySelectorAll('.project-assessment-batch')]
       .filter(section => (
@@ -170,8 +170,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       ));
     let updated = false;
     sections.forEach((section) => {
-      const currentMonitor = section.querySelector(':scope > .project-assessment-batch-monitor');
-      if (!currentMonitor) return;
+      const currentPanel = section.querySelector(`:scope > ${panelSelector}`);
+      if (!currentPanel) return;
       const active = document.activeElement;
       const keyedActive = active?.closest?.('[data-assessment-batch-focus-key]');
       const enhancedSelect = active?.closest?.('.app-select')?.previousElementSibling;
@@ -189,9 +189,9 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
         st.renderDetail,
         st,
       );
-      const nextMonitor = nextSection.querySelector(':scope > .project-assessment-batch-monitor');
-      if (!nextMonitor) return;
-      currentMonitor.replaceWith(nextMonitor);
+      const nextPanel = nextSection.querySelector(`:scope > ${panelSelector}`);
+      if (!nextPanel) return;
+      currentPanel.replaceWith(nextPanel);
 
       const currentError = section.querySelector(':scope > .project-assessment-batch-error');
       const nextError = nextSection.querySelector(':scope > .project-assessment-batch-error');
@@ -199,12 +199,12 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       else if (currentError) currentError.remove();
       else if (nextError) section.querySelector(':scope > .project-assessment-section-heading')?.after(nextError);
 
-      ctx.enhanceAppSelects?.(nextMonitor);
+      ctx.enhanceAppSelects?.(nextPanel);
       scrollContainers.forEach(snapshot => {
         snapshot.element.scrollTop = snapshot.top;
         snapshot.element.scrollLeft = snapshot.left;
       });
-      restorePolledFocus(section, focusKey);
+      restoreSectionFocus(section, focusKey);
       scrollContainers.forEach(snapshot => {
         snapshot.element.scrollTop = snapshot.top;
         snapshot.element.scrollLeft = snapshot.left;
@@ -212,6 +212,14 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       updated = true;
     });
     return updated;
+  }
+
+  function renderPolledSections(st) {
+    return renderUpdatedSections(st, '.project-assessment-batch-monitor');
+  }
+
+  function renderPlannerViews(st) {
+    if (!renderUpdatedSections(st, '.project-assessment-batch-planner')) renderViews();
   }
 
   async function requestJson(url, options, fallback) {
@@ -389,7 +397,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     if (st.previewing || st.refreshingTemplates || st.starting) return false;
     st.previewing = true;
     st.error = '';
-    renderViews();
+    renderPlannerViews(st);
     try {
       const payload = await requestJson(
         `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/batch-previews`,
@@ -409,7 +417,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       return false;
     } finally {
       st.previewing = false;
-      renderViews();
+      renderPlannerViews(st);
     }
   }
 
@@ -460,7 +468,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     if (!previewId || st.refreshingTemplates || st.starting) return false;
     st.refreshingTemplates = true;
     st.error = '';
-    renderViews();
+    renderPlannerViews(st);
     try {
       const payload = await requestJson(
         `/projects/${encodeURIComponent(projectId)}/assessments/${encodeURIComponent(assessmentId)}/batch-previews/${encodeURIComponent(previewId)}/nuclei-templates/refresh`,
@@ -483,7 +491,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       return false;
     } finally {
       st.refreshingTemplates = false;
-      renderViews();
+      renderPlannerViews(st);
       restoreFocus(returnFocus);
     }
   }
@@ -669,7 +677,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       return false;
     }
     st.previewDirty = Boolean(st.preview);
-    renderViews();
+    if (key === 'includeStandard') renderPlannerViews(st);
+    else renderViews();
     return true;
   }
 

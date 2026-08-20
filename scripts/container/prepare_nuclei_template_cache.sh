@@ -110,7 +110,9 @@ for path in "$cache_dir" "$config_dir"; do
 done
 
 for metadata in "$cache_dir/.checksum" "$config_dir/.templates-config.json"; do
-    [ -f "$metadata" ] && [ ! -L "$metadata" ] || continue
+    if [ ! -f "$metadata" ] || [ -L "$metadata" ]; then
+        continue
+    fi
     chown scanner:appuser "$metadata" || {
         echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=metadata-chown" >&2
         exit 1

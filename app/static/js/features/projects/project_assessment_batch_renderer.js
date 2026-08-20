@@ -215,6 +215,7 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = st.selection.includeStandard;
+    checkbox.dataset.assessmentBatchFocusKey = 'include-standard';
     checkbox.addEventListener('change', () => {
       act.setSelection(projectId, assessmentId, 'includeStandard', checkbox.checked);
     });
@@ -403,11 +404,13 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const selectedCategories = categoryRows(detail).length - st.selection.excludedCategories.size;
     const emptySelection = selectedTargets <= 0 || selectedCategories <= 0;
     const previewActions = element('div', 'project-assessment-batch-actions');
-    previewActions.appendChild(actionButton(
+    const previewAction = actionButton(
       st.previewing ? 'Building preview…' : (st.preview ? 'Refresh preview' : 'Preview assessment plan'),
       () => act.createPreview(projectId, assessment.id),
       { primary: true, disabled: st.previewing || st.starting || emptySelection },
-    ));
+    );
+    previewAction.dataset.assessmentBatchFocusKey = 'preview-plan';
+    previewActions.appendChild(previewAction);
     body.appendChild(previewActions);
     if (emptySelection) body.appendChild(element('p', 'project-assessment-batch-selection-note', 'Select at least one target and category to build a plan.'));
     if (st.previewDirty) {
@@ -443,14 +446,16 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       && nucleiSummary.refresh_enabled !== false
       && (nucleiBlocked || nucleiSummary.state === 'stale');
     if (canRefreshNuclei) {
-      startActions.appendChild(actionButton(
+      const refreshAction = actionButton(
         st.refreshingTemplates ? 'Updating templates…' : 'Update templates and rebuild preview',
         button => act.refreshNucleiTemplates(projectId, assessment.id, button),
         {
           primary: nucleiBlocked,
           disabled: st.refreshingTemplates || st.starting || st.previewDirty,
         },
-      ));
+      );
+      refreshAction.dataset.assessmentBatchFocusKey = 'refresh-nuclei';
+      startActions.appendChild(refreshAction);
     }
     const start = actionButton(
       st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),

@@ -245,16 +245,30 @@ describe('Project assessment batches', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
     const ctx = context(projectWorkspaceRequest)
-    const manager = createProjectAssessmentBatchManager(ctx, { renderViews: vi.fn() })
+    const renderViews = vi.fn()
+    const manager = createProjectAssessmentBatchManager(ctx, { renderViews })
 
     await manager.load('prj_batch_1', assessment.id, { render: false })
-    let surface = render(manager)
+    const scrollHost = document.createElement('div')
+    scrollHost.className = 'project-explorer-body'
+    let surface = manager.renderSection('prj_batch_1', assessment, detail)
+    scrollHost.appendChild(surface)
+    document.body.appendChild(scrollHost)
+    scrollHost.scrollTop = 61
     expect(surface.textContent).toContain('Safe checks are selected by default')
     expect(surface.textContent).toContain('Include standard checks')
     surface.querySelector('button.btn-primary').click()
+    expect(surface.textContent).toContain('Building preview…')
+    expect(scrollHost.scrollTop).toBe(61)
+    expect(document.querySelector('.project-assessment-batch')).toBe(surface)
+    expect(renderViews).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(
       manager.stateFor('prj_batch_1', assessment.id).preview?.preview_id,
     ).toBe(preview.preview_id))
+    await vi.waitFor(() => expect(
+      manager.stateFor('prj_batch_1', assessment.id).previewing,
+    ).toBe(false))
+    expect(scrollHost.scrollTop).toBe(61)
 
     const previewRequest = requests.find(item => item.url.endsWith('/batch-previews'))
     expect(JSON.parse(previewRequest.options.body)).toMatchObject({
@@ -264,7 +278,6 @@ describe('Project assessment batches', () => {
       max_owner_parallel: 16,
       max_instance_parallel: 32,
     })
-    surface = render(manager)
     expect(surface.textContent).toContain('2 of 2 shown')
     expect(surface.textContent).toContain('safe')
     expect(surface.textContent).toContain('standard · not selected')
@@ -339,9 +352,10 @@ describe('Project assessment batches', () => {
       }
       throw new Error(`Unexpected request: ${url}`)
     })
+    const renderViews = vi.fn()
     const manager = createProjectAssessmentBatchManager(
       context(projectWorkspaceRequest, { canRunCommands: vi.fn(() => false) }),
-      { renderViews: vi.fn() },
+      { renderViews },
     )
     await manager.load('prj_batch_1', assessment.id, { render: false })
     let surface = render(manager)
@@ -350,16 +364,27 @@ describe('Project assessment batches', () => {
       manager.stateFor('prj_batch_1', assessment.id).preview?.preview_id,
     ).toBe(preview.preview_id))
 
-    surface = render(manager)
+    renderViews.mockClear()
+    const scrollHost = document.createElement('div')
+    scrollHost.className = 'project-explorer-body'
+    surface = manager.renderSection('prj_batch_1', assessment, detail)
+    scrollHost.appendChild(surface)
+    document.body.appendChild(scrollHost)
+    scrollHost.scrollTop = 73
     const standard = [...surface.querySelectorAll('label')]
       .find(label => label.textContent.includes('Include standard checks'))
     const standardInput = standard.querySelector('input')
+    standardInput.focus()
     standardInput.checked = true
     standardInput.dispatchEvent(new Event('change', { bubbles: true }))
     await vi.waitFor(() => expect(
       manager.stateFor('prj_batch_1', assessment.id).previewDirty,
     ).toBe(true))
-    surface = render(manager)
+    expect(document.querySelector('.project-assessment-batch')).toBe(surface)
+    expect(scrollHost.scrollTop).toBe(73)
+    expect(surface.querySelector('[data-assessment-batch-focus-key="include-standard"]'))
+      .toBe(document.activeElement)
+    expect(renderViews).not.toHaveBeenCalled()
     expect(surface.textContent).toContain('Selection changed. Refresh the preview before starting.')
     expect(surface.textContent).toContain('Managed Nuclei template preflight')
     expect(surface.textContent).toContain('Nuclei template preflight must pass')
@@ -371,9 +396,13 @@ describe('Project assessment batches', () => {
     const refresh = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Refresh preview')
     refresh.click()
+    expect(surface.textContent).toContain('Building preview…')
+    expect(scrollHost.scrollTop).toBe(73)
     await vi.waitFor(() => expect(latestPreviewBody?.include_standard).toBe(true))
     await vi.waitFor(() => expect(manager.stateFor('prj_batch_1', assessment.id).previewing).toBe(false))
     expect(latestPreviewBody.include_standard).toBe(true)
+    expect(scrollHost.scrollTop).toBe(73)
+    expect(renderViews).not.toHaveBeenCalled()
     manager.invalidate()
   })
 
@@ -442,7 +471,8 @@ describe('Project assessment batches', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
     const ctx = context(projectWorkspaceRequest)
-    const manager = createProjectAssessmentBatchManager(ctx, { renderViews: vi.fn() })
+    const renderViews = vi.fn()
+    const manager = createProjectAssessmentBatchManager(ctx, { renderViews })
     await manager.load('prj_batch_1', assessment.id, { render: false })
     const st = manager.stateFor('prj_batch_1', assessment.id)
     st.selection.includeStandard = true
@@ -450,13 +480,22 @@ describe('Project assessment batches', () => {
     surface.querySelector('button.btn-primary').click()
     await vi.waitFor(() => expect(st.preview?.preview_id).toBe(preview.preview_id))
 
-    surface = render(manager)
+    renderViews.mockClear()
+    const scrollHost = document.createElement('div')
+    scrollHost.className = 'project-explorer-body'
+    surface = manager.renderSection('prj_batch_1', assessment, detail)
+    scrollHost.appendChild(surface)
+    document.body.appendChild(scrollHost)
+    scrollHost.scrollTop = 89
     expect(surface.textContent).toContain('Managed Nuclei template preflight')
     expect(surface.textContent).toContain('v10.4.7')
     const start = [...surface.querySelectorAll('button')]
       .find(button => button.textContent === 'Run assessment plan')
     start.click()
     await vi.waitFor(() => expect(st.preview?.preview_id).toBe('abp_batch_refreshed'))
+    expect(document.querySelector('.project-assessment-batch')).toBe(surface)
+    expect(scrollHost.scrollTop).toBe(89)
+    expect(renderViews).not.toHaveBeenCalled()
     expect(startBody).toBeNull()
     expect(ctx.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
       confirmId: 'update_nuclei_templates',
