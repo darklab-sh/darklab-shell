@@ -4,6 +4,7 @@
 // Shared desktop/mobile assessment-plan preview and durable batch monitor.
 
 import { hasRetryableBatchProgress } from './project_assessment_batch_retry.js';
+import { bindDisclosure } from '../../ui/ui_disclosure.js';
 
 const STATUS_LABELS = Object.freeze({
   queued: 'Queued',
@@ -104,6 +105,31 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     button.type = 'button';
     button.disabled = disabled;
     return bind(button, handler);
+  }
+
+  function previewDisclosure(title, detail, panel, { open = false, onToggle = null } = {}) {
+    const section = element('section', 'project-assessment-batch-disclosure');
+    const toggle = element('button', 'btn btn-ghost project-assessment-batch-disclosure-toggle');
+    toggle.type = 'button';
+    const glyph = element('span', 'disclosure-chev', open ? '▾' : '▸');
+    glyph.setAttribute('aria-hidden', 'true');
+    const copy = element('span', 'project-assessment-batch-disclosure-copy');
+    copy.append(element('strong', '', title), element('small', '', detail));
+    toggle.append(glyph, copy);
+    bindDisclosure(toggle, {
+      panel,
+      initialOpen: open,
+      hiddenClass: 'u-hidden',
+      openClass: 'is-open',
+      clearPressStyle: true,
+      preventFocusTheft: true,
+      onToggle: (isOpen) => {
+        glyph.textContent = isOpen ? '▾' : '▸';
+        onToggle?.(isOpen);
+      },
+    });
+    section.append(toggle, panel);
+    return section;
   }
 
   function errorPanel(message) {
@@ -231,10 +257,19 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const summary = element('summary', '', 'Batch limits');
     details.appendChild(summary);
     const controls = element('div', 'project-assessment-batch-limit-grid');
-    const selectField = (label, key, values, current) => {
+    const selectField = (label, key, presets, current, maximum) => {
       const field = element('label');
       field.appendChild(element('span', '', label));
       const select = element('select', 'form-select');
+      select.dataset.assessmentBatchFocusKey = `batch-limit-${key}`;
+      const parsedMaximum = Number(maximum);
+      const safeMaximum = Number.isInteger(parsedMaximum) && parsedMaximum >= 1
+        ? parsedMaximum
+        : Number(current);
+      const values = [...new Set([
+        ...presets.filter(value => value <= safeMaximum),
+        safeMaximum,
+      ])].sort((left, right) => left - right);
       values.forEach((value) => {
         const option = element('option', '', value);
         option.value = String(value);
@@ -247,11 +282,12 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       field.appendChild(select);
       return field;
     };
+    const limits = st.limits || {};
     controls.append(
-      selectField('Command limit', 'itemLimit', [128, 256, 512], st.selection.itemLimit),
-      selectField('This batch', 'maxParallel', [1, 2, 3, 4, 5, 6, 7, 8], st.selection.maxParallel),
-      selectField('Your batches', 'maxOwnerParallel', [4, 8, 16, 24, 32], st.selection.maxOwnerParallel),
-      selectField('All batches', 'maxInstanceParallel', [8, 16, 32, 48, 64], st.selection.maxInstanceParallel),
+      selectField('Command limit', 'itemLimit', [128, 256, 512], st.selection.itemLimit, limits.itemLimit),
+      selectField('This batch', 'maxParallel', [1, 2, 3, 4, 5, 6, 7, 8], st.selection.maxParallel, limits.maxParallel),
+      selectField('Your batches', 'maxOwnerParallel', [1, 2, 4, 8, 16, 24, 32], st.selection.maxOwnerParallel, limits.maxOwnerParallel),
+      selectField('All batches', 'maxInstanceParallel', [1, 2, 4, 8, 16, 32, 48, 64], st.selection.maxInstanceParallel, limits.maxInstanceParallel),
     );
     details.appendChild(controls);
     box.appendChild(details);
@@ -274,17 +310,25 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     return grid;
   }
 
-  function exclusions(summary) {
+  function exclusions(summary, st) {
     const reasons = Object.entries(summary?.reason_counts || {}).filter(([, count]) => Number(count) > 0);
     if (!reasons.length) return null;
     const panel = element('div', 'project-assessment-batch-exclusions');
-    panel.appendChild(element('strong', '', 'Not included in this plan'));
     const list = element('div', 'project-assessment-batch-chip-list');
     reasons.forEach(([reason, count]) => {
       list.appendChild(badge(`${REASON_LABELS[reason] || reason}: ${count}`, 'muted'));
     });
     panel.appendChild(list);
-    return panel;
+    const excludedCount = reasons.reduce((total, [, count]) => total + Number(count || 0), 0);
+    return previewDisclosure(
+      `Not included in this plan (${excludedCount})`,
+      `${reasons.length} exclusion reason${reasons.length === 1 ? '' : 's'}`,
+      panel,
+      {
+        open: !!st.previewExclusionsOpen,
+        onToggle: isOpen => { st.previewExclusionsOpen = isOpen; },
+      },
+    );
   }
 
   function nucleiPreflight(summary) {
@@ -393,6 +437,114 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     return list;
   }
 
+  function previewCommands(projectId, assessmentId, st) {
+    const candidateCount = Number(st.preview?.candidate_item_count || 0);
+    const selectedCount = Number(st.preview?.selected_item_count || 0);
+    const panel = commandList(projectId, assessmentId, st);
+    panel.classList.add('project-assessment-batch-disclosure-body');
+    return previewDisclosure(
+      `Exact commands (${candidateCount})`,
+      `${st.previewItems.length} loaded · ${selectedCount} selected`,
+      panel,
+      {
+        open: !!st.previewCommandsOpen,
+        onToggle: isOpen => { st.previewCommandsOpen = isOpen; },
+      },
+    );
+  }
+
+  function plannerDecisionBar(projectId, assessmentId, st, options) {
+    const {
+      canRefreshNuclei,
+      canRun,
+      emptyRetry,
+      emptySelection,
+      nucleiBlocked,
+      nucleiSummary,
+      retry,
+    } = options;
+    let status = ['Ready to run', 'The reviewed plan can start now.', 'green', 'Ready'];
+    if (st.previewing) {
+      status = ['Refreshing preview…', 'Selections are being checked against the current assessment.', 'amber', 'Working'];
+    } else if (st.refreshingTemplates) {
+      status = ['Updating templates…', 'The managed cache and preview are being rebuilt.', 'amber', 'Working'];
+    } else if (st.starting) {
+      status = ['Starting assessment…', 'The reviewed plan is being handed to the batch runner.', 'amber', 'Working'];
+    } else if (emptySelection) {
+      status = ['Selection required', 'Select at least one target and category before refreshing this preview.', 'amber', 'Action needed'];
+    } else if (st.previewDirty) {
+      status = ['Preview needs refreshing', 'Selection changed. Refresh the preview before starting.', 'amber', 'Refresh needed'];
+    } else if (nucleiBlocked) {
+      status = ['Templates need attention', 'Nuclei template preflight must pass before this plan can start.', 'red', 'Blocked'];
+    } else if (emptyRetry) {
+      status = ['Nothing to retry', 'No failed or unfinished commands are currently eligible.', 'muted', 'Unavailable'];
+    } else if (!canRun) {
+      status = ['Ready for review', 'Ask an operator with Run commands access to start this plan.', 'muted', 'Read only'];
+    } else if (nucleiSummary?.state === 'stale') {
+      status = ['Ready with stale templates', 'Run the pinned snapshot or update templates and rebuild first.', 'amber', 'Stale'];
+    }
+
+    const bar = element('aside', 'project-assessment-batch-decision');
+    bar.setAttribute('aria-label', 'Assessment plan actions');
+    const copy = element('div', 'project-assessment-batch-decision-copy');
+    const heading = element('div', 'project-assessment-batch-decision-heading');
+    heading.append(element('strong', '', status[0]), badge(status[3], status[2]));
+    heading.setAttribute('aria-live', 'polite');
+    copy.append(heading, element('small', '', status[1]));
+
+    const actions = element(
+      'div',
+      'project-assessment-batch-actions project-assessment-batch-decision-actions',
+    );
+    const busy = st.previewing || st.refreshingTemplates || st.starting;
+    const startDisabled = busy || st.previewDirty || !canRun || emptyRetry || nucleiBlocked;
+    const refreshPreview = actionButton(
+      st.previewing ? 'Building preview…' : 'Refresh preview',
+      () => act.createPreview(projectId, assessmentId),
+      {
+        primary: st.previewDirty || emptySelection,
+        disabled: busy || emptySelection,
+      },
+    );
+    refreshPreview.dataset.assessmentBatchFocusKey = 'preview-plan';
+    const start = actionButton(
+      st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),
+      button => act.startBatch(projectId, assessmentId, button),
+      { primary: !startDisabled, disabled: startDisabled },
+    );
+    start.dataset.assessmentBatchFocusKey = 'run-plan';
+    if (!canRun) start.title = 'View-only team members can preview plans but cannot start commands.';
+
+    if (st.previewDirty || emptySelection) {
+      actions.append(start, refreshPreview);
+    } else if (nucleiBlocked) {
+      actions.append(refreshPreview, start);
+      if (canRefreshNuclei) {
+        const refreshTemplates = actionButton(
+          st.refreshingTemplates ? 'Updating templates…' : 'Update templates and rebuild preview',
+          button => act.refreshNucleiTemplates(projectId, assessmentId, button),
+          { primary: true, disabled: busy },
+        );
+        refreshTemplates.dataset.assessmentBatchFocusKey = 'refresh-nuclei';
+        actions.appendChild(refreshTemplates);
+      }
+    } else {
+      actions.appendChild(refreshPreview);
+      if (canRefreshNuclei) {
+        const refreshTemplates = actionButton(
+          st.refreshingTemplates ? 'Updating templates…' : 'Update templates and rebuild preview',
+          button => act.refreshNucleiTemplates(projectId, assessmentId, button),
+          { disabled: busy },
+        );
+        refreshTemplates.dataset.assessmentBatchFocusKey = 'refresh-nuclei';
+        actions.appendChild(refreshTemplates);
+      }
+      actions.appendChild(start);
+    }
+    bar.append(copy, actions);
+    return bar;
+  }
+
   function renderPlanner(projectId, assessment, detail, st) {
     const body = element('div', 'project-assessment-batch-planner');
     body.append(
@@ -403,20 +555,19 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     const selectedTargets = targetRows(detail).length - st.selection.excludedTargetIds.size;
     const selectedCategories = categoryRows(detail).length - st.selection.excludedCategories.size;
     const emptySelection = selectedTargets <= 0 || selectedCategories <= 0;
-    const previewActions = element('div', 'project-assessment-batch-actions');
-    const previewAction = actionButton(
-      st.previewing ? 'Building preview…' : (st.preview ? 'Refresh preview' : 'Preview assessment plan'),
-      () => act.createPreview(projectId, assessment.id),
-      { primary: true, disabled: st.previewing || st.starting || emptySelection },
-    );
-    previewAction.dataset.assessmentBatchFocusKey = 'preview-plan';
-    previewActions.appendChild(previewAction);
-    body.appendChild(previewActions);
-    if (emptySelection) body.appendChild(element('p', 'project-assessment-batch-selection-note', 'Select at least one target and category to build a plan.'));
-    if (st.previewDirty) {
-      body.appendChild(element('p', 'project-assessment-batch-stale', 'Selection changed. Refresh the preview before starting.'));
+    if (!st.preview) {
+      const previewActions = element('div', 'project-assessment-batch-actions');
+      const previewAction = actionButton(
+        st.previewing ? 'Building preview…' : 'Preview assessment plan',
+        () => act.createPreview(projectId, assessment.id),
+        { primary: true, disabled: st.previewing || st.starting || emptySelection },
+      );
+      previewAction.dataset.assessmentBatchFocusKey = 'preview-plan';
+      previewActions.appendChild(previewAction);
+      body.appendChild(previewActions);
+      if (emptySelection) body.appendChild(element('p', 'project-assessment-batch-selection-note', 'Select at least one target and category to build a plan.'));
+      return body;
     }
-    if (!st.preview) return body;
     const retry = Boolean(st.preview?.source_batch_id);
     if (retry) {
       body.appendChild(element(
@@ -428,15 +579,9 @@ function createProjectAssessmentBatchRenderer(context, actions) {
     body.append(previewSummary(st.preview));
     const preflight = nucleiPreflight(st.preview.summary);
     if (preflight) body.appendChild(preflight);
-    const excluded = exclusions(st.preview.summary);
+    const excluded = exclusions(st.preview.summary, st);
     if (excluded) body.appendChild(excluded);
-    const commandHeading = element('div', 'project-assessment-batch-command-list-heading');
-    commandHeading.append(
-      element('strong', '', 'Exact commands'),
-      element('small', '', `${st.previewItems.length} of ${st.preview.candidate_item_count || 0} shown`),
-    );
-    body.append(commandHeading, commandList(projectId, assessment.id, st));
-    const startActions = element('div', 'project-assessment-batch-actions');
+    body.appendChild(previewCommands(projectId, assessment.id, st));
     const canRun = ctx.canRunCommands?.() !== false;
     const emptyRetry = retry && Number(st.preview?.selected_item_count || 0) === 0;
     const nucleiBlocked = st.preview?.summary?.nuclei_preflight?.launchable === false;
@@ -445,32 +590,15 @@ function createProjectAssessmentBatchRenderer(context, actions) {
       && nucleiSummary
       && nucleiSummary.refresh_enabled !== false
       && (nucleiBlocked || nucleiSummary.state === 'stale');
-    if (canRefreshNuclei) {
-      const refreshAction = actionButton(
-        st.refreshingTemplates ? 'Updating templates…' : 'Update templates and rebuild preview',
-        button => act.refreshNucleiTemplates(projectId, assessment.id, button),
-        {
-          primary: nucleiBlocked,
-          disabled: st.refreshingTemplates || st.starting || st.previewDirty,
-        },
-      );
-      refreshAction.dataset.assessmentBatchFocusKey = 'refresh-nuclei';
-      startActions.appendChild(refreshAction);
-    }
-    const start = actionButton(
-      st.starting ? 'Starting…' : (retry ? 'Start retry' : 'Run assessment plan'),
-      button => act.startBatch(projectId, assessment.id, button),
-      {
-        primary: true,
-        disabled: st.starting || st.refreshingTemplates || st.previewDirty || !canRun || emptyRetry || nucleiBlocked,
-      },
-    );
-    if (!canRun) start.title = 'View-only team members can preview plans but cannot start commands.';
-    startActions.appendChild(start);
-    if (emptyRetry) startActions.appendChild(element('small', '', 'Nothing can be retried from this batch right now.'));
-    if (nucleiBlocked) startActions.appendChild(element('small', '', 'Nuclei template preflight must pass before this plan can start.'));
-    if (!canRun) startActions.appendChild(element('small', '', 'Read-only: ask for operator access to start this batch.'));
-    body.appendChild(startActions);
+    body.appendChild(plannerDecisionBar(projectId, assessment.id, st, {
+      canRefreshNuclei,
+      canRun,
+      emptyRetry,
+      emptySelection,
+      nucleiBlocked,
+      nucleiSummary,
+      retry,
+    }));
     return body;
   }
 

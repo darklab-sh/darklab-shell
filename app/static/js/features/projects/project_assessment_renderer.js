@@ -1533,6 +1533,9 @@ function createProjectAssessmentRenderer(context, actions) {
       return root;
     }
     const batch = act.renderBatch(projectId, selected, st.detail, { mobile });
+    if (mobile && batch?.querySelector('.project-assessment-batch-decision')) {
+      root.classList.add('has-assessment-batch-decision');
+    }
     root.append(
       ...(batch ? [batch] : []),
       renderCoverage(st.detail.rollup),

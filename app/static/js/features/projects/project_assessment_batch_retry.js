@@ -32,6 +32,8 @@ async function createAssessmentBatchRetryPreview(st, dependencies) {
     st.previewItems = [];
     st.previewItemsCursor = null;
     st.previewDirty = false;
+    st.previewCommandsOpen = false;
+    st.previewExclusionsOpen = false;
     st.planning = true;
     await loadPreviewItemPage(st);
     return true;

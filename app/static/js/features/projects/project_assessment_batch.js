@@ -15,6 +15,17 @@ const DEFAULT_SELECTION = Object.freeze({
   maxOwnerParallel: 16,
   maxInstanceParallel: 32,
 });
+const BATCH_LIMIT_CAPS = Object.freeze({
+  itemLimit: 512,
+  maxParallel: 8,
+  maxOwnerParallel: 32,
+  maxInstanceParallel: 64,
+});
+
+function normalizedLimit(value, fallback, maximum) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= maximum ? parsed : fallback;
+}
 
 function createProjectAssessmentBatchManager(context, hooks = {}) {
   const ctx = context || {};
@@ -39,6 +50,31 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
   }
 
   function defaultState(projectId, assessmentId) {
+    const configured = typeof ctx.assessmentBatchLimits === 'function'
+      ? ctx.assessmentBatchLimits()
+      : {};
+    const limits = {
+      itemLimit: normalizedLimit(
+        configured?.item_limit,
+        DEFAULT_SELECTION.itemLimit,
+        BATCH_LIMIT_CAPS.itemLimit,
+      ),
+      maxParallel: normalizedLimit(
+        configured?.max_parallel,
+        DEFAULT_SELECTION.maxParallel,
+        BATCH_LIMIT_CAPS.maxParallel,
+      ),
+      maxOwnerParallel: normalizedLimit(
+        configured?.max_owner_parallel,
+        DEFAULT_SELECTION.maxOwnerParallel,
+        BATCH_LIMIT_CAPS.maxOwnerParallel,
+      ),
+      maxInstanceParallel: normalizedLimit(
+        configured?.max_instance_parallel,
+        DEFAULT_SELECTION.maxInstanceParallel,
+        BATCH_LIMIT_CAPS.maxInstanceParallel,
+      ),
+    };
     return {
       projectId: String(projectId || ''),
       assessmentId: String(assessmentId || ''),
@@ -65,11 +101,15 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       previewItemsCursor: null,
       previewItemsLoading: false,
       previewDirty: false,
+      previewCommandsOpen: false,
+      previewExclusionsOpen: false,
       pollTimer: null,
       renderAssessment: null,
       renderDetail: null,
+      limits,
       selection: {
         ...DEFAULT_SELECTION,
+        ...limits,
         excludedTargetIds: new Set(),
         excludedCategories: new Set(),
       },
@@ -192,6 +232,10 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       const nextPanel = nextSection.querySelector(`:scope > ${panelSelector}`);
       if (!nextPanel) return;
       currentPanel.replaceWith(nextPanel);
+      section.closest('.project-assessment-root.is-mobile')?.classList.toggle(
+        'has-assessment-batch-decision',
+        Boolean(nextPanel.querySelector('.project-assessment-batch-decision')),
+      );
 
       const currentError = section.querySelector(':scope > .project-assessment-batch-error');
       const nextError = nextSection.querySelector(':scope > .project-assessment-batch-error');
@@ -408,6 +452,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       st.previewItems = [];
       st.previewItemsCursor = null;
       st.previewDirty = false;
+      st.previewCommandsOpen = false;
+      st.previewExclusionsOpen = false;
       st.planning = true;
       await loadPreviewItemPage(st);
       return true;
@@ -479,6 +525,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       st.previewItems = [];
       st.previewItemsCursor = null;
       st.previewDirty = false;
+      st.previewCommandsOpen = false;
+      st.previewExclusionsOpen = false;
       st.planning = true;
       await loadPreviewItemPage(st);
       ctx.setProjectWorkspaceMessage?.(
@@ -677,8 +725,7 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
       return false;
     }
     st.previewDirty = Boolean(st.preview);
-    if (key === 'includeStandard') renderPlannerViews(st);
-    else renderViews();
+    renderPlannerViews(st);
     return true;
   }
 
@@ -690,6 +737,8 @@ function createProjectAssessmentBatchManager(context, hooks = {}) {
     st.previewItems = [];
     st.previewItemsCursor = null;
     st.previewDirty = false;
+    st.previewCommandsOpen = false;
+    st.previewExclusionsOpen = false;
     st.error = '';
     renderViews();
     return true;

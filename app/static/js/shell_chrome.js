@@ -2166,6 +2166,9 @@ let importedProjectWorkspaceShell;
       actionSheetContainer: () => projectWorkspaceModal,
       logClientError: _shellLogClientError,
       mobileView: _projectMobileView,
+      assessmentBatchLimits: () => (
+        _shellValue('APP_CONFIG')?.assessment_batch_limits || {}
+      ),
       canMutateProjects: () => _shellActiveTeamScopeCan('mutate_projects'),
       canRunCommands: () => _shellActiveTeamScopeCan('run_commands'),
       canManageSecrets: () => _shellActiveTeamScopeCan('manage_secrets'),

@@ -635,6 +635,22 @@ test.describe('project assessment qualification', () => {
     expect((await previewResponse).status()).toBe(201)
     await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
     await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
+    const decisionBar = section.locator('.project-assessment-batch-decision')
+    await expect(decisionBar).toBeVisible()
+    await expect(decisionBar).toContainText('Ready with stale templates')
+    await expect(section.getByRole('button', { name: 'Run assessment plan' })).toBeVisible()
+    const [explorerBox, decisionBox] = await Promise.all([
+      explorerBody.boundingBox(),
+      decisionBar.boundingBox(),
+    ])
+    expect(decisionBox.y).toBeGreaterThanOrEqual(explorerBox.y - 1)
+    expect(decisionBox.y + decisionBox.height)
+      .toBeLessThanOrEqual(explorerBox.y + explorerBox.height + 1)
+    const commandDisclosure = section.getByRole('button', { name: /Exact commands \(/ })
+    await expect(commandDisclosure).toHaveAttribute('aria-expanded', 'false')
+    await expect(section.locator('.project-assessment-batch-command').first()).toBeHidden()
+    await commandDisclosure.click()
+    await expect(commandDisclosure).toHaveAttribute('aria-expanded', 'true')
     await expect(section.locator('.project-assessment-batch-command').first()).toBeVisible()
     await expect(section).toContainText('Planning estimate')
     await expect(section).toContainText('Managed Nuclei template preflight')
@@ -649,7 +665,7 @@ test.describe('project assessment qualification', () => {
     const updateTemplates = section.getByRole('button', {
       name: 'Update templates and rebuild preview',
     })
-    await updateTemplates.scrollIntoViewIfNeeded()
+    await expect(updateTemplates).toBeVisible()
     const scrollBeforeTemplateRefresh = await explorerBody.evaluate(node => node.scrollTop)
     await updateTemplates.click()
     await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
@@ -661,6 +677,7 @@ test.describe('project assessment qualification', () => {
     await expect(section.getByRole('button', {
       name: 'Update templates and rebuild preview',
     })).toHaveCount(0)
+    await expect(decisionBar).toContainText('Ready to run')
     await expect(section.getByRole('button', { name: 'Run assessment plan' })).toBeEnabled()
 
     await page.keyboard.press('Escape')
@@ -983,6 +1000,7 @@ test.describe('project assessment qualification', () => {
 
     test('archives and deletes a cycle through the shared action sheet', async ({ page }, testInfo) => {
       test.setTimeout(90_000)
+      await installAssessmentBatchLifecycleFixture(page)
       const projectName = `Mobile Assessment ${Date.now()}`
       const { project } = await createAssessmentProject(page, projectName)
       const monitoring = seedProjectMonitoringFixture(testInfo, {
@@ -1013,6 +1031,15 @@ test.describe('project assessment qualification', () => {
       expect(selectorLayout.every(item => item.right <= page.viewportSize().width + 1)).toBe(true)
 
       const cycleActions = assessment.getByRole('button', { name: 'Cycle actions' })
+      await batchPlan.getByRole('button', { name: 'Preview assessment plan' }).click()
+      const decisionBar = batchPlan.locator('.project-assessment-batch-decision')
+      await expect(decisionBar).toBeVisible()
+      await expect(decisionBar).toContainText('Ready with stale templates')
+      await expect(batchPlan.getByRole('button', { name: 'Run assessment plan' })).toBeVisible()
+      await expect(assessment).toHaveClass(/\bhas-assessment-batch-decision\b/)
+      await expect.poll(() => cycleActions.evaluate(node => getComputedStyle(node.parentElement).position))
+        .toBe('static')
+
       const sheet = page.locator('#action-sheet-overlay')
       await cycleActions.click()
       await expect(sheet).toHaveClass(/\bopen\b/)

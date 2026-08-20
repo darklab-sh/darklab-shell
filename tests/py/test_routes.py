@@ -14053,6 +14053,7 @@ class TestConfigRoute:
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
             "workspace_enabled", "interactive_pty_commands",
             "assessment_intrusive_actions_enabled",
+            "assessment_batch_limits",
             "scheduler_default_timezone",
             "tour_chapters",
         ):
@@ -14060,6 +14061,12 @@ class TestConfigRoute:
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
         assert data["assessment_intrusive_actions_enabled"] is False
+        assert data["assessment_batch_limits"] == {
+            "item_limit": 128,
+            "max_parallel": 8,
+            "max_owner_parallel": 16,
+            "max_instance_parallel": 32,
+        }
 
     def test_interactive_pty_commands_reflect_registry(self):
         client = get_client()

@@ -136,6 +136,12 @@ function context(projectWorkspaceRequest, overrides = {}) {
     showConfirm: vi.fn(async options => options.confirmId),
     openHistoryRunDetails: vi.fn(),
     formatDate: vi.fn(value => String(value || '')),
+    assessmentBatchLimits: vi.fn(() => ({
+      item_limit: 128,
+      max_parallel: 8,
+      max_owner_parallel: 16,
+      max_instance_parallel: 32,
+    })),
     canRunCommands: vi.fn(() => true),
     logClientError: vi.fn(),
     ...overrides,
@@ -244,7 +250,14 @@ describe('Project assessment batches', () => {
       }
       throw new Error(`Unexpected request: ${url}`)
     })
-    const ctx = context(projectWorkspaceRequest)
+    const ctx = context(projectWorkspaceRequest, {
+      assessmentBatchLimits: vi.fn(() => ({
+        item_limit: 512,
+        max_parallel: 8,
+        max_owner_parallel: 16,
+        max_instance_parallel: 32,
+      })),
+    })
     const renderViews = vi.fn()
     const manager = createProjectAssessmentBatchManager(ctx, { renderViews })
 
@@ -257,6 +270,12 @@ describe('Project assessment batches', () => {
     scrollHost.scrollTop = 61
     expect(surface.textContent).toContain('Safe checks are selected by default')
     expect(surface.textContent).toContain('Include standard checks')
+    const commandLimit = [...surface.querySelectorAll('label')]
+      .find(label => label.textContent.includes('Command limit'))
+      .querySelector('select')
+    expect([...commandLimit.options].map(option => option.value)).toEqual(['128', '256', '512'])
+    commandLimit.value = '512'
+    commandLimit.dispatchEvent(new Event('change', { bubbles: true }))
     surface.querySelector('button.btn-primary').click()
     expect(surface.textContent).toContain('Building preview…')
     expect(scrollHost.scrollTop).toBe(61)
@@ -273,15 +292,31 @@ describe('Project assessment batches', () => {
     const previewRequest = requests.find(item => item.url.endsWith('/batch-previews'))
     expect(JSON.parse(previewRequest.options.body)).toMatchObject({
       include_standard: false,
-      item_limit: 128,
+      item_limit: 512,
       max_parallel: 8,
       max_owner_parallel: 16,
       max_instance_parallel: 32,
     })
-    expect(surface.textContent).toContain('2 of 2 shown')
-    expect(surface.textContent).toContain('safe')
-    expect(surface.textContent).toContain('standard · not selected')
-    expect(surface.textContent).toContain('Already covered: 1')
+    const decision = surface.querySelector('.project-assessment-batch-decision')
+    expect(decision.textContent).toContain('Ready to run')
+    expect(decision.textContent).toContain('The reviewed plan can start now.')
+    const commandToggle = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent.includes('Exact commands (2)'))
+    const commandList = surface.querySelector('.project-assessment-batch-command-list')
+    expect(commandToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(commandToggle.textContent).toContain('2 loaded · 1 selected')
+    expect(commandList.classList.contains('u-hidden')).toBe(true)
+    commandToggle.click()
+    expect(commandToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(commandList.classList.contains('u-hidden')).toBe(false)
+    expect(commandList.textContent).toContain('safe')
+    expect(commandList.textContent).toContain('standard · not selected')
+    const exclusionsToggle = [...surface.querySelectorAll('button')]
+      .find(button => button.textContent.includes('Not included in this plan (1)'))
+    expect(exclusionsToggle.getAttribute('aria-expanded')).toBe('false')
+    exclusionsToggle.click()
+    expect(surface.querySelector('.project-assessment-batch-exclusions').textContent)
+      .toContain('Already covered: 1')
     expect(surface.textContent).toContain('Review scope')
 
     const start = [...surface.querySelectorAll('button')]
@@ -370,6 +405,10 @@ describe('Project assessment batches', () => {
     surface = manager.renderSection('prj_batch_1', assessment, detail)
     scrollHost.appendChild(surface)
     document.body.appendChild(scrollHost)
+    const commandLimit = [...surface.querySelectorAll('label')]
+      .find(label => label.textContent.includes('Command limit'))
+      .querySelector('select')
+    expect([...commandLimit.options].map(option => option.value)).toEqual(['128'])
     scrollHost.scrollTop = 73
     const standard = [...surface.querySelectorAll('label')]
       .find(label => label.textContent.includes('Include standard checks'))
@@ -387,9 +426,8 @@ describe('Project assessment batches', () => {
     expect(renderViews).not.toHaveBeenCalled()
     expect(surface.textContent).toContain('Selection changed. Refresh the preview before starting.')
     expect(surface.textContent).toContain('Managed Nuclei template preflight')
-    expect(surface.textContent).toContain('Nuclei template preflight must pass')
+    expect(surface.textContent).toContain("Nuclei work can't start")
     expect([...surface.querySelectorAll('button')].find(button => button.textContent === 'Run assessment plan').disabled).toBe(true)
-    expect(surface.textContent).toContain('Read-only: ask for operator access')
     expect(surface.textContent).toContain('Ask an operator with Run commands access')
     expect(surface.textContent).not.toContain('Update templates and rebuild preview')
 
@@ -401,6 +439,8 @@ describe('Project assessment batches', () => {
     await vi.waitFor(() => expect(latestPreviewBody?.include_standard).toBe(true))
     await vi.waitFor(() => expect(manager.stateFor('prj_batch_1', assessment.id).previewing).toBe(false))
     expect(latestPreviewBody.include_standard).toBe(true)
+    expect(surface.textContent).toContain('Templates need attention')
+    expect(surface.textContent).toContain('Nuclei template preflight must pass')
     expect(scrollHost.scrollTop).toBe(73)
     expect(renderViews).not.toHaveBeenCalled()
     manager.invalidate()

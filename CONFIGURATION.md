@@ -384,7 +384,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
-| `assessment_batches` | see nested defaults | Server-side safety, runtime, and retention settings for **Run assessment plan** |
+| `assessment_batches` | see nested defaults | Server-side safety, runtime, and retention settings for **Run assessment plan**. The planner defaults to the effective item and concurrency ceilings and offers only values at or below them |
 | `assessment_batches.item_limit` | `128` | Maximum selected commands in one new batch, from 1 to the fixed product ceiling of 512. Larger work needs another preview and confirmation |
 | `assessment_batches.max_active_per_owner` | `3` | Maximum queued, running, or canceling assessment batches for one personal session or team, from 1 to 8 |
 | `assessment_batches.max_parallel` | `8` | Maximum active child commands in one assessment batch, from 1 to the fixed cap of 8 |
