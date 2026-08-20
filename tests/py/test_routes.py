@@ -14053,6 +14053,7 @@ class TestConfigRoute:
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
             "workspace_enabled", "interactive_pty_commands",
             "assessment_intrusive_actions_enabled",
+            "assessment_batch_limits",
             "scheduler_default_timezone",
             "tour_chapters",
         ):
@@ -14060,6 +14061,12 @@ class TestConfigRoute:
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
         assert data["assessment_intrusive_actions_enabled"] is False
+        assert data["assessment_batch_limits"] == {
+            "item_limit": 128,
+            "max_parallel": 8,
+            "max_owner_parallel": 16,
+            "max_instance_parallel": 32,
+        }
 
     def test_interactive_pty_commands_reflect_registry(self):
         client = get_client()
@@ -21660,6 +21667,9 @@ class TestRunRoute:
                 "note_count": 0,
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
+                "assessment_batch": None,
+                "assessment_batch_id": "",
+                "assessment_batch_item_index": None,
                 "scheduled": False,
                 "schedule_id": "",
             }
@@ -23566,6 +23576,46 @@ class TestHistoryRoute:
             ]
         }
         active_mock.assert_called_once_with(session, client_id="client-1", team_id="")
+
+    def test_active_history_can_include_durable_assessment_plan_progress(self):
+        client = get_client()
+        session = f"session-{uuid.uuid4()}"
+        assessment_state = {
+            "batches": [{
+                "batch_id": "abx-monitor",
+                "project_id": "prj-monitor",
+                "assessment_id": "asm-monitor",
+                "status": "running",
+                "progress": {"total": 2, "pending": 1, "running": 1},
+                "active_commands": [{
+                    "display_command": "nmap monitor.example.test",
+                    "status": "running",
+                    "run_id": "run-monitor",
+                }],
+            }],
+            "truncated": False,
+        }
+        with mock.patch(
+            "blueprints.history.active_runs_for_session", return_value=[]
+        ), mock.patch(
+            "blueprints.history.safe_active_assessment_batch_monitor_state",
+            return_value=assessment_state,
+        ) as assessment_mock:
+            resp = client.get(
+                "/history/active?include_scheduled=1&include_assessment_batches=1",
+                headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
+            )
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {
+            "runs": [],
+            "assessment_batches": assessment_state,
+        }
+        assessment_mock.assert_called_once_with(
+            session,
+            team_id="",
+            log_context={"ip": mock.ANY, "session": mock.ANY},
+        )
 
     def test_compare_candidates_rank_exact_command_before_same_target(self):
         client = get_client()

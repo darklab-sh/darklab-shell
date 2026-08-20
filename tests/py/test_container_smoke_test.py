@@ -59,7 +59,6 @@ DEFAULT_BUILD_TIMEOUT = int(
 DEFAULT_RUN_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RUN_TIMEOUT", "300")
 )
-NUCLEI_TEMPLATE_WARMUP_COMMAND = "nuclei -update-templates"
 SMOKE_COMMAND_RETRIES = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRIES", "3")
 )
@@ -1617,75 +1616,16 @@ if _SELECTED_COMMANDS:
 
 
 @pytest.fixture(scope="module")
-def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_test_session_id) -> None:
+def container_smoke_test_nuclei_templates(container_smoke_test) -> None:
     if not _needs_nuclei_template_warmup(SMOKE_TEST_CASES) and not _needs_nuclei_workspace_template_warmup():
         return
 
-    warmup_session_id = _new_smoke_session_id()
-    _workspace_payload(container_smoke_test, warmup_session_id)
     shell_container = _run(
         container_smoke_test.compose + ["ps", "-q", "shell"],
         timeout=30,
     ).stdout.strip()
-    assert shell_container, "shell container id was not available before Nuclei warmup"
-    workspace_name = "sess_" + hashlib.sha256(
-        warmup_session_id.encode("utf-8")
-    ).hexdigest()[:32]
-    stale_config_dir = (
-        f"/tmp/darklab_shell-workspaces/{workspace_name}/tools/nuclei"
-    )
-    stale_config = json.dumps({
-        "nuclei-templates-directory": "/tmp/nuclei-templates",
-        "nuclei-templates-version": "v999.0.0",
-    })
-    _run(
-        [
-            "docker",
-            "exec",
-            shell_container,
-            "sh",
-            "-c",
-            (
-                'install -d -o scanner -g appuser -m 3770 "$1" && '
-                'printf "%s\\n" "$2" > "$1/.templates-config.json" && '
-                'chown scanner:appuser "$1/.templates-config.json" && '
-                'chmod 0640 "$1/.templates-config.json"'
-            ),
-            "sh",
-            stale_config_dir,
-            stale_config,
-        ],
-        timeout=30,
-    )
-    print(
-        f"[container-smoke-test] warming nuclei templates: {NUCLEI_TEMPLATE_WARMUP_COMMAND}",
-        flush=True,
-    )
-    events, killed_early = _post_run(
-        container_smoke_test,
-        NUCLEI_TEMPLATE_WARMUP_COMMAND,
-        warmup_session_id,
-        timeout=max(DEFAULT_RUN_TIMEOUT, 900),
-        stop_text=None,
-        stop_patterns=None,
-    )
-    visible_lines = _collect_visible_lines(events, NUCLEI_TEMPLATE_WARMUP_COMMAND)
-    event_types = [str(event.get("type", "")) for event in events]
-    exit_events = [event for event in events if event.get("type") == "exit"]
-
-    assert not killed_early, (
-        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} was killed early; events={events[:10]}"
-    )
-    assert "error" not in event_types, (
-        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} emitted an error event; events={events[:10]}"
-    )
-    assert exit_events, (
-        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} never emitted an exit event; "
-        f"output={visible_lines[:12]!r}"
-    )
-    assert exit_events[0].get("code") == 0, (
-        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} exited with the wrong status; "
-        f"events={events[:10]}; output={visible_lines[:12]!r}"
+    assert shell_container, (
+        "shell container id was not available before the Nuclei cache check"
     )
 
     _run(

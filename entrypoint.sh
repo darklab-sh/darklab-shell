@@ -171,34 +171,32 @@ mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
 chown -R scanner:scanner /tmp/.config /tmp/.cache
 chmod -R 755 /tmp/.config /tmp/.cache
 
-# Nuclei creates a new templates directory with mode 0700, which prevents the
-# appuser web process from reading the managed checksum after scanner installs
-# templates. Prepare the shared root first so scanner keeps write ownership and
-# appuser can traverse it to verify the exact template snapshot used by plans.
-prepare_managed_nuclei_cache() {
-    NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"
-    export NUCLEI_TEMPLATES_DIR
+# The named volume stays mounted at /tmp/nuclei-templates, while its live
+# snapshot is a child directory that can be replaced atomically. The helper
+# also migrates the volume-root layout used by older releases.
+/usr/local/libexec/darklab-prepare-nuclei-template-cache
 
-    if [ -L "$NUCLEI_TEMPLATES_DIR" ] \
-        || { [ -e "$NUCLEI_TEMPLATES_DIR" ] && [ ! -d "$NUCLEI_TEMPLATES_DIR" ]; }; then
-        echo "NUCLEI_TEMPLATE_CACHE_INVALID path=$NUCLEI_TEMPLATES_DIR" >&2
-        exit 1
-    fi
-    mkdir -p "$NUCLEI_TEMPLATES_DIR" || {
-        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=mkdir path=$NUCLEI_TEMPLATES_DIR" >&2
-        exit 1
-    }
-    chown scanner:appuser "$NUCLEI_TEMPLATES_DIR" || {
-        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=chown path=$NUCLEI_TEMPLATES_DIR" >&2
-        exit 1
-    }
-    chmod 0750 "$NUCLEI_TEMPLATES_DIR" || {
-        echo "NUCLEI_TEMPLATE_CACHE_PREPARE_FAILED stage=chmod path=$NUCLEI_TEMPLATES_DIR" >&2
-        exit 1
-    }
+# The web process coordinates cache maintenance while scans run as the scanner
+# user. Create the shared lock before dropping privileges so both identities can
+# open it, but only appuser owns its metadata in the sticky /tmp directory.
+NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"
+if [ -L "$NUCLEI_TEMPLATE_LOCK_PATH" ] \
+    || { [ -e "$NUCLEI_TEMPLATE_LOCK_PATH" ] && [ ! -f "$NUCLEI_TEMPLATE_LOCK_PATH" ]; }; then
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=unsafe_path" >&2
+    exit 1
+fi
+touch "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=create_failed" >&2
+    exit 1
 }
-
-prepare_managed_nuclei_cache
+chown appuser:appuser "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=owner_failed" >&2
+    exit 1
+}
+chmod 0660 "$NUCLEI_TEMPLATE_LOCK_PATH" || {
+    echo "NUCLEI_TEMPLATE_LOCK_PREPARE_FAILED reason=mode_failed" >&2
+    exit 1
+}
 
 # A fresh deployment should be able to preview reviewed Nuclei probes without
 # first running a manual terminal command. Bootstrap only an empty managed

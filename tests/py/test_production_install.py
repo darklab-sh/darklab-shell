@@ -1154,9 +1154,10 @@ def test_nuclei_template_bootstrap_is_conditional_and_non_fatal(tmp_path: Path):
         encoding="utf-8",
     )
     (fake_bin / "gosu").write_text(
-        "#!/bin/sh\n[ \"$1\" = scanner ] && shift\nexec \"$@\"\n",
+        "#!/bin/sh\n[ \"$1\" = scanner:appuser ] && shift\nexec \"$@\"\n",
         encoding="utf-8",
     )
+    (fake_bin / "chown").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (fake_bin / "nuclei").write_text(
         """#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_NUCLEI_CALLS"
@@ -1174,6 +1175,9 @@ case "$FAKE_NUCLEI_MODE" in
     success)
         mkdir -p "$cache_dir"
         printf 'http/test.yaml,d41d8cd98f00b204e9800998ecf8427e;' > "$cache_dir/.checksum"
+        mkdir -p "$XDG_CONFIG_HOME/nuclei"
+        printf '{"nuclei-templates-directory":"%s","nuclei-templates-version":"v10.4.7"}\n' \
+            "$cache_dir" > "$XDG_CONFIG_HOME/nuclei/.templates-config.json"
         exit 0
         ;;
     no-manifest)
@@ -1197,6 +1201,7 @@ esac
                 **os.environ,
                 "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
                 "NUCLEI_TEMPLATES_DIR": str(cache_dir),
+                "NUCLEI_CONFIG_DIR": str(cache_dir.parent / "config" / "nuclei"),
                 "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED": enabled,
                 "FAKE_NUCLEI_CALLS": str(calls),
                 "FAKE_NUCLEI_MODE": mode,
@@ -1242,7 +1247,7 @@ esac
     incomplete_cache = tmp_path / "incomplete"
     incomplete = run(incomplete_cache, mode="no-manifest")
     assert incomplete.returncode == 0
-    assert "reason=manifest_missing_after_update" in incomplete.stderr
+    assert "reason=cache_metadata_missing_after_update" in incomplete.stderr
 
     unsafe_cache = tmp_path / "unsafe"
     unsafe_cache.mkdir()
@@ -1250,6 +1255,70 @@ esac
     unsafe = run(unsafe_cache)
     assert unsafe.returncode == 0
     assert "reason=unsafe_manifest" in unsafe.stderr
+
+    prepare = ROOT / "scripts" / "container" / "prepare_nuclei_template_cache.sh"
+    legacy_root = tmp_path / "legacy-volume"
+    legacy_root.mkdir()
+    (legacy_root / "http").mkdir()
+    (legacy_root / ".checksum").write_text(
+        f"{legacy_root}/http/test.yaml,{'a' * 32};",
+        encoding="utf-8",
+    )
+    prepared = subprocess.run(
+        ["sh", str(prepare)],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "NUCLEI_TEMPLATE_VOLUME_ROOT": str(legacy_root),
+            "NUCLEI_TEMPLATES_DIR": str(legacy_root / "current"),
+            "NUCLEI_CONFIG_DIR": str(legacy_root / "config" / "nuclei"),
+            "DARKLAB_PYTHON_BIN": sys.executable,
+            "PYTHONPATH": str(ROOT / "app"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    assert "NUCLEI_TEMPLATE_CACHE_MIGRATED" in prepared.stdout
+    assert (legacy_root / "current" / ".checksum").read_text(encoding="utf-8") == (
+        f"{legacy_root}/current/http/test.yaml,{'a' * 32};"
+    )
+    assert (legacy_root / "current" / "http").is_dir()
+    assert (legacy_root / "config" / "nuclei").is_dir()
+
+    failed_migration_root = tmp_path / "failed-legacy-volume"
+    failed_migration_root.mkdir()
+    (failed_migration_root / "http").mkdir()
+    failed_manifest = f"{failed_migration_root}/http/test.yaml,{'b' * 32};"
+    (failed_migration_root / ".checksum").write_text(
+        failed_manifest,
+        encoding="utf-8",
+    )
+    failed_migration = subprocess.run(
+        ["sh", str(prepare)],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "NUCLEI_TEMPLATE_VOLUME_ROOT": str(failed_migration_root),
+            "NUCLEI_TEMPLATES_DIR": str(failed_migration_root / "current"),
+            "NUCLEI_CONFIG_DIR": str(failed_migration_root / "config" / "nuclei"),
+            "DARKLAB_PYTHON_BIN": str(tmp_path / "missing-python"),
+            "PYTHONPATH": str(ROOT / "app"),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert failed_migration.returncode != 0
+    assert "stage=legacy-migration-manifest" in failed_migration.stderr
+    assert (failed_migration_root / ".checksum").read_text(encoding="utf-8") == (
+        failed_manifest
+    )
+    assert not (failed_migration_root / "current").exists()
+    assert not (failed_migration_root / ".darklab-nuclei-migration").exists()
 
 
 def test_development_source_staging_normalizes_private_files_and_fails_closed(
@@ -1387,6 +1456,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "!scripts/container/patches/nuclei-kin-openapi-v0.144.patch" in dockerignore
     assert "!scripts/container/stage_runtime_source.sh" in dockerignore
     assert "!scripts/container/bootstrap_nuclei_templates.sh" in dockerignore
+    assert "!scripts/container/prepare_nuclei_template_cache.sh" in dockerignore
     assert "!scripts/operations/migrate_sqlite_to_postgres.py" in dockerignore
     assert "!scripts/operations/restore_system.py" in dockerignore
     assert (
@@ -1396,6 +1466,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert (
         "COPY scripts/container/bootstrap_nuclei_templates.sh "
         "/usr/local/libexec/darklab-bootstrap-nuclei-templates"
+    ) in dockerfile
+    assert (
+        "COPY scripts/container/prepare_nuclei_template_cache.sh "
+        "/usr/local/libexec/darklab-prepare-nuclei-template-cache"
     ) in dockerfile
     assert "/usr/local/libexec/darklab-stage-runtime-source" in entrypoint
     assert entrypoint.index("/usr/local/libexec/darklab-stage-runtime-source") < (
@@ -1409,14 +1483,20 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'echo "PROCESS_ROLE_INVALID role=$process_role"' in entrypoint
     assert 'exec gosu appuser python -m "$process_module"' in entrypoint
     assert "/tmp/darklab-process-role.ready" in entrypoint
-    assert 'NUCLEI_TEMPLATES_DIR="${NUCLEI_TEMPLATES_DIR:-/tmp/nuclei-templates}"' in entrypoint
-    assert 'chown scanner:appuser "$NUCLEI_TEMPLATES_DIR"' in entrypoint
-    assert 'chmod 0750 "$NUCLEI_TEMPLATES_DIR"' in entrypoint
-    cache_prepare = entrypoint.index("\nprepare_managed_nuclei_cache\n")
+    assert "ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates/current" in dockerfile
+    assert "ENV NUCLEI_CONFIG_DIR=/tmp/nuclei-templates/config/nuclei" in dockerfile
+    assert "/usr/local/libexec/darklab-prepare-nuclei-template-cache" in entrypoint
+    assert 'NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"' in entrypoint
+    assert 'chown appuser:appuser "$NUCLEI_TEMPLATE_LOCK_PATH"' in entrypoint
+    assert 'chmod 0660 "$NUCLEI_TEMPLATE_LOCK_PATH"' in entrypoint
+    cache_prepare = entrypoint.index(
+        "\n/usr/local/libexec/darklab-prepare-nuclei-template-cache\n"
+    )
+    lock_prepare = entrypoint.index('NUCLEI_TEMPLATE_LOCK_PATH="/tmp/.darklab-nuclei-template.lock"')
     cache_bootstrap = entrypoint.index(
         "\n/usr/local/libexec/darklab-bootstrap-nuclei-templates\n"
     )
-    assert cache_prepare < cache_bootstrap < entrypoint.index("exec gosu appuser gunicorn")
+    assert cache_prepare < lock_prepare < cache_bootstrap < entrypoint.index("exec gosu appuser gunicorn")
     assert 'cp -R "${source_dir%/}/."' in source_stager
     assert 'chmod -R u+rX,a-w "$runtime_dir"' in source_stager
     assert "DEVELOPMENT_SOURCE_STAGE_FAILED stage=$stage" in source_stager

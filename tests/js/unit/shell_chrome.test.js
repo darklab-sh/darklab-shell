@@ -57,6 +57,7 @@ const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').repla
   `
   global.__darklabShellChromeExports = {
     closeProjectWorkspace,
+    openProjectAssessment,
     openProjectWorkspace,
     openProjectWorkspaceById,
     openProjectAutoPromoteRuleFromAtlas,
@@ -540,6 +541,7 @@ function loadShellChrome({
       ${SHELL_CHROME_SRC}
       global.openProjectWorkspace = global.__darklabShellChromeExports.openProjectWorkspace;
       global.openProjectWorkspaceById = global.__darklabShellChromeExports.openProjectWorkspaceById;
+      global.openProjectAssessment = global.__darklabShellChromeExports.openProjectAssessment;
       global.closeProjectWorkspace = global.__darklabShellChromeExports.closeProjectWorkspace;
       global.openProjectAutoPromoteRuleFromAtlas = global.__darklabShellChromeExports.openProjectAutoPromoteRuleFromAtlas;
       global.refreshProjectWorkspace = global.__darklabShellChromeExports.refreshProjectWorkspace;
@@ -643,6 +645,7 @@ function loadShellChrome({
     closeProjectWorkspace: global.closeProjectWorkspace,
     openProjectWorkspace: global.openProjectWorkspace,
     openProjectWorkspaceById: global.openProjectWorkspaceById,
+    openProjectAssessment: global.openProjectAssessment,
     openProjectAutoPromoteRuleFromAtlas: global.openProjectAutoPromoteRuleFromAtlas,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
@@ -1249,6 +1252,19 @@ describe('shell chrome project workspace', () => {
       expect(logClientError.mock.calls).toEqual([])
       await vi.waitFor(() => {
         expect(focusCycle).toHaveBeenCalledWith('project-1', 'asmt-active', {
+          batch_id: '',
+          category: '',
+          state: '',
+          priority: '',
+        })
+      })
+      await shell.openProjectAssessment('project-1', {
+        assessmentId: 'asmt-active',
+        batchId: 'abx-focused',
+      })
+      await vi.waitFor(() => {
+        expect(focusCycle).toHaveBeenLastCalledWith('project-1', 'asmt-active', {
+          batch_id: 'abx-focused',
           category: '',
           state: '',
           priority: '',
@@ -4646,11 +4662,40 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1/1')
     expect(document.getElementById('project-explorer-body').textContent).toContain('CVE-2025-49113')
     expect(document.getElementById('project-explorer-body').textContent).toContain('intel: NVD')
+    const entityScrollBody = document.getElementById('project-explorer-body')
+    const replaceEntityChildren = entityScrollBody.replaceChildren.bind(entityScrollBody)
+    vi.spyOn(entityScrollBody, 'replaceChildren').mockImplementation((...children) => {
+      entityScrollBody.scrollTop = 0
+      return replaceEntityChildren(...children)
+    })
+    entityScrollBody.scrollTop = 121
     document.querySelector('[data-project-action="toggle-project-entity-select"]').click()
     await tick()
+    expect(entityScrollBody.scrollTop).toBe(121)
+    entityScrollBody.scrollTop = 137
+    document.querySelector('[data-project-entity-select="entity-cve"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-selection-count')?.textContent).toBe('1 selected')
+    expect(entityScrollBody.scrollTop).toBe(137)
+    entityScrollBody.scrollTop = 149
+    document.querySelector('[data-project-action="clear-project-entities"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-selection-count')?.textContent).toBe('0 selected')
+    expect(entityScrollBody.scrollTop).toBe(149)
+    entityScrollBody.scrollTop = 163
+    document.querySelector('[data-project-action="toggle-project-entity-row"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-selection-count')?.textContent).toBe('1 selected')
+    expect(entityScrollBody.scrollTop).toBe(163)
+    entityScrollBody.scrollTop = 177
+    document.querySelector('[data-project-action="clear-project-entities"]').click()
+    await tick()
+    expect(entityScrollBody.scrollTop).toBe(177)
+    entityScrollBody.scrollTop = 191
     document.querySelector('[data-project-action="select-all-project-entities"]').click()
     await tick()
     expect(document.querySelector('.project-entity-selection-count')?.textContent).toBe('1 selected')
+    expect(entityScrollBody.scrollTop).toBe(191)
     document.querySelector('[data-project-action="bulk-unlink-project-entities"]').click()
     await tick()
     await tick()

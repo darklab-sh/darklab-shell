@@ -22,6 +22,11 @@ from services.teams.scope import personal_owner_context, shared_owner_predicate
 from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
+from services.workflows.execution_kinds import (
+    ASSESSMENT_BATCH_EXECUTION_KIND,
+    WORKFLOW_EXECUTION_KIND,
+    require_execution_kind,
+)
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
 from services.workflows.fanout_child_cancellation import cancel_fanout_children_on_conn
 from services.workflows.fanout_summary import summarize_fanout_results
@@ -33,6 +38,7 @@ TERMINAL_EXECUTION_STATUSES = ("completed", "failed", "canceled")
 MAX_EXECUTION_FAILURE_DETAIL = 500
 PUBLIC_EXECUTION_FIELDS = (
     "id",
+    "execution_kind",
     "workflow_id",
     "workflow_source",
     "title",
@@ -135,6 +141,8 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return the execution state used by browser and terminal surfaces."""
     if not execution:
         return {}
+    if str(execution.get("execution_kind") or WORKFLOW_EXECUTION_KIND) != WORKFLOW_EXECUTION_KIND:
+        return {}
     definition = execution.get("definition_snapshot")
     variables = execution.get("variables")
     private_values = workflow_private_values(
@@ -230,21 +238,23 @@ def create_execution(
         _lock_execution_owner(conn, session_id, team_id)
         owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
         active_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE execution_kind = ? AND "  # nosec
+            + owner_sql
             + " AND status IN ('queued', 'running', 'canceling')",
-            owner_params,
+            (WORKFLOW_EXECUTION_KIND, *owner_params),
         ).fetchone()
         active_count = int(active_row["n"] if active_row else 0)
         if active_count >= max(1, int(max_active)):
             raise WorkflowActiveExecutionLimitExceeded(max(1, int(max_active)))
         conn.execute(
             "INSERT INTO workflow_executions "
-            "(id, session_id, team_id, workflow_id, workflow_source, title, definition_snapshot, "
+            "(id, execution_kind, session_id, team_id, workflow_id, workflow_source, title, definition_snapshot, "
             "input_values, variables, status, current_step_id, workspace_cwd, project_id, actor_member_id, "
             "actor_role, owner_client_id, owner_tab_id, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 execution_id,
+                WORKFLOW_EXECUTION_KIND,
                 session_id,
                 str(team_id or ""),
                 workflow_id,
@@ -294,10 +304,15 @@ def list_executions(
     workflow_params = (workflow_id,) if workflow_id else ()
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql  # nosec
+            "SELECT * FROM workflow_executions WHERE execution_kind = ? AND " + owner_sql  # nosec
             + workflow_sql
             + " ORDER BY created DESC LIMIT ?",
-            (*owner_params, *workflow_params, max(1, min(int(limit or 50), 100))),
+            (
+                WORKFLOW_EXECUTION_KIND,
+                *owner_params,
+                *workflow_params,
+                max(1, min(int(limit or 50), 100)),
+            ),
         ).fetchall()
         executions = [item for item in (_execution_from_row(row) for row in rows) if item]
         execution_ids = [str(item.get("id") or "") for item in executions if item.get("id")]
@@ -324,9 +339,10 @@ def active_execution_count(session_id: str, *, team_id: str = "") -> int:
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions WHERE " + owner_sql  # nosec
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE execution_kind = ? AND "  # nosec
+            + owner_sql
             + " AND status IN ('queued', 'running', 'canceling')",
-            owner_params,
+            (WORKFLOW_EXECUTION_KIND, *owner_params),
         ).fetchone()
     return int(row["n"] if row else 0)
 
@@ -334,9 +350,10 @@ def active_execution_count(session_id: str, *, team_id: str = "") -> int:
 def active_execution_count_for_actor(session_id: str) -> int:
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions WHERE session_id = ? "
+            "SELECT COUNT(*) AS n FROM workflow_executions "
+            "WHERE execution_kind IN (?, ?) AND session_id = ? "
             "AND status IN ('queued', 'running', 'canceling')",
-            (session_id,),
+            (WORKFLOW_EXECUTION_KIND, ASSESSMENT_BATCH_EXECUTION_KIND, session_id),
         ).fetchone()
     return int(row["n"] if row else 0)
 
@@ -345,8 +362,9 @@ def get_execution(session_id: str, execution_id: str, *, team_id: str = "") -> d
     owner_sql, owner_params = _owner_where(session_id, team_id=team_id, table_alias="e")
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e WHERE " + owner_sql + " AND e.id = ?",  # nosec
-            (*owner_params, execution_id),
+            "SELECT e.* FROM workflow_executions e WHERE e.execution_kind = ? AND "  # nosec
+            + owner_sql + " AND e.id = ?",
+            (WORKFLOW_EXECUTION_KIND, *owner_params, execution_id),
         ).fetchone()
         if not row:
             return None
@@ -360,9 +378,17 @@ def get_execution(session_id: str, execution_id: str, *, team_id: str = "") -> d
     return result
 
 
-def get_execution_by_id(execution_id: str) -> dict[str, Any] | None:
+def get_execution_by_id(
+    execution_id: str,
+    *,
+    execution_kind: str = WORKFLOW_EXECUTION_KIND,
+) -> dict[str, Any] | None:
+    normalized_kind = require_execution_kind(execution_kind)
     with get_db_connect()() as conn:
-        row = conn.execute("SELECT * FROM workflow_executions WHERE id = ?", (execution_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM workflow_executions WHERE id = ? AND execution_kind = ?",
+            (execution_id, normalized_kind),
+        ).fetchone()
         if not row:
             return None
         step_rows = conn.execute(
@@ -397,23 +423,25 @@ def active_execution_page_for_recovery(
     limit: int = 100,
     after_created: str = "",
     after_id: str = "",
+    execution_kind: str = WORKFLOW_EXECUTION_KIND,
 ) -> list[tuple[str, str]]:
     page_limit = max(1, min(int(limit or 100), 500))
+    normalized_kind = require_execution_kind(execution_kind)
     with get_db_connect()() as conn:
         if after_created:
             rows = conn.execute(
                 "SELECT id, created FROM workflow_executions "
-                "WHERE status IN ('queued', 'running', 'canceling') "
+                "WHERE execution_kind = ? AND status IN ('queued', 'running', 'canceling') "
                 "AND (created > ? OR (created = ? AND id > ?)) "
                 "ORDER BY created ASC, id ASC LIMIT ?",
-                (after_created, after_created, after_id, page_limit),
+                (normalized_kind, after_created, after_created, after_id, page_limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT id, created FROM workflow_executions "
-                "WHERE status IN ('queued', 'running', 'canceling') "
+                "WHERE execution_kind = ? AND status IN ('queued', 'running', 'canceling') "
                 "ORDER BY created ASC, id ASC LIMIT ?",
-                (page_limit,),
+                (normalized_kind, page_limit),
             ).fetchall()
     return [(str(row["id"]), str(row["created"] or "")) for row in rows]
 
@@ -483,16 +511,22 @@ def fail_execution(execution_id: str, code: str, detail: str, *, step_id: str = 
 
 def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
     with get_db_connect()() as conn:
-        query = "SELECT execution_id, step_id FROM workflow_execution_steps WHERE run_id = ?"
-        params = (run_id,)
+        query = (
+            "SELECT s.execution_id, s.step_id FROM workflow_execution_steps s "
+            "JOIN workflow_executions e ON e.id = s.execution_id "
+            "WHERE e.execution_kind = ? AND s.run_id = ?"
+        )
+        params = (WORKFLOW_EXECUTION_KIND, run_id)
         if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
             conn, "workflow_execution_children"
         ):
             query += (
-                " UNION ALL SELECT execution_id, step_id "
-                "FROM workflow_execution_children WHERE run_id = ?"
+                " UNION ALL SELECT c.execution_id, c.step_id "
+                "FROM workflow_execution_children c "
+                "JOIN workflow_executions e ON e.id = c.execution_id "
+                "WHERE e.execution_kind = ? AND c.run_id = ?"
             )
-            params = (run_id, run_id)
+            params = (WORKFLOW_EXECUTION_KIND, run_id, WORKFLOW_EXECUTION_KIND, run_id)
         row = conn.execute(query + " LIMIT 1", params).fetchone()  # nosec
     if not row:
         return False
@@ -502,7 +536,7 @@ def fail_execution_for_run(run_id: str, code: str, detail: str) -> bool:
 def execution_for_run(run_id: str) -> dict[str, Any] | None:
     with get_db_connect()() as conn:
         child_clause = ""
-        params = (run_id,)
+        params = (WORKFLOW_EXECUTION_KIND, run_id)
         if get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
             conn, "workflow_execution_children"
         ):
@@ -510,11 +544,11 @@ def execution_for_run(run_id: str) -> dict[str, Any] | None:
                 " OR EXISTS (SELECT 1 FROM workflow_execution_children c "
                 "WHERE c.execution_id = e.id AND c.run_id = ?)"
             )
-            params = (run_id, run_id)
+            params = (WORKFLOW_EXECUTION_KIND, run_id, run_id)
         row = conn.execute(
-            "SELECT e.* FROM workflow_executions e WHERE "  # nosec
+            "SELECT e.* FROM workflow_executions e WHERE e.execution_kind = ? AND ("  # nosec
             "EXISTS (SELECT 1 FROM workflow_execution_steps s "
-            "WHERE s.execution_id = e.id AND s.run_id = ?)" + child_clause,
+            "WHERE s.execution_id = e.id AND s.run_id = ?)" + child_clause + ")",
             params,
         ).fetchone()
     return _execution_from_row(row)
@@ -554,9 +588,9 @@ def workflow_provenance_by_run(
         "e.workflow_id, e.workflow_source, e.title, e.status AS execution_status, e.current_step_id "
         "FROM workflow_execution_steps s "
         "JOIN workflow_executions e ON e.id = s.execution_id "
-        f"WHERE s.run_id IN ({placeholders})" + owner_sql
+        f"WHERE e.execution_kind = ? AND s.run_id IN ({placeholders})" + owner_sql
     )
-    query_params: tuple[Any, ...] = (*normalized_ids, *owner_params)
+    query_params: tuple[Any, ...] = (WORKFLOW_EXECUTION_KIND, *normalized_ids, *owner_params)
     child_table_exists = get_db_backend() != DatabaseBackend.SQLITE or sqlite_table_exists(
         conn, "workflow_execution_children"
     )
@@ -570,10 +604,10 @@ def workflow_provenance_by_run(
             "JOIN workflow_execution_steps s ON s.execution_id = c.execution_id "
             "AND s.step_id = c.step_id "
             "JOIN workflow_executions e ON e.id = c.execution_id "
-            f"WHERE c.run_id IN ({placeholders})" + owner_sql
+            f"WHERE e.execution_kind = ? AND c.run_id IN ({placeholders})" + owner_sql
         )
         scalar_query += " UNION ALL " + child_query
-        query_params += (*normalized_ids, *owner_params)
+        query_params += (WORKFLOW_EXECUTION_KIND, *normalized_ids, *owner_params)
     rows = conn.execute(scalar_query, query_params).fetchall()
     result: dict[str, dict[str, Any]] = {}
     execution_ids: set[str] = set()
@@ -640,8 +674,9 @@ def apply_workflow_provenance(run: dict[str, Any], provenance: dict[str, Any] | 
 def execution_launch_pointer(execution_id: str) -> tuple[str, str, str] | None:
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT session_id, team_id, current_step_id FROM workflow_executions WHERE id = ?",
-            (execution_id,),
+            "SELECT session_id, team_id, current_step_id FROM workflow_executions "
+            "WHERE id = ? AND execution_kind = ?",
+            (execution_id, WORKFLOW_EXECUTION_KIND),
         ).fetchone()
     if not row:
         return None
@@ -660,7 +695,10 @@ def claim_step_for_launch(execution_id: str, step_id: str) -> dict[str, Any] | N
         if result.rowcount != 1:
             conn.rollback()
             return None
-        row = conn.execute("SELECT * FROM workflow_executions WHERE id = ?", (execution_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM workflow_executions WHERE id = ? AND execution_kind = ?",
+            (execution_id, WORKFLOW_EXECUTION_KIND),
+        ).fetchone()
         execution = _execution_from_row(row)
         if not execution or execution.get("status") not in {"queued", "running"}:
             conn.rollback()
@@ -702,8 +740,8 @@ def finalize_run_step(
             "SELECT s.execution_id, s.step_id, s.status AS step_status, s.started AS step_started, "
             "e.definition_snapshot, e.variables "
             "FROM workflow_execution_steps s JOIN workflow_executions e ON e.id = s.execution_id "
-            "WHERE s.run_id = ?",
-            (run_id,),
+            "WHERE s.run_id = ? AND e.execution_kind = ?",
+            (run_id, WORKFLOW_EXECUTION_KIND),
         ).fetchone()
         if not row or row["step_status"] not in {"launching", "running"}:
             return None
@@ -859,8 +897,9 @@ def cancel_execution(session_id: str, execution_id: str, *, team_id: str = "") -
         conn.execute(_dialect().begin_immediate_sql())
         lock_sql = " FOR UPDATE" if get_db_backend() == DatabaseBackend.POSTGRES else ""
         row = conn.execute(
-            "SELECT * FROM workflow_executions WHERE " + owner_sql + " AND id = ?" + lock_sql,  # nosec
-            (*owner_params, execution_id),
+            "SELECT * FROM workflow_executions WHERE execution_kind = ? AND "  # nosec
+            + owner_sql + " AND id = ?" + lock_sql,
+            (WORKFLOW_EXECUTION_KIND, *owner_params, execution_id),
         ).fetchone()
         execution = _execution_from_row(row)
         if not execution:

@@ -27,6 +27,7 @@ from services.metrics.assessments import (
     ASSESSMENT_PROFILE_KEY_LIMIT,
     assessment_profile_key_label,
 )
+from services.metrics.assessment_batch_state import assessment_batch_metric_families
 from services.workspace.files import workspace_root, workspace_settings
 
 
@@ -345,6 +346,7 @@ class RuntimeStateCollector:
             "Active Project assessment cycles by bounded owner kind and profile key.",
             labels=("owner_kind", "profile_key"),
         )
+        assessment_batch_metrics = assessment_batch_metric_families(None)
 
         try:
             with database.db_connect() as conn:
@@ -368,6 +370,7 @@ class RuntimeStateCollector:
                 self._add_intel_missing(conn, intel_missing)
                 self._add_ai_assists(conn, ai_assists, ai_queued_age, ai_in_progress_age, ai_heartbeat_age)
                 self._add_assessment_cycles(conn, assessment_cycles)
+                assessment_batch_metrics = assessment_batch_metric_families(conn)
         except Exception:
             log.warning(
                 "METRICS_DB_COLLECT_FAILED",
@@ -393,6 +396,7 @@ class RuntimeStateCollector:
         yield ai_in_progress_age
         yield ai_heartbeat_age
         yield assessment_cycles
+        yield from assessment_batch_metrics
 
     def _add_atlas(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:

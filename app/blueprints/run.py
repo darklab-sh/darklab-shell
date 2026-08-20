@@ -387,6 +387,7 @@ def _finalize_completed_run(
     workspace_artifacts=None,
     owner_tab_id="",
     link_project_id: str | None = "", completion_policy=None,
+    suppress_run_complete_notification: bool = False,
 ):
     return run_finalization.finalize_completed_run(
         run_id,
@@ -400,7 +401,9 @@ def _finalize_completed_run(
         cmd_type=cmd_type,
         workspace_artifacts=workspace_artifacts,
         owner_tab_id=owner_tab_id,
-        link_project_id=link_project_id, completion_policy=completion_policy, cfg=CFG,
+        link_project_id=link_project_id, completion_policy=completion_policy,
+        suppress_run_complete_notification=suppress_run_complete_notification,
+        cfg=CFG,
         save_completed_run_fn=_save_completed_run,
     )
 

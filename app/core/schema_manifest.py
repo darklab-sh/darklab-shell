@@ -69,6 +69,13 @@ UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
 SHARED_APP_TABLES: tuple[str, ...] = (
     *UNIFIED_BASELINE_APP_TABLES,
     *SHARED_TABLES,
+    "assessment_batch_events",
+    "assessment_batch_item_checks",
+    "assessment_batch_items",
+    "assessment_batch_preview_item_checks",
+    "assessment_batch_preview_items",
+    "assessment_batch_previews",
+    "assessment_batches",
     "atlas_import_evidence",
     "workflow_execution_children",
     "workflow_execution_steps",

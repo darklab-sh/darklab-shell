@@ -9,6 +9,10 @@ import time
 
 import services.runs.comparison as run_comparison
 from core.database_access import get_db_connect
+from services.assessments.batch.provenance import (
+    apply_assessment_batch_provenance,
+    assessment_batch_provenance_by_run,
+)
 from services.metrics_lazy import app_metrics
 from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
 
@@ -28,12 +32,20 @@ def compare_run_rows(owner_scope, left_id: str, right_id: str):
             [left_id, right_id],
             owner_scope=owner_scope,
         )
+        batch_provenance_by_run = assessment_batch_provenance_by_run(
+            conn,
+            [left_id, right_id],
+            owner_scope=owner_scope,
+        )
     app_metrics.record_db_query("history_compare_run_rows", time.perf_counter() - query_started)
     by_id = {str(row["id"]): dict(row) for row in rows}
     for run_id, run in by_id.items():
         provenance = provenance_by_run.get(run_id)
         if provenance:
             apply_workflow_provenance(run, provenance)
+        batch_provenance = batch_provenance_by_run.get(run_id)
+        if batch_provenance:
+            apply_assessment_batch_provenance(run, batch_provenance)
     return by_id.get(left_id), by_id.get(right_id)
 
 

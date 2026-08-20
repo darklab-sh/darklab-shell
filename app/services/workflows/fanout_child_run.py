@@ -9,11 +9,8 @@ import logging
 from collections.abc import Mapping
 
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
-from services.workflows.compiler import (
-    WorkflowDefinitionError,
-    render_step_display_command,
-    workflow_private_values,
-)
+from services.runs.start_context import cleanup_started_run_material
+from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.fanout_child_lifecycle import (
     bind_fanout_child_run,
     finalize_fanout_child_run,
@@ -32,22 +29,6 @@ def _integer(value: object, default: int) -> int:
     if isinstance(value, int) and not isinstance(value, bool):
         return value
     return default
-
-
-def _child_variables(
-    execution: Mapping[str, object],
-    collection_name: str,
-    item: object,
-) -> dict[str, str]:
-    raw_variables = execution.get("variables")
-    variables = raw_variables if isinstance(raw_variables, Mapping) else {}
-    result = {
-        str(name): str(value)
-        for name, value in variables.items()
-        if not isinstance(value, list)
-    }
-    result[collection_name] = str(item)
-    return result
 
 
 def _launch_failure_code(exc: Exception) -> str:
@@ -69,30 +50,19 @@ def _launch_failure_code(exc: Exception) -> str:
 
 def launch_fanout_child(
     execution: Mapping[str, object],
-    step: Mapping[str, object],
-    plan: Mapping[str, object],
+    step_id: str,
     child: Mapping[str, object],
-    collection_name: str,
     current_role: str,
+    launch_spec: ChildLaunchSpec,
 ) -> tuple[dict[str, object], dict[str, object]]:
-    """Start one claimed item without returning or persisting its private value."""
+    """Start one claimed child without deriving or persisting its private inputs."""
     from blueprints import run as run_routes  # noqa: PLC0415
 
     execution_id = str(execution.get("id") or "")
-    step_id = str(step.get("id") or "")
+    execution_kind = str(execution.get("execution_kind") or "workflow")
     child_id = str(child.get("id") or "")
     ordinal = _integer(child.get("ordinal"), 0)
-    command = str(plan.get("command") or "")
-    raw_variables = execution.get("variables")
-    raw_definition = execution.get("definition_snapshot")
-    variables = raw_variables if isinstance(raw_variables, Mapping) else {}
-    definition = raw_definition if isinstance(raw_definition, Mapping) else {}
-    item = plan.get("item")
-    if item is None:
-        raise WorkflowDefinitionError("workflow fan-out child value is unavailable")
-    child_variables = _child_variables(execution, collection_name, item)
-    display_command = render_step_display_command(step, definition, child_variables)
-    private_values = workflow_private_values(definition, variables)
+    command = launch_spec.execution_command
     interactive_spec = run_routes.interactive_pty_spec_for_command(command)
     interactive_trigger = str((interactive_spec or {}).get("trigger_flag") or "").strip()
     if interactive_trigger and interactive_trigger in run_routes.split_command_argv(command)[1:]:
@@ -116,8 +86,7 @@ def launch_fanout_child(
         )
         started = run_routes._start_brokered_run_service(
             original_command=command,
-            display_command=display_command,
-            private_values=private_values,
+            display_command=launch_spec.display_command,
             session_id=str(execution.get("session_id") or ""),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
@@ -127,10 +96,16 @@ def launch_fanout_child(
             owner_tab_id=str(execution.get("owner_tab_id") or ""),
             workspace_cwd=str(execution.get("workspace_cwd") or ""),
             link_project_id="" if builtin_step else str(execution.get("project_id") or ""),
-            thread_name_prefix="workflow-fanout-run",
+            thread_name_prefix=(
+                "assessment-batch-run"
+                if execution_kind == "assessment_batch"
+                else "workflow-fanout-run"
+            ),
             run_created_hook=attach_run,
+            **launch_spec.broker_kwargs(),
         )
     except (RunPreparationError, RunStartRejected, RunSpawnError, FanoutRunBindingError) as exc:
+        cleanup_started_run_material(launch_spec.run_cleanup_hook)
         error_code = _launch_failure_code(exc)
         failed = fail_launching_fanout_child(child_id, error_code) or {}
         log.warning("WORKFLOW_FANOUT_CHILD_LAUNCH_FAILED", extra={
@@ -143,6 +118,7 @@ def launch_fanout_child(
         })
         return {}, failed
     except Exception as exc:
+        cleanup_started_run_material(launch_spec.run_cleanup_hook)
         failed = fail_launching_fanout_child(child_id, "launch_failed") or {}
         log.error("WORKFLOW_FANOUT_CHILD_LAUNCH_ERROR", exc_info=True, extra={
             "execution_id": execution_id,

@@ -4,6 +4,7 @@
 // Project Assessment tab state and data controller.
 
 import { createProjectAssessmentRenderer } from './project_assessment_renderer.js';
+import { createProjectAssessmentBatchManager } from './project_assessment_batch.js';
 import { openAssessmentCheckStateEditor } from './project_assessment_check_state.js';
 import { openAssessmentEvidenceEditor } from './project_assessment_evidence.js';
 import { launchAssessmentAction } from './project_assessment_actions.js';
@@ -73,7 +74,7 @@ function createProjectAssessmentController(context) {
     st.detailRefreshKind = '';
   }
 
-  function invalidate(projectId = '') {
+  function invalidate(projectId = '', { preserveBatchDrafts = false } = {}) {
     const id = String(projectId || '');
     const targets = id ? [states.get(id)] : Array.from(states.values());
     targets.filter(Boolean).forEach((st) => {
@@ -89,6 +90,7 @@ function createProjectAssessmentController(context) {
     httpProfileManager.invalidate(id);
     oastManager.invalidate(id);
     zapManager.invalidate(id);
+    batchManager.invalidate(id, { preserveDrafts: preserveBatchDrafts });
   }
 
   async function responseError(resp, fallback) {
@@ -110,6 +112,7 @@ function createProjectAssessmentController(context) {
   const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
   const oastManager = createProjectAssessmentOastManager(ctx, { renderViews });
   const zapManager = createProjectAssessmentZapManager(ctx, { renderViews });
+  const batchManager = createProjectAssessmentBatchManager(ctx, { renderViews });
 
   function loadOastHistoryForDetail(projectId, loadedDetail) {
     const assessmentId = String(loadedDetail?.assessment?.id || '');
@@ -299,11 +302,18 @@ function createProjectAssessmentController(context) {
     st.findingOffset = 0;
     resetDetailState(st, { findings: false });
     renderViews();
+    let loaded;
     if (st.loaded && st.assessments.some(item => String(item?.id || '') === nextId)) {
-      return loadDetail(id);
+      loaded = await loadDetail(id);
+    } else {
+      st.loaded = false;
+      loaded = await load(id, { force: true });
     }
-    st.loaded = false;
-    return load(id, { force: true });
+    const batchId = String(filters.batch_id || '');
+    if (loaded && batchId) {
+      await batchManager.focusBatch(id, nextId, batchId);
+    }
+    return loaded;
   }
 
   async function setFilter(projectId, key, value) {
@@ -847,6 +857,9 @@ function createProjectAssessmentController(context) {
     oastCurrentCorrelation: oastManager.currentCorrelation,
     oastStateFor: oastManager.stateFor,
     zapStateFor: zapManager.stateFor,
+    renderBatch: (projectId, assessment, detail, options = {}) => (
+      batchManager.renderSection(projectId, assessment, detail, options)
+    ),
     renderHttpProfiles: (projectId, options = {}) => httpProfileManager.renderSection(projectId, options),
   });
 

@@ -12,12 +12,11 @@ from flask import jsonify, request
 from blueprints import projects as project_routes
 from config import CFG
 from extensions import limiter
-from services.audit.models import AuditEventType
 from services.audit.queries import AuditEventFilters, AuditScopeError, list_scoped_events
 from services.audit.retention import audit_retention_days
 from services.projects.active import clear_active_project, get_active_project, set_active_project
 from services.projects.contracts import ProjectWorkspaceError
-from services.projects.crud import create_project, delete_project, update_project
+from services.projects.crud import create_project, update_project
 from services.projects.package_presets import list_package_presets
 from services.projects.queries import (
     get_project,
@@ -27,7 +26,6 @@ from services.projects.queries import (
     list_projects,
     list_projects_page,
     list_projects_switcher,
-    run_project_transaction,
 )
 from services.teams.capabilities import Capability
 from services.teams.request_scope import RequestScopeError, current_request_scope, scope_error_payload
@@ -295,38 +293,6 @@ def projects_update(project_id):
         "project_status": project["status"],
     })
     return jsonify({"ok": True, "project": project})
-
-
-@project_routes.projects_bp.route("/projects/<project_id>", methods=["DELETE"])
-@limiter.limit(project_routes._project_write_limit)
-def projects_delete(project_id):
-    session_id, team_id, error_response = project_routes._project_owner(Capability.MUTATE_PROJECTS)
-    if error_response:
-        return error_response
-
-    def _delete_project(conn):
-        deleted = delete_project(session_id, project_id, team_id=team_id, conn=conn)
-        if not deleted:
-            return project_routes._project_not_found()
-        project_routes.record_event(
-            AuditEventType.PROJECT_DELETE,
-            target_id=project_id,
-            project_id=project_id,
-            details={"project_id": project_id, "deleted_count": 1},
-            conn=conn,
-            **project_routes._project_audit_fields(session_id, team_id),
-        )
-        return None
-
-    delete_response = run_project_transaction(_delete_project)
-    if delete_response is not None:
-        return delete_response
-    project_routes.log.info("PROJECT_DELETED", extra={
-        "ip": project_routes.get_client_ip(),
-        "session": project_routes.get_log_session_id(session_id),
-        "project_id": project_id,
-    })
-    return jsonify({"ok": True})
 
 
 @project_routes.projects_bp.route("/projects/<project_id>/runs")

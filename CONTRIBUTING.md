@@ -290,6 +290,14 @@ Docker Postgres container and removes it after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
 profile-gated Compose Postgres service without publishing the database port.
 
+Assessment-batch changes need focused coverage at each boundary: compiler and
+policy tests for selection and exclusions; coordinator tests for claims,
+recovery, cancellation, and retries; route tests for personal and Team roles;
+Postgres parity for persistence and lifecycle behavior; Vitest for preview and
+monitor state; and source plus bundled Playwright for the live cycle flow.
+Keep previews resource-free, use the shared probe planner and launcher, and
+prove every confirmed item is preserved instead of silently truncating a plan.
+
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.

@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.assessments.coverage_candidates import candidate_checks_for_run
 from services.assessments.evidence_matching import (
     load_run_evidence_facts,
     matching_run_rule,
@@ -36,25 +37,6 @@ def _profile_checks(snapshot: object) -> dict[str, Mapping[str, Any]]:
         for check in checks
         if isinstance(check, Mapping) and str(check.get("key") or "")
     }
-
-
-def _candidate_checks(conn: Any, run_id: str) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT a.id AS assessment_id, a.session_id, a.team_id, a.project_id, "
-        "a.profile_snapshot, c.id AS check_id, c.check_key, c.target_type, "
-        "c.target_value, c.state, c.state_source, c.state_reason, "
-        "c.first_evidence_at, c.last_evidence_at "
-        "FROM project_links pl "
-        "JOIN project_assessments a ON a.project_id = pl.project_id AND a.status = 'active' "
-        "JOIN project_assessment_checks c ON c.assessment_id = a.id "
-        "JOIN runs r ON r.id = pl.entity_id "
-        "WHERE pl.entity_type = 'run' AND pl.entity_id = ? "
-        "AND a.team_id = r.team_id "
-        "AND (a.team_id != '' OR a.session_id = r.session_id) "
-        "ORDER BY a.id ASC, c.id ASC",
-        (run_id,),
-    ).fetchall()
-    return [dict(row) for row in rows]
 
 
 def _count(conn: Any, sql: str, params: tuple[object, ...]) -> int:
@@ -168,7 +150,7 @@ def reconcile_run_evidence_on_conn(
         return summary
     candidates: list[dict[str, Any]] = []
     profile_cache: dict[str, dict[str, Mapping[str, Any]]] = {}
-    for check in _candidate_checks(conn, facts.run_id):
+    for check in candidate_checks_for_run(conn, facts.run_id):
         summary["checks_considered"] += 1
         assessment_id = str(check["assessment_id"] or "")
         definitions = profile_cache.get(assessment_id)

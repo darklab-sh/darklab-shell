@@ -16,6 +16,10 @@ from pathlib import PurePosixPath
 from jinja2 import Environment, select_autoescape
 
 from core.redaction import line_entries_from_events, redact_line_entries
+from services.assessments.batch.provenance import (
+    apply_assessment_batch_provenance,
+    assessment_batch_provenance_by_run,
+)
 from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.metadata import _metadata_owner_where
@@ -130,6 +134,7 @@ _PACKAGE_INDEX_TEMPLATE = _PACKAGE_JINJA.from_string("""
 {% endif -%}
 </span>
 <span>{{ run.link_source }} link</span>
+{% if run.batch_source -%}<span>{{ run.batch_source }}</span>{% endif -%}
 </div>
 </li>
 {% endfor -%}
@@ -351,6 +356,17 @@ def _package_short_id(value):
     return text[:12] if len(text) > 12 else text
 
 
+def _package_batch_source(run) -> str:
+    provenance = run.get("assessment_batch") if isinstance(run, dict) else None
+    if not isinstance(provenance, dict) or not provenance.get("batch_id"):
+        return ""
+    item = value if isinstance(value := provenance.get("item"), dict) else {}
+    item_number = int(item.get("item_index") or 0) + 1
+    check_count = int(item.get("check_count") or 0)
+    mapped = f" · {check_count} mapped check{'s' if check_count != 1 else ''}" if check_count else ""
+    return f"Assessment batch {provenance['batch_id']} · item {item_number}{mapped}"
+
+
 def _package_int(value, default=0):
     try:
         return int(value)
@@ -453,6 +469,16 @@ def _package_run_rows(conn, session_id, run_ids, *, team_id=""):
         [*owner_params, *ids],
     ).fetchall()
     by_id = {str(row["id"]): dict(row) for row in rows}
+    provenance_by_run = assessment_batch_provenance_by_run(
+        conn,
+        ids,
+        session_id=session_id,
+        team_id=team_id,
+    )
+    for run_id, run in by_id.items():
+        provenance = provenance_by_run.get(run_id)
+        if provenance:
+            apply_assessment_batch_provenance(run, provenance)
     return [by_id[run_id] for run_id in ids if run_id in by_id]
 
 
@@ -690,6 +716,9 @@ def _render_package_run_html(
                 ("Lines", line_count),
             ]
         ]
+    batch_source = _package_batch_source(run)
+    if batch_source:
+        rendered_metric_items.append({"kind": "Source", "text": batch_source})
     project_name = (
         manifest.get("project", {}).get("name", "Project")
         if isinstance(manifest.get("project"), dict)
@@ -1002,6 +1031,7 @@ def _render_package_index_html(
             "line_count": run.get("output_line_count") or 0,
             "text_href": run_text_paths.get(run_id, ""),
             "link_source": run.get("link_source") or "manual",
+            "batch_source": _package_batch_source(run),
         })
 
     finding_items = []
@@ -1164,6 +1194,9 @@ def _render_package_readme(
             lines.append(f"- {_package_markdown_link(label, run_pages.get(run_id, ''))}")
             lines.append(f"  - Started: {_package_markdown_text(run.get('started') or 'unknown')}")
             lines.append(f"  - Lines: {_package_int(run.get('output_line_count'))}")
+            batch_source = _package_batch_source(run)
+            if batch_source:
+                lines.append(f"  - Source: {_package_markdown_text(batch_source)}")
             if run_text_paths.get(run_id):
                 lines.append(f"  - Full text: {_package_markdown_link('transcript text', run_text_paths[run_id])}")
     else:

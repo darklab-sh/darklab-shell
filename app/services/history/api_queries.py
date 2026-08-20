@@ -11,6 +11,10 @@ from typing import Any
 from core.database_access import get_db_backend, get_db_connect
 from core.helpers import get_log_session_id
 from core.process import active_runs_for_session, active_runs_for_team
+from services.assessments.batch.provenance import (
+    apply_assessment_batch_provenance,
+    assessment_batch_provenance_by_run,
+)
 from services.history.run_metadata import (
     history_offloaded_search_run_ids,
     run_atlas_counts_by_run,
@@ -365,6 +369,12 @@ def history_rows(
             session_id=session_id,
             team_id=team_id,
         )
+        batch_provenance = assessment_batch_provenance_by_run(
+            conn,
+            run_ids,
+            session_id=session_id,
+            team_id=team_id,
+        )
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
@@ -372,6 +382,7 @@ def history_rows(
         run.update(atlas.get(run_id, {}))
         apply_schedule_ref(run, scheduled.get(run_id))
         apply_workflow_provenance(run, workflow_provenance.get(run_id))
+        apply_assessment_batch_provenance(run, batch_provenance.get(run_id))
     log.debug("API_HISTORY_DATA_ACCESS", extra={
         "session": get_log_session_id(session_id),
         "team_scope": bool(team_id),
@@ -412,6 +423,13 @@ def load_run_detail(session_id: str, team_id: str, run_id: str) -> dict[str, Any
             team_id=team_id,
         ).get(run_id)
         apply_workflow_provenance(run, provenance)
+        batch_provenance = assessment_batch_provenance_by_run(
+            conn,
+            [run_id],
+            session_id=session_id,
+            team_id=team_id,
+        ).get(run_id)
+        apply_assessment_batch_provenance(run, batch_provenance)
     return run
 
 

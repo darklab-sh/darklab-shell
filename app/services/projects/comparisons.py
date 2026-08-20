@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import services.runs.comparison as run_comparison
 from core.database_access import get_db_connect
+from services.assessments.batch.provenance import (
+    apply_assessment_batch_provenance,
+    assessment_batch_provenance_by_run,
+)
 from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     MAX_LABEL_LEN,
@@ -116,6 +120,14 @@ def compare_project_runs(owner_scope, project_id, filters=None):
         for run_id, provenance in provenance_by_run.items():
             if run_id in runs_by_id and provenance:
                 apply_workflow_provenance(runs_by_id[run_id], provenance)
+        batch_provenance = assessment_batch_provenance_by_run(
+            conn,
+            [left_run_id, right_run_id],
+            owner_scope=owner_scope,
+        )
+        for run_id, provenance in batch_provenance.items():
+            if run_id in runs_by_id and provenance:
+                apply_assessment_batch_provenance(runs_by_id[run_id], provenance)
         left_findings, left_finding_count, left_findings_truncated = run_comparison.run_finding_compare_items(
             conn, owner_scope, left_run_id, include_line_number=True
         )

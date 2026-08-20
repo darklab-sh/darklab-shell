@@ -8,16 +8,10 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
-from datetime import datetime, timezone
-
-from config import resolve_effective_cfg
-from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.runs.output_store import load_run_output_events_for_run
 from services.runs.output_model import LineEvent
-from services.teams.capabilities import Capability, role_can
-from services.teams.storage import get_member, get_team
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
 from services.workflows.compiler import (
@@ -33,6 +27,14 @@ from services.workflows.fanout_child_lifecycle import (
 from services.workflows.fanout_child_queries import fanout_child_for_run
 from services.workflows.fanout_children import list_fanout_children
 from services.workflows.fanout_launch import launch_fanout_batch
+from services.workflows.execution_kinds import WORKFLOW_EXECUTION_KIND
+from services.workflows.execution_authorization import (
+    current_execution_role as _current_execution_role,
+    execution_elapsed_seconds,
+    execution_expired as _execution_expired,
+    max_execution_runtime_seconds as _max_runtime_seconds,
+)
+from services.workflows.recovery_runs import run_is_still_active
 from services.workflows import storage
 
 
@@ -41,43 +43,6 @@ log = logging.getLogger("shell")
 
 class _WorkflowRunBindingError(RuntimeError):
     pass
-
-
-def _max_runtime_seconds() -> int:
-    return max(1, int(resolve_effective_cfg().get("workflow_execution_max_runtime_seconds") or 14400))
-
-
-def _parse_timestamp(value: object) -> datetime | None:
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        try:
-            parsed = datetime.fromisoformat(str(value or ""))
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _execution_expired(execution: Mapping[str, object], *, now: datetime | None = None) -> bool:
-    created = _parse_timestamp(execution.get("created"))
-    if created is None:
-        return True
-    current = now or datetime.now(timezone.utc)
-    return (current - created).total_seconds() >= _max_runtime_seconds()
-
-
-def execution_elapsed_seconds(
-    execution: Mapping[str, object],
-    *,
-    now: datetime | None = None,
-) -> float:
-    created = _parse_timestamp(execution.get("created"))
-    if created is None:
-        return 0.0
-    finished = _parse_timestamp(execution.get("finished")) or now or datetime.now(timezone.utc)
-    return max(0.0, (finished - created).total_seconds())
 
 
 def _record_execution_finished(execution_id: str, status: str) -> None:
@@ -95,38 +60,6 @@ def _record_failed_step_and_execution(execution_id: str, step_id: str) -> None:
     if step_id:
         app_metrics.record_workflow_step_outcome("failed")
     _record_execution_finished(execution_id, "failed")
-
-
-def _current_execution_role(execution: Mapping[str, object]) -> tuple[str, str, str]:
-    team_id = str(execution.get("team_id") or "")
-    member_id = str(execution.get("actor_member_id") or "")
-    session_id = str(execution.get("session_id") or "")
-    with get_db_connect()() as conn:
-        token_exists = not session_id.startswith("tok_") or bool(
-            conn.execute(
-                "SELECT 1 FROM session_tokens WHERE token = ?",
-                (session_id,),
-            ).fetchone()
-        )
-        team = get_team(conn, team_id) if team_id else None
-        member = get_member(conn, member_id) if member_id else None
-    if not token_exists:
-        return "token_revoked", "The workflow initiator's session token is no longer active.", ""
-    if not team_id:
-        return "", "", ""
-    if not team or str(team.get("status") or "") != "active":
-        return "team_unavailable", "The workflow's team is no longer active.", ""
-    if (
-        not member
-        or str(member.get("team_id") or "") != team_id
-        or str(member.get("status") or "") != "active"
-        or bool(member.get("removed_at"))
-    ):
-        return "member_revoked", "The workflow initiator is no longer an active team member.", ""
-    role = str(member.get("role") or "")
-    if not role_can(role, Capability.RUN_COMMANDS):
-        return "permission_revoked", "The workflow initiator can no longer run team commands.", role
-    return "", "", role
 
 
 def _execution_can_launch(execution: Mapping[str, object], step_id: str) -> tuple[bool, str]:
@@ -313,6 +246,8 @@ def _continue_after_fanout_child(
 
 def finalize_workflow_run(run_id: str, exit_code: int, capture: object | None) -> dict[str, object] | None:
     child = fanout_child_for_run(run_id)
+    if child and str(child.get("execution_kind") or "") != WORKFLOW_EXECUTION_KIND:
+        return None
     if child and str(child.get("status") or "") != "running":
         return None
     linked_execution = storage.execution_for_run(run_id)
@@ -572,12 +507,7 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
 
 
 def _run_is_still_active(execution: Mapping[str, object], run_id: str) -> bool:
-    from core.process import pid_for_session, pid_for_team  # noqa: PLC0415
-
-    team_id = str(execution.get("team_id") or "")
-    if team_id:
-        return pid_for_team(run_id, team_id) is not None
-    return pid_for_session(run_id, str(execution.get("session_id") or "")) is not None
+    return run_is_still_active(execution, run_id)
 
 
 def _recover_completed_step(

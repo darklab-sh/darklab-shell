@@ -19,8 +19,10 @@ def fanout_child_for_run(run_id: str) -> dict[str, object] | None:
         ):
             return None
         row: Any = conn.execute(
-            "SELECT id, execution_id, step_id, ordinal, attempt, status "
-            "FROM workflow_execution_children WHERE run_id = ?",
+            "SELECT c.id, c.execution_id, c.step_id, c.ordinal, c.attempt, "
+            "c.status, e.execution_kind FROM workflow_execution_children c "
+            "JOIN workflow_executions e ON e.id = c.execution_id "
+            "WHERE c.run_id = ?",
             (str(run_id or ""),),
         ).fetchone()
     if not row:

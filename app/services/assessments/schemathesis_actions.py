@@ -146,17 +146,17 @@ def _artifact_options(
         "JOIN run_file_artifacts a ON a.run_id = r.id "
         "WHERE p.id = ? AND " + project_sql + " AND " + run_sql + " "  # nosec
         "AND a.byte_size > 0 AND a.byte_size <= ? "
-        "AND (LOWER(COALESCE(a.content_type, '')) LIKE 'application/json%' "
-        "OR LOWER(COALESCE(a.content_type, '')) LIKE 'application/openapi+json%' "
-        "OR LOWER(COALESCE(a.content_type, '')) LIKE 'application/vnd.oai.openapi+json%' "
-        "OR LOWER(COALESCE(a.display_name, '')) LIKE '%.json' "
-        "OR LOWER(COALESCE(a.workspace_path, '')) LIKE '%.json') "
+        "AND (LOWER(COALESCE(a.content_type, '')) LIKE ? "
+        "OR LOWER(COALESCE(a.content_type, '')) LIKE ? "
+        "OR LOWER(COALESCE(a.content_type, '')) LIKE ? "
+        "OR LOWER(COALESCE(a.display_name, '')) LIKE ? "
+        "OR LOWER(COALESCE(a.workspace_path, '')) LIKE ?) "
         "ORDER BY a.created DESC, a.id DESC LIMIT ?",
         (
-            project_id,
-            *project_params,
-            *run_params,
+            project_id, *project_params, *run_params,
             SCHEMATHESIS_SCHEMA_MAX_BYTES,
+            "application/json%", "application/openapi+json%",
+            "application/vnd.oai.openapi+json%", "%.json", "%.json",
             SCHEMATHESIS_ARTIFACT_OPTION_LIMIT + 1,
         ),
     ).fetchall()

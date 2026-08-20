@@ -5793,7 +5793,7 @@ commands:
     category: Vulnerability Scanning
     knowledge:
       notes:
-        - Templates load from /tmp/nuclei-templates (injected via -ud); pass -ud to point elsewhere.
+        - Templates load from the managed /tmp/nuclei-templates/current cache (injected via -ud); assessment plans refresh that cache through their reviewed preflight.
         - Output, response-dir, export, and log flags are rewritten into the session workspace when Files are enabled.
       gotchas:
         - The progress/status bar is verbose; add -silent to keep only findings.
@@ -5837,6 +5837,8 @@ commands:
         - nuclei -sf
         - nuclei -secret-file
         - nuclei -resume
+        - nuclei -update-templates
+        - nuclei -ut
     workspace_flags:
       - flag: -l
         mode: read
@@ -5935,7 +5937,7 @@ commands:
       inject_flags:
         - flags:
             - -ud
-            - /tmp/nuclei-templates
+            - /tmp/nuclei-templates/current
           position: prepend
           unless_any:
             - -ud

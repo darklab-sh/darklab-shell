@@ -23,7 +23,7 @@ The loader validates the final config at startup. Malformed YAML, a non-mapping 
 
 Config events are captured while the files and environment are being resolved, then written once after the effective `log_level` and `log_format` are ready. `CONFIG_VALIDATED` and `CONFIG_LOADED` report a `warning_count` that includes ignored, dropped, defaulted, clamped, and truncated values. If loading can't finish, the app writes one safe `CONFIG_LOAD_FAILED` record using the most recent usable text or GELF format. It includes bounded phase, source, key, and error-type fields, but not raw parser output, file contents, configuration values, or a traceback.
 
-Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
+Nested sections such as `notifications`, `notifications.smtp`, `scheduler`, `watchers`, `project_digests`, `assessment_batches`, `cve_risk`, `oast_connector`, and `zap_connector` merge by field. A local file can override one nested value without restating the whole section.
 
 The runtime keeps one validated effective config after startup. Operators normally work with the YAML files and environment variables above; Python callers that need implementation details should use the conventions in [ARCHITECTURE.md](ARCHITECTURE.md#configuration-surfaces) and [CONTRIBUTING.md](CONTRIBUTING.md#branch-workflow).
 
@@ -36,7 +36,7 @@ The schema contract is:
 | Field group | Validation posture |
 |-------------|--------------------|
 | Top-level strings, booleans, integers, floats, and lists | Validated by type after file overlays and environment variables are applied. Unknown keys are ignored with `CONFIG_UNKNOWN_KEY_IGNORED` |
-| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
+| Nested sections | `notifications`, `notifications.smtp`, `notifications.retry`, `notifications.events`, `scheduler`, `watchers`, `project_digests`, `assessment_batches`, `cve_risk`, `oast_connector`, and `zap_connector` are structured sections. They merge by field, and invalid shapes such as `scheduler: false` or `notifications: []` stop startup |
 | Forgiving booleans | Boolean environment settings plus YAML settings such as `database_postgres_jit`, `audit_log_enabled`, `ai_allow_full_output`, and `ai_require_private_base_url` accept common string forms such as `true`, `false`, `yes`, `no`, `on`, and `off`; invalid values fall back and log `CONFIG_VALUE_DEFAULTED` |
 | Forgiving integers | Database pool limits, audit limits, and AI numeric limits accept numeric strings; invalid values fall back, below-minimum values are clamped, and `audit_export_max_rows` is capped at `200000` |
 | Forgiving MB values | `output_preview_max_mb` and `full_output_max_mb` accept numeric YAML values and strings such as `25mb`; invalid values fall back |
@@ -384,6 +384,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
+| `assessment_batches` | see nested defaults | Server-side safety, runtime, and retention settings for **Run assessment plan**. The planner defaults to the effective item and concurrency ceilings and offers only values at or below them |
+| `assessment_batches.item_limit` | `128` | Maximum selected commands in one new batch, from 1 to the fixed product ceiling of 512. Larger work needs another preview and confirmation |
+| `assessment_batches.max_active_per_owner` | `3` | Maximum queued, running, or canceling assessment batches for one personal session or team, from 1 to 8 |
+| `assessment_batches.max_parallel` | `8` | Maximum active child commands in one assessment batch, from 1 to the fixed cap of 8 |
+| `assessment_batches.max_owner_parallel` | `16` | Maximum active assessment-batch child commands for one personal session or team, from 1 to 32 |
+| `assessment_batches.max_instance_parallel` | `32` | Maximum active assessment-batch child commands across the deployment, from 1 to 64 |
+| `assessment_batches.retention_days` | `30` | Days to keep terminal coordinator and sanitized event state. `0` keeps it indefinitely. Ordinary child runs, evidence, and retry ancestry still in use aren't deleted |
+| `assessment_batches.max_runtime_seconds` | `14400` | Maximum lifetime of one assessment batch, from 60 to 604800 seconds. The coordinator checks it before claim, launch, and startup recovery |
 | `cve_risk` | see nested defaults | Server-side public CVE risk data. Release-pinned FIRST EPSS and CISA KEV snapshots work offline; live bulk-feed refresh remains an operator opt-in |
 | `cve_risk.bootstrap_enabled` | `true` | Loads the release-pinned EPSS and KEV snapshots when the database has no newer accepted data. Bootstrap import is a silent ranking baseline and does not create risk-escalation events |
 | `cve_risk.refresh_enabled` | `false` | Lets the scheduler refresh the public EPSS and KEV bulk feeds. Refreshes send no Project, target, finding, package, or CVE inventory values to either source |
@@ -1016,6 +1024,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `RAW_PACKET_SCANNING_ENABLED` | Docker Compose, Flask app | Opts approved scanners into capability-backed SYN/raw modes. Readiness still requires Linux, `CAP_NET_RAW` in the container bounding set, scanner file capabilities, and an executable policy that permits them |
 | `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
 | `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED` | Docker Compose, Docker entrypoint | When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot |
+| `NUCLEI_TEMPLATE_REFRESH_ENABLED` | Flask app | Enables the operator-controlled template refresh in Assessment-plan preflight. When unset, it follows `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED`; disabling both leaves cache replacement to deployment operators |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
@@ -1049,7 +1058,11 @@ If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain
 
 The optional database and AI tuning variables are escape hatches for process-managed deployments. Leave them unset in the shipped Compose stacks to use `config.local.yaml`; their Compose entries intentionally pass empty values, which the app ignores.
 
-Both shipped Compose stacks mount the managed Nuclei templates at `/tmp/nuclei-templates` through the `nuclei-templates` named volume. The first web-container startup fills an empty volume. Container logs show only the fixed bootstrap lifecycle records, not output from the Nuclei updater. The shell healthcheck gives that bounded download enough startup grace before a failed check can mark the container unhealthy. Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery; Nuclei plans stay unavailable until an operator runs `nuclei -update-templates`. Removing the named volume also removes the installed template snapshot.
+Both shipped Compose stacks mount the `nuclei-templates` named volume at `/tmp/nuclei-templates`. The live snapshot is `/tmp/nuclei-templates/current`, and its matching release metadata stays in the same volume. Keeping the live tree below the mount point lets the app replace a validated snapshot without exposing a partial update. Startup moves caches created by older releases into this layout once. The first web-container startup fills an empty volume; container logs show only fixed bootstrap lifecycle records, not output from the Nuclei updater, and the shell healthcheck gives that bounded download enough startup grace before a failed check can mark the container unhealthy. An installed snapshot never refreshes in the background.
+
+When an Assessment preview includes Nuclei work, preflight reports the installed release, digest, refresh age, validation result, and command count. Operators can choose **Update templates and rebuild preview** when `NUCLEI_TEMPLATE_REFRESH_ENABLED` is active. The refresh runs once under the deployment-wide maintenance lock, stages and validates the replacement, atomically swaps it into place, and leaves the last good snapshot untouched after a download or validation failure. Started Nuclei runs hold the matching shared lock, so no scan can read a partial replacement and a batch can't mix snapshots.
+
+Set `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false` when startup must not contact ProjectDiscovery. Set `NUCLEI_TEMPLATE_REFRESH_ENABLED=false` as well when the app must never make an outbound template update; in that mode, replace the cache through the deployment's own maintenance process. A missing or incompatible cache blocks Nuclei work and reports that operator action, while the rest of the Assessment preview remains available. Removing the named volume also removes the installed template snapshot.
 
 ---
 

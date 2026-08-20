@@ -120,7 +120,7 @@ With Files enabled, downloads go to the active Files folder. Use `-P downloads` 
 
 ### `nuclei` and ProjectDiscovery state
 
-The app runs `nuclei` with a writable temporary home and adds `-ud /tmp/nuclei-templates` when no update directory is present. The managed template cache lasts for the container session, so run `nuclei -update-templates` after a restart or recreation before using a reviewed template-backed action. Template updates keep their version marker with that temporary cache instead of reusing the owner workspace's retained marker, which prevents an empty cache from being mistaken for an up-to-date installation. A fresh download may take 30–60 seconds.
+The app runs `nuclei` with a writable temporary home and adds `-ud /tmp/nuclei-templates/current` when no update directory is present. Compose keeps that managed cache and its release marker in the `nuclei-templates` volume. Startup fills an empty cache, while Assessment-plan preflight offers an explicit **Update templates and rebuild preview** action for an installed snapshot. A fresh download may take 30–60 seconds. Normal terminal commands can't update this shared cache behind an approved plan.
 
 Saved output records whether a finding used the managed cache, a workspace template path, a pinned-looking template clone, or an operator-updated template set. Normal relative selectors such as `http/` count as managed-cache templates. ProjectDiscovery config, resume, and useful generated state is stored in Files under `/tools/` as described above.
 

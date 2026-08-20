@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "c7369dc155eaed661162762d913b43c1b18ef4bb9bcb325d6a6c2c87df270277"
+_LOG_EVENT_INVENTORY_HASH = "860a7b89d13925bc41f2d0e0fc51cb7bff87e6fa51f24010779293ccf675926e"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
@@ -867,7 +867,7 @@ class TestLoggingReference:
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 352
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 362
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

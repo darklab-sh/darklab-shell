@@ -31,6 +31,7 @@ from services.commands.registry import (
     split_command_argv,
 )
 from services.commands.raw_packets import scan_transport_log_context
+from services.nuclei.template_run import locked_nuclei_argv
 from services.runs.broker_worker import (
     BrokerOutputBatcher,  # noqa: F401 - compatibility seam for blueprints.run/tests
     brokered_real_run_worker,  # noqa: F401 - compatibility seam for blueprints.run/tests
@@ -426,6 +427,7 @@ def prepare_real_command(
 def real_command_popen_argv(
     prepared_real: PreparedRealCommand,
     *,
+    nuclei_template_digest: str = "",
     scanner_prefix: list[str] | tuple[str, ...] | str | None = None,
     stdbuf_bin: str | None = None,
     shell_bin: str | None = None,
@@ -440,6 +442,8 @@ def real_command_popen_argv(
         stdbuf_bin=STDBUF_BIN if stdbuf_bin is None else stdbuf_bin,
         shell_bin=SHELL_BIN if shell_bin is None else shell_bin,
     )
+    if command_root(prepared_real.registry_command) == "nuclei":
+        command_argv = locked_nuclei_argv(command_argv, nuclei_template_digest)
     return prefix + command_argv if prefix else command_argv
 
 
@@ -553,9 +557,17 @@ def start_real_command_process(
         if env_overrides:
             popen_env = os.environ.copy()
             popen_env.update(env_overrides)
+        template_digest = str(
+            getattr(
+                getattr(output_signal_context, "nuclei_template_snapshot", None),
+                "content_digest",
+                "",
+            )
+        )
         proc = popen_fn(
             real_command_popen_argv(
                 prepared_real,
+                nuclei_template_digest=template_digest,
                 scanner_prefix=scanner_prefix,
                 stdbuf_bin=stdbuf_bin,
                 shell_bin=shell_bin,

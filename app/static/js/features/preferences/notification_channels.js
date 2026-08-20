@@ -146,6 +146,11 @@ let exportedOpenNotificationChannelEditor = null;
 
   function _eventTitle(event) {
     const trigger = String(event.trigger || 'notification').replaceAll('_', ' ');
+    const batch = event.assessment_batch || {};
+    if (batch.batch_id) {
+      const status = String(batch.status || 'complete').replaceAll('_', ' ');
+      return `assessment batch complete: ${status}`;
+    }
     const digest = event.project_digest || {};
     const projectName = String(digest.project_name || '').trim();
     if (event.trigger === 'project_digest' && projectName) {
@@ -162,6 +167,8 @@ let exportedOpenNotificationChannelEditor = null;
 
   function _eventMeta(event) {
     const parts = [];
+    const batchId = _shortRunId(event.assessment_batch?.batch_id);
+    if (batchId) parts.push(`batch ${batchId}`);
     const digestMeta = _eventDigestMeta(event);
     if (digestMeta) parts.push(digestMeta);
     const runId = _shortRunId(event.run_id);

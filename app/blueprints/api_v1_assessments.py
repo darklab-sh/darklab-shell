@@ -8,12 +8,17 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
+from blueprints.assessment_batch_lifecycle import (
+    assessment_check_filters as _check_filters,
+    batch_lifecycle_pending_response,
+)
 from core.helpers import get_client_ip, get_log_session_id
 from services.assessments.contracts import (
     AssessmentConflict,
     AssessmentError,
     AssessmentNotFound,
 )
+from services.assessments.batch.lifecycle_guard import BatchLifecycleCancellation
 from services.assessments.lifecycle import (
     delete_assessment_cycle,
     preview_assessment_deletion,
@@ -65,16 +70,6 @@ def _bool_arg(name: str) -> bool:
         "1",
         "true",
         "yes",
-    }
-
-
-def _check_filters() -> dict[str, str]:
-    return {
-        "category": str(request.args.get("category") or ""),
-        "state": str(request.args.get("state") or ""),
-        "target_type": str(request.args.get("target_type") or ""),
-        "policy_level": str(request.args.get("policy_level") or ""),
-        "evidence_state": str(request.args.get("evidence_state") or ""),
     }
 
 
@@ -242,6 +237,8 @@ def api_project_assessment_update(project_id, assessment_id):
                 actor_member_id=actor_member_id,
                 conn=conn,
             )
+            if isinstance(change, BatchLifecycleCancellation):
+                return change
             assessment = change["assessment"]
             event_type = {
                 "complete": AuditEventType.ASSESSMENT_COMPLETE,
@@ -276,6 +273,8 @@ def api_project_assessment_update(project_id, assessment_id):
         change = run_project_transaction(_update)
     except (AssessmentError, ProjectWorkspaceQuotaExceeded, TeamPermissionDenied) as exc:
         return _assessment_api_error(exc)
+    if isinstance(change, BatchLifecycleCancellation):
+        return batch_lifecycle_pending_response(change, session_id, team_id=owner_scope.team_id, api=True)
     assessment = change["assessment"]
     api_routes.log.info(
         "API_PROJECT_ASSESSMENT_UPDATED",
@@ -309,8 +308,6 @@ def api_project_assessment_delete_preview(project_id, assessment_id):
     except AssessmentError as exc:
         return _assessment_api_error(exc)
     return jsonify({"preview": preview})
-
-
 @api_routes.api_v1_bp.route(
     "/projects/<project_id>/assessments/<assessment_id>",
     methods=["DELETE"],
@@ -328,6 +325,8 @@ def api_project_assessment_delete(project_id, assessment_id):
                 team_id=owner_scope.team_id,
                 conn=conn,
             )
+            if isinstance(preview, BatchLifecycleCancellation):
+                return preview
             assessment = preview["assessment"]
             record_event(
                 AuditEventType.ASSESSMENT_DELETE,
@@ -347,6 +346,8 @@ def api_project_assessment_delete(project_id, assessment_id):
         deleted = run_project_transaction(_delete)
     except (AssessmentError, ProjectWorkspaceQuotaExceeded, TeamPermissionDenied) as exc:
         return _assessment_api_error(exc)
+    if isinstance(deleted, BatchLifecycleCancellation):
+        return batch_lifecycle_pending_response(deleted, session_id, team_id=owner_scope.team_id, api=True)
     api_routes.log.info(
         "API_PROJECT_ASSESSMENT_DELETED",
         extra=_log_fields(

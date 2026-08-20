@@ -552,6 +552,7 @@ describe('history panel actions', () => {
     openMetadataEditorImpl = vi.fn(),
     openAtlasImpl = vi.fn(() => Promise.resolve()),
     openWatchersModalImpl = vi.fn(() => Promise.resolve()),
+    openProjectAssessmentImpl = vi.fn(() => Promise.resolve(true)),
     openContextualFindingRecordImpl = vi.fn(() => Promise.resolve(true)),
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
@@ -855,6 +856,7 @@ describe('history panel actions', () => {
           logClientError: logClientErrorImpl,
           openAtlas: openAtlasImpl,
           openWatchersModal: openWatchersModalImpl,
+          openProjectAssessment: openProjectAssessmentImpl,
           openContextualFindingRecord: openContextualFindingRecordImpl,
           downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
           bindPressable,
@@ -884,6 +886,7 @@ describe('history panel actions', () => {
         _historyRelativeTime,
         _historyResetSelectionOnClose,
         _handleHistoryRunExport,
+        _handleHistoryRunModalAction,
         _historyRunPrimary,
         _historyRunPlainExportText,
         _restoreBothHistoryCompareRuns,
@@ -952,6 +955,7 @@ describe('history panel actions', () => {
       openMetadataEditor: openMetadataEditorImpl,
       openAtlas: openAtlasImpl,
       openWatchersModal: openWatchersModalImpl,
+      openProjectAssessment: openProjectAssessmentImpl,
       openContextualFindingRecord: openContextualFindingRecordImpl,
       downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
       emitUiEvent,
@@ -1112,6 +1116,76 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-run-body').textContent).toContain('Command outcome')
     expect(document.getElementById('history-run-body').textContent).toContain('ResultFinished cleanly')
     expect(_historyRunPlainExportText(_historyRunPrimary())).toContain('Command outcome')
+  })
+
+  it('shows assessment batch ancestry and opens the exact batch from Run Details', async () => {
+    const openProjectAssessment = vi.fn(() => Promise.resolve(true))
+    const provenance = {
+      batch_id: 'abx_history_1',
+      assessment_id: 'asm_history_1',
+      project_id: 'prj_history_1',
+      status: 'completed',
+      item: {
+        item_index: 2,
+        status: 'succeeded',
+        check_count: 3,
+      },
+    }
+    const run = {
+      id: 'run-batch',
+      type: 'run',
+      command: 'nuclei -u example.test',
+      label: 'nuclei -u example.test',
+      started: '2026-08-17T00:00:00Z',
+      finished: '2026-08-17T00:00:01Z',
+      exit_code: 0,
+      assessment_batch_id: provenance.batch_id,
+      assessment_batch_item_index: 2,
+      assessment_batch: provenance,
+    }
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ roots: ['nuclei'], items: [run], runs: [run] }),
+        })
+      }
+      if (url === '/history/run-batch?json&preview=1') {
+        return Promise.resolve({ json: () => Promise.resolve(run) })
+      }
+      if (url === '/runs/run-batch/service-evidence?limit=50&offset=0') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ observations: [], total: 0, limit: 50, offset: 0 }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const {
+      refreshHistoryPanel,
+      _handleHistoryRunModalAction,
+    } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      openProjectAssessmentImpl: openProjectAssessment,
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+    const entry = document.querySelector('#history-list .history-entry')
+    expect(entry.querySelector('.history-entry-kind-assessment-batch')?.textContent).toBe('batch')
+    expect(entry.querySelector('.history-entry-kind-assessment-batch')?.title)
+      .toBe('Assessment batch abx_history_1, item 3')
+
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(document.querySelector('.history-run-assessment-batch-summary')?.textContent)
+        .toContain('Item 3 · 3 mapped checks · succeededView batch')
+    })
+    await _handleHistoryRunModalAction('open-assessment-batch')
+
+    expect(openProjectAssessment).toHaveBeenCalledWith('prj_history_1', {
+      assessmentId: 'asm_history_1',
+      batchId: 'abx_history_1',
+    })
   })
 
   it('opens the watchers modal from the Run Details baseline action', async () => {

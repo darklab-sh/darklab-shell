@@ -213,6 +213,22 @@ describe('notification channel preferences panel', () => {
           window_end: '2026-05-22T08:00:00+00:00',
         },
       },
+      {
+        id: 'nte_batch',
+        channel_id: 'ntc_chat',
+        trigger: 'run_complete',
+        status: 'sent',
+        attempts: 1,
+        created: '2026-05-22T09:00:00+00:00',
+        last_attempt_at: '2026-05-22T09:00:01+00:00',
+        next_attempt_at: '',
+        last_error: '',
+        run_id: '',
+        assessment_batch: {
+          batch_id: 'abx_1234567890abcdef',
+          status: 'completed',
+        },
+      },
     ]
     const apiFetch = vi.fn(async (url, options = {}) => {
       if (url === '/session/notification-channel-kinds') return jsonResponse(CHANNEL_KIND_CONTRACT)
@@ -287,6 +303,8 @@ describe('notification channel preferences panel', () => {
     expect(list.textContent).toContain('watcher error')
     await vi.waitFor(() => expect(list.textContent).toContain('project digest: External Edge'))
     expect(list.textContent).toContain('window')
+    expect(list.textContent).toContain('assessment batch complete: completed')
+    expect(list.textContent).toContain('batch abx_1234')
     await vi.waitFor(() => expect(list.textContent).toContain('provider rejected message'))
     await vi.waitFor(() => expect(list.textContent).toContain('digest endpoint timed out'))
     expect(apiFetch).toHaveBeenCalledWith('/session/notification-events?channel_id=ntc_chat&limit=5')

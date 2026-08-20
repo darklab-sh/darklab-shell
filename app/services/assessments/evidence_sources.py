@@ -17,7 +17,6 @@ from services.assessments.evidence_matching import (
 )
 from services.projects.scope import shared_owner_where
 
-
 _PROJECT_RUN_SQL = (
     "SELECT r.id FROM runs r JOIN project_links pl "
     "ON pl.entity_type = 'run' AND pl.entity_id = r.id "
@@ -45,7 +44,8 @@ _ENTITY_SQL = (
 )
 _WORKFLOW_SQL = (
     "SELECT w.id, w.workflow_id, w.status, w.finished, w.created "
-    "FROM workflow_executions w WHERE {owner_sql} AND w.project_id = ? AND w.id = ?"
+    "FROM workflow_executions w WHERE w.execution_kind = ? AND {owner_sql} AND w.project_id = ? "
+    "AND w.id = ?"
 )
 
 
@@ -244,7 +244,7 @@ def _workflow_source(
     )
     row = conn.execute(
         _WORKFLOW_SQL.format(owner_sql=owner_sql),
-        (*owner_params, project_id, execution_id),
+        ("workflow", *owner_params, project_id, execution_id),
     ).fetchone()
     if not row:
         raise AssessmentNotFound("assessment evidence was not found in this project scope")

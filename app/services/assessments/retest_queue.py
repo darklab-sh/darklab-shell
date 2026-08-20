@@ -11,6 +11,10 @@ from typing import Any
 from core.database_access import get_db_connect
 from services.assessments.action_plan_payload import digest_plan
 from services.assessments.action_plans import AssessmentActionError
+from services.assessments.batch.plan_policy import (
+    evaluate_shared_batch,
+    retest_group_key,
+)
 from services.projects.finding_verification import finding_verification_context_on_conn
 from services.projects.scope import shared_owner_where
 from services.projects.verification_actions import verification_action_plan_on_conn
@@ -86,49 +90,24 @@ def _comparison_summary(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _group_key(plan: dict[str, Any]) -> tuple[str, ...]:
-    raw_target = plan.get("target")
-    target = raw_target if isinstance(raw_target, dict) else {}
-    raw_action = plan.get("action")
-    action = raw_action if isinstance(raw_action, dict) else {}
-    raw_profile = plan.get("http_profile")
-    profile = raw_profile if isinstance(raw_profile, dict) else {}
-    return (
-        str(target.get("entity_id") or ""),
-        str(target.get("type") or ""),
-        str(target.get("value") or ""),
-        str(plan.get("check_id") or ""),
-        str(action.get("key") or ""),
-        str(profile.get("role") or ""),
-        str(profile.get("id") or ""),
-    )
-
-
 def _batch_reason(items: list[dict[str, Any]]) -> str:
-    if len(items) < 2:
-        return "A shared batch needs at least two findings; use the finding's individual action."
-    if len(items) > RETEST_BATCH_MAX_FINDINGS:
-        return f"This group exceeds the {RETEST_BATCH_MAX_FINDINGS}-finding batch limit."
-    unavailable = next(
-        (
-            str(item["action_plan"].get("unavailable_reason") or "The action is unavailable.")
-            for item in items
-            if not item["action_plan"].get("launchable")
-        ),
-        "",
+    decision = evaluate_shared_batch(
+        (item["action_plan"] for item in items),
+        minimum_items=2,
+        maximum_items=RETEST_BATCH_MAX_FINDINGS,
+        allowed_policy_levels={"safe"},
     )
-    if unavailable:
-        return unavailable
-    if any(str(item["action_plan"].get("policy_level") or "") != "safe" for item in items):
+    if decision.code == "too_few_items":
+        return "A shared batch needs at least two findings; use the finding's individual action."
+    if decision.code == "too_many_items":
+        return f"This group exceeds the {RETEST_BATCH_MAX_FINDINGS}-finding batch limit."
+    if decision.code == "plan_unavailable":
+        return decision.reason
+    if decision.code == "policy_excluded":
         return "Shared batches are limited to safe assessment actions."
-    if any(
-        str(item["action_plan"].get("bounds", {}).get("credential_use") or "none")
-        != "none"
-        for item in items
-    ):
+    if decision.code == "credentialed":
         return "Credentialed HTTP roles stay individual so every use is reviewed separately."
-    commands = {str(item["action_plan"].get("display_command") or "") for item in items}
-    if len(commands) != 1 or not next(iter(commands), ""):
+    if decision.code == "command_mismatch":
         return "The findings don't share one exact bounded command."
     return ""
 
@@ -237,7 +216,7 @@ def assessment_retest_queue_on_conn(
             )
             contexts[finding_id] = context
         item = _public_item(row, plan, context)
-        groups.setdefault(_group_key(plan), []).append(item)
+        groups.setdefault(retest_group_key(plan), []).append(item)
         if finding_id not in seen_findings:
             status = str(row["verification_status"] or "")
             if status in status_counts:
