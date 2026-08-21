@@ -16,9 +16,9 @@ _NMAP_ENTITY_NOISE_RE = re.compile(
     re.I,
 )
 _SQLMAP_ENTITY_NOISE_RE = re.compile(
-    r"^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?\[WARNING\]\s+you've provided target URL without any GET parameters "
+    r"^(?:(?:\[\d{2}:\d{2}:\d{2}\]\s+)?\[WARNING\]\s+you've provided target URL without any GET parameters "
     r"\(e\.g\. 'http://(?:www\.)?site\.com/article\.php\?id=1'\) and without providing any POST parameters "
-    r"through option '--data'\s*$",
+    r"through option '--data'|\|_\|V\.\.\.\s+\|_\|\s+https://sqlmap\.org/?)\s*$",
     re.I,
 )
 _HTTPX_ENTITY_NOISE_RE = re.compile(

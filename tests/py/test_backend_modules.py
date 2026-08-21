@@ -25527,6 +25527,13 @@ class TestOutputSignals:
         assert "entities" in sqlmap_classifier.classify_line(
             "[INFO] testing URL 'https://darklab.sh/article.php?id=1'"
         )
+        sqlmap_banner = sqlmap_classifier.classify_line(
+            "      |_|V...       |_|   https://sqlmap.org"
+        )
+        assert "entities" not in sqlmap_banner
+        assert "entities" in sqlmap_classifier.classify_line(
+            "[INFO] testing URL 'http://sqlmap.org/article.php?id=1'"
+        )
 
         httpx_classifier = OutputSignalClassifier("httpx -u https://darklab.sh")
         httpx_model_download = httpx_classifier.classify_line(
