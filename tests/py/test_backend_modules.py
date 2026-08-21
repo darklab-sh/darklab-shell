@@ -25572,6 +25572,29 @@ class TestOutputSignals:
             for entity in cast("list[dict[str, object]]", resolver_target["entities"])
         }
 
+        nslookup_classifier = OutputSignalClassifier("nslookup kali.darklab.sh 1.1.1.1")
+        for resolver_line in (
+            "Server:\t\t1.1.1.1",
+            "Address:\t1.1.1.1#53",
+            "Resolver: 1.1.1.1 (1.1.1.1#53)",
+        ):
+            assert "entities" not in nslookup_classifier.classify_line(resolver_line)
+        nslookup_answer = nslookup_classifier.classify_line(
+            "kali.darklab.sh canonical name = fw-vx2-vp2.darklab.sh."
+        )
+        nslookup_address = nslookup_classifier.classify_line("Address: 104.161.46.133")
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", nslookup_answer["entities"])
+        } == {
+            ("domain", "kali.darklab.sh"),
+            ("domain", "fw-vx2-vp2.darklab.sh"),
+        }
+        assert ("ip", "104.161.46.133") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", nslookup_address["entities"])
+        }
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )
