@@ -25595,6 +25595,31 @@ class TestOutputSignals:
             for entity in cast("list[dict[str, object]]", nslookup_address["entities"])
         }
 
+        dig_classifier = OutputSignalClassifier("dig @1.1.1.1 kali.darklab.sh")
+        for resolver_line in (
+            "; <<>> DiG 9.20.26-1~deb13u1-Debian <<>> @1.1.1.1 kali.darklab.sh",
+            ";; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)",
+            "Resolver: 1.1.1.1#53(1.1.1.1) (UDP)",
+        ):
+            assert "entities" not in dig_classifier.classify_line(resolver_line)
+        dig_cname = dig_classifier.classify_line(
+            "kali.darklab.sh. 60 IN CNAME fw-vx2-vp2.darklab.sh."
+        )
+        dig_address = dig_classifier.classify_line(
+            "fw-vx2-vp2.darklab.sh. 60 IN A 104.161.46.133"
+        )
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", dig_cname["entities"])
+        } == {
+            ("domain", "kali.darklab.sh"),
+            ("domain", "fw-vx2-vp2.darklab.sh"),
+        }
+        assert ("ip", "104.161.46.133") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", dig_address["entities"])
+        }
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )

@@ -21,10 +21,9 @@ _HTTPX_ENTITY_NOISE_RE = re.compile(
     r"^\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\s+INFO\s+Model not found, downloading "
     r"url=https://huggingface\.co/datasets/happyhackingspace/dit/resolve/main/model\.json "
     r"dest=/tmp/\.dit/model\.json\s*$", re.I)
-_NSLOOKUP_ENTITY_NOISE_RE = re.compile(
-    r"^(?:Server:\s+\S+|Address:\s+\S+#\d+|"
-    r"Resolver:\s+\S+(?:\s+\(\S+\))?)\s*$", re.I,
-)
+_DNS_RESOLVER_ENTITY_NOISE_RE = re.compile(
+    r"^(?:;\s+<<>>\s+DiG\b.*\s+@\S+.*|Address:\s+\S+#\d+|"
+    r"(?:(?:;;\s+)?Server|Resolver):\s+\S+(?:\s+\(\S+\))?)\s*$", re.I)
 _TESTSSL_ENTITY_NOISE_RE = re.compile(
     r"^(?:Using\s+OpenSSL\b.*|"
     r"on\s+\S+:/opt/testssl\.sh/bin/openssl\.\S+|"
@@ -37,9 +36,10 @@ _TESTSSL_ENTITY_NOISE_RE = re.compile(
     r"https://github\.com/ssllabs/research/wiki/SSL-Server-Rating-Guide/?"
     r")\s*$", re.I)
 _COMMAND_ENTITY_EXCLUDES = {
+    "dig": _DNS_RESOLVER_ENTITY_NOISE_RE,
     "httpx": _HTTPX_ENTITY_NOISE_RE,
     "nmap": _NMAP_ENTITY_NOISE_RE,
-    "nslookup": _NSLOOKUP_ENTITY_NOISE_RE,
+    "nslookup": _DNS_RESOLVER_ENTITY_NOISE_RE,
     "sqlmap": _SQLMAP_ENTITY_NOISE_RE,
     "testssl": _TESTSSL_ENTITY_NOISE_RE,
 }
