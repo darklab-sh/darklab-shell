@@ -32,6 +32,7 @@ from core.output_entities import (
     strip_ansi_codes as _entity_strip_ansi_codes,
     extract_entities,
 )
+from core.output_entity_exclusions import command_output_excludes_entities
 from core.output_port_entities import (
     _nc_bracket_entity_host,
     _nmap_port_entities,
@@ -415,15 +416,6 @@ _HOSTNAME_RE = re.compile(
     re.I,
 )
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
-_NMAP_ENTITY_NOISE_RE = re.compile(
-    r"^(?:Starting Nmap\b.*\bhttps://nmap\.org\b|"
-    r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.|"
-    r".*\bfollowing fingerprints? at https://nmap\.org/cgi-bin/submit\.cgi\?new-service\b.*|"
-    r"SF:)",
-    re.I,
-)
-
-
 def _looks_like_clean_url(value: str) -> bool:
     raw = _normalize_signal_text(value)
     if not _CLEAN_HTTP_URL_RE.match(raw):
@@ -772,7 +764,7 @@ def _extract_entities_for_command(
         return []
     if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
         return []
-    if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
+    if command_output_excludes_entities(root, stripped):
         return []
     if root == "nmap":
         nmap_report_entities = _nmap_report_entities(stripped, source_line)

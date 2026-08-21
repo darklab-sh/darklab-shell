@@ -25516,6 +25516,18 @@ class TestOutputSignals:
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
 
+        sqlmap_classifier = OutputSignalClassifier("sqlmap -u https://darklab.sh/article.php")
+        sqlmap_warning = sqlmap_classifier.classify_line(
+            "[03:39:35] [WARNING] you've provided target URL without any GET parameters "
+            "(e.g. 'http://www.site.com/article.php?id=1') and without providing any POST parameters "
+            "through option '--data'"
+        )
+        assert sqlmap_warning["signals"] == ["warnings"]
+        assert "entities" not in sqlmap_warning
+        assert "entities" in sqlmap_classifier.classify_line(
+            "[INFO] testing URL 'https://darklab.sh/article.php?id=1'"
+        )
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )
