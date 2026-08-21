@@ -23,6 +23,7 @@ from core.output_targets import (
     tokenize_command,
 )
 from core.output_dnsx import dnsx_json_entities
+from core.output_httpx import httpx_json_entities
 from core.output_entities import (
     _add_entity,
     _is_public_ip,
@@ -856,6 +857,12 @@ def _extract_entities_for_command(
             )
         # Keep curl on the generic extraction path: verbose/header output often
         # contains useful domains or URLs even when it is not a connect line.
+    if root == "httpx":
+        data = _json_object_line(stripped)
+        if data:
+            return httpx_json_entities(data, source_line)
+        if stripped.lstrip().startswith("{"):
+            return []
     if root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}:
         data = _json_object_line(stripped)
         extractors = {"dnsx": dnsx_json_entities, "tlsx": _tlsx_json_entities,
@@ -1068,7 +1075,7 @@ class OutputSignalClassifier:
                             entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
-            self.root in {"dalfox", "dnsx", "tlsx", "cdncheck", "trufflehog"}
+            self.root in {"dalfox", "dnsx", "httpx", "tlsx", "cdncheck", "trufflehog"}
             and normalized_text
             and normalized_text.lstrip().startswith("{")
             and _json_object_line(normalized_text) is None

@@ -25543,6 +25543,34 @@ class TestOutputSignals:
         )
         assert "entities" not in httpx_model_download
         assert "entities" in httpx_classifier.classify_line("https://darklab.sh [200]")
+        httpx_json = httpx_classifier.classify_line(json.dumps({
+            "url": "https://h.darklab.sh",
+            "input": "https://h.darklab.sh",
+            "host": "h.darklab.sh",
+            "host_ip": "108.79.194.246",
+            "a": ["108.79.194.246"],
+            "aaaa": ["fd12:3456:789a:2::1"],
+            "resolvers": ["1.1.1.1:53", "1.0.0.1:53"],
+        }))
+        httpx_json_values = {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", httpx_json["entities"])
+        }
+        assert httpx_json_values == {
+            ("url", "https://h.darklab.sh"),
+            ("domain", "h.darklab.sh"),
+            ("ip", "108.79.194.246"),
+        }
+        resolver_target = httpx_classifier.classify_line(json.dumps({
+            "url": "https://1.1.1.1",
+            "host": "1.1.1.1",
+            "host_ip": "1.1.1.1",
+            "resolvers": ["1.1.1.1:53"],
+        }))
+        assert ("ip", "1.1.1.1") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", resolver_target["entities"])
+        }
 
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
