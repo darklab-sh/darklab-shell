@@ -25528,6 +25528,15 @@ class TestOutputSignals:
             "[INFO] testing URL 'https://darklab.sh/article.php?id=1'"
         )
 
+        httpx_classifier = OutputSignalClassifier("httpx -u https://darklab.sh")
+        httpx_model_download = httpx_classifier.classify_line(
+            "2026/08/18 03:39:00 INFO Model not found, downloading "
+            "url=https://huggingface.co/datasets/happyhackingspace/dit/resolve/main/model.json "
+            "dest=/tmp/.dit/model.json"
+        )
+        assert "entities" not in httpx_model_download
+        assert "entities" in httpx_classifier.classify_line("https://darklab.sh [200]")
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )

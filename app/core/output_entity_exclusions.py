@@ -21,7 +21,14 @@ _SQLMAP_ENTITY_NOISE_RE = re.compile(
     r"through option '--data'\s*$",
     re.I,
 )
+_HTTPX_ENTITY_NOISE_RE = re.compile(
+    r"^\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\s+INFO\s+Model not found, downloading "
+    r"url=https://huggingface\.co/datasets/happyhackingspace/dit/resolve/main/model\.json "
+    r"dest=/tmp/\.dit/model\.json\s*$",
+    re.I,
+)
 _COMMAND_ENTITY_EXCLUDES = {
+    "httpx": _HTTPX_ENTITY_NOISE_RE,
     "nmap": _NMAP_ENTITY_NOISE_RE,
     "sqlmap": _SQLMAP_ENTITY_NOISE_RE,
 }
