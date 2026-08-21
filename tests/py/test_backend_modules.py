@@ -25596,6 +25596,19 @@ class TestOutputSignals:
         assert "entities" not in testssl_classifier.classify_line(
             "\x1b[36mon 8064a565c28d:/opt/testssl.sh/bin/openssl.Linux.x86_64\x1b[0m"
         )
+        testssl_reference_lines = (
+            "testssl version 3.2.4 from https://testssl.sh/",
+            "Please file bugs @ https://testssl.sh/bugs/",
+            "Certificate Revocation List  http://r10.c.lencr.org/17.crl",
+            "OCSP URI                     http://r10.o.lencr.org",
+            "https://search.censys.io/search?resource=hosts&virtual_hosts=INCLUDE&q=3697269ECB748435F4634C8E9F53A713",
+            "Specification documentation  https://github.com/ssllabs/research/wiki/SSL-Server-Rating-Guide",
+        )
+        for line in testssl_reference_lines:
+            assert "entities" not in testssl_classifier.classify_line(line)
+        assert "entities" in testssl_classifier.classify_line(
+            "Common Name (CN)             testssl.sh"
+        )
         assert "entities" in OutputSignalClassifier("curl https://testssl.sh").classify_line("https://testssl.sh")
         shodan_classifier = OutputSignalClassifier("shodan domain darklab.sh")
         shodan_metadata = shodan_classifier.classify_line("shell                    CNAME  fw-vx2-vp1.darklab.sh")

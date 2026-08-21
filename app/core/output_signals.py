@@ -215,10 +215,6 @@ _TESTSSL_FINDING_RE = re.compile(
     r"Overall Grade|ROBOT\s+|Secure Renegotiation|BREACH \(CVE-|LOGJAM \(CVE-)",
     re.I,
 )
-_TESTSSL_ENTITY_NOISE_RE = re.compile(
-    r"^(?:Using\s+OpenSSL\b.*|on\s+\S+:/opt/testssl\.sh/bin/openssl\.\S+)\s*$",
-    re.I,
-)
 _SSLSCAN_FINDING_RE = re.compile(
     r"^(?:TLSv1\.[23]\s+enabled|Server supports TLS Fallback SCSV|(?:Preferred|Accepted)\s+TLSv1\.[23]\s+|"
     r"Signature Algorithm:|RSA Key Strength:|Subject:|Altnames:|Issuer:|Not valid before:|Not valid after:)",
@@ -759,8 +755,6 @@ def _extract_entities_for_command(
     stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
-        return []
-    if root == "testssl" and _TESTSSL_ENTITY_NOISE_RE.search(stripped):
         return []
     if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
         return []

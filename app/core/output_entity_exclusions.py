@@ -27,10 +27,24 @@ _HTTPX_ENTITY_NOISE_RE = re.compile(
     r"dest=/tmp/\.dit/model\.json\s*$",
     re.I,
 )
+_TESTSSL_ENTITY_NOISE_RE = re.compile(
+    r"^(?:Using\s+OpenSSL\b.*|"
+    r"on\s+\S+:/opt/testssl\.sh/bin/openssl\.\S+|"
+    r"testssl version \S+ from https://testssl\.sh/?|"
+    r"Please file bugs @ https://testssl\.sh/bugs/?|"
+    r"(?:Certificate Revocation List|OCSP URI)\s+"
+    r"https?://(?:[a-z0-9-]+\.)+lencr\.org(?:/\S*)?|"
+    r".*https://search\.censys\.io/search\?\S+|"
+    r"Specification documentation\s+"
+    r"https://github\.com/ssllabs/research/wiki/SSL-Server-Rating-Guide/?"
+    r")\s*$",
+    re.I,
+)
 _COMMAND_ENTITY_EXCLUDES = {
     "httpx": _HTTPX_ENTITY_NOISE_RE,
     "nmap": _NMAP_ENTITY_NOISE_RE,
     "sqlmap": _SQLMAP_ENTITY_NOISE_RE,
+    "testssl": _TESTSSL_ENTITY_NOISE_RE,
 }
 
 
