@@ -25620,6 +25620,33 @@ class TestOutputSignals:
             for entity in cast("list[dict[str, object]]", dig_address["entities"])
         }
 
+        whois_classifier = OutputSignalClassifier("whois darklab.sh")
+        whois_target = whois_classifier.classify_line("Domain Name: darklab.sh")
+        assert whois_target["signals"] == ["findings"]
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", whois_target["entities"])
+        } == {("domain", "darklab.sh")}
+        whois_provider_findings = (
+            "Registrar WHOIS Server: whois.namecheap.com",
+            "Registrar URL: https://www.namecheap.com/",
+            "Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+            "Name Server: ruth.ns.cloudflare.com",
+            "Name Server: frank.ns.cloudflare.com",
+        )
+        for line in whois_provider_findings:
+            metadata = whois_classifier.classify_line(line)
+            assert metadata["signals"] == ["findings"]
+            assert "entities" not in metadata
+        whois_reference_lines = (
+            "URL of the ICANN Whois Inaccuracy Complaint Form: https://icann.org/wicf/",
+            "For more information on Whois status codes, please visit https://icann.org/epp",
+            "Access can be requested at "
+            "https://www.identity.digital/about/policies/whois-layered-access/.",
+        )
+        for line in whois_reference_lines:
+            assert "entities" not in whois_classifier.classify_line(line)
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )

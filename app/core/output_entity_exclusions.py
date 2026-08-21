@@ -35,13 +35,15 @@ _TESTSSL_ENTITY_NOISE_RE = re.compile(
     r"Specification documentation\s+"
     r"https://github\.com/ssllabs/research/wiki/SSL-Server-Rating-Guide/?"
     r")\s*$", re.I)
+_WHOIS_ENTITY_NOISE_RE = re.compile(
+    r"^(?:(?:Registrar WHOIS Server|Registrar URL|Name Server):\s+\S+|"
+    r"Domain Status:\s+\S+\s+https://icann\.org/epp(?:#\S+)?|.*https://(?:icann\.org/(?:epp|wicf/?)|"
+    r"www\.identity\.digital/about/policies/whois-layered-access/|www\.namecheap\.com/?))", re.I)
 _COMMAND_ENTITY_EXCLUDES = {
-    "dig": _DNS_RESOLVER_ENTITY_NOISE_RE,
-    "httpx": _HTTPX_ENTITY_NOISE_RE,
-    "nmap": _NMAP_ENTITY_NOISE_RE,
-    "nslookup": _DNS_RESOLVER_ENTITY_NOISE_RE,
-    "sqlmap": _SQLMAP_ENTITY_NOISE_RE,
-    "testssl": _TESTSSL_ENTITY_NOISE_RE,
+    "dig": _DNS_RESOLVER_ENTITY_NOISE_RE, "httpx": _HTTPX_ENTITY_NOISE_RE,
+    "nmap": _NMAP_ENTITY_NOISE_RE, "nslookup": _DNS_RESOLVER_ENTITY_NOISE_RE,
+    "sqlmap": _SQLMAP_ENTITY_NOISE_RE, "testssl": _TESTSSL_ENTITY_NOISE_RE,
+    "whois": _WHOIS_ENTITY_NOISE_RE,
 }
 
 
