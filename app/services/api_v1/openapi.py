@@ -15,6 +15,7 @@ from services.api_v1.openapi_assessment_oast import assessment_oast_paths, asses
 from services.api_v1.openapi_assessment_zap import assessment_zap_paths, assessment_zap_schemas
 from services.api_v1.openapi_atlas_profile import atlas_profile_query_parameters, atlas_profile_schemas
 from services.api_v1.openapi_cve_risk import cve_risk_schemas
+from services.api_v1.openapi_cve_risk_feeds import cve_risk_feed_paths, cve_risk_feed_schemas
 from services.api_v1.openapi_findings import finding_schemas
 from services.api_v1.openapi_finding_evidence import finding_evidence_paths, finding_evidence_schemas
 from services.api_v1.openapi_http_profiles import http_profile_paths, http_profile_schemas
@@ -530,6 +531,7 @@ OPENAPI_SPEC: dict = {
                 },
             },
             **cve_risk_schemas(),
+            **cve_risk_feed_schemas(),
             **osv_lookup_schemas(),
             **probe_schemas(),
             **finding_schemas(),
@@ -1507,6 +1509,7 @@ OPENAPI_SPEC: dict = {
         | assessment_action_paths()
         | assessment_oast_paths()
         | assessment_zap_paths()
+        | cve_risk_feed_paths()
         | finding_evidence_paths()
         | http_profile_paths()
         | manual.manual_finding_paths()

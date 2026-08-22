@@ -45,6 +45,7 @@ _API_V1_SERVICE_ALLOWED_FILES = {
     "openapi_assessments.py",
     "openapi_cve_advisory.py",
     "openapi_cve_risk.py",
+    "openapi_cve_risk_feeds.py",
     "openapi_finding_details.py",
     "openapi_finding_dispositions.py",
     "openapi_finding_evidence.py",
@@ -346,6 +347,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_assessments.py", 359, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_lookup.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_atlas_profile.py", 33, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_cve_risk.py", 18, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_finding_evidence.py", 167, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_http_profiles.py", 253, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_manual_findings.py", 180, "split-package-ratchet"),
@@ -433,6 +435,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/api_v1/openapi_assessments.py", 729, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_advisory.py", 66, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_cve_risk.py", 94, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/api_v1/openapi_cve_risk_feeds.py", 92, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_details.py", 47, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_findings.py", 151, "split-package-ratchet"),
     ModuleSizeBudget("app/services/api_v1/openapi_finding_evidence.py", 172, "split-package-ratchet"),
@@ -1255,10 +1258,14 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/worker_cleanup.py", 37, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/__init__.py", 0, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/__init__.py", 5, "split-package-ratchet"),
-    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/__main__.py", 2102, "split-target-phase4"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/__main__.py", 2099, "split-target-phase4"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/client.py", 336, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/errors.py", 49, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/formatting.py", 86, "split-package-ratchet"),
-    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/__init__.py", 1, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/http_profile_payloads.py", 107, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/payloads.py", 44, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/__init__.py", 9, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/advisory.py", 54, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch.py", 34, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_formatting.py", 148, "split-package-ratchet"),
@@ -1267,16 +1274,38 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_reads.py", 198, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_batch_retry.py", 91, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_formatting.py", 26, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/assessment_lifecycle.py", 120, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "tools/darklab_cli/src/darklab_cli/commands/assessment_lifecycle_formatting.py",
+        65,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/confirmations.py", 36, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/evidence.py", 20, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/evidence_links.py", 85, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/finding.py", 96, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/http_profile.py", 27, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/http_profile_formatting.py", 52, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/http_profile_mutations.py", 83, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/project_references.py", 38, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe.py", 133, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe_catalog_formatting.py", 59, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe_formatting.py", 71, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/probe_render_values.py", 28, "split-package-ratchet"),
-    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/__init__.py", 1, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/risk.py", 38, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/commands/service_evidence.py", 50, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/__init__.py", 9, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/advisory.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment.py", 81, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_batch.py", 145, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_batch_retry.py", 31, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/assessment_lifecycle.py", 45, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/evidence.py", 26, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/evidence_links.py", 49, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/finding.py", 45, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/http_profile.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/probe.py", 44, "split-package-ratchet"),
+    ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/risk.py", 21, "split-package-ratchet"),
 )
 
 _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
@@ -1311,8 +1340,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 )
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
-_DECOMPOSED_ROUTE_CONTRACT_COUNT = 295
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "b7d532f8173a0ac7cba826c5656be654d44844cbeb51b20b2223f86b870f9ee4"
+_DECOMPOSED_ROUTE_CONTRACT_COUNT = 296
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "a1d38e58b6e05aa3419ae549c7b9efbb8e1c734795751fac4a63fd1b118c3752"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

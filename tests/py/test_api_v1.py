@@ -621,11 +621,39 @@ def test_api_v1_osv_lookup_requires_team_triage_capability():
     _add_api_team_member(client, owner_token, operator_token, team_id, role="operator")
     endpoint = "/api/v1/advisories/osv/lookup"
     body = {"purl": "pkg:pypi/requests", "version": "2.30.0"}
+    feed_status = [{
+        "source": "epss",
+        "status": "stale",
+        "origin": "bundled",
+        "source_version": "v2026.08.01:2026-08-01",
+        "model_version": "v2026.08.01",
+        "published_at": "2026-08-01T00:00:00Z",
+        "retrieved_at": "2026-08-01T00:00:00Z",
+        "accepted_at": "2026-08-01T00:00:00Z",
+        "age_hours": 504.0,
+        "record_count": 100,
+        "last_attempt_at": "",
+        "last_error": "",
+        "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+        "attribution": "FIRST EPSS",
+        "terms_url": "https://www.first.org/epss/model",
+        "live_refresh_enabled": False,
+    }]
 
     with mock.patch(
+        "blueprints.api_v1_cve_risk.get_configured_feed_status",
+        return_value=feed_status,
+    ) as status_read, mock.patch(
         "blueprints.api_v1_osv_lookup.query_external_osv",
         return_value={"source": "osv", "outcome": "negative_cached", "record_count": 0},
     ) as lookup:
+        status_response = client.get(
+            "/api/v1/risk/feeds",
+            headers=_team_headers(viewer_token, team_id),
+        )
+        assert status_response.status_code == 200
+        assert status_response.get_json() == {"feeds": feed_status, "total": 1}
+        status_read.assert_called_once_with()
         viewer = client.post(
             endpoint,
             headers=_team_headers(viewer_token, team_id),
@@ -7371,6 +7399,8 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "AtlasSourceRun",
         "AtlasSummary",
         "ArtifactSummary",
+        "CveRiskFeedStatus",
+        "CveRiskFeedStatusList",
         "EvidencePackage",
         "Health",
         "HistorySearchMatch",
@@ -7455,6 +7485,14 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert "supplied PURL and version" in osv_lookup["description"]
     assert schemas["OsvLookupRequest"]["required"] == ["purl", "version"]
     assert schemas["OsvLookupRequest"]["additionalProperties"] is False
+    risk_feeds = spec["paths"]["/risk/feeds"]["get"]
+    assert risk_feeds["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/CveRiskFeedStatusList"
+    }
+    assert "never refreshes a feed" in risk_feeds["description"]
+    assert schemas["CveRiskFeedStatus"]["properties"]["status"]["enum"] == [
+        "unavailable", "current", "stale", "failed",
+    ]
     assert spec["paths"]["/runs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ActiveRunList"
     }
@@ -8336,6 +8374,8 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
                 return {"watchers": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
             if method == "GET" and path == "/notification-channels":
                 return {"channels": []}
+            if method == "POST" and path == "/projects/prj_cli/assessments":
+                return {"ok": True, "assessment": {"id": "asmt_team"}}
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
@@ -8359,11 +8399,18 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
     assert cli_main.main(["--team", "team_notify", "notify", "list", "--format", "json"]) == 0
     json.loads(capsys.readouterr().out)
 
+    assert cli_main.main([
+        "--team", "team_assessment", "assessment", "create", "prj_cli", "network",
+        "--format", "json",
+    ]) == 0
+    json.loads(capsys.readouterr().out)
+
     assert seen == [
         ("team_flag", "POST", "/runs"),
         ("team_env", "GET", "/history"),
         ("team_saved", "GET", "/watchers"),
         ("team_notify", "GET", "/notification-channels"),
+        ("team_assessment", "POST", "/projects/prj_cli/assessments"),
     ]
 
 
@@ -8406,7 +8453,21 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                 404,
                 "Not Found",
                 Message(),
-                io.BytesIO(b'{"error":{"code":"not_found","message":"missing"}}'),
+                io.BytesIO(
+                    b'{"error":{"code":"not_found","message":"missing",'
+                    b'"details":{"batch_ids":["wfx_cli"]}}}'
+                ),
+            )
+        if req.full_url.endswith("/conflict"):
+            raise urllib.error.HTTPError(
+                req.full_url,
+                409,
+                "Conflict",
+                Message(),
+                io.BytesIO(
+                    b'{"ok":false,"updated":false,"conflict":"stale_revision",'
+                    b'"current_revision":3}'
+                ),
             )
         return FakeResponse()
 
@@ -8419,8 +8480,26 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
         client.request("GET", "/missing")
     except DarklabCliError as exc:
         assert str(exc) == "not_found: missing"
+        assert exc.message == "not_found: missing"
+        assert exc.status == 404
+        assert exc.code == "not_found"
+        assert exc.details == {"batch_ids": ["wfx_cli"]}
     else:
         raise AssertionError("expected HTTP error to fail")
+    try:
+        client.request("PATCH", "/conflict", body={"expected_revision": 2})
+    except DarklabCliError as exc:
+        assert str(exc) == "stale_revision"
+        assert exc.status == 409
+        assert exc.code == "stale_revision"
+        assert exc.details == {
+            "ok": False,
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 3,
+        }
+    else:
+        raise AssertionError("expected mutation conflict to fail")
 
 
 def test_darklab_cli_config_preserves_http_scheme_and_port():
@@ -8888,8 +8967,8 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     ]
 
     class FakeClient:
-        def __init__(self, _config):
-            pass
+        def __init__(self, config):
+            self.team = config.team
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
@@ -8908,6 +8987,81 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                     "offset": 0,
                     "has_more": False,
                     "profiles": profile_summaries,
+                }
+            if path == "/projects/prj_cli/assessments" and method == "POST":
+                if self.team == "team_viewer":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                created_assessment = {
+                    **assessment,
+                    "id": "asmt_created",
+                    "profile_key": str((body or {}).get("profile_key") or ""),
+                    "title": str((body or {}).get("title") or ""),
+                }
+                return {"ok": True, "assessment": created_assessment}
+            if method == "PATCH" and "/checks/" not in path and path.startswith(
+                "/projects/prj_cli/assessments/"
+            ):
+                assessment_id = path.rsplit("/", 1)[-1]
+                if assessment_id == "asmt_pending":
+                    raise cli_main.DarklabCliError(
+                        "assessment_batch_cancellation_pending: pending",
+                        status=409,
+                        code="assessment_batch_cancellation_pending",
+                        details={"batch_id": "abx_one", "batch_ids": ["abx_one", "abx_two"]},
+                    )
+                return {
+                    "ok": True,
+                    "assessment": {
+                        **assessment,
+                        "id": assessment_id,
+                        "status": str((body or {}).get("status") or ""),
+                    },
+                }
+            if path.endswith("/delete-preview") and method == "GET":
+                assessment_id = path.split("/")[-2]
+                can_delete = assessment_id != "asmt_active"
+                return {
+                    "preview": {
+                        "assessment": {
+                            **assessment,
+                            "id": assessment_id,
+                            "status": "archived" if can_delete else "active",
+                        },
+                        "can_delete": can_delete,
+                        "requires_archived": True,
+                        "will_delete": {
+                            "assessments": 1,
+                            "checks": 3,
+                            "evidence_links": 2,
+                            "available_evidence_links": 2,
+                            "unavailable_evidence_links": 0,
+                            "evidence_links_by_type": {"run": 2},
+                            "schemathesis_reports": 0,
+                            "schemathesis_operations": 0,
+                            "reconciliation_observations": 0,
+                            "reconciliation_matches": 0,
+                        },
+                        "source_records_deleted": False,
+                    },
+                }
+            if path == "/projects/prj_cli/assessments/asmt_archived" and method == "DELETE":
+                return {
+                    "ok": True,
+                    "deleted": {
+                        "assessment": {
+                            **assessment,
+                            "id": "asmt_archived",
+                            "status": "archived",
+                        },
+                        "can_delete": True,
+                        "requires_archived": True,
+                        "will_delete": {"assessments": 1, "checks": 3},
+                        "source_records_deleted": False,
+                    },
                 }
             if path == "/projects/prj_cli/assessments/asmt_cli" and method == "GET":
                 return {
@@ -8968,6 +9122,124 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    try:
+        cli_main.main(["assessment", "create", "--help"])
+    except SystemExit as help_exit:
+        assert help_exit.code == 0
+    else:
+        raise AssertionError("assessment create help did not exit")
+    lifecycle_help = capsys.readouterr().out
+    assert "PROFILE_KEY" in lifecycle_help
+    assert "--title" in lifecycle_help
+    assert "profile-version" not in lifecycle_help
+
+    assert cli_main.main([
+        "assessment", "create", "assessment-project", "combined",
+        "--title", "CLI assessment",
+    ]) == 0
+    assert "asmt_created" in capsys.readouterr().out
+    assert calls[-2:] == [
+        ("GET", "/projects", {"limit": 100, "offset": 0}, None),
+        (
+            "POST",
+            "/projects/prj_cli/assessments",
+            None,
+            {"profile_key": "combined", "title": "CLI assessment"},
+        ),
+    ]
+
+    assert cli_main.main([
+        "assessment", "create", "prj_cli", "network", "--format", "json",
+    ]) == 0
+    created_payload = json.loads(capsys.readouterr().out)
+    assert created_payload["assessment"]["profile_key"] == "network"
+    assert calls[-1] == (
+        "POST", "/projects/prj_cli/assessments", None, {"profile_key": "network"},
+    )
+
+    assert cli_main.main([
+        "assessment", "complete", "prj_cli", "asmt_cli", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["assessment"]["status"] == "completed"
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli",
+        None,
+        {"status": "completed"},
+    )
+
+    assert cli_main.main([
+        "assessment", "archive", "prj_cli", "asmt_cli",
+    ]) == 0
+    assert "archived" in capsys.readouterr().out
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli",
+        None,
+        {"status": "archived"},
+    )
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_archived",
+    ]) == 0
+    preview_output = capsys.readouterr().out
+    assert "Assessment deletion preview" in preview_output
+    assert "Source records preserved: yes" in preview_output
+    assert "Preview only. Re-run with --confirm" in preview_output
+    assert calls[call_count:] == [(
+        "GET",
+        "/projects/prj_cli/assessments/asmt_archived/delete-preview",
+        None,
+        None,
+    )]
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_archived", "--confirm",
+        "--format", "json",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["deleted"]["assessment"]["id"] == "asmt_archived"
+    assert json.loads(captured.err)["preview"]["source_records_deleted"] is False
+    assert calls[call_count:] == [
+        (
+            "GET",
+            "/projects/prj_cli/assessments/asmt_archived/delete-preview",
+            None,
+            None,
+        ),
+        ("DELETE", "/projects/prj_cli/assessments/asmt_archived", None, None),
+    ]
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_active", "--confirm",
+    ]) == 1
+    active_delete = capsys.readouterr()
+    assert "archive this assessment first" in active_delete.out
+    assert "must be archived" in active_delete.err
+    assert calls[call_count:] == [(
+        "GET",
+        "/projects/prj_cli/assessments/asmt_active/delete-preview",
+        None,
+        None,
+    )]
+
+    assert cli_main.main([
+        "assessment", "complete", "prj_cli", "asmt_pending",
+    ]) == 1
+    pending_error = capsys.readouterr().err
+    assert "abx_one, abx_two" in pending_error
+    assert "reach a terminal state" in pending_error
+    assert "retry assessment complete" in pending_error
+
+    assert cli_main.main([
+        "--team", "team_viewer", "assessment", "create", "prj_cli", "network",
+    ]) == 1
+    permission_error = capsys.readouterr().err
+    assert "MUTATE_PROJECTS capability" in permission_error
 
     assert cli_main.main([
         "assessment",
@@ -9606,17 +9878,41 @@ def test_darklab_cli_assessment_batch_follow_reports_resumable_interrupt(
 
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
+    osv_requests = []
+    finding_requests = []
+    http_profile_requests = []
     help_text = cli_main._parser().format_help()
     assert "active            List active runs for the current token." in help_text
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
     assert "fish." in help_text
     assert "download          Download one artifact by id." in help_text
+    assert "advisory          Run explicit advisory lookups; ordinary reads never" in help_text
+    assert "evidence          Read and manage typed evidence without copying" in help_text
+    assert "finding           Create and edit assessor-authored Project findings." in help_text
+    assert "http-profile      Read and manage Project HTTP profiles without" in help_text
+    assert "risk              Read configured CVE risk feed state without starting" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
-    assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
-    assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
+    assert (
+        "active advisory artifacts assessment atlas cancel completion download "
+        "evidence finding grep history http-profile notify"
+    ) in bash_completion
+    assert (
+        "assessment) _darklab_comp_words 'archive batch checks clear-state complete "
+        "create delete list set-state show start-action'"
+    ) in bash_completion
+    assert "assessment:create:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
+    assert "advisory) _darklab_comp_words osv" in bash_completion
+    assert "advisory:osv) _darklab_comp_words '--format --help -h'" in bash_completion
+    assert "advisory:osv:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
+    assert "evidence) _darklab_comp_words 'link list services unlink'" in bash_completion
+    assert "finding) _darklab_comp_words 'create edit'" in bash_completion
+    assert "http-profile) _darklab_comp_words 'create delete list show update'" in bash_completion
+    assert "evidence:link:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
+    assert "evidence:list:--format) _darklab_comp_words 'text json ndjson'; return ;;" in bash_completion
+    assert "risk) _darklab_comp_words status" in bash_completion
     assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion
@@ -9662,13 +9958,162 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             pass
 
         def request(self, method, path, *, params=None, body=None, stream=False):
+            if path == "/advisories/osv/lookup":
+                assert method == "POST"
+                assert params is None
+                assert stream is False
+                assert isinstance(body, dict)
+                assert set(body) == {"purl", "version"}
+                osv_requests.append(body)
+                error_code = {
+                    "pkg:pypi/forbidden": ("team_forbidden", 403),
+                    "pkg:pypi/disabled": ("osv_lookup_disabled", 409),
+                    "pkg:pypi/provider-failure": ("osv_lookup_failed", 503),
+                }.get(body["purl"])
+                if error_code:
+                    code, status = error_code
+                    raise cli_main.DarklabCliError(
+                        f"{code}: rejected",
+                        status=status,
+                        code=code,
+                    )
+                return {
+                    "ok": True,
+                    "source": "osv",
+                    "outcome": "negative_cached",
+                    "record_count": 0,
+                }
             if path == "/whoami":
                 return {"token_created": "2026-05-19 00:00:00", "last_seen_at": "2026-05-19 00:00:01"}
             if path == "/projects":
                 return {
-                    "projects": [{"id": "prj_cli", "name": "CLI Project", "status": "active"}],
+                    "projects": [{
+                        "id": "prj_cli",
+                        "name": "CLI Project",
+                        "slug": "cli-project",
+                        "status": "active",
+                    }],
                     "has_more": False,
                 }
+            if path == "/projects/prj_cli/http-profiles" and method == "POST":
+                assert params is None
+                assert isinstance(body, dict)
+                http_profile_requests.append((method, path, body))
+                if body.get("name") == "Forbidden profile":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                if body.get("name") == "Duplicate profile":
+                    raise cli_main.DarklabCliError(
+                        "http_profile_conflict: duplicate",
+                        status=409,
+                        code="http_profile_conflict",
+                    )
+                secret_refs = {
+                    key: {"name": value, "available": True}
+                    for key, value in body.get("secret_refs", {}).items()
+                }
+                return {"ok": True, "profile": {
+                    "id": "htp_created",
+                    "name": body.get("name"),
+                    "role": body.get("role", "anonymous"),
+                    "base_url": body.get("base_url"),
+                    "enabled": body.get("enabled", True),
+                    "revision": 1,
+                    "protected_references_visible": True,
+                    "headers": body.get("headers", []),
+                    "secret_refs": secret_refs,
+                    "file_refs": body.get("file_refs", {}),
+                    "reference_counts": {
+                        "headers": len(body.get("headers", [])),
+                        "secret_refs": len(secret_refs),
+                        "file_refs": len(body.get("file_refs", {})),
+                    },
+                }}
+            if path == "/projects/prj_cli/http-profiles" and method == "GET":
+                assert params is None
+                http_profile_requests.append((method, path, body))
+                return {
+                    "profiles": [{
+                        "id": "htp_cli",
+                        "name": "Authenticated API",
+                        "role": "authenticated",
+                        "base_url": "https://api.example.com",
+                        "enabled": True,
+                        "revision": 3,
+                        "protected_references_visible": True,
+                        "reference_counts": {
+                            "headers": 1,
+                            "secret_refs": 1,
+                            "file_refs": 1,
+                            "scope_roots": 1,
+                            "allowed_hosts": 1,
+                            "capture_rules": 0,
+                        },
+                    }],
+                    "total": 1,
+                }
+            if path == "/projects/prj_cli/http-profiles/htp_cli" and method == "GET":
+                http_profile_requests.append((method, path, body))
+                return {"profile": {
+                    "id": "htp_cli",
+                    "name": "Authenticated API",
+                    "role": "authenticated",
+                    "base_url": "https://api.example.com",
+                    "enabled": True,
+                    "revision": 3,
+                    "protected_references_visible": True,
+                    "header_names": ["Authorization"],
+                    "headers": [{"name": "Authorization", "secret_name": "API_TOKEN"}],
+                    "secret_refs": {"api_token": "API_TOKEN"},
+                    "file_refs": {"client_cert": "certs/client.pem"},
+                    "reference_counts": {
+                        "headers": 1,
+                        "secret_refs": 1,
+                        "file_refs": 1,
+                        "scope_roots": 1,
+                        "allowed_hosts": 1,
+                        "capture_rules": 0,
+                    },
+                }}
+            if path == "/projects/prj_cli/http-profiles/htp_viewer" and method == "GET":
+                http_profile_requests.append((method, path, body))
+                return {"profile": {
+                    "id": "htp_viewer",
+                    "name": "Viewer-safe API",
+                    "role": "authenticated",
+                    "base_url": "https://api.example.com",
+                    "enabled": True,
+                    "revision": 3,
+                    "protected_references_visible": False,
+                    "header_names": ["Authorization"],
+                    "credential_use": ["headers", "secret_refs", "file_refs"],
+                    "reference_counts": {"headers": 1, "secret_refs": 1, "file_refs": 1},
+                }}
+            if path == "/projects/prj_cli/http-profiles/htp_cli" and method == "PATCH":
+                assert isinstance(body, dict)
+                http_profile_requests.append((method, path, body))
+                if body.get("revision") == 2:
+                    raise cli_main.DarklabCliError(
+                        "http_profile_conflict: stale revision",
+                        status=409,
+                        code="http_profile_conflict",
+                    )
+                return {"ok": True, "profile": {
+                    "id": "htp_cli",
+                    "name": "Authenticated API",
+                    "role": "authenticated",
+                    "base_url": "https://api.example.com",
+                    "enabled": body.get("enabled", True),
+                    "revision": 4,
+                    "protected_references_visible": True,
+                    "reference_counts": {"headers": 1, "secret_refs": 1, "file_refs": 1},
+                }}
+            if path == "/projects/prj_cli/http-profiles/htp_cli" and method == "DELETE":
+                http_profile_requests.append((method, path, body))
+                return {"ok": True, "removed": True}
             if path == "/history":
                 if params and params.get("run_kind"):
                     assert params == {
@@ -9747,6 +10192,180 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             if path == "/runs/run_cli/stream" and stream:
                 assert params == {"format": "ndjson", "after": "1-0"}
                 return FakeResponse()
+            if path == "/runs/run_cli/service-evidence":
+                assert params == {"limit": 25, "offset": 5}
+                return {
+                    "observations": [{
+                        "id": "nse_cli",
+                        "target": "104.161.46.133:443/tcp",
+                        "service": "https",
+                        "script_id": "ssl-cert",
+                        "evidence_kind": "certificate",
+                        "fields": [{"path": ["subject", "common_name"], "value": "darklab.sh"}],
+                        "observed_at": "2026-05-19T00:00:04+00:00",
+                    }],
+                    "total": 1,
+                    "limit": 25,
+                    "offset": 5,
+                    "has_more": False,
+                }
+            if path == "/runs/run_empty/service-evidence":
+                assert params == {"limit": 50, "offset": 0}
+                return {
+                    "observations": [],
+                    "total": 0,
+                    "limit": 50,
+                    "offset": 0,
+                    "has_more": False,
+                }
+            if path == "/projects/prj_cli/findings" and method == "POST":
+                assert params is None
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("title") == "Forbidden finding":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                if body.get("title") == "Possible duplicate" and not body.get(
+                    "allow_duplicate"
+                ):
+                    raise cli_main.DarklabCliError(
+                        "possible_duplicate",
+                        status=409,
+                        code="possible_duplicate",
+                        details={"duplicates": [{"id": "fnd_existing"}]},
+                    )
+                return {
+                    "ok": True,
+                    "created": True,
+                    "duplicate_override": bool(body.get("allow_duplicate")),
+                    "finding": {
+                        "id": "fnd_manual_cli",
+                        "manual_revision": 1,
+                        "severity": body.get("severity"),
+                        "title": body.get("title"),
+                        "target_id": body.get("target_id"),
+                    },
+                }
+            if path == "/projects/prj_cli/findings/fnd_manual_cli" and method == "PATCH":
+                assert params is None
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("expected_revision") == 0:
+                    raise cli_main.DarklabCliError(
+                        "stale_revision",
+                        status=409,
+                        code="stale_revision",
+                        details={"current_revision": 2},
+                    )
+                return {
+                    "ok": True,
+                    "updated": True,
+                    "duplicate_override": False,
+                    "changed_fields": ["summary"],
+                    "finding": {
+                        "id": "fnd_manual_cli",
+                        "manual_revision": 2,
+                        "severity": "high",
+                        "title": "Manual CLI finding",
+                        "target_id": "ent_cli",
+                    },
+                }
+            evidence_path = "/projects/prj_cli/findings/fnd_manual_cli/evidence"
+            if path == evidence_path and method == "GET":
+                return {
+                    "evidence": [{
+                        "id": "fev_cli",
+                        "evidence_type": "run",
+                        "evidence_id": "run_cli",
+                        "line_number": -1,
+                        "source_state": "available",
+                        "label": "echo ok",
+                    }],
+                    "total": 1,
+                    "verification": {},
+                }
+            if path == evidence_path and method == "POST":
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("evidence_id") == "run_forbidden":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                created = body.get("evidence_id") != "run_cli"
+                return {
+                    "ok": True,
+                    "created": created,
+                    "evidence": {
+                        "id": "fev_new" if created else "fev_cli",
+                        "evidence_type": body.get("evidence_type"),
+                        "evidence_id": body.get("evidence_id"),
+                        "line_number": body.get("line_number", -1),
+                        "source_state": "available",
+                        "label": body.get("snippet") or "saved source",
+                    },
+                }
+            if path == evidence_path + "/fev_cli" and method == "DELETE":
+                finding_requests.append((method, path, body))
+                return {
+                    "ok": True,
+                    "evidence": {
+                        "id": "fev_cli",
+                        "evidence_type": "run",
+                        "evidence_id": "run_cli",
+                        "line_number": -1,
+                        "source_state": "unavailable",
+                        "label": "run_cli",
+                    },
+                }
+            if path == "/risk/feeds":
+                assert method == "GET"
+                assert params is None
+                return {
+                    "feeds": [
+                        {
+                            "source": "epss",
+                            "status": "stale",
+                            "origin": "bundled",
+                            "source_version": "v-old:2020-01-01",
+                            "model_version": "v-old",
+                            "published_at": "2020-01-01T00:00:00Z",
+                            "retrieved_at": "2020-01-01T00:00:00Z",
+                            "accepted_at": "2020-01-01T00:00:00Z",
+                            "age_hours": 58000.0,
+                            "record_count": 1,
+                            "last_attempt_at": "",
+                            "last_error": "",
+                            "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+                            "attribution": "FIRST EPSS",
+                            "terms_url": "https://www.first.org/epss/model",
+                            "live_refresh_enabled": False,
+                        },
+                        {
+                            "source": "kev",
+                            "status": "unavailable",
+                            "origin": "unavailable",
+                            "source_version": "",
+                            "model_version": "",
+                            "published_at": "",
+                            "retrieved_at": "",
+                            "accepted_at": "",
+                            "age_hours": None,
+                            "record_count": 0,
+                            "last_attempt_at": "",
+                            "last_error": "",
+                            "source_url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+                            "attribution": "CISA KEV",
+                            "terms_url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                            "live_refresh_enabled": False,
+                        },
+                    ],
+                    "total": 2,
+                }
             if path == "/runs" and method == "GET":
                 return {
                     "runs": [
@@ -9826,6 +10445,212 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
     assert cli_main.main(["whoami"]) == 0
     assert "token_created" in capsys.readouterr().out
+    assert cli_main.main(["http-profile", "list", "cli-project"]) == 0
+    profile_list = capsys.readouterr().out
+    assert "Authenticated API" in profile_list
+    assert '"headers":1' in profile_list
+    assert "stored-secret-value" not in profile_list
+    assert http_profile_requests[-1] == ("GET", "/projects/prj_cli/http-profiles", None)
+    assert cli_main.main([
+        "http-profile", "list", "prj_cli", "--format", "json",
+    ]) == 0
+    listed_profiles = json.loads(capsys.readouterr().out)
+    assert listed_profiles["total"] == 1
+    assert listed_profiles["profiles"][0]["reference_counts"]["secret_refs"] == 1
+    assert cli_main.main([
+        "http-profile", "list", "prj_cli", "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "htp_cli"
+    assert cli_main.main(["http-profile", "show", "prj_cli", "htp_cli"]) == 0
+    profile_text = capsys.readouterr().out
+    assert "Authenticated API" in profile_text
+    assert "API_TOKEN" not in profile_text
+    assert "certs/client.pem" not in profile_text
+    assert cli_main.main([
+        "http-profile", "show", "prj_cli", "htp_cli", "--format", "json",
+    ]) == 0
+    shown_profile = json.loads(capsys.readouterr().out)["profile"]
+    assert shown_profile["secret_refs"] == {"api_token": "API_TOKEN"}
+    assert "stored-secret-value" not in json.dumps(shown_profile)
+    assert cli_main.main([
+        "http-profile", "show", "prj_cli", "htp_viewer", "--format", "json",
+    ]) == 0
+    viewer_profile = json.loads(capsys.readouterr().out)["profile"]
+    assert viewer_profile["protected_references_visible"] is False
+    assert "secret_refs" not in viewer_profile
+    assert viewer_profile["reference_counts"]["secret_refs"] == 1
+    profile_input = tmp_path / "http-profile-create.json"
+    profile_input.write_text(json.dumps({
+        "name": "Automation session",
+        "role": "authenticated",
+        "base_url": "https://api.example.com",
+        "headers": [{"name": "Authorization", "secret_name": "API_TOKEN"}],
+        "secret_refs": {"bearer_token": "API_TOKEN"},
+        "file_refs": {
+            "client_certificate": "certs/client.pem",
+            "client_key": "certs/client-key.pem",
+        },
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(profile_input),
+    ]) == 0
+    created_profile_text = capsys.readouterr().out
+    assert "htp_created" in created_profile_text
+    assert "API_TOKEN" not in created_profile_text
+    assert "certs/client.pem" not in created_profile_text
+    assert http_profile_requests[-1] == (
+        "POST",
+        "/projects/prj_cli/http-profiles",
+        {
+            "name": "Automation session",
+            "role": "authenticated",
+            "base_url": "https://api.example.com",
+            "headers": [{"name": "Authorization", "secret_name": "API_TOKEN"}],
+            "secret_refs": {"bearer_token": "API_TOKEN"},
+            "file_refs": {
+                "client_certificate": "certs/client.pem",
+                "client_key": "certs/client-key.pem",
+            },
+        },
+    )
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(profile_input),
+        "--format", "json",
+    ]) == 0
+    created_profile_json = json.loads(capsys.readouterr().out)["profile"]
+    assert created_profile_json["secret_refs"]["bearer_token"]["name"] == "API_TOKEN"
+    assert "stored-secret-value" not in json.dumps(created_profile_json)
+    from io import StringIO
+    profile_update = tmp_path / "http-profile-update.json"
+    profile_update.write_text('{"enabled":false}', encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "update", "prj_cli", "htp_cli", "--revision", "3",
+        "--input", str(profile_update), "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["profile"]["revision"] == 4
+    assert http_profile_requests[-1] == (
+        "PATCH",
+        "/projects/prj_cli/http-profiles/htp_cli",
+        {"enabled": False, "revision": 3},
+    )
+    with mock.patch(
+        "darklab_cli.payloads.sys.stdin",
+        new=StringIO('{"enabled":true}'),
+    ):
+        assert cli_main.main([
+            "http-profile", "update", "prj_cli", "htp_cli",
+            "--revision", "3", "--input", "-", "--format", "json",
+        ]) == 0
+    assert json.loads(capsys.readouterr().out)["profile"]["enabled"] is True
+    assert http_profile_requests[-1][2] == {"enabled": True, "revision": 3}
+    assert cli_main.main([
+        "http-profile", "update", "prj_cli", "htp_cli", "--revision", "2",
+        "--input", str(profile_update),
+    ]) == 1
+    assert "current --revision" in capsys.readouterr().err
+    revision_input = tmp_path / "http-profile-revision.json"
+    revision_input.write_text('{"revision":3,"enabled":false}', encoding="utf-8")
+    request_count = len(http_profile_requests)
+    assert cli_main.main([
+        "http-profile", "update", "prj_cli", "htp_cli", "--revision", "3",
+        "--input", str(revision_input),
+    ]) == 1
+    assert "use --revision" in capsys.readouterr().err
+    assert len(http_profile_requests) == request_count
+    unsafe_input = tmp_path / "http-profile-unsafe.json"
+    unsafe_input.write_text(json.dumps({
+        "name": "Unsafe profile",
+        "base_url": "https://api.example.com",
+        "password": "stored-secret-value",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(unsafe_input),
+    ]) == 1
+    assert "unsupported fields" in capsys.readouterr().err
+    assert len(http_profile_requests) == request_count
+    inline_secret_input = tmp_path / "http-profile-inline-secret.json"
+    inline_secret_input.write_text(json.dumps({
+        "name": "Unsafe header",
+        "base_url": "https://api.example.com",
+        "headers": [{"name": "Authorization", "secret_name": "storedsecretvalue"}],
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(inline_secret_input),
+    ]) == 1
+    inline_secret_error = capsys.readouterr().err
+    assert "app-managed Secret" in inline_secret_error
+    assert "stored-secret-value" not in inline_secret_error
+    assert len(http_profile_requests) == request_count
+    unsafe_path_input = tmp_path / "http-profile-unsafe-path.json"
+    unsafe_path_input.write_text(json.dumps({
+        "name": "Unsafe Files path",
+        "base_url": "https://api.example.com",
+        "file_refs": {
+            "client_certificate": "/tmp/client.pem",
+            "client_key": "certs/client-key.pem",
+        },
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(unsafe_path_input),
+    ]) == 1
+    assert "relative Files path" in capsys.readouterr().err
+    assert len(http_profile_requests) == request_count
+    inline_proxy_input = tmp_path / "http-profile-inline-proxy.json"
+    inline_proxy_input.write_text(json.dumps({
+        "name": "Unsafe proxy",
+        "base_url": "https://api.example.com",
+        "proxy_url": "https://user:stored-secret-value@proxy.example.com",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(inline_proxy_input),
+    ]) == 1
+    inline_proxy_error = capsys.readouterr().err
+    assert "must not contain inline credentials" in inline_proxy_error
+    assert "stored-secret-value" not in inline_proxy_error
+    assert len(http_profile_requests) == request_count
+    oversized_profile_input = tmp_path / "http-profile-oversized.json"
+    oversized_profile_input.write_text(" " * (1024 * 1024 + 1), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(oversized_profile_input),
+    ]) == 1
+    assert "structured input exceeds 1048576 bytes" in capsys.readouterr().err
+    assert len(http_profile_requests) == request_count
+    duplicate_profile_input = tmp_path / "http-profile-duplicate.json"
+    duplicate_profile_input.write_text(json.dumps({
+        "name": "Duplicate profile",
+        "base_url": "https://api.example.com",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(duplicate_profile_input),
+    ]) == 1
+    assert "already exists" in capsys.readouterr().err
+    forbidden_input = tmp_path / "http-profile-forbidden.json"
+    forbidden_input.write_text(json.dumps({
+        "name": "Forbidden profile",
+        "base_url": "https://api.example.com",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "http-profile", "create", "prj_cli", "--input", str(forbidden_input),
+    ]) == 1
+    assert "MANAGE_SECRETS capability" in capsys.readouterr().err
+    delete_count = sum(1 for method, _path, _body in http_profile_requests if method == "DELETE")
+    assert cli_main.main([
+        "http-profile", "delete", "prj_cli", "htp_cli",
+    ]) == 0
+    delete_preview = capsys.readouterr().out
+    assert '"secret_refs":1' in delete_preview
+    assert "--confirm" in delete_preview
+    assert sum(1 for method, _path, _body in http_profile_requests if method == "DELETE") == delete_count
+    assert cli_main.main([
+        "http-profile", "delete", "prj_cli", "htp_cli", "--confirm",
+        "--format", "json",
+    ]) == 0
+    deleted_output = capsys.readouterr()
+    assert json.loads(deleted_output.out) == {"ok": True, "removed": True}
+    assert json.loads(deleted_output.err)["profile"]["id"] == "htp_cli"
+    assert http_profile_requests[-1] == (
+        "DELETE", "/projects/prj_cli/http-profiles/htp_cli", None,
+    )
     assert cli_main.main(["history"]) == 0
     history_lines = capsys.readouterr().out.splitlines()
     assert history_lines[0].startswith("FINISHED")
@@ -9854,6 +10679,227 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert '"event":"schema"' in tail_output
     assert '"event":"output"' in tail_output
     assert '"event_id":"2-0"' in tail_output
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+    ]) == 0
+    service_evidence = capsys.readouterr().out
+    assert "104.161.46.133:443/tcp" in service_evidence
+    assert "ssl-cert" in service_evidence
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+        "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["observations"][0]["id"] == "nse_cli"
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+        "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "nse_cli"
+    assert cli_main.main(["evidence", "services", "run_empty"]) == 0
+    assert capsys.readouterr().out == "No service evidence.\n"
+    assert cli_main.main(["evidence", "services", "run_cli", "--limit", "101"]) == 1
+    assert "limit must be between 1 and 100" in capsys.readouterr().err
+    create_input = tmp_path / "finding-create.json"
+    create_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Manual CLI finding",
+        "severity": "high",
+        "summary": "Confirmed from the headless client",
+        "evidence": [{"evidence_type": "run", "evidence_id": "run_cli"}],
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(create_input),
+    ]) == 0
+    assert "fnd_manual_cli" in capsys.readouterr().out
+    assert finding_requests[-1] == (
+        "POST",
+        "/projects/prj_cli/findings",
+        {
+            "target_id": "ent_cli",
+            "title": "Manual CLI finding",
+            "severity": "high",
+            "summary": "Confirmed from the headless client",
+            "evidence": [{"evidence_type": "run", "evidence_id": "run_cli"}],
+        },
+    )
+    edit_input = tmp_path / "finding-edit.json"
+    edit_input.write_text('{"summary":"Updated from automation"}', encoding="utf-8")
+    assert cli_main.main([
+        "finding", "edit", "prj_cli", "fnd_manual_cli",
+        "--expected-revision", "1", "--input", str(edit_input), "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["finding"]["manual_revision"] == 2
+    assert finding_requests[-1] == (
+        "PATCH",
+        "/projects/prj_cli/findings/fnd_manual_cli",
+        {"summary": "Updated from automation", "expected_revision": 1},
+    )
+    assert cli_main.main([
+        "finding", "edit", "prj_cli", "fnd_manual_cli",
+        "--expected-revision", "0", "--input", str(edit_input),
+    ]) == 1
+    stale_error = capsys.readouterr().err
+    assert "review the current record" in stale_error
+    assert "current revision is 2" in stale_error
+    duplicate_input = tmp_path / "finding-duplicate.json"
+    duplicate_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Possible duplicate",
+        "severity": "medium",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(duplicate_input),
+    ]) == 1
+    duplicate_error = capsys.readouterr().err
+    assert "--allow-duplicate" in duplicate_error
+    assert "fnd_existing" in duplicate_error
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(duplicate_input),
+        "--allow-duplicate",
+    ]) == 0
+    assert "Duplicate override: yes" in capsys.readouterr().out
+    assert finding_requests[-1][2]["allow_duplicate"] is True
+    forbidden_input = tmp_path / "finding-forbidden.json"
+    forbidden_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Forbidden finding",
+        "severity": "low",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(forbidden_input),
+    ]) == 1
+    assert "TRIAGE_FINDINGS capability" in capsys.readouterr().err
+    invalid_input = tmp_path / "finding-invalid.json"
+    invalid_input.write_text("[]", encoding="utf-8")
+    request_count = len(finding_requests)
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(invalid_input),
+    ]) == 1
+    assert "must contain one JSON object" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    control_input = tmp_path / "finding-control.json"
+    control_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Hidden control",
+        "severity": "low",
+        "allow_duplicate": True,
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(control_input),
+    ]) == 1
+    assert "use --allow-duplicate" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    oversized_input = tmp_path / "finding-oversized.json"
+    oversized_input.write_text(" " * (1024 * 1024 + 1), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(oversized_input),
+    ]) == 1
+    assert "structured input exceeds 1048576 bytes" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    with mock.patch("darklab_cli.payloads.sys.stdin", new=StringIO(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Finding from stdin",
+        "severity": "info",
+    }))):
+        assert cli_main.main([
+            "finding", "create", "prj_cli", "--input", "-", "--format", "json",
+        ]) == 0
+    assert json.loads(capsys.readouterr().out)["finding"]["title"] == "Finding from stdin"
+    assert finding_requests[-1][2] == {
+        "target_id": "ent_cli",
+        "title": "Finding from stdin",
+        "severity": "info",
+    }
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli",
+    ]) == 0
+    assert "fev_cli" in capsys.readouterr().out
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["total"] == 1
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli", "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "fev_cli"
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli",
+        "run_line", "run_new", "--line-number", "3", "--snippet", "matched line",
+    ]) == 0
+    assert "Evidence linked." in capsys.readouterr().out
+    assert finding_requests[-1][2] == {
+        "evidence_type": "run_line",
+        "evidence_id": "run_new",
+        "line_number": 3,
+        "snippet": "matched line",
+    }
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run", "run_cli",
+    ]) == 0
+    assert "already exists; no changes" in capsys.readouterr().out
+    request_count = len(finding_requests)
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run_line", "run_new",
+    ]) == 1
+    assert "requires a zero-based --line-number" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run", "run_forbidden",
+    ]) == 1
+    assert "TRIAGE_FINDINGS capability" in capsys.readouterr().err
+    assert cli_main.main([
+        "evidence", "unlink", "prj_cli", "fnd_manual_cli", "fev_cli",
+        "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["evidence"]["id"] == "fev_cli"
+    assert finding_requests[-1] == (
+        "DELETE",
+        "/projects/prj_cli/findings/fnd_manual_cli/evidence/fev_cli",
+        None,
+    )
+    assert cli_main.main(["risk", "status"]) == 0
+    risk_status = capsys.readouterr().out
+    assert "stale" in risk_status
+    assert "unavailable" in risk_status
+    assert cli_main.main(["risk", "status", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["total"] == 2
+    assert cli_main.main(["risk", "status", "--format", "ndjson"]) == 0
+    assert [json.loads(line)["source"] for line in capsys.readouterr().out.splitlines()] == [
+        "epss", "kev",
+    ]
+    assert osv_requests == []
+    assert cli_main.main([
+        "advisory", "osv", "pkg:pypi/requests", "2.30.0",
+    ]) == 0
+    advisory_output = capsys.readouterr().out
+    assert "outcome: negative_cached" in advisory_output
+    assert "record_count: 0" in advisory_output
+    assert osv_requests[-1] == {
+        "purl": "pkg:pypi/requests",
+        "version": "2.30.0",
+    }
+    assert cli_main.main([
+        "advisory", "osv", "pkg:pypi/requests", "2.30.0", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "outcome": "negative_cached",
+        "record_count": 0,
+        "source": "osv",
+    }
+    request_count = len(osv_requests)
+    assert cli_main.main(["advisory", "osv", "", "2.30.0"]) == 1
+    assert "PURL must not be empty" in capsys.readouterr().err
+    assert cli_main.main(["advisory", "osv", "pkg:pypi/requests", ""]) == 1
+    assert "VERSION must not be empty" in capsys.readouterr().err
+    assert len(osv_requests) == request_count
+    for purl, message in (
+        ("pkg:pypi/forbidden", "requires the TRIAGE_FINDINGS capability"),
+        ("pkg:pypi/disabled", "Set cve_risk.osv_advisory_mode to external"),
+        ("pkg:pypi/provider-failure", "Check outbound access and provider availability"),
+    ):
+        assert cli_main.main(["advisory", "osv", purl, "2.30.0"]) == 1
+        assert message in capsys.readouterr().err
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
     assert cli_main.main(["project-link", "run_cli", "prj_cli", "--format", "json"]) == 0

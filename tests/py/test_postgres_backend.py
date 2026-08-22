@@ -4933,6 +4933,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     browser_headers = {"X-Session-ID": session_id}
     api_headers = {"Authorization": f"Bearer {session_id}"}
     command_catalog_resp = client.get("/commands/catalog", headers=browser_headers)
+    api_risk_feeds_resp = client.get("/api/v1/risk/feeds", headers=api_headers)
     create_resp = client.post(
         "/projects",
         headers=browser_headers,
@@ -4973,8 +4974,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         },
     )
     http_profile_resp = client.post(
-        f"/projects/{project['id']}/http-profiles",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles",
+        headers=api_headers,
         json={
             "name": "Administrator",
             "role": "administrator",
@@ -5004,8 +5005,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=api_headers,
     )
     http_profile_update_resp = client.patch(
-        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
         json={"revision": http_profile["revision"], "enabled": False},
     )
     assessment_resp = client.post(
@@ -5332,8 +5333,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=browser_headers,
     )
     http_profile_delete_resp = client.delete(
-        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
@@ -5371,6 +5372,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert {
         item["source"] for item in json.loads(command_catalog_resp.data)["cve_risk_feeds"]
     } == {"epss", "kev"}
+    assert api_risk_feeds_resp.status_code == 200
+    postgres_risk_feeds = json.loads(api_risk_feeds_resp.data)
+    assert postgres_risk_feeds["total"] == 2
+    assert {item["source"] for item in postgres_risk_feeds["feeds"]} == {"epss", "kev"}
+    assert all(item["live_refresh_enabled"] is False for item in postgres_risk_feeds["feeds"])
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
     assert probe_catalog_resp.status_code == 200
@@ -5726,6 +5732,22 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
         json={"expected_revision": 1, "severity": "high"},
     )
     updated = updated_response.get_json()["finding"]
+    evidence_route = f"/projects/{project['id']}/findings/{created['id']}/evidence"
+    linked_response = client.post(
+        evidence_route,
+        headers={"X-Session-ID": session_id},
+        json={"evidence_type": "atlas_entity", "evidence_id": target["id"]},
+    )
+    linked = linked_response.get_json()["evidence"]
+    duplicate_response = client.post(
+        evidence_route,
+        headers={"X-Session-ID": session_id},
+        json={"evidence_type": "atlas_entity", "evidence_id": target["id"]},
+    )
+    listed_response = client.get(
+        evidence_route,
+        headers={"X-Session-ID": session_id},
+    )
     stored = conn.execute(
         "SELECT manual_revision, cve_ids_json FROM findings WHERE id = %s",
         (created["id"],),
@@ -5734,16 +5756,41 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
         "SELECT cve_id, link_source FROM finding_cve_links WHERE finding_id = %s",
         (created["id"],),
     ).fetchone()
+    stored_evidence = conn.execute(
+        "SELECT project_id, finding_id, evidence_type, evidence_id "
+        "FROM finding_evidence_links WHERE id = %s",
+        (linked["id"],),
+    ).fetchone()
+    unlinked_response = client.delete(
+        f"{evidence_route}/{linked['id']}",
+        headers={"X-Session-ID": session_id},
+    )
+    empty_evidence = client.get(
+        evidence_route,
+        headers={"X-Session-ID": session_id},
+    ).get_json()["evidence"]
 
     assert project_response.status_code == 201
     assert target_response.status_code == 201
     assert created_response.status_code == 201
     assert updated_response.status_code == 200
+    assert linked_response.status_code == 201
+    assert duplicate_response.status_code == 200
+    assert duplicate_response.get_json()["created"] is False
+    assert listed_response.get_json()["evidence"] == [linked]
+    assert unlinked_response.status_code == 200
+    assert empty_evidence == []
     assert updated["manual_revision"] == 2
     assert updated["observation_id"] == created["observation_id"]
     assert updated["remediation_id"] == created["remediation_id"]
     assert stored == {"manual_revision": 2, "cve_ids_json": ["CVE-2026-12345"]}
     assert cve_link == {"cve_id": "CVE-2026-12345", "link_source": "manual"}
+    assert stored_evidence == {
+        "project_id": project["id"],
+        "finding_id": created["id"],
+        "evidence_type": "atlas_entity",
+        "evidence_id": target["id"],
+    }
 
 
 @pytest.mark.postgres

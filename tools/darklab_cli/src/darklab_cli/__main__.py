@@ -17,15 +17,14 @@ from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json, save_config_value
-from .commands.assessment import handle_assessment
-from .commands.probe import handle_probe
+from .commands import handle_advisory, handle_assessment, handle_evidence, handle_finding, handle_http_profile, handle_probe, handle_risk  # noqa: E501
 from .formatting import (
     print_collection as _print_collection,
     print_payload as _print_payload,
     print_table as _print_table,
 )
-from .parsers.assessment import register_assessment_parser
-from .parsers.probe import register_probe_parser
+from .parsers import (register_advisory_parser, register_assessment_parser,
+                      register_evidence_parser, register_finding_parser, register_http_profile_parser, register_probe_parser, register_risk_parser)  # noqa: E501
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
 STREAM_INTERRUPTED_EXIT_CODE = 130
@@ -39,7 +38,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="darklab",
         description=(
-            "Headless darklab_shell client for runs, history, projects, probes, assessments, "
+            "Headless darklab_shell client for runs, history, projects, probes, assessments, advisories, "
             "Atlas, schedules, watchers, and notifications."
         ),
     )
@@ -48,7 +47,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--team", help="Team id for this request; DARKLAB_TEAM also works.")
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-
     completion = sub.add_parser("completion", help="Print or install shell completion for bash, zsh, or fish.")
     completion.add_argument("completion_action", choices=(*COMPLETION_SHELLS, "install"), metavar="SHELL|install")
     completion.add_argument(
@@ -57,10 +55,8 @@ def _parser() -> argparse.ArgumentParser:
         default="auto",
         help="Shell to install for; default auto.",
     )
-
     whoami = sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
     whoami.add_argument("--format", choices=("text", "json"), default="text")
-
     team = sub.add_parser("team", help="Create, join, inspect, and manage teams.")
     team_sub = team.add_subparsers(dest="team_command", required=True)
 
@@ -256,8 +252,9 @@ def _parser() -> argparse.ArgumentParser:
     project_packages.add_argument("--offset", type=int, default=0)
     project_packages.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    register_assessment_parser(sub)
-    register_probe_parser(sub)
+    for register_parser in (register_advisory_parser, register_assessment_parser,
+                            register_evidence_parser, register_finding_parser, register_http_profile_parser, register_probe_parser, register_risk_parser):  # noqa: E501
+        register_parser(sub)
 
     atlas = sub.add_parser("atlas", help="Read Atlas summaries, source runs, entities, and findings.")
     atlas_sub = atlas.add_subparsers(dest="atlas_command", required=True)
@@ -928,10 +925,10 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "project-packages":
             payload = client.request("GET", f"/projects/{args.project_id}/packages", params=_page_window_params(args))
             return _print_collection(payload, "packages", args.format, fields=("id", "status", "name"))
-        case "assessment":
-            return handle_assessment(client, args)
-        case "probe":
-            return handle_probe(client, args)
+        case "advisory" | "assessment" | "evidence" | "finding" | "http-profile" | "probe" | "risk":
+            handlers = {"advisory": handle_advisory, "assessment": handle_assessment,
+                        "evidence": handle_evidence, "finding": handle_finding, "http-profile": handle_http_profile, "probe": handle_probe, "risk": handle_risk}  # noqa: E501
+            return handlers[args.command](client, args)
         case "atlas":
             return _atlas(client, args)
         case "schedule":

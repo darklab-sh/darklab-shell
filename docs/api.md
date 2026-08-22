@@ -30,6 +30,7 @@ names, and fixed choices such as output formats and notification channel kinds.
 - [Versioning](#versioning)
 - [Common Shapes](#common-shapes)
 - [Routes](#routes)
+  - [CVE risk feed status](#cve-risk-feed-status)
   - [Exact OSV package lookup](#exact-osv-package-lookup)
 - [Project Probes](#project-probes)
 - [Project Assessments](#project-assessments)
@@ -118,6 +119,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/health` | Unauthenticated liveness check. |
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
+| `GET` | `/api/v1/risk/feeds` | Read stored EPSS and KEV feed freshness and effective refresh state without starting a refresh. |
 | `POST` | `/api/v1/advisories/osv/lookup` | Explicitly look up one exact PURL and version when external OSV mode is enabled. |
 | `GET` | `/api/v1/teams` | List teams joined by the current token. |
 | `POST` | `/api/v1/teams` | Create a team and return the one-time recovery code. |
@@ -275,9 +277,28 @@ Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint
 
 Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
 
+### CVE risk feed status
+
+Any authenticated token, including a Team viewer, can inspect the stored EPSS and KEV sources without starting a refresh:
+
+```bash
+curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/risk/feeds"
+
+darklab risk status
+darklab risk status --format json
+```
+
+The response contains `feeds` and `total`. Each source reports whether it's current, stale, failed, or unavailable, along with its bundled, live, local, or unavailable origin; source and model versions; publication, retrieval, acceptance, and last-attempt times; age and record count; safe failure text; source, attribution, and terms links; and whether live refresh is enabled. This route reads the last accepted state only. It doesn't contact a provider, refresh a feed, or change feed rows.
+
 ### Exact OSV package lookup
 
 External OSV package acquisition is disabled by default. When an operator enables it, an authenticated client can make one explicit request:
+
+```bash
+darklab advisory osv "pkg:pypi/requests" "2.30.0"
+darklab advisory osv "pkg:pypi/requests" "2.30.0" --format json
+```
 
 ```json
 {
@@ -286,7 +307,7 @@ External OSV package acquisition is disabled by default. When an operator enable
 }
 ```
 
-That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. Disabled mode returns `409`, and a provider failure returns `503` while keeping the last accepted data.
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The CLI distinguishes missing permission, disabled external mode, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
 
 ---
 
@@ -421,6 +442,33 @@ curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
 
 Create returns `201`. Update with `PATCH` and the profile's current `revision`; only supplied fields change. A stale revision or duplicate name returns `409`. Delete removes the profile but not its referenced Secrets, Files, workflow, or Project. Team reads are available to members, but reference names are replaced with counts unless the member can manage Secrets. Team create, update, and delete require `MANAGE_SECRETS`. Invalid scope or references return `400`, an out-of-scope Project/profile returns `404`, and the Project profile quota returns `409`.
 
+The CLI accepts the same nested profile body from a file or stdin. Protected fields contain only canonical Secret names and relative workspace Files paths:
+
+```bash
+darklab http-profile create example-project --input - <<'JSON'
+{
+  "name": "Authenticated API",
+  "role": "authenticated",
+  "base_url": "https://api.example.test/",
+  "headers": [
+    {"name": "Authorization", "secret_name": "API_TOKEN"}
+  ],
+  "secret_refs": {"bearer_token": "API_TOKEN"},
+  "include_paths": ["/v1"],
+  "exclude_paths": ["/v1/logout"]
+}
+JSON
+
+printf '%s\n' '{"enabled":false}' |
+  darklab http-profile update example-project htp_123 \
+    --revision 3 --input - --format json
+
+darklab http-profile delete example-project htp_123
+darklab http-profile delete example-project htp_123 --confirm
+```
+
+The first delete command is a read-only preview with the profile's reference counts. The confirmed command removes only the profile. Text output stays on public fields, while JSON follows the API's capability-aware response and never includes Secret values.
+
 ### Recommended actions
 
 Direct Assessment actions support protected Curl, HTTPx, Katana, Dalfox, and detection-only SQLmap runs. Nuclei actions remain anonymous because generated template requests can't safely inherit an HTTP profile's exact request boundary. Preview accepts these optional query fields:
@@ -514,9 +562,12 @@ Structured Nmap service observations are read-only and paged separately:
 ```bash
 curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
   "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/service-evidence?limit=50&offset=0"
+
+darklab evidence services "$RUN_ID" --limit 50 --offset 0
+darklab evidence services "$RUN_ID" --format json
 ```
 
-The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `limit` defaults to 50 and caps at 100; `offset` caps at 100,000. Free-form NSE output isn't returned. A run outside the active personal/team scope returns `404`.
+The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `limit` defaults to 50 and caps at 100; `offset` caps at 100,000. CLI text output shows the canonical port target, service, script, evidence kind, structured fields, and observation time. An existing run with no observations prints `No service evidence.` and exits successfully; JSON retains the complete empty page. Free-form NSE output isn't returned. A run outside the active personal/team scope returns `404`.
 
 Across these routes, lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; team permission failures return `403`; and rate limits return `429`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
 
@@ -853,6 +904,14 @@ SSE streams send the same payloads as `event: schema`, `event: output`, `event: 
 
 The CLI talks only to `/api/v1` and has no Flask app imports.
 
+Finding create and edit commands read one JSON object of at most 1 MiB from
+`--input PATH`, or from standard input with `--input -`. Create input requires
+`target_id`, `title`, and `severity`; it can also include the finding detail
+fields and up to 20 initial typed evidence references documented by the API.
+Edit input contains only the fields being changed. Use the separate
+`--expected-revision` and `--allow-duplicate` flags for concurrency and duplicate
+decisions; those controls aren't accepted inside the input object.
+
 | Command | Purpose |
 | --- | --- |
 | `darklab whoami [--format text\|json]` | Check token auth. |
@@ -865,6 +924,19 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
 | `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
 | `darklab artifacts <run_id>` | List run artifacts. |
+| `darklab evidence services <run_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page through typed Nmap service evidence for one saved run. `--limit` defaults to 50 and caps at 100; `--offset` caps at 100,000. |
+| `darklab evidence list <project-slug-or-id> <finding_id> [--format text\|json\|ndjson]` | List the complete bounded set of typed supporting-evidence links for one Project finding. The route doesn't page, so this command doesn't accept paging flags. |
+| `darklab evidence link <project-slug-or-id> <finding_id> <type> <evidence_id> [--line-number N] [--snippet TEXT] [--format text\|json]` | Link one Project-owned source. Supported types are `run`, `run_line`, `run_artifact`, `workspace_file`, `screenshot`, `atlas_entity`, `project_target`, `assessment_check`, and `retest_run`. `run_line` requires a zero-based line number; the line options are rejected for every other type. Repeating an existing link reports a no-op. |
+| `darklab evidence unlink <project-slug-or-id> <finding_id> <link_id> [--format text\|json]` | Remove one exact evidence link by its stable id without deleting the source record. |
+| `darklab finding create <project-slug-or-id> --input PATH\|- [--allow-duplicate] [--format text\|json]` | Create an assessor-authored finding for a confirmed Project target. Possible duplicates are rejected unless the explicit override is supplied. |
+| `darklab finding edit <project-slug-or-id> <finding_id> --expected-revision N --input PATH\|- [--allow-duplicate] [--format text\|json]` | Edit an assessor-authored finding. A stale expected revision fails closed and reports the current revision when the server provides it; the target and stable finding identity remain unchanged. |
+| `darklab http-profile list <project-slug-or-id> [--format text\|json\|ndjson]` | List saved HTTP profiles with their safe scope summary and reference counts. Callers without Secret-management permission still receive usable non-secret fields. |
+| `darklab http-profile show <project-slug-or-id> <profile_id> [--format text\|json]` | Show one saved HTTP profile. Text stays on its public summary; JSON includes reference names and Files paths only when the API authorizes them, and never includes Secret values. |
+| `darklab http-profile create <project-slug-or-id> --input PATH\|- [--format text\|json]` | Create a profile from one bounded JSON object. Protected fields accept app-managed Secret names and relative workspace Files paths, not inline credential values. |
+| `darklab http-profile update <project-slug-or-id> <profile_id> --revision N --input PATH\|- [--format text\|json]` | Update selected profile fields. The current positive revision must be supplied as a flag and can't be hidden in the input object; conflicts fail closed with retry guidance. |
+| `darklab http-profile delete <project-slug-or-id> <profile_id> [--confirm] [--format text\|json]` | Show the current public summary and reference counts without deleting anything. Add `--confirm` to remove the profile while leaving its referenced Secrets, Files, and workflow in place. |
+| `darklab risk status [--format text\|json\|ndjson]` | Show stored EPSS and KEV freshness, origin, versions, dates, record counts, safe failure state, attribution, and whether live refresh is enabled. This command never starts a refresh. |
+| `darklab advisory osv <PURL> <VERSION> [--format text\|json]` | Explicitly send one exact package identity and version to the configured OSV provider. This is the only CLI command that can start an OSV lookup. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
 | `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |
 | `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. `--limit` defaults to 50 and caps at 200. |
@@ -882,8 +954,12 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab assessment create <project-slug-or-id> <profile_key> [--title TITLE] [--format text\|json]` | Create a cycle from the current maintained profile. Profile version is server-owned snapshot metadata and isn't a selectable CLI option. |
 | `darklab assessment list <project-slug-or-id> [--status active\|completed\|archived] [--include-archived] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Project assessment cycles. `--limit` defaults to 50 and caps at 200. |
 | `darklab assessment show <project-slug-or-id> <assessment_id> [--format text\|json]` | Show one cycle with its coverage rollup. JSON output retains the full detail response, including the first bounded check page. |
+| `darklab assessment complete <project-slug-or-id> <assessment_id> [--format text\|json]` | Complete an active cycle. If linked batches are still settling after cancellation, the error names them and asks you to retry after they reach a terminal state. |
+| `darklab assessment archive <project-slug-or-id> <assessment_id> [--format text\|json]` | Archive a completed cycle through the same forward-only lifecycle used by the browser. |
+| `darklab assessment delete <project-slug-or-id> <assessment_id> [--confirm] [--format text\|json]` | Read and show the server-owned deletion preview. Without `--confirm`, nothing changes. A confirmed JSON command writes the preview to stderr before returning the stable deletion result on stdout. Source runs, findings, artifacts, and other source records remain intact. |
 | `darklab assessment checks <project-slug-or-id> <assessment_id> [--category NAME] [--state STATE] [--target-type TYPE] [--policy-level LEVEL] [--evidence-state available\|unavailable\|none] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page and filter checks for one cycle. `--limit` defaults to 50 and caps at 200. |
 | `darklab assessment set-state <project-slug-or-id> <assessment_id> <check_id> blocked\|skipped\|not_applicable --reason TEXT [--format text\|json]` | Save a reasoned manual decision on an active check. |
 | `darklab assessment clear-state <project-slug-or-id> <assessment_id> <check_id> [--format text\|json]` | Clear a manual decision and restore the check's evidence-derived state. |
