@@ -331,6 +331,14 @@ Assessor-authored findings get an opaque identity when they're created, and that
 
 Finding bodies come from one bounded JSON object in a file or standard input because their optional details and initial evidence are nested. CLI control decisions stay outside that object: duplicate acceptance requires `--allow-duplicate`, and edits require `--expected-revision`. Evidence links use typed positional identities plus the run-line-only line and snippet flags. The server remains authoritative for Project ownership, source compatibility, duplicate detection, revisions, and Team capability, while JSON output preserves its stable response shape.
 
+### Headless HTTP Profiles Keep Protected Values Out of the CLI
+
+**The CLI accepts reference names and workspace paths, not reusable credential values.**
+
+`darklab http-profile` keeps list, create, show, update, and delete under one singular noun. Nested profile settings come from one bounded JSON object in a file or stdin, while the optimistic revision and destructive confirmation remain explicit flags. Protected slots accept only app-managed Secret names and relative Files paths, and proxy URLs with embedded credentials are rejected before a request.
+
+The server still owns Project scope, reference existence, quotas, capability checks, and concurrency conflicts. Text output uses only public summary fields and composition counts. JSON preserves the server's capability-aware response, which may include reference names and Files paths for authorized callers but can never include Secret values because the profile service doesn't read those values into its model. Delete reads the current profile before confirmation so an operator can review its reference counts without changing state.
+
 ### Assessment Execution, Secrets, and Packaging
 
 **Policy labels have the same behavior on every launch surface.**

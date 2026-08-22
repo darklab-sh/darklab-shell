@@ -41,4 +41,15 @@ def print_http_profile(payload: dict[str, Any], output_format: str) -> int:
     return 0
 
 
-__all__ = ["print_http_profile", "print_http_profiles"]
+def print_http_profile_deleted(
+    payload: dict[str, Any], output_format: str, profile_id: str
+) -> int:
+    if output_format == "json":
+        return print_payload(payload, output_format)
+    if not payload.get("ok") or not payload.get("removed"):
+        raise DarklabCliError("invalid HTTP profile deletion response")
+    print(f"Deleted HTTP profile {profile_id}.")
+    return 0
+
+
+__all__ = ["print_http_profile", "print_http_profile_deleted", "print_http_profiles"]

@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Headless HTTP-profile parity](#headless-http-profile-parity)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Retire the local Nuclei kin-openapi compatibility patch](#retire-the-local-nuclei-kin-openapi-compatibility-patch)
@@ -82,23 +81,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-### Headless HTTP-profile parity
-
-Finish the external CLI's consistently named surface for the Project HTTP-profile routes that the API already supports. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
-
-- [ ] Finish writable Project HTTP-profile commands:
-  - Add `create`, `update`, and `delete` to the grouped `darklab http-profile` noun; don't add bare verbs or another flat `project-*` command.
-  - Resolve every Project argument through `commands/project_references.resolve_active_project_id`, and reuse the generic bounded JSON-object reader for file or stdin input.
-  - Define a script-friendly authoring contract for the profile's nested payload, using a structured input file or stdin plus focused flags where they remain unambiguous.
-  - Accept only Secret names and workspace Files paths in protected fields. Never accept inline secret material and never echo submitted or stored secret values in text or JSON output.
-  - Require an explicit `--revision` for updates so stale writes fail closed under the route's optimistic-concurrency contract.
-- [ ] Keep the architecture and documentation gates satisfied when the family lands:
-  - Add a `ModuleSizeBudget` entry for every new CLI parser, handler, and formatter module; the CLI globs are already allowlisted, so a missing budget fails the architecture suite.
-  - Extend the CLI coverage in `tests/py/test_api_v1.py`: assert help output, exit codes, JSON stability, auth and role handling, stale-revision conflicts, request bounds, and protected-value redaction in both text and JSON output.
-  - Verify the regenerated `docs/api-v1-openapi.json` matches the live contract, since the suite compares them directly.
-  - Update `docs/api.md`, `FEATURES.md`, and the test inventories in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`. Continue the evolving unreleased `CHANGELOG.md` entry, and update a release draft only when an active draft already exists.
-  - Run the PostgreSQL parity suite for the write commands so backend-specific behavior is proven rather than assumed.
 
 ## Known Issues
 

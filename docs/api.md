@@ -442,6 +442,33 @@ curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
 
 Create returns `201`. Update with `PATCH` and the profile's current `revision`; only supplied fields change. A stale revision or duplicate name returns `409`. Delete removes the profile but not its referenced Secrets, Files, workflow, or Project. Team reads are available to members, but reference names are replaced with counts unless the member can manage Secrets. Team create, update, and delete require `MANAGE_SECRETS`. Invalid scope or references return `400`, an out-of-scope Project/profile returns `404`, and the Project profile quota returns `409`.
 
+The CLI accepts the same nested profile body from a file or stdin. Protected fields contain only canonical Secret names and relative workspace Files paths:
+
+```bash
+darklab http-profile create example-project --input - <<'JSON'
+{
+  "name": "Authenticated API",
+  "role": "authenticated",
+  "base_url": "https://api.example.test/",
+  "headers": [
+    {"name": "Authorization", "secret_name": "API_TOKEN"}
+  ],
+  "secret_refs": {"bearer_token": "API_TOKEN"},
+  "include_paths": ["/v1"],
+  "exclude_paths": ["/v1/logout"]
+}
+JSON
+
+printf '%s\n' '{"enabled":false}' |
+  darklab http-profile update example-project htp_123 \
+    --revision 3 --input - --format json
+
+darklab http-profile delete example-project htp_123
+darklab http-profile delete example-project htp_123 --confirm
+```
+
+The first delete command is a read-only preview with the profile's reference counts. The confirmed command removes only the profile. Text output stays on public fields, while JSON follows the API's capability-aware response and never includes Secret values.
+
 ### Recommended actions
 
 Direct Assessment actions support protected Curl, HTTPx, Katana, Dalfox, and detection-only SQLmap runs. Nuclei actions remain anonymous because generated template requests can't safely inherit an HTTP profile's exact request boundary. Preview accepts these optional query fields:
@@ -905,6 +932,9 @@ decisions; those controls aren't accepted inside the input object.
 | `darklab finding edit <project-slug-or-id> <finding_id> --expected-revision N --input PATH\|- [--allow-duplicate] [--format text\|json]` | Edit an assessor-authored finding. A stale expected revision fails closed and reports the current revision when the server provides it; the target and stable finding identity remain unchanged. |
 | `darklab http-profile list <project-slug-or-id> [--format text\|json\|ndjson]` | List saved HTTP profiles with their safe scope summary and reference counts. Callers without Secret-management permission still receive usable non-secret fields. |
 | `darklab http-profile show <project-slug-or-id> <profile_id> [--format text\|json]` | Show one saved HTTP profile. Text stays on its public summary; JSON includes reference names and Files paths only when the API authorizes them, and never includes Secret values. |
+| `darklab http-profile create <project-slug-or-id> --input PATH\|- [--format text\|json]` | Create a profile from one bounded JSON object. Protected fields accept app-managed Secret names and relative workspace Files paths, not inline credential values. |
+| `darklab http-profile update <project-slug-or-id> <profile_id> --revision N --input PATH\|- [--format text\|json]` | Update selected profile fields. The current positive revision must be supplied as a flag and can't be hidden in the input object; conflicts fail closed with retry guidance. |
+| `darklab http-profile delete <project-slug-or-id> <profile_id> [--confirm] [--format text\|json]` | Show the current public summary and reference counts without deleting anything. Add `--confirm` to remove the profile while leaving its referenced Secrets, Files, and workflow in place. |
 | `darklab risk status [--format text\|json\|ndjson]` | Show stored EPSS and KEV freshness, origin, versions, dates, record counts, safe failure state, attribution, and whether live refresh is enabled. This command never starts a refresh. |
 | `darklab advisory osv <PURL> <VERSION> [--format text\|json]` | Explicitly send one exact package identity and version to the configured OSV provider. This is the only CLI command that can start an OSV lookup. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |

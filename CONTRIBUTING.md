@@ -296,6 +296,9 @@ role failures, optimistic-concurrency conflicts, and idempotent responses in
 the focused command smoke test without adding one test function per case. When
 a CLI command writes Project state, extend an existing PostgreSQL route test and
 run it through `bash scripts/run_postgres_tests.sh -- ...` as well.
+For HTTP profiles, also pin the explicit revision flag, read-before-delete
+confirmation, Secret-name and Files-path input boundary, reference-count output,
+and capability-aware redaction.
 
 Assessment-batch changes need focused coverage at each boundary: compiler and
 policy tests for selection and exclusions; coordinator tests for claims,

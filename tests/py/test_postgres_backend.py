@@ -4974,8 +4974,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         },
     )
     http_profile_resp = client.post(
-        f"/projects/{project['id']}/http-profiles",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles",
+        headers=api_headers,
         json={
             "name": "Administrator",
             "role": "administrator",
@@ -5005,8 +5005,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=api_headers,
     )
     http_profile_update_resp = client.patch(
-        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
         json={"revision": http_profile["revision"], "enabled": False},
     )
     assessment_resp = client.post(
@@ -5333,8 +5333,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=browser_headers,
     )
     http_profile_delete_resp = client.delete(
-        f"/projects/{project['id']}/http-profiles/{http_profile['id']}",
-        headers=browser_headers,
+        f"/api/v1/projects/{project['id']}/http-profiles/{http_profile['id']}",
+        headers=api_headers,
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
