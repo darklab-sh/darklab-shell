@@ -6,5 +6,6 @@
 from .assessment import register_assessment_parser
 from .evidence import register_evidence_parser
 from .probe import register_probe_parser
+from .risk import register_risk_parser
 
-__all__ = ["register_assessment_parser", "register_evidence_parser", "register_probe_parser"]
+__all__ = ["register_assessment_parser", "register_evidence_parser", "register_probe_parser", "register_risk_parser"]

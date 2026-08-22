@@ -30,6 +30,7 @@ names, and fixed choices such as output formats and notification channel kinds.
 - [Versioning](#versioning)
 - [Common Shapes](#common-shapes)
 - [Routes](#routes)
+  - [CVE risk feed status](#cve-risk-feed-status)
   - [Exact OSV package lookup](#exact-osv-package-lookup)
 - [Project Probes](#project-probes)
 - [Project Assessments](#project-assessments)
@@ -118,6 +119,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/health` | Unauthenticated liveness check. |
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
+| `GET` | `/api/v1/risk/feeds` | Read stored EPSS and KEV feed freshness and effective refresh state without starting a refresh. |
 | `POST` | `/api/v1/advisories/osv/lookup` | Explicitly look up one exact PURL and version when external OSV mode is enabled. |
 | `GET` | `/api/v1/teams` | List teams joined by the current token. |
 | `POST` | `/api/v1/teams` | Create a team and return the one-time recovery code. |
@@ -274,6 +276,20 @@ AI assist responses include a `progress` object while a queued request is active
 Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
 Run, history, artifact, project, AI assist, schedule, and watcher routes are scoped to the token's active personal/team scope. Cross-scope IDs return `404` rather than confirming the object exists elsewhere.
+
+### CVE risk feed status
+
+Any authenticated token, including a Team viewer, can inspect the stored EPSS and KEV sources without starting a refresh:
+
+```bash
+curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/risk/feeds"
+
+darklab risk status
+darklab risk status --format json
+```
+
+The response contains `feeds` and `total`. Each source reports whether it's current, stale, failed, or unavailable, along with its bundled, live, local, or unavailable origin; source and model versions; publication, retrieval, acceptance, and last-attempt times; age and record count; safe failure text; source, attribution, and terms links; and whether live refresh is enabled. This route reads the last accepted state only. It doesn't contact a provider, refresh a feed, or change feed rows.
 
 ### Exact OSV package lookup
 
@@ -869,6 +885,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
 | `darklab artifacts <run_id>` | List run artifacts. |
 | `darklab evidence services <run_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page through typed Nmap service evidence for one saved run. `--limit` defaults to 50 and caps at 100; `--offset` caps at 100,000. |
+| `darklab risk status [--format text\|json\|ndjson]` | Show stored EPSS and KEV freshness, origin, versions, dates, record counts, safe failure state, attribution, and whether live refresh is enabled. This command never starts a refresh. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
 | `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |
 | `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. `--limit` defaults to 50 and caps at 200. |

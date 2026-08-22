@@ -6508,6 +6508,117 @@
         ],
         "type": "object"
       },
+      "CveRiskFeedStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "type": "string"
+          },
+          "age_hours": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "attribution": {
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "live_refresh_enabled": {
+            "type": "boolean"
+          },
+          "model_version": {
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "unavailable",
+              "bundled",
+              "live",
+              "local"
+            ],
+            "type": "string"
+          },
+          "published_at": {
+            "type": "string"
+          },
+          "record_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retrieved_at": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "epss",
+              "kev"
+            ],
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "unavailable",
+              "current",
+              "stale",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "terms_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "status",
+          "origin",
+          "source_version",
+          "model_version",
+          "published_at",
+          "retrieved_at",
+          "accepted_at",
+          "age_hours",
+          "record_count",
+          "last_attempt_at",
+          "last_error",
+          "source_url",
+          "attribution",
+          "terms_url",
+          "live_refresh_enabled"
+        ],
+        "type": "object"
+      },
+      "CveRiskFeedStatusList": {
+        "additionalProperties": false,
+        "properties": {
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/CveRiskFeedStatus"
+            },
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feeds",
+          "total"
+        ],
+        "type": "object"
+      },
       "CveRiskKevSignal": {
         "properties": {
           "date_added": {
@@ -21023,6 +21134,44 @@
             "description": "Rate limit exceeded"
           }
         }
+      }
+    },
+    "/risk/feeds": {
+      "get": {
+        "description": "Returns stored EPSS and KEV source status using effective freshness and refresh settings. This read never refreshes a feed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CveRiskFeedStatusList"
+                }
+              }
+            },
+            "description": "Configured CVE risk feed status"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Read configured CVE risk feed status"
       }
     },
     "/runs": {

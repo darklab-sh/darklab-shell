@@ -621,11 +621,39 @@ def test_api_v1_osv_lookup_requires_team_triage_capability():
     _add_api_team_member(client, owner_token, operator_token, team_id, role="operator")
     endpoint = "/api/v1/advisories/osv/lookup"
     body = {"purl": "pkg:pypi/requests", "version": "2.30.0"}
+    feed_status = [{
+        "source": "epss",
+        "status": "stale",
+        "origin": "bundled",
+        "source_version": "v2026.08.01:2026-08-01",
+        "model_version": "v2026.08.01",
+        "published_at": "2026-08-01T00:00:00Z",
+        "retrieved_at": "2026-08-01T00:00:00Z",
+        "accepted_at": "2026-08-01T00:00:00Z",
+        "age_hours": 504.0,
+        "record_count": 100,
+        "last_attempt_at": "",
+        "last_error": "",
+        "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+        "attribution": "FIRST EPSS",
+        "terms_url": "https://www.first.org/epss/model",
+        "live_refresh_enabled": False,
+    }]
 
     with mock.patch(
+        "blueprints.api_v1_cve_risk.get_configured_feed_status",
+        return_value=feed_status,
+    ) as status_read, mock.patch(
         "blueprints.api_v1_osv_lookup.query_external_osv",
         return_value={"source": "osv", "outcome": "negative_cached", "record_count": 0},
     ) as lookup:
+        status_response = client.get(
+            "/api/v1/risk/feeds",
+            headers=_team_headers(viewer_token, team_id),
+        )
+        assert status_response.status_code == 200
+        assert status_response.get_json() == {"feeds": feed_status, "total": 1}
+        status_read.assert_called_once_with()
         viewer = client.post(
             endpoint,
             headers=_team_headers(viewer_token, team_id),
@@ -7371,6 +7399,8 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "AtlasSourceRun",
         "AtlasSummary",
         "ArtifactSummary",
+        "CveRiskFeedStatus",
+        "CveRiskFeedStatusList",
         "EvidencePackage",
         "Health",
         "HistorySearchMatch",
@@ -7455,6 +7485,14 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert "supplied PURL and version" in osv_lookup["description"]
     assert schemas["OsvLookupRequest"]["required"] == ["purl", "version"]
     assert schemas["OsvLookupRequest"]["additionalProperties"] is False
+    risk_feeds = spec["paths"]["/risk/feeds"]["get"]
+    assert risk_feeds["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/CveRiskFeedStatusList"
+    }
+    assert "never refreshes a feed" in risk_feeds["description"]
+    assert schemas["CveRiskFeedStatus"]["properties"]["status"]["enum"] == [
+        "unavailable", "current", "stale", "failed",
+    ]
     assert spec["paths"]["/runs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ActiveRunList"
     }
@@ -9619,12 +9657,14 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "fish." in help_text
     assert "download          Download one artifact by id." in help_text
     assert "evidence          Read and manage typed evidence without copying" in help_text
+    assert "risk              Read configured CVE risk feed state without starting" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
     assert "evidence) _darklab_comp_words services" in bash_completion
+    assert "risk) _darklab_comp_words status" in bash_completion
     assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
     assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
@@ -9782,6 +9822,50 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                     "offset": 0,
                     "has_more": False,
                 }
+            if path == "/risk/feeds":
+                assert method == "GET"
+                assert params is None
+                return {
+                    "feeds": [
+                        {
+                            "source": "epss",
+                            "status": "stale",
+                            "origin": "bundled",
+                            "source_version": "v-old:2020-01-01",
+                            "model_version": "v-old",
+                            "published_at": "2020-01-01T00:00:00Z",
+                            "retrieved_at": "2020-01-01T00:00:00Z",
+                            "accepted_at": "2020-01-01T00:00:00Z",
+                            "age_hours": 58000.0,
+                            "record_count": 1,
+                            "last_attempt_at": "",
+                            "last_error": "",
+                            "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+                            "attribution": "FIRST EPSS",
+                            "terms_url": "https://www.first.org/epss/model",
+                            "live_refresh_enabled": False,
+                        },
+                        {
+                            "source": "kev",
+                            "status": "unavailable",
+                            "origin": "unavailable",
+                            "source_version": "",
+                            "model_version": "",
+                            "published_at": "",
+                            "retrieved_at": "",
+                            "accepted_at": "",
+                            "age_hours": None,
+                            "record_count": 0,
+                            "last_attempt_at": "",
+                            "last_error": "",
+                            "source_url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+                            "attribution": "CISA KEV",
+                            "terms_url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                            "live_refresh_enabled": False,
+                        },
+                    ],
+                    "total": 2,
+                }
             if path == "/runs" and method == "GET":
                 return {
                     "runs": [
@@ -9909,6 +9993,16 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert capsys.readouterr().out == "No service evidence.\n"
     assert cli_main.main(["evidence", "services", "run_cli", "--limit", "101"]) == 1
     assert "limit must be between 1 and 100" in capsys.readouterr().err
+    assert cli_main.main(["risk", "status"]) == 0
+    risk_status = capsys.readouterr().out
+    assert "stale" in risk_status
+    assert "unavailable" in risk_status
+    assert cli_main.main(["risk", "status", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["total"] == 2
+    assert cli_main.main(["risk", "status", "--format", "ndjson"]) == 0
+    assert [json.loads(line)["source"] for line in capsys.readouterr().out.splitlines()] == [
+        "epss", "kev",
+    ]
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
     assert cli_main.main(["project-link", "run_cli", "prj_cli", "--format", "json"]) == 0

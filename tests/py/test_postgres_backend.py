@@ -4933,6 +4933,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     browser_headers = {"X-Session-ID": session_id}
     api_headers = {"Authorization": f"Bearer {session_id}"}
     command_catalog_resp = client.get("/commands/catalog", headers=browser_headers)
+    api_risk_feeds_resp = client.get("/api/v1/risk/feeds", headers=api_headers)
     create_resp = client.post(
         "/projects",
         headers=browser_headers,
@@ -5371,6 +5372,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert {
         item["source"] for item in json.loads(command_catalog_resp.data)["cve_risk_feeds"]
     } == {"epss", "kev"}
+    assert api_risk_feeds_resp.status_code == 200
+    postgres_risk_feeds = json.loads(api_risk_feeds_resp.data)
+    assert postgres_risk_feeds["total"] == 2
+    assert {item["source"] for item in postgres_risk_feeds["feeds"]} == {"epss", "kev"}
+    assert all(item["live_refresh_enabled"] is False for item in postgres_risk_feeds["feeds"])
     assert create_resp.status_code == 201
     assert target_resp.status_code == 201
     assert probe_catalog_resp.status_code == 200

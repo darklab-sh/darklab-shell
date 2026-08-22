@@ -6,5 +6,6 @@
 from .assessment import handle_assessment
 from .evidence import handle_evidence
 from .probe import handle_probe
+from .risk import handle_risk
 
-__all__ = ["handle_assessment", "handle_evidence", "handle_probe"]
+__all__ = ["handle_assessment", "handle_evidence", "handle_probe", "handle_risk"]
