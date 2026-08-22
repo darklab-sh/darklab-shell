@@ -49,7 +49,7 @@ from services.cve_risk.ranking import (
     cve_risk_order_sql,
 )
 from services.cve_risk.snapshot import build_cve_risk_snapshot
-from services.cve_risk.store import accept_feed, get_feed_status
+from services.cve_risk.store import accept_feed, get_configured_feed_status, get_feed_status
 from services.assessments.nvd_cpe_correlation import correlate_stored_nvd_cpe_page
 from services.assessments.osv_package_correlation import correlate_stored_osv_package_page
 from services.assessments.cyclonedx_stored_nvd import correlate_cyclonedx_json_with_stored_nvd
@@ -1187,7 +1187,10 @@ def test_bundled_baseline_does_not_replace_newer_live_data(risk_db, monkeypatch,
     assert dict(row) == {"origin": "live", "source_version": "v-live:2026-08-05"}
 
 
-def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(risk_db):
+def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(
+    risk_db,
+    monkeypatch,
+):
     accepted = _epss_feed("v-old", "2020-01-01", ("CVE-2026-12345", 0.2, 0.9))
     accept_feed(
         risk_db,
@@ -1197,13 +1200,56 @@ def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(ri
         retrieved_at="2020-01-01T00:00:00+00:00",
         enqueue_changes=False,
     )
+    accept_feed(
+        risk_db,
+        ParsedFeed(
+            source="kev",
+            version="2020.01.01",
+            model_version="",
+            published_at="2020-01-01T00:00:00Z",
+            records=(),
+        ),
+        origin="bundled",
+        payload_sha256="old-kev-sha",
+        retrieved_at="2020-01-01T00:00:00+00:00",
+        enqueue_changes=False,
+    )
     status = {item["source"]: item for item in get_feed_status(
         risk_db, stale_after_hours=24, live_refresh_enabled=False
     )}
     assert status["epss"]["status"] == "stale"
     assert status["epss"]["origin"] == "bundled"
     assert status["epss"]["live_refresh_enabled"] is False
-    assert status["kev"]["status"] == "unavailable"
+    assert status["kev"]["status"] == "stale"
+    assert status["kev"]["origin"] == "bundled"
+
+    monkeypatch.setattr(
+        refresh,
+        "refresh_source",
+        lambda *_args, **_kwargs: pytest.fail("feed status attempted a refresh"),
+    )
+    before_sources = [
+        dict(row)
+        for row in risk_db.execute(
+            "SELECT * FROM cve_risk_sources ORDER BY source"
+        ).fetchall()
+    ]
+    before_changes = risk_db.total_changes
+    configured = get_configured_feed_status(
+        risk_db,
+        cfg={"cve_risk": {"refresh_enabled": False, "stale_after_hours": 24}},
+    )
+    after_sources = [
+        dict(row)
+        for row in risk_db.execute(
+            "SELECT * FROM cve_risk_sources ORDER BY source"
+        ).fetchall()
+    ]
+    assert {item["source"] for item in configured} == {"epss", "kev"}
+    assert all(item["origin"] == "bundled" for item in configured)
+    assert all(item["live_refresh_enabled"] is False for item in configured)
+    assert after_sources == before_sources
+    assert risk_db.total_changes == before_changes
 
     risk_db.execute(
         "INSERT INTO findings (id, session_id, target_id, title, created) "
@@ -1222,7 +1268,8 @@ def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(ri
     assert enriched["epss"]["origin"] == "bundled"
     assert enriched["epss"]["age_hours"] > 24
     assert enriched["epss"]["live_refresh_enabled"] is False
-    assert enriched["kev"]["origin"] == "unavailable"
+    assert enriched["kev"]["origin"] == "bundled"
+    assert enriched["kev"]["freshness"] == "stale"
 
 
 def test_disabled_refresh_never_opens_the_network(risk_db, monkeypatch):

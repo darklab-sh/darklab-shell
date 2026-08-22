@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Headless assessment and evidence parity](#headless-assessment-and-evidence-parity)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Retire the local Nuclei kin-openapi compatibility patch](#retire-the-local-nuclei-kin-openapi-compatibility-patch)
@@ -82,20 +81,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-### Headless assessment and evidence parity
-
-Close the adjacent API and external CLI gaps independently of the one-off-probe and bounded-runner delivery gates. Reuse the external CLI modules and API conventions established by those plans where available, but do not delay either assessment feature solely for these parity commands.
-
-- [ ] Choose consistent external CLI nouns for structured service evidence, risk/feed status, OSV lookup, manual findings, evidence links, and HTTP profiles so the command tree does not accumulate unrelated top-level verbs.
-- [ ] Expose structured Nmap service observations from the existing run service-evidence route through the chosen external CLI noun, with bounded pagination and text/JSON output.
-- [ ] Add a read-only API route and `darklab risk status` command for configured CVE feed source, age, bundled/live origin, refresh state, and safe failure information. Reading status must never refresh a feed.
-- [ ] Add an external CLI wrapper for the existing explicit OSV lookup route. Preserve exact package/version inputs, permissions, feature gating, cache behavior, provider error handling, and the rule that ordinary reads never start lookups.
-- [ ] Add API/CLI parity for assessment-cycle create, complete, archive, and delete operations, including profile selection, lifecycle conflicts, confirmation where destructive, and personal/team permissions.
-- [ ] Add external CLI support for manual finding create/edit and evidence list/link/unlink operations with revision checks, exact Project ownership, typed source validation, duplicate handling, and bounded output.
-- [ ] Add external CLI support for Project HTTP-profile list/create/show/update/delete operations. Accept only references to protected values and never echo submitted secret material.
-- [ ] Split new external CLI parsers, handlers, and formatters into focused ratcheted modules rather than growing the main command module. Give new API/OpenAPI modules their required architecture budgets and allowlist entries when they are added.
-- [ ] Add end-to-end API and CLI tests for each command, including help output, JSON stability, authentication, roles, conflict responses, rate/request bounds, and PostgreSQL parity. Update documentation, generated OpenAPI, test inventories/counts, `CHANGELOG.md`, and release drafts with each delivered command family.
 
 ## Known Issues
 

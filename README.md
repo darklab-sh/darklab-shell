@@ -120,7 +120,7 @@ Probes accept an active Project slug or stable id and only use confirmed, compat
 
 ### Use reviewed actions and integrations
 
-Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action.
+Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. You can manage the same profiles from a script with `darklab http-profile`, using a JSON file or stdin for nested settings and an explicit revision for updates. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action.
 
 Operators can optionally connect ZAP for reviewed external web scans or a private Interactsh-compatible service for blind-XSS callbacks. Both integrations are off by default, use separate workers, and keep scanner credentials and callback details out of visible commands and browser storage. See [ZAP and OAST worker setup](CONFIGURATION.md#running-zap-and-oast-workers).
 
