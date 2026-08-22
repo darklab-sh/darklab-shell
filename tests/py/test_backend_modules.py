@@ -97,6 +97,7 @@ from services.history.permalinks import (
     _prompt_echo_text,
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
+from core.output_dns_command import parse_dns_command
 from core.redaction import (
     RAW_ONLY_INTEL_PLACEHOLDER,
     REDACTED_ENTITY_SENTINEL,
@@ -24253,12 +24254,42 @@ class TestWelcomeAssetLoading:
 
 # ── run_output_store ──────────────────────────────────────────────────────────
 
+
+def _transcript_entity_values(command: str, transcript: str) -> set[tuple[str, str]]:
+    classifier = OutputSignalClassifier(command)
+    values: set[tuple[str, str]] = set()
+    for source_line, line in enumerate(transcript.splitlines()):
+        metadata = classifier.classify_line(line)
+        for entity in cast("list[dict[str, object]]", metadata.get("entities", [])):
+            assert entity["source_line"] == source_line
+            values.add((str(entity["type"]), str(entity["canonical_value"])))
+    return values
+
+
 class TestOutputSignals:
     def test_command_root_and_target_extraction(self):
         assert command_root("nmap -sV ip.darklab.sh") == "nmap"
         assert extract_target("nuclei -u https://ip.darklab.sh -t http/") == "ip.darklab.sh"
         assert extract_target("nc -zv ip.darklab.sh 443 80") == "ip.darklab.sh"
         assert extract_target("dig @8.8.8.8 darklab.sh A") == "darklab.sh"
+        assert extract_target("dig DNSKEY darklab.sh +dnssec") == "darklab.sh"
+        assert extract_target("dig -x 104.161.46.133 @1.1.1.1") == "104.161.46.133"
+        assert extract_target("dig -c IN darklab.sh A") == "darklab.sh"
+        assert extract_target("nslookup -type=soa darklab.sh 1.1.1.1") == "darklab.sh"
+        dig_spec = parse_dns_command("dig @1.1.1.1 darklab.sh DNSKEY +dnssec +trace")
+        assert (dig_spec.query, dig_spec.record_type, dig_spec.resolver, dig_spec.trace) == (
+            "darklab.sh", "dnskey", "1.1.1.1", True,
+        )
+        nslookup_spec = parse_dns_command("nslookup -type=mx darklab.sh 2606:4700:4700::1111")
+        assert (nslookup_spec.query, nslookup_spec.record_type, nslookup_spec.resolver) == (
+            "darklab.sh", "mx", "2606:4700:4700::1111",
+        )
+        class_spec = parse_dns_command("dig -c IN darklab.sh A")
+        assert (class_spec.query, class_spec.queries, class_spec.record_type) == (
+            "darklab.sh", ("darklab.sh",), "a",
+        )
+        multi_spec = parse_dns_command("dig darklab.sh A example.org A")
+        assert multi_spec.queries == ("darklab.sh", "example.org")
         assert extract_target("dnsrecon -d darklab.sh -t std") == "darklab.sh"
         assert extract_target("assetfinder -subs-only darklab.sh") == "darklab.sh"
         assert extract_target("shodan domain darklab.sh") == "darklab.sh"
@@ -25618,6 +25649,362 @@ class TestOutputSignals:
         assert ("ip", "104.161.46.133") in {
             (entity["type"], entity["canonical_value"])
             for entity in cast("list[dict[str, object]]", dig_address["entities"])
+        }
+
+        dns_transcript_cases = (
+            (
+                "dig @1.1.1.1 kali.darklab.sh A +comments +stats",
+                """; <<>> DiG 9.20.26-1~deb13u1-Debian <<>> @1.1.1.1 kali.darklab.sh A +comments +stats
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 45881
+;; flags: qr rd ra; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 1232
+;; QUESTION SECTION:
+;kali.darklab.sh. IN A
+;; ANSWER SECTION:
+kali.darklab.sh. 60 IN CNAME fw-vx2-vp2.darklab.sh.
+fw-vx2-vp2.darklab.sh. 60 IN A 104.161.46.133
+;; Query time: 32 msec
+;; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)
+;; MSG SIZE  rcvd: 85""",
+                {
+                    ("domain", "kali.darklab.sh"),
+                    ("domain", "fw-vx2-vp2.darklab.sh"),
+                    ("ip", "104.161.46.133"),
+                },
+            ),
+            (
+                "dig @1.1.1.1 darklab.sh ANY +multiline",
+                """;; ->>HEADER<<- opcode: QUERY, status: NOTIMP, id: 58910
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1
+;; QUESTION SECTION:
+;darklab.sh. IN ANY
+;; SERVER: 1.1.1.1#53(1.1.1.1) (TCP)""",
+                set(),
+            ),
+            (
+                "dig @1.1.1.1 darklab.sh SOA +multiline",
+                """;; QUESTION SECTION:
+;darklab.sh. IN SOA
+;; ANSWER SECTION:
+darklab.sh. 1800 IN SOA frank.ns.cloudflare.com. dns.cloudflare.com. (
+  2412782301 ; serial
+  10000 ; refresh
+  2400 ; retry
+  604800 ; expire
+  1800 ; minimum
+  )
+;; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "dig @1.1.1.1 darklab.sh DNSKEY +dnssec +multiline",
+                """;; QUESTION SECTION:
+;darklab.sh. IN DNSKEY
+;; ANSWER SECTION:
+darklab.sh. 1004 IN DNSKEY 256 3 13 (
+  oJMRESz5E4gYzS/q6XDrvU1qMPYIjCWzJaOau8XNEZeq
+  CYKD5ar0IRd8KqXXFJkqmVfRvMGPmM1x8fGAa2XhSA==
+  ) ; ZSK; alg = ECDSAP256SHA256 ; key id = 34505
+darklab.sh. 1004 IN RRSIG DNSKEY 13 2 3600 (
+  20261007080545 20260807080545 2371 darklab.sh.
+  AbulhCPtrMooHp9klgZT6MqjWoiCFRKzLdKPP9Q+CLOl
+  )
+;; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "dig @1.1.1.1 does-not-exist.darklab.sh A +comments +stats",
+                """;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 59712
+;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+;; QUESTION SECTION:
+;does-not-exist.darklab.sh. IN A
+;; AUTHORITY SECTION:
+darklab.sh. 1800 IN SOA frank.ns.cloudflare.com. dns.cloudflare.com. 2412782301 10000 2400 604800 1800
+;; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)""",
+                set(),
+            ),
+            (
+                "dig @1.1.1.1 darklab.sh A +tcp +stats",
+                """;; QUESTION SECTION:
+;darklab.sh. IN A
+;; ANSWER SECTION:
+darklab.sh. 300 IN A 104.21.4.35
+darklab.sh. 300 IN A 172.67.131.156
+;; SERVER: 1.1.1.1#53(1.1.1.1) (TCP)""",
+                {
+                    ("domain", "darklab.sh"),
+                    ("ip", "104.21.4.35"),
+                    ("ip", "172.67.131.156"),
+                },
+            ),
+            (
+                "dig -c IN darklab.sh A",
+                """;; ANSWER SECTION:
+darklab.sh. 300 IN A 104.21.4.35""",
+                {("domain", "darklab.sh"), ("ip", "104.21.4.35")},
+            ),
+            (
+                "dig darklab.sh A",
+                """;; ANSWER SECTION:
+_dmarc..bad 300 IN A 8.8.8.8""",
+                set(),
+            ),
+            (
+                "dig '*.darklab.sh' A",
+                """;; ANSWER SECTION:
+*.darklab.sh. 300 IN A 104.21.4.35""",
+                {("domain", "darklab.sh"), ("ip", "104.21.4.35")},
+            ),
+            (
+                "dig darklab.sh A example.org A",
+                """;; ANSWER SECTION:
+darklab.sh. 300 IN A 104.21.4.35
+example.org. 300 IN A 93.184.216.34""",
+                {
+                    ("domain", "darklab.sh"),
+                    ("domain", "example.org"),
+                    ("ip", "104.21.4.35"),
+                    ("ip", "93.184.216.34"),
+                },
+            ),
+            (
+                "dig darklab.sh +trace",
+                """. 514075 IN NS a.root-servers.net.
+;; Received 525 bytes from 127.0.0.11#53(127.0.0.11) in 36 ms
+sh. 172800 IN NS a0.nic.sh.
+sh. 172800 IN NS b0.nic.sh.
+;; Received 622 bytes from 198.41.0.4#53(a.root-servers.net) in 24 ms
+darklab.sh. 3600 IN NS frank.ns.cloudflare.com.
+darklab.sh. 3600 IN NS ruth.ns.cloudflare.com.
+urlg1ms0tecs1d3kstght8m8vlutp58d.sh. 3600 IN NSEC3 1 1 0 73 hash NS SOA RRSIG DNSKEY
+59nnusmk4u61kgvuoi9ffe8suspko0n6.sh. 3600 IN RRSIG NSEC3 8 2 3600 signature
+;; Received 580 bytes from 65.22.160.9#53(a0.nic.sh) in 40 ms
+darklab.sh. 300 IN A 172.67.131.156
+darklab.sh. 300 IN A 104.21.4.35
+darklab.sh. 300 IN RRSIG A 13 2 300 signature
+;; Received 177 bytes from 173.245.58.143#53(ruth.ns.cloudflare.com) in 28 ms""",
+                {
+                    ("domain", "darklab.sh"),
+                    ("ip", "104.21.4.35"),
+                    ("ip", "172.67.131.156"),
+                },
+            ),
+            (
+                "dig darklab.sh +nssearch",
+                "SOA frank.ns.cloudflare.com. dns.cloudflare.com. 2412782301 10000 2400 604800 1800 "
+                "from server 173.245.59.166 in 32 ms.\n"
+                "SOA frank.ns.cloudflare.com. dns.cloudflare.com. 2412782301 10000 2400 604800 1800 "
+                "from server 108.162.192.143 in 32 ms.",
+                set(),
+            ),
+            (
+                "nslookup -debug kali.darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+QUESTIONS:
+kali.darklab.sh, type = A, class = IN
+ANSWERS:
+-> kali.darklab.sh
+canonical name = fw-vx2-vp2.darklab.sh.
+-> fw-vx2-vp2.darklab.sh
+internet address = 104.161.46.133
+AUTHORITY RECORDS:
+-> darklab.sh
+origin = frank.ns.cloudflare.com
+mail addr = dns.cloudflare.com
+Non-authoritative answer:
+kali.darklab.sh canonical name = fw-vx2-vp2.darklab.sh.
+Name: fw-vx2-vp2.darklab.sh
+Address: 104.161.46.133""",
+                {
+                    ("domain", "kali.darklab.sh"),
+                    ("domain", "fw-vx2-vp2.darklab.sh"),
+                    ("ip", "104.161.46.133"),
+                },
+            ),
+            (
+                "nslookup -d2 kali.darklab.sh 1.1.1.1",
+                """main parsing kali.darklab.sh
+main parsing 1.1.1.1
+make_server(1.1.1.1)
+Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+kali.darklab.sh canonical name = fw-vx2-vp2.darklab.sh.
+Name: fw-vx2-vp2.darklab.sh
+Address: 104.161.46.133
+freeing server 0x7f1b87517000 belonging to 0x7f1b87522800""",
+                {
+                    ("domain", "kali.darklab.sh"),
+                    ("domain", "fw-vx2-vp2.darklab.sh"),
+                    ("ip", "104.161.46.133"),
+                },
+            ),
+            (
+                "nslookup -type=soa darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+darklab.sh
+origin = frank.ns.cloudflare.com
+mail addr = dns.cloudflare.com
+serial = 2412782301""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "nslookup -type=any darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+** server can't find darklab.sh: NOTIMP""",
+                set(),
+            ),
+            (
+                "nslookup -type=mx darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+darklab.sh mail exchanger = 1 aspmx.l.google.com.
+darklab.sh mail exchanger = 10 alt3.aspmx.l.google.com.""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "nslookup -type=mx darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh mail exchanger = 10 aspmx.l.google.com.
+Name: aspmx.l.google.com
+Address: 142.250.1.26""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "nslookup -type=ns darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh nameserver = frank.ns.cloudflare.com.
+internet address = 173.245.58.143""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "nslookup -type=txt darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+darklab.sh text = \"protonmail-verification=38e104c429782de40f8237379af390236f3c3897\"
+darklab.sh text = \"v=spf1 ip4:8.8.8.8 include:_spf.protonmail.ch include:_spf.google.com ~all\"""",
+                {("domain", "darklab.sh")},
+            ),
+            (
+                "nslookup 104.161.46.133 1.1.1.1",
+                """133.46.161.104.in-addr.arpa name = kali.darklab.sh.
+Authoritative answers can be found from:""",
+                {("domain", "kali.darklab.sh"), ("ip", "104.161.46.133")},
+            ),
+            (
+                "nslookup -vc kali.darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+kali.darklab.sh canonical name = fw-vx2-vp2.darklab.sh.
+Name: fw-vx2-vp2.darklab.sh
+Address: 104.161.46.133""",
+                {
+                    ("domain", "kali.darklab.sh"),
+                    ("domain", "fw-vx2-vp2.darklab.sh"),
+                    ("ip", "104.161.46.133"),
+                },
+            ),
+            (
+                "nslookup kali.darklab.sh 1.1.1.1",
+                """Name: kali.darklab.sh
+Address: 104.161.46.133
+Server: one.one.one.one
+Address: 1.1.1.1""",
+                {("domain", "kali.darklab.sh"), ("ip", "104.161.46.133")},
+            ),
+            (
+                "nslookup ipv6.darklab.sh 2606:4700:4700::1111",
+                """Server: 2606:4700:4700::1111
+Address: 2606:4700:4700::1111#53
+Non-authoritative answer:
+Name: ipv6.darklab.sh
+Address: 2606:4700:4700::1001""",
+                {("domain", "ipv6.darklab.sh"), ("ip", "2606:4700:4700::1001")},
+            ),
+            (
+                "dig -x 2606:4700:4700::1111 @2606:4700:4700::1001",
+                """;; ANSWER SECTION:
+1.1.1.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.7.4.6.0.6.2.ip6.arpa. 300 IN PTR one.one.one.one.
+;; SERVER: 2606:4700:4700::1001#53(2606:4700:4700::1001) (UDP)""",
+                {("domain", "one.one.one.one"), ("ip", "2606:4700:4700::1111")},
+            ),
+            (
+                "nslookup does-not-exist.darklab.sh 1.1.1.1",
+                """Server: 1.1.1.1
+Address: 1.1.1.1#53
+Non-authoritative answer:
+*** Can't find does-not-exist.darklab.sh: No answer""",
+                set(),
+            ),
+            (
+                "nslookup -type=mx darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh mail exchanger = 10 mail.darklab.sh.""",
+                {("domain", "darklab.sh"), ("domain", "mail.darklab.sh")},
+            ),
+            (
+                "nslookup -type=ns darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh nameserver = ns1.darklab.sh.
+Name: ns1.darklab.sh
+Address: 104.161.46.134
+darklab.sh nameserver = frank.ns.cloudflare.com.""",
+                {
+                    ("domain", "darklab.sh"),
+                    ("domain", "ns1.darklab.sh"),
+                    ("ip", "104.161.46.134"),
+                },
+            ),
+            (
+                "dig darklab.sh SRV",
+                """;; ANSWER SECTION:
+darklab.sh. 300 IN SRV 10 60 5060 sip.darklab.sh.""",
+                {("domain", "darklab.sh"), ("domain", "sip.darklab.sh")},
+            ),
+            (
+                "nslookup -type=srv darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh service = 10 60 5060 sip.darklab.sh.""",
+                {("domain", "darklab.sh"), ("domain", "sip.darklab.sh")},
+            ),
+            (
+                "nslookup -type=caa darklab.sh 1.1.1.1",
+                """Non-authoritative answer:
+darklab.sh rdata_257 = 0 issue \"letsencrypt.org\"""",
+                {("domain", "darklab.sh")},
+            ),
+        )
+        for command, transcript, expected in dns_transcript_cases:
+            assert _transcript_entity_values(command, transcript) == expected
+
+        assert _transcript_entity_values("dig darklab.sh A +short", "104.21.4.35") == {
+            ("domain", "darklab.sh"),
+            ("ip", "104.21.4.35"),
+        }
+        assert _transcript_entity_values(
+            "dig kali.darklab.sh A +short",
+            "fw-vx2-vp2.darklab.sh.\n104.161.46.133",
+        ) == {
+            ("domain", "kali.darklab.sh"),
+            ("domain", "fw-vx2-vp2.darklab.sh"),
+            ("ip", "104.161.46.133"),
+        }
+        assert _transcript_entity_values("dig MX darklab.sh +short", "1 aspmx.l.google.com.") == {
+            ("domain", "darklab.sh"),
+        }
+        assert _transcript_entity_values("dig -x 104.161.46.133 +short", "kali.darklab.sh.") == {
+            ("domain", "kali.darklab.sh"),
+            ("ip", "104.161.46.133"),
         }
 
         whois_classifier = OutputSignalClassifier("whois darklab.sh")
@@ -31645,6 +32032,28 @@ SQL syntax error near q</response>
                 "darklab.sh --resolvers resolvers.txt",
                 "www.darklab.sh",
             ),
+            (
+                "run-atlas-dig",
+                "dig @1.1.1.1 trace.darklab.sh A +trace",
+                "trace.darklab.sh. 300 IN A 104.21.4.36",
+            ),
+            (
+                "run-atlas-nslookup",
+                "nslookup -type=txt policy.darklab.sh 1.1.1.1",
+                'policy.darklab.sh text = "include:_spf.google.com ip4:8.8.8.8"',
+            ),
+            (
+                "run-atlas-nslookup-negative",
+                "nslookup missing.darklab.sh 1.1.1.1",
+                "*** Can't find missing.darklab.sh: No answer",
+            ),
+            (
+                "run-atlas-nslookup-external-mx",
+                "nslookup -type=mx mx-policy.darklab.sh 1.1.1.1",
+                "mx-policy.darklab.sh mail exchanger = 10 aspmx.l.google.com.\n"
+                "Name: aspmx.l.google.com\n"
+                "Address: 142.250.1.26",
+            ),
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -31658,11 +32067,14 @@ SQL syntax error near q</response>
                     (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
                 )
                 classifier = OutputSignalClassifier(command)
+                events = []
+                for output_line in line.splitlines():
+                    events.append({"text": output_line, **classifier.classify_line(output_line)})
                 materialize_run_entities(
                     conn,
                     "atlas-session",
                     run_id,
-                    [{"text": line, **classifier.classify_line(line)}],
+                    events,
                     seen_at="2026-05-14T00:00:01+00:00",
                 )
             conn.commit()
@@ -31674,9 +32086,13 @@ SQL syntax error near q</response>
         assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
             ("domain", "cdn.darklab.sh", 1),
             ("domain", "ip.darklab.sh", 1),
+            ("domain", "mx-policy.darklab.sh", 1),
+            ("domain", "policy.darklab.sh", 1),
+            ("domain", "trace.darklab.sh", 1),
             ("domain", "www.darklab.sh", 1),
             ("hash", "sha1:c60e09aff9a4570d8d4efd455d552ea051818950", 1),
             ("ip", "104.21.4.35", 1),
+            ("ip", "104.21.4.36", 1),
             ("ip", "107.178.109.44", 1),
         }
 
