@@ -295,6 +295,11 @@ The response contains `feeds` and `total`. Each source reports whether it's curr
 
 External OSV package acquisition is disabled by default. When an operator enables it, an authenticated client can make one explicit request:
 
+```bash
+darklab advisory osv "pkg:pypi/requests" "2.30.0"
+darklab advisory osv "pkg:pypi/requests" "2.30.0" --format json
+```
+
 ```json
 {
   "purl": "pkg:pypi/requests",
@@ -302,7 +307,7 @@ External OSV package acquisition is disabled by default. When an operator enable
 }
 ```
 
-That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. Disabled mode returns `409`, and a provider failure returns `503` while keeping the last accepted data.
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The CLI distinguishes missing permission, disabled external mode, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
 
 ---
 
@@ -886,6 +891,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab artifacts <run_id>` | List run artifacts. |
 | `darklab evidence services <run_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page through typed Nmap service evidence for one saved run. `--limit` defaults to 50 and caps at 100; `--offset` caps at 100,000. |
 | `darklab risk status [--format text\|json\|ndjson]` | Show stored EPSS and KEV freshness, origin, versions, dates, record counts, safe failure state, attribution, and whether live refresh is enabled. This command never starts a refresh. |
+| `darklab advisory osv <PURL> <VERSION> [--format text\|json]` | Explicitly send one exact package identity and version to the configured OSV provider. This is the only CLI command that can start an OSV lookup. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
 | `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |
 | `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. `--limit` defaults to 50 and caps at 200. |

@@ -85,26 +85,20 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 
 ### Headless assessment and evidence parity
 
-Finish the external CLI's consistently named surface for the remaining advisory, finding, HTTP-profile, and assessment-lifecycle work that the API already supports. The required routes already exist: `/advisories/osv/lookup`, the project assessment create/read/update/delete family with its `delete-preview` companion, manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
+Finish the external CLI's consistently named surface for the remaining finding, HTTP-profile, and assessment-lifecycle work that the API already supports. The required routes already exist: the project assessment create/read/update/delete family with its `delete-preview` companion, manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
 
 - [ ] Finish and document the grouped command tree so each remaining family lands under a grouped noun instead of a new bare verb:
   - Extend `darklab evidence` with finding links: `evidence list <PROJECT> <FINDING>`, `evidence link <PROJECT> <FINDING>`, and `evidence unlink <PROJECT> <FINDING> <LINK_ID>`.
-  - Add `darklab advisory osv <PURL> <VERSION>`, matching the `/advisories/` route prefix.
   - Add `darklab finding create` and `darklab finding edit` as a singular noun, distinct from the existing `project-findings` listing.
   - Add `darklab http-profile` with `list`, `create`, `show`, `update`, and `delete`.
   - Extend the existing `darklab assessment` noun with `create`, `complete`, `archive`, and `delete` rather than adding a second assessment-shaped noun.
-  - Record the decision so the review gate is checkable: three additional grouped nouns, the existing `evidence` and `assessment` nouns extended in place, no new bare top-level verbs, and no new flat `project-*` entries.
+  - Record the decision so the review gate is checkable: two additional grouped nouns, the existing `evidence` and `assessment` nouns extended in place, no new bare top-level verbs, and no new flat `project-*` entries.
 - [ ] Establish the shared CLI foundation the families depend on:
   - Register every new family through its own `parsers/` module invoked from `_parser()`, following `register_assessment_parser` and `register_probe_parser`. `__main__.py` sits at its `split-target-phase4` budget and must not grow.
   - Keep handlers in `commands/` modules and reuse `formatting.print_collection`, `print_payload`, and `print_table` instead of adding per-family output code.
   - Resolve every Project argument through the existing `commands/project_references.resolve_active_project_id` so slugs and ids behave identically across families.
   - Add one shared helper for destructive confirmation that follows the established `--confirm` convention, and one generic helper for reading structured request payloads from a file or stdin. Protected inputs must remain Secret names or workspace Files paths; the CLI must never read, accept, or send raw secret values.
   - Match the established option contract: `--format` accepting `text`/`json`/`ndjson` for collections and `text`/`json` for single objects. Add `--limit` and `--offset` only where the backing route supports pagination, and do not accept ignored paging options for bounded whole-collection responses.
-- [ ] Wrap the explicit OSV lookup without weakening its guarantees:
-  - Send only `purl` and `version`; the route rejects any other key, so the CLI must not add pass-through fields.
-  - Require both arguments as exact strings and fail locally on empty values rather than sending a request the route will reject.
-  - Report the `TRIAGE_FINDINGS` capability denial, the disabled-mode response, and provider errors as separate, actionable messages instead of one generic failure.
-  - Preserve the rule that ordinary reads never start lookups: this command is the only CLI path that may reach the provider, and its help must say so.
 - [ ] Complete assessment-cycle lifecycle parity:
   - Add `create` with profile key and optional title, posting only the fields the existing route accepts. Profile version is snapshot metadata rather than a selectable catalog dimension and must not be exposed as a CLI option.
   - Add `complete` and `archive` as PATCH transitions, and `delete` guarded by `--confirm`.

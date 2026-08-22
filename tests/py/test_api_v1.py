@@ -9651,18 +9651,23 @@ def test_darklab_cli_assessment_batch_follow_reports_resumable_interrupt(
 
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
+    osv_requests = []
     help_text = cli_main._parser().format_help()
     assert "active            List active runs for the current token." in help_text
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
     assert "fish." in help_text
     assert "download          Download one artifact by id." in help_text
+    assert "advisory          Run explicit advisory lookups; ordinary reads never" in help_text
     assert "evidence          Read and manage typed evidence without copying" in help_text
     assert "risk              Read configured CVE risk feed state without starting" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
-    assert "active artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
+    assert "active advisory artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
+    assert "advisory) _darklab_comp_words osv" in bash_completion
+    assert "advisory:osv) _darklab_comp_words '--format --help -h'" in bash_completion
+    assert "advisory:osv:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
     assert "evidence) _darklab_comp_words services" in bash_completion
     assert "risk) _darklab_comp_words status" in bash_completion
     assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
@@ -9711,6 +9716,31 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             pass
 
         def request(self, method, path, *, params=None, body=None, stream=False):
+            if path == "/advisories/osv/lookup":
+                assert method == "POST"
+                assert params is None
+                assert stream is False
+                assert isinstance(body, dict)
+                assert set(body) == {"purl", "version"}
+                osv_requests.append(body)
+                error_code = {
+                    "pkg:pypi/forbidden": ("team_forbidden", 403),
+                    "pkg:pypi/disabled": ("osv_lookup_disabled", 409),
+                    "pkg:pypi/provider-failure": ("osv_lookup_failed", 503),
+                }.get(body["purl"])
+                if error_code:
+                    code, status = error_code
+                    raise cli_main.DarklabCliError(
+                        f"{code}: rejected",
+                        status=status,
+                        code=code,
+                    )
+                return {
+                    "ok": True,
+                    "source": "osv",
+                    "outcome": "negative_cached",
+                    "record_count": 0,
+                }
             if path == "/whoami":
                 return {"token_created": "2026-05-19 00:00:00", "last_seen_at": "2026-05-19 00:00:01"}
             if path == "/projects":
@@ -10003,6 +10033,39 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert [json.loads(line)["source"] for line in capsys.readouterr().out.splitlines()] == [
         "epss", "kev",
     ]
+    assert osv_requests == []
+    assert cli_main.main([
+        "advisory", "osv", "pkg:pypi/requests", "2.30.0",
+    ]) == 0
+    advisory_output = capsys.readouterr().out
+    assert "outcome: negative_cached" in advisory_output
+    assert "record_count: 0" in advisory_output
+    assert osv_requests[-1] == {
+        "purl": "pkg:pypi/requests",
+        "version": "2.30.0",
+    }
+    assert cli_main.main([
+        "advisory", "osv", "pkg:pypi/requests", "2.30.0", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "outcome": "negative_cached",
+        "record_count": 0,
+        "source": "osv",
+    }
+    request_count = len(osv_requests)
+    assert cli_main.main(["advisory", "osv", "", "2.30.0"]) == 1
+    assert "PURL must not be empty" in capsys.readouterr().err
+    assert cli_main.main(["advisory", "osv", "pkg:pypi/requests", ""]) == 1
+    assert "VERSION must not be empty" in capsys.readouterr().err
+    assert len(osv_requests) == request_count
+    for purl, message in (
+        ("pkg:pypi/forbidden", "requires the TRIAGE_FINDINGS capability"),
+        ("pkg:pypi/disabled", "Set cve_risk.osv_advisory_mode to external"),
+        ("pkg:pypi/provider-failure", "Check outbound access and provider availability"),
+    ):
+        assert cli_main.main(["advisory", "osv", purl, "2.30.0"]) == 1
+        assert message in capsys.readouterr().err
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
     assert cli_main.main(["project-link", "run_cli", "prj_cli", "--format", "json"]) == 0
