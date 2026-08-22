@@ -403,6 +403,8 @@ docker-build:
         ][0].digest // empty
       ' python-base-index.json)
       printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      apt_cache_epoch=$(sh scripts/container/resolve_apt_cache_epoch.sh \
+        "$CI_PIPELINE_CREATED_AT")
       build_context=$(mktemp)
       trap 'rm -f "$build_context"' EXIT
       scripts/container/create_portable_build_context.sh "$build_context"
@@ -410,6 +412,7 @@ docker-build:
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
         --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}:buildcache-amd64" \
         --load --tag "darklab_shell:$CI_COMMIT_SHA" - < "$build_context"
     - docker pull "$SYFT_IMAGE"
@@ -464,6 +467,8 @@ docker-build-cache-amd64:
         ][0].digest // empty
       ' python-base-index.json)
       printf '%s' "$python_base_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      apt_cache_epoch=$(sh scripts/container/resolve_apt_cache_epoch.sh \
+        "$CI_PIPELINE_CREATED_AT")
       cache_image="${CI_REGISTRY_IMAGE}:buildcache-amd64"
       build_context=$(mktemp)
       trap 'rm -f "$build_context"' EXIT
@@ -472,12 +477,14 @@ docker-build-cache-amd64:
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
+        --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
         --cache-from "type=registry,ref=${cache_image}" \
         --cache-to "type=registry,ref=${cache_image},mode=max" \
         --output type=cacheonly - < "$build_context"
       printf '%s\n' \
         "SCHEDULED_PYTHON_BASE_IMAGE=${python_base_image}" \
         "SCHEDULED_PYTHON_BASE_DIGEST=${python_base_digest}" \
+        "SCHEDULED_APT_CACHE_EPOCH=${apt_cache_epoch}" \
         "SCHEDULED_AMD64_CACHE_REF=${cache_image}" \
         > scheduled-docker-cache.env
   artifacts:
@@ -505,6 +512,9 @@ docker-build-cache-amd64:
     - |
       test -n "$SCHEDULED_PYTHON_BASE_IMAGE"
       printf '%s' "$SCHEDULED_PYTHON_BASE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+      apt_cache_epoch=$(sh scripts/container/resolve_apt_cache_epoch.sh \
+        "$SCHEDULED_APT_CACHE_EPOCH")
+      test "$apt_cache_epoch" = "$SCHEDULED_APT_CACHE_EPOCH"
       test "$SCHEDULED_AMD64_CACHE_REF" = "${CI_REGISTRY_IMAGE}:buildcache-amd64"
       build_context=$(mktemp)
       trap 'rm -f "$build_context"' EXIT
@@ -513,6 +523,7 @@ docker-build-cache-amd64:
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${SCHEDULED_PYTHON_BASE_IMAGE}@${SCHEDULED_PYTHON_BASE_DIGEST}" \
         --build-arg "PYTHON_BASE_DIGEST=${SCHEDULED_PYTHON_BASE_DIGEST}" \
+        --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
         --cache-from "type=registry,ref=${SCHEDULED_AMD64_CACHE_REF}" \
         --load --tag "darklab_shell:${CI_COMMIT_SHA}" - < "$build_context"
 
@@ -581,8 +592,12 @@ docker-build-baal:
         */*) ;;
         *) python_base_image="docker.io/library/${python_base_image}" ;;
       esac
+      apt_cache_epoch=$(sh scripts/container/resolve_apt_cache_epoch.sh \
+        "$SCHEDULED_APT_CACHE_EPOCH")
+      test "$apt_cache_epoch" = "$SCHEDULED_APT_CACHE_EPOCH"
       podman build --build-arg "PYTHON_BASE_IMAGE=${python_base_image}" \
         --build-arg "TARGETARCH=amd64" \
+        --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
         --format docker --tag "darklab_shell:${CI_COMMIT_SHA}" .
 
 .protected-release-tag:
