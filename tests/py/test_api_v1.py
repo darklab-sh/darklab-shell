@@ -9880,6 +9880,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     cli_main = import_module("darklab_cli.__main__")
     osv_requests = []
     finding_requests = []
+    http_profile_requests = []
     help_text = cli_main._parser().format_help()
     assert "active            List active runs for the current token." in help_text
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
@@ -9888,6 +9889,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "advisory          Run explicit advisory lookups; ordinary reads never" in help_text
     assert "evidence          Read and manage typed evidence without copying" in help_text
     assert "finding           Create and edit assessor-authored Project findings." in help_text
+    assert "http-profile      Read Project HTTP profiles with capability-aware" in help_text
     assert "risk              Read configured CVE risk feed state without starting" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
@@ -9895,7 +9897,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert (
         "active advisory artifacts assessment atlas cancel completion download "
-        "evidence finding grep history notify"
+        "evidence finding grep history http-profile notify"
     ) in bash_completion
     assert (
         "assessment) _darklab_comp_words 'archive batch checks clear-state complete "
@@ -9907,6 +9909,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "advisory:osv:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
     assert "evidence) _darklab_comp_words 'link list services unlink'" in bash_completion
     assert "finding) _darklab_comp_words 'create edit'" in bash_completion
+    assert "http-profile) _darklab_comp_words 'list show'" in bash_completion
     assert "evidence:link:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
     assert "evidence:list:--format) _darklab_comp_words 'text json ndjson'; return ;;" in bash_completion
     assert "risk) _darklab_comp_words status" in bash_completion
@@ -9984,9 +9987,74 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                 return {"token_created": "2026-05-19 00:00:00", "last_seen_at": "2026-05-19 00:00:01"}
             if path == "/projects":
                 return {
-                    "projects": [{"id": "prj_cli", "name": "CLI Project", "status": "active"}],
+                    "projects": [{
+                        "id": "prj_cli",
+                        "name": "CLI Project",
+                        "slug": "cli-project",
+                        "status": "active",
+                    }],
                     "has_more": False,
                 }
+            if path == "/projects/prj_cli/http-profiles" and method == "GET":
+                assert params is None
+                http_profile_requests.append((method, path))
+                return {
+                    "profiles": [{
+                        "id": "htp_cli",
+                        "name": "Authenticated API",
+                        "role": "authenticated",
+                        "base_url": "https://api.example.com",
+                        "enabled": True,
+                        "revision": 3,
+                        "protected_references_visible": True,
+                        "reference_counts": {
+                            "headers": 1,
+                            "secret_refs": 1,
+                            "file_refs": 1,
+                            "scope_roots": 1,
+                            "allowed_hosts": 1,
+                            "capture_rules": 0,
+                        },
+                    }],
+                    "total": 1,
+                }
+            if path == "/projects/prj_cli/http-profiles/htp_cli" and method == "GET":
+                http_profile_requests.append((method, path))
+                return {"profile": {
+                    "id": "htp_cli",
+                    "name": "Authenticated API",
+                    "role": "authenticated",
+                    "base_url": "https://api.example.com",
+                    "enabled": True,
+                    "revision": 3,
+                    "protected_references_visible": True,
+                    "header_names": ["Authorization"],
+                    "headers": [{"name": "Authorization", "secret_name": "API_TOKEN"}],
+                    "secret_refs": {"api_token": "API_TOKEN"},
+                    "file_refs": {"client_cert": "certs/client.pem"},
+                    "reference_counts": {
+                        "headers": 1,
+                        "secret_refs": 1,
+                        "file_refs": 1,
+                        "scope_roots": 1,
+                        "allowed_hosts": 1,
+                        "capture_rules": 0,
+                    },
+                }}
+            if path == "/projects/prj_cli/http-profiles/htp_viewer" and method == "GET":
+                http_profile_requests.append((method, path))
+                return {"profile": {
+                    "id": "htp_viewer",
+                    "name": "Viewer-safe API",
+                    "role": "authenticated",
+                    "base_url": "https://api.example.com",
+                    "enabled": True,
+                    "revision": 3,
+                    "protected_references_visible": False,
+                    "header_names": ["Authorization"],
+                    "credential_use": ["headers", "secret_refs", "file_refs"],
+                    "reference_counts": {"headers": 1, "secret_refs": 1, "file_refs": 1},
+                }}
             if path == "/history":
                 if params and params.get("run_kind"):
                     assert params == {
@@ -10318,6 +10386,40 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
     assert cli_main.main(["whoami"]) == 0
     assert "token_created" in capsys.readouterr().out
+    assert cli_main.main(["http-profile", "list", "cli-project"]) == 0
+    profile_list = capsys.readouterr().out
+    assert "Authenticated API" in profile_list
+    assert '"headers":1' in profile_list
+    assert "stored-secret-value" not in profile_list
+    assert http_profile_requests[-1] == ("GET", "/projects/prj_cli/http-profiles")
+    assert cli_main.main([
+        "http-profile", "list", "prj_cli", "--format", "json",
+    ]) == 0
+    listed_profiles = json.loads(capsys.readouterr().out)
+    assert listed_profiles["total"] == 1
+    assert listed_profiles["profiles"][0]["reference_counts"]["secret_refs"] == 1
+    assert cli_main.main([
+        "http-profile", "list", "prj_cli", "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "htp_cli"
+    assert cli_main.main(["http-profile", "show", "prj_cli", "htp_cli"]) == 0
+    profile_text = capsys.readouterr().out
+    assert "Authenticated API" in profile_text
+    assert "API_TOKEN" not in profile_text
+    assert "certs/client.pem" not in profile_text
+    assert cli_main.main([
+        "http-profile", "show", "prj_cli", "htp_cli", "--format", "json",
+    ]) == 0
+    shown_profile = json.loads(capsys.readouterr().out)["profile"]
+    assert shown_profile["secret_refs"] == {"api_token": "API_TOKEN"}
+    assert "stored-secret-value" not in json.dumps(shown_profile)
+    assert cli_main.main([
+        "http-profile", "show", "prj_cli", "htp_viewer", "--format", "json",
+    ]) == 0
+    viewer_profile = json.loads(capsys.readouterr().out)["profile"]
+    assert viewer_profile["protected_references_visible"] is False
+    assert "secret_refs" not in viewer_profile
+    assert viewer_profile["reference_counts"]["secret_refs"] == 1
     assert cli_main.main(["history"]) == 0
     history_lines = capsys.readouterr().out.splitlines()
     assert history_lines[0].startswith("FINISHED")
