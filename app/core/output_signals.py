@@ -23,6 +23,7 @@ from core.output_targets import (
     tokenize_command,
 )
 from core.output_dnsx import dnsx_json_entities
+from core.output_httpx import httpx_json_entities
 from core.output_entities import (
     _add_entity,
     _is_public_ip,
@@ -32,6 +33,7 @@ from core.output_entities import (
     strip_ansi_codes as _entity_strip_ansi_codes,
     extract_entities,
 )
+from core.output_entity_exclusions import command_output_excludes_entities
 from core.output_port_entities import (
     _nc_bracket_entity_host,
     _nmap_port_entities,
@@ -212,10 +214,6 @@ _TESTSSL_FINDING_RE = re.compile(
     r"Elliptic curves offered:|Common Name \(CN\)|subjectAltName \(SAN\)|Trust \(hostname\)|"
     r"Certificate Validity \(UTC\)|Issuer\s+|HTTP Status Code|Strict Transport Security|Server banner|"
     r"Overall Grade|ROBOT\s+|Secure Renegotiation|BREACH \(CVE-|LOGJAM \(CVE-)",
-    re.I,
-)
-_TESTSSL_ENTITY_NOISE_RE = re.compile(
-    r"^(?:Using\s+OpenSSL\b.*|on\s+\S+:/opt/testssl\.sh/bin/openssl\.\S+)\s*$",
     re.I,
 )
 _SSLSCAN_FINDING_RE = re.compile(
@@ -415,15 +413,6 @@ _HOSTNAME_RE = re.compile(
     re.I,
 )
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
-_NMAP_ENTITY_NOISE_RE = re.compile(
-    r"^(?:Starting Nmap\b.*\bhttps://nmap\.org\b|"
-    r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.|"
-    r".*\bfollowing fingerprints? at https://nmap\.org/cgi-bin/submit\.cgi\?new-service\b.*|"
-    r"SF:)",
-    re.I,
-)
-
-
 def _looks_like_clean_url(value: str) -> bool:
     raw = _normalize_signal_text(value)
     if not _CLEAN_HTTP_URL_RE.match(raw):
@@ -768,11 +757,9 @@ def _extract_entities_for_command(
     plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
         return []
-    if root == "testssl" and _TESTSSL_ENTITY_NOISE_RE.search(stripped):
-        return []
     if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
         return []
-    if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
+    if command_output_excludes_entities(root, stripped):
         return []
     if root == "nmap":
         nmap_report_entities = _nmap_report_entities(stripped, source_line)
@@ -870,6 +857,12 @@ def _extract_entities_for_command(
             )
         # Keep curl on the generic extraction path: verbose/header output often
         # contains useful domains or URLs even when it is not a connect line.
+    if root == "httpx":
+        data = _json_object_line(stripped)
+        if data:
+            return httpx_json_entities(data, source_line)
+        if stripped.lstrip().startswith("{"):
+            return []
     if root in {"dnsx", "tlsx", "cdncheck", "trufflehog"}:
         data = _json_object_line(stripped)
         extractors = {"dnsx": dnsx_json_entities, "tlsx": _tlsx_json_entities,
@@ -1082,7 +1075,7 @@ class OutputSignalClassifier:
                             entity["attributes"] = attributes
                 metadata["entities"] = entities
         if (
-            self.root in {"dalfox", "dnsx", "tlsx", "cdncheck", "trufflehog"}
+            self.root in {"dalfox", "dnsx", "httpx", "tlsx", "cdncheck", "trufflehog"}
             and normalized_text
             and normalized_text.lstrip().startswith("{")
             and _json_object_line(normalized_text) is None
