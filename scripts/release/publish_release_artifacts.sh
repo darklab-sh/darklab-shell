@@ -146,6 +146,8 @@ publish_gitlab_platform_image() {
         "${PYTHON_BASE_INDEX_DIGEST:-}"
     require_digest platform_image_preflight python_base_digest "$python_base_digest"
     require_nonempty platform_image_preflight build_date "${RELEASE_BUILD_DATE:-}"
+    apt_cache_epoch=$(sh "$repo_root/scripts/container/resolve_apt_cache_epoch.sh" \
+        "$RELEASE_BUILD_DATE")
     base_resolution_key=$(printf '%s' "${PYTHON_BASE_INDEX_DIGEST#sha256:}" | cut -c1-12)
     staging_image="${CI_REGISTRY_IMAGE}:${publication_tag}-staging-${CI_PIPELINE_ID}-${base_resolution_key}-${architecture}"
     env_file="release-image-${architecture}.env"
@@ -229,6 +231,7 @@ publish_gitlab_platform_image() {
             --build-arg "PYTHON_BASE_IMAGE=${PYTHON_BASE_IMAGE}@${python_base_digest}" \
             --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \
             --build-arg "PYTHON_BASE_INDEX_DIGEST=${PYTHON_BASE_INDEX_DIGEST}" \
+            --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
             --build-arg "APP_VERSION=${release_version}" \
             --build-arg "VCS_REF=${CI_COMMIT_SHA}" \
             --build-arg "BUILD_DATE=${RELEASE_BUILD_DATE}"

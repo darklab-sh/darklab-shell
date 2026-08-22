@@ -45,6 +45,7 @@ BUILD_INPUT_FILES = (
     "deploy/container-licenses.json",
     "entrypoint.sh",
     "scripts/container/install_go_tool.sh",
+    "scripts/container/resolve_apt_cache_epoch.sh",
     "scripts/container/patches/httpx-disable-leakless.patch",
     "scripts/container/patches/nuclei-kin-openapi-v0.144.patch",
 )
@@ -125,6 +126,7 @@ def _build_input_inventory(
     dockerfile_args = _dockerfile_args(dockerfile)
     dockerfile_args.update({
         "APP_VERSION": version,
+        "APT_CACHE_EPOCH": build_date[:10],
         "BUILD_DATE": build_date,
         "PYTHON_BASE_DIGEST": base_image_digest,
         "PYTHON_BASE_IMAGE": f"{base_image}@{base_image_digest}",
