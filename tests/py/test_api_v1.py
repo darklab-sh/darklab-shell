@@ -8374,6 +8374,8 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
                 return {"watchers": [], "total": 0, "limit": 50, "offset": 0, "has_more": False}
             if method == "GET" and path == "/notification-channels":
                 return {"channels": []}
+            if method == "POST" and path == "/projects/prj_cli/assessments":
+                return {"ok": True, "assessment": {"id": "asmt_team"}}
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
@@ -8397,11 +8399,18 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
     assert cli_main.main(["--team", "team_notify", "notify", "list", "--format", "json"]) == 0
     json.loads(capsys.readouterr().out)
 
+    assert cli_main.main([
+        "--team", "team_assessment", "assessment", "create", "prj_cli", "network",
+        "--format", "json",
+    ]) == 0
+    json.loads(capsys.readouterr().out)
+
     assert seen == [
         ("team_flag", "POST", "/runs"),
         ("team_env", "GET", "/history"),
         ("team_saved", "GET", "/watchers"),
         ("team_notify", "GET", "/notification-channels"),
+        ("team_assessment", "POST", "/projects/prj_cli/assessments"),
     ]
 
 
@@ -8933,8 +8942,8 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
     ]
 
     class FakeClient:
-        def __init__(self, _config):
-            pass
+        def __init__(self, config):
+            self.team = config.team
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
@@ -8953,6 +8962,81 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
                     "offset": 0,
                     "has_more": False,
                     "profiles": profile_summaries,
+                }
+            if path == "/projects/prj_cli/assessments" and method == "POST":
+                if self.team == "team_viewer":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                created_assessment = {
+                    **assessment,
+                    "id": "asmt_created",
+                    "profile_key": str((body or {}).get("profile_key") or ""),
+                    "title": str((body or {}).get("title") or ""),
+                }
+                return {"ok": True, "assessment": created_assessment}
+            if method == "PATCH" and "/checks/" not in path and path.startswith(
+                "/projects/prj_cli/assessments/"
+            ):
+                assessment_id = path.rsplit("/", 1)[-1]
+                if assessment_id == "asmt_pending":
+                    raise cli_main.DarklabCliError(
+                        "assessment_batch_cancellation_pending: pending",
+                        status=409,
+                        code="assessment_batch_cancellation_pending",
+                        details={"batch_id": "abx_one", "batch_ids": ["abx_one", "abx_two"]},
+                    )
+                return {
+                    "ok": True,
+                    "assessment": {
+                        **assessment,
+                        "id": assessment_id,
+                        "status": str((body or {}).get("status") or ""),
+                    },
+                }
+            if path.endswith("/delete-preview") and method == "GET":
+                assessment_id = path.split("/")[-2]
+                can_delete = assessment_id != "asmt_active"
+                return {
+                    "preview": {
+                        "assessment": {
+                            **assessment,
+                            "id": assessment_id,
+                            "status": "archived" if can_delete else "active",
+                        },
+                        "can_delete": can_delete,
+                        "requires_archived": True,
+                        "will_delete": {
+                            "assessments": 1,
+                            "checks": 3,
+                            "evidence_links": 2,
+                            "available_evidence_links": 2,
+                            "unavailable_evidence_links": 0,
+                            "evidence_links_by_type": {"run": 2},
+                            "schemathesis_reports": 0,
+                            "schemathesis_operations": 0,
+                            "reconciliation_observations": 0,
+                            "reconciliation_matches": 0,
+                        },
+                        "source_records_deleted": False,
+                    },
+                }
+            if path == "/projects/prj_cli/assessments/asmt_archived" and method == "DELETE":
+                return {
+                    "ok": True,
+                    "deleted": {
+                        "assessment": {
+                            **assessment,
+                            "id": "asmt_archived",
+                            "status": "archived",
+                        },
+                        "can_delete": True,
+                        "requires_archived": True,
+                        "will_delete": {"assessments": 1, "checks": 3},
+                        "source_records_deleted": False,
+                    },
                 }
             if path == "/projects/prj_cli/assessments/asmt_cli" and method == "GET":
                 return {
@@ -9013,6 +9097,124 @@ def test_darklab_cli_assessment_commands_use_stable_api_contract(monkeypatch, ca
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    try:
+        cli_main.main(["assessment", "create", "--help"])
+    except SystemExit as help_exit:
+        assert help_exit.code == 0
+    else:
+        raise AssertionError("assessment create help did not exit")
+    lifecycle_help = capsys.readouterr().out
+    assert "PROFILE_KEY" in lifecycle_help
+    assert "--title" in lifecycle_help
+    assert "profile-version" not in lifecycle_help
+
+    assert cli_main.main([
+        "assessment", "create", "assessment-project", "combined",
+        "--title", "CLI assessment",
+    ]) == 0
+    assert "asmt_created" in capsys.readouterr().out
+    assert calls[-2:] == [
+        ("GET", "/projects", {"limit": 100, "offset": 0}, None),
+        (
+            "POST",
+            "/projects/prj_cli/assessments",
+            None,
+            {"profile_key": "combined", "title": "CLI assessment"},
+        ),
+    ]
+
+    assert cli_main.main([
+        "assessment", "create", "prj_cli", "network", "--format", "json",
+    ]) == 0
+    created_payload = json.loads(capsys.readouterr().out)
+    assert created_payload["assessment"]["profile_key"] == "network"
+    assert calls[-1] == (
+        "POST", "/projects/prj_cli/assessments", None, {"profile_key": "network"},
+    )
+
+    assert cli_main.main([
+        "assessment", "complete", "prj_cli", "asmt_cli", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["assessment"]["status"] == "completed"
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli",
+        None,
+        {"status": "completed"},
+    )
+
+    assert cli_main.main([
+        "assessment", "archive", "prj_cli", "asmt_cli",
+    ]) == 0
+    assert "archived" in capsys.readouterr().out
+    assert calls[-1] == (
+        "PATCH",
+        "/projects/prj_cli/assessments/asmt_cli",
+        None,
+        {"status": "archived"},
+    )
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_archived",
+    ]) == 0
+    preview_output = capsys.readouterr().out
+    assert "Assessment deletion preview" in preview_output
+    assert "Source records preserved: yes" in preview_output
+    assert "Preview only. Re-run with --confirm" in preview_output
+    assert calls[call_count:] == [(
+        "GET",
+        "/projects/prj_cli/assessments/asmt_archived/delete-preview",
+        None,
+        None,
+    )]
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_archived", "--confirm",
+        "--format", "json",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["deleted"]["assessment"]["id"] == "asmt_archived"
+    assert json.loads(captured.err)["preview"]["source_records_deleted"] is False
+    assert calls[call_count:] == [
+        (
+            "GET",
+            "/projects/prj_cli/assessments/asmt_archived/delete-preview",
+            None,
+            None,
+        ),
+        ("DELETE", "/projects/prj_cli/assessments/asmt_archived", None, None),
+    ]
+
+    call_count = len(calls)
+    assert cli_main.main([
+        "assessment", "delete", "prj_cli", "asmt_active", "--confirm",
+    ]) == 1
+    active_delete = capsys.readouterr()
+    assert "archive this assessment first" in active_delete.out
+    assert "must be archived" in active_delete.err
+    assert calls[call_count:] == [(
+        "GET",
+        "/projects/prj_cli/assessments/asmt_active/delete-preview",
+        None,
+        None,
+    )]
+
+    assert cli_main.main([
+        "assessment", "complete", "prj_cli", "asmt_pending",
+    ]) == 1
+    pending_error = capsys.readouterr().err
+    assert "abx_one, abx_two" in pending_error
+    assert "reach a terminal state" in pending_error
+    assert "retry assessment complete" in pending_error
+
+    assert cli_main.main([
+        "--team", "team_viewer", "assessment", "create", "prj_cli", "network",
+    ]) == 1
+    permission_error = capsys.readouterr().err
+    assert "MUTATE_PROJECTS capability" in permission_error
 
     assert cli_main.main([
         "assessment",
@@ -9665,12 +9867,16 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert "active advisory artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
+    assert (
+        "assessment) _darklab_comp_words 'archive batch checks clear-state complete "
+        "create delete list set-state show start-action'"
+    ) in bash_completion
+    assert "assessment:create:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
     assert "advisory) _darklab_comp_words osv" in bash_completion
     assert "advisory:osv) _darklab_comp_words '--format --help -h'" in bash_completion
     assert "advisory:osv:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
     assert "evidence) _darklab_comp_words services" in bash_completion
     assert "risk) _darklab_comp_words status" in bash_completion
-    assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
     assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
     assert "team:invite) _darklab_word_in \"$word\" 'create revoke'" in bash_completion

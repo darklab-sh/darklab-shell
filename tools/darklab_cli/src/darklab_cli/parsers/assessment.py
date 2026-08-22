@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 
 from .assessment_batch import register_assessment_batch_parser
+from .assessment_lifecycle import register_assessment_lifecycle_parsers
 
 
 _STATUS_CHOICES = ("active", "completed", "archived")
@@ -24,6 +25,7 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     assessment = subparsers.add_parser("assessment", help="Review and update project assessment cycles.")
     commands = assessment.add_subparsers(dest="assessment_command", required=True)
     register_assessment_batch_parser(commands)
+    register_assessment_lifecycle_parsers(commands)
     listing = commands.add_parser("list", help="List assessment cycles for one project.")
     listing.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     listing.add_argument("--status", choices=_STATUS_CHOICES)
@@ -31,12 +33,10 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     listing.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
     listing.add_argument("--offset", type=int, default=0)
     listing.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
-
     show = commands.add_parser("show", help="Show one assessment cycle and its coverage rollup.")
     show.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     show.add_argument("assessment_id")
     show.add_argument("--format", choices=("text", "json"), default="text")
-
     checks = commands.add_parser("checks", help="List checks for one assessment cycle.")
     checks.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     checks.add_argument("assessment_id")
@@ -57,15 +57,15 @@ def register_assessment_parser(subparsers: argparse._SubParsersAction) -> None:
     set_state.add_argument("--reason", required=True)
     set_state.add_argument("--format", choices=("text", "json"), default="text")
 
-    clear_state = commands.add_parser("clear-state", help=
-        "Clear a manual check state and restore its evidence-derived state.")
+    clear_state = commands.add_parser(
+        "clear-state", help="Clear a manual check state and restore its evidence-derived state.")
     clear_state.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     clear_state.add_argument("assessment_id")
     clear_state.add_argument("check_id")
     clear_state.add_argument("--format", choices=("text", "json"), default="text")
 
-    start_action = commands.add_parser("start-action", help=
-        "Preview or explicitly start an Assessment check recommendation.")
+    start_action = commands.add_parser(
+        "start-action", help="Preview or explicitly start an Assessment check recommendation.")
     start_action.add_argument("project_id", metavar="PROJECT", help="Active Project slug or id.")
     start_action.add_argument("assessment_id")
     start_action.add_argument("check_id")

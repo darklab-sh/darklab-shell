@@ -85,26 +85,19 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 
 ### Headless assessment and evidence parity
 
-Finish the external CLI's consistently named surface for the remaining finding, HTTP-profile, and assessment-lifecycle work that the API already supports. The required routes already exist: the project assessment create/read/update/delete family with its `delete-preview` companion, manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
+Finish the external CLI's consistently named surface for the remaining finding, HTTP-profile, and evidence-link work that the API already supports. The required routes already exist: manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
 
 - [ ] Finish and document the grouped command tree so each remaining family lands under a grouped noun instead of a new bare verb:
   - Extend `darklab evidence` with finding links: `evidence list <PROJECT> <FINDING>`, `evidence link <PROJECT> <FINDING>`, and `evidence unlink <PROJECT> <FINDING> <LINK_ID>`.
   - Add `darklab finding create` and `darklab finding edit` as a singular noun, distinct from the existing `project-findings` listing.
   - Add `darklab http-profile` with `list`, `create`, `show`, `update`, and `delete`.
-  - Extend the existing `darklab assessment` noun with `create`, `complete`, `archive`, and `delete` rather than adding a second assessment-shaped noun.
-  - Record the decision so the review gate is checkable: two additional grouped nouns, the existing `evidence` and `assessment` nouns extended in place, no new bare top-level verbs, and no new flat `project-*` entries.
+  - Record the decision so the review gate is checkable: two additional grouped nouns, the existing `evidence` noun extended in place, no second assessment-shaped noun, no new bare top-level verbs, and no new flat `project-*` entries.
 - [ ] Establish the shared CLI foundation the families depend on:
   - Register every new family through its own `parsers/` module invoked from `_parser()`, following `register_assessment_parser` and `register_probe_parser`. `__main__.py` sits at its `split-target-phase4` budget and must not grow.
   - Keep handlers in `commands/` modules and reuse `formatting.print_collection`, `print_payload`, and `print_table` instead of adding per-family output code.
   - Resolve every Project argument through the existing `commands/project_references.resolve_active_project_id` so slugs and ids behave identically across families.
-  - Add one shared helper for destructive confirmation that follows the established `--confirm` convention, and one generic helper for reading structured request payloads from a file or stdin. Protected inputs must remain Secret names or workspace Files paths; the CLI must never read, accept, or send raw secret values.
+  - Add one generic helper for reading structured request payloads from a file or stdin. Protected inputs must remain Secret names or workspace Files paths; the CLI must never read, accept, or send raw secret values.
   - Match the established option contract: `--format` accepting `text`/`json`/`ndjson` for collections and `text`/`json` for single objects. Add `--limit` and `--offset` only where the backing route supports pagination, and do not accept ignored paging options for bounded whole-collection responses.
-- [ ] Complete assessment-cycle lifecycle parity:
-  - Add `create` with profile key and optional title, posting only the fields the existing route accepts. Profile version is snapshot metadata rather than a selectable catalog dimension and must not be exposed as a CLI option.
-  - Add `complete` and `archive` as PATCH transitions, and `delete` guarded by `--confirm`.
-  - Show the existing `delete-preview` read before any confirmed delete, and make an unconfirmed `delete` print that preview and stop.
-  - Handle the lifecycle conflict properly. Completing, archiving, or deleting a cycle with running batches returns HTTP 409 with the pending-cancellation code and details rather than succeeding, so the CLI must render the affected batches and the required next step instead of reporting a generic conflict.
-  - Cover personal and team scopes, including a member without write capability receiving a clean permission error.
 - [ ] Add manual finding and evidence-link commands:
   - Support `finding create` with a confirmed Project `target_id`, typed severity, title, summary, optional finding details, and optional initial evidence. Make duplicate handling explicit through the route's `allow_duplicate` contract.
   - Support `finding edit` with an explicit `--expected-revision` value so concurrent edits fail closed rather than silently fetching and overwriting the latest revision.
