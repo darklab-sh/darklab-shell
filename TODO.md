@@ -8,6 +8,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
+  - [Refresh cached APT packages in image builds](#refresh-cached-apt-packages-in-image-builds)
   - [Headless assessment and evidence parity](#headless-assessment-and-evidence-parity)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -82,6 +83,18 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
+
+### Refresh cached APT packages in image builds
+
+Keep Debian security updates current without discarding the registry-backed cache for compiled tools. Local runner cleanup cannot expire layers restored from `buildcache-amd64`, so image builds need a shared daily cache key that invalidates the runtime APT installation while leaving the Go, native-tool, and downloaded-asset stages reusable.
+
+- [ ] Add a bounded `APT_CACHE_EPOCH` build argument to the Dockerfile and consume it in the runtime package-installation `RUN` before `apt-get update`.
+- [ ] Derive the epoch from the UTC date in `CI_PIPELINE_CREATED_AT` for ordinary branch builds and the AMD64 scheduled cache warmer. Validate its `YYYY-MM-DD` shape before building.
+- [ ] Export the epoch through `scheduled-docker-cache.env`, then pass the same value to every scheduled Docker and Podman fan-out build so one refreshed runtime layer is reused throughout that day's pipeline.
+- [ ] Derive the release epoch from `RELEASE_BUILD_DATE` and pass it through the protected AMD64 and ARM64 release-image build paths without changing the release's recorded build timestamp.
+- [ ] Extend the production-install and CI contract tests to require the Dockerfile argument, its use at the APT boundary, the cache-warmer dotenv value, and matching build arguments across branch, scheduled, Podman, and release paths.
+- [ ] Prove that the first image build for a new UTC date reruns the runtime APT layer, a later same-day build imports that refreshed layer from the registry cache, and compiled tool stages remain cached in both cases.
+- [ ] Verify the rebuilt AMD64 and ARM64 images contain the current Debian security packages and pass the existing Syft and Grype Critical vulnerability gates. Update the maintained CI documentation and `CHANGELOG.md`, then remove this TODO.
 
 ### Headless assessment and evidence parity
 

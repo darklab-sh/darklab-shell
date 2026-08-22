@@ -25516,6 +25516,137 @@ class TestOutputSignals:
             r'SF:trict\.dtd">\n<html\x20xmlns="http://www\.w3\.org/1999/xhtml">\n<hea'
         )
 
+        sqlmap_classifier = OutputSignalClassifier("sqlmap -u https://darklab.sh/article.php")
+        sqlmap_warning = sqlmap_classifier.classify_line(
+            "[03:39:35] [WARNING] you've provided target URL without any GET parameters "
+            "(e.g. 'http://www.site.com/article.php?id=1') and without providing any POST parameters "
+            "through option '--data'"
+        )
+        assert sqlmap_warning["signals"] == ["warnings"]
+        assert "entities" not in sqlmap_warning
+        assert "entities" in sqlmap_classifier.classify_line(
+            "[INFO] testing URL 'https://darklab.sh/article.php?id=1'"
+        )
+        sqlmap_banner = sqlmap_classifier.classify_line(
+            "      |_|V...       |_|   https://sqlmap.org"
+        )
+        assert "entities" not in sqlmap_banner
+        assert "entities" in sqlmap_classifier.classify_line(
+            "[INFO] testing URL 'http://sqlmap.org/article.php?id=1'"
+        )
+
+        httpx_classifier = OutputSignalClassifier("httpx -u https://darklab.sh")
+        httpx_model_download = httpx_classifier.classify_line(
+            "2026/08/18 03:39:00 INFO Model not found, downloading "
+            "url=https://huggingface.co/datasets/happyhackingspace/dit/resolve/main/model.json "
+            "dest=/tmp/.dit/model.json"
+        )
+        assert "entities" not in httpx_model_download
+        assert "entities" in httpx_classifier.classify_line("https://darklab.sh [200]")
+        httpx_json = httpx_classifier.classify_line(json.dumps({
+            "url": "https://h.darklab.sh",
+            "input": "https://h.darklab.sh",
+            "host": "h.darklab.sh",
+            "host_ip": "108.79.194.246",
+            "a": ["108.79.194.246"],
+            "aaaa": ["fd12:3456:789a:2::1"],
+            "resolvers": ["1.1.1.1:53", "1.0.0.1:53"],
+        }))
+        httpx_json_values = {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", httpx_json["entities"])
+        }
+        assert httpx_json_values == {
+            ("url", "https://h.darklab.sh"),
+            ("domain", "h.darklab.sh"),
+            ("ip", "108.79.194.246"),
+        }
+        resolver_target = httpx_classifier.classify_line(json.dumps({
+            "url": "https://1.1.1.1",
+            "host": "1.1.1.1",
+            "host_ip": "1.1.1.1",
+            "resolvers": ["1.1.1.1:53"],
+        }))
+        assert ("ip", "1.1.1.1") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", resolver_target["entities"])
+        }
+
+        nslookup_classifier = OutputSignalClassifier("nslookup kali.darklab.sh 1.1.1.1")
+        for resolver_line in (
+            "Server:\t\t1.1.1.1",
+            "Address:\t1.1.1.1#53",
+            "Resolver: 1.1.1.1 (1.1.1.1#53)",
+        ):
+            assert "entities" not in nslookup_classifier.classify_line(resolver_line)
+        nslookup_answer = nslookup_classifier.classify_line(
+            "kali.darklab.sh canonical name = fw-vx2-vp2.darklab.sh."
+        )
+        nslookup_address = nslookup_classifier.classify_line("Address: 104.161.46.133")
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", nslookup_answer["entities"])
+        } == {
+            ("domain", "kali.darklab.sh"),
+            ("domain", "fw-vx2-vp2.darklab.sh"),
+        }
+        assert ("ip", "104.161.46.133") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", nslookup_address["entities"])
+        }
+
+        dig_classifier = OutputSignalClassifier("dig @1.1.1.1 kali.darklab.sh")
+        for resolver_line in (
+            "; <<>> DiG 9.20.26-1~deb13u1-Debian <<>> @1.1.1.1 kali.darklab.sh",
+            ";; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)",
+            "Resolver: 1.1.1.1#53(1.1.1.1) (UDP)",
+        ):
+            assert "entities" not in dig_classifier.classify_line(resolver_line)
+        dig_cname = dig_classifier.classify_line(
+            "kali.darklab.sh. 60 IN CNAME fw-vx2-vp2.darklab.sh."
+        )
+        dig_address = dig_classifier.classify_line(
+            "fw-vx2-vp2.darklab.sh. 60 IN A 104.161.46.133"
+        )
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", dig_cname["entities"])
+        } == {
+            ("domain", "kali.darklab.sh"),
+            ("domain", "fw-vx2-vp2.darklab.sh"),
+        }
+        assert ("ip", "104.161.46.133") in {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", dig_address["entities"])
+        }
+
+        whois_classifier = OutputSignalClassifier("whois darklab.sh")
+        whois_target = whois_classifier.classify_line("Domain Name: darklab.sh")
+        assert whois_target["signals"] == ["findings"]
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", whois_target["entities"])
+        } == {("domain", "darklab.sh")}
+        whois_provider_findings = (
+            "Registrar WHOIS Server: whois.namecheap.com",
+            "Registrar URL: https://www.namecheap.com/",
+            "Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+            "Name Server: ruth.ns.cloudflare.com",
+            "Name Server: frank.ns.cloudflare.com",
+        )
+        for line in whois_provider_findings:
+            metadata = whois_classifier.classify_line(line)
+            assert metadata["signals"] == ["findings"]
+            assert "entities" not in metadata
+        whois_reference_lines = (
+            "URL of the ICANN Whois Inaccuracy Complaint Form: https://icann.org/wicf/",
+            "For more information on Whois status codes, please visit https://icann.org/epp",
+            "Access can be requested at "
+            "https://www.identity.digital/about/policies/whois-layered-access/.",
+        )
+        for line in whois_reference_lines:
+            assert "entities" not in whois_classifier.classify_line(line)
+
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"
         )
@@ -25567,6 +25698,19 @@ class TestOutputSignals:
         )
         assert "entities" not in testssl_classifier.classify_line(
             "\x1b[36mon 8064a565c28d:/opt/testssl.sh/bin/openssl.Linux.x86_64\x1b[0m"
+        )
+        testssl_reference_lines = (
+            "testssl version 3.2.4 from https://testssl.sh/",
+            "Please file bugs @ https://testssl.sh/bugs/",
+            "Certificate Revocation List  http://r10.c.lencr.org/17.crl",
+            "OCSP URI                     http://r10.o.lencr.org",
+            "https://search.censys.io/search?resource=hosts&virtual_hosts=INCLUDE&q=3697269ECB748435F4634C8E9F53A713",
+            "Specification documentation  https://github.com/ssllabs/research/wiki/SSL-Server-Rating-Guide",
+        )
+        for line in testssl_reference_lines:
+            assert "entities" not in testssl_classifier.classify_line(line)
+        assert "entities" in testssl_classifier.classify_line(
+            "Common Name (CN)             testssl.sh"
         )
         assert "entities" in OutputSignalClassifier("curl https://testssl.sh").classify_line("https://testssl.sh")
         shodan_classifier = OutputSignalClassifier("shodan domain darklab.sh")
