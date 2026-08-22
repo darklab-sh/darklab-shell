@@ -23,6 +23,7 @@ from core.output_targets import (
     tokenize_command,
 )
 from core.output_dnsx import dnsx_json_entities
+from core.output_dns_entities import DnsEntityState
 from core.output_httpx import httpx_json_entities
 from core.output_entities import (
     _add_entity,
@@ -752,9 +753,12 @@ def _extract_entities_for_command(
     command_target: str | None = None,
     line_target: str | None = None,
     command_url_template: str | None = None,
+    dns_state: DnsEntityState | None = None,
 ) -> list[dict[str, object]]:
     stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
+    if dns_state is not None:
+        return dns_state.entities_for_line(stripped, source_line)
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
         return []
     if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
@@ -948,6 +952,8 @@ class OutputSignalClassifier:
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
+        self.dns_entities = DnsEntityState(self.command, self.extra_domain_suffixes) \
+            if self.root in {"dig", "nslookup"} else None
         self.url_template = ""
         if self.root == "ffuf":
             self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
@@ -1066,6 +1072,7 @@ class OutputSignalClassifier:
                 command_target=self.target,
                 line_target=target,
                 command_url_template=self.url_template,
+                dns_state=self.dns_entities,
             )
             if entities:
                 if historical:
