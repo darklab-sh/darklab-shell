@@ -323,6 +323,14 @@ Cross-cycle finding change is stored against the newest earlier cycle with the s
 
 Assessor-authored findings get an opaque identity when they're created, and that identity never depends on editable title, severity, or detail text. Their Project target is immutable. Same-target title matches or shared CVEs are warnings rather than automatic merges: the caller must explicitly keep the duplicate, while optimistic revisions prevent an older editor from overwriting newer work. Private creator/editor session references stay in storage for audit and token migration, but responses expose only safe team-member context. This keeps manual observations stable without pretending that a wording match proves two findings are the same issue.
 
+### Headless Finding Work Uses Existing Grouped Nouns
+
+**The CLI adds one singular `finding` noun and extends `evidence`; it doesn't add another Assessment surface or new flat Project commands.**
+
+`darklab finding create` and `edit` are mutation commands for one assessor-authored record, while the older `project-findings` command remains the paged Project reader. Finding evidence list, link, and unlink stay under the existing `evidence` noun beside typed service evidence. This keeps the command tree predictable without adding bare top-level verbs, another Assessment-shaped noun, or more `project-*` entries.
+
+Finding bodies come from one bounded JSON object in a file or standard input because their optional details and initial evidence are nested. CLI control decisions stay outside that object: duplicate acceptance requires `--allow-duplicate`, and edits require `--expected-revision`. Evidence links use typed positional identities plus the run-line-only line and snippet flags. The server remains authoritative for Project ownership, source compatibility, duplicate detection, revisions, and Team capability, while JSON output preserves its stable response shape.
+
 ### Assessment Execution, Secrets, and Packaging
 
 **Policy labels have the same behavior on every launch surface.**

@@ -35,16 +35,15 @@ def error_from_http_error(exc: urllib.error.HTTPError) -> DarklabCliError:
         payload = json.loads(body) if body else {}
     except Exception:
         payload = {}
+    conflict = payload.get("conflict") if isinstance(payload, dict) else None
+    if isinstance(payload, dict) and payload.get("ok") is False and isinstance(conflict, str) and conflict:
+        return DarklabCliError(conflict, status=exc.code, code=conflict, details=payload)
     error = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(error, dict):
         code = str(error.get("code") or exc.code)
         message = str(error.get("message") or exc.reason)
-        return DarklabCliError(
-            f"{code}: {message}",
-            status=exc.code,
-            code=code,
-            details=error.get("details"),
-        )
+        return DarklabCliError(f"{code}: {message}", status=exc.code, code=code,
+                               details=error.get("details"))
     if isinstance(error, str):
         return DarklabCliError(error, status=exc.code)
     return DarklabCliError(f"HTTP {exc.code}: {exc.reason}", status=exc.code)

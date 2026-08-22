@@ -8,7 +8,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Headless assessment and evidence parity](#headless-assessment-and-evidence-parity)
+  - [Headless HTTP-profile parity](#headless-http-profile-parity)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Retire the local Nuclei kin-openapi compatibility patch](#retire-the-local-nuclei-kin-openapi-compatibility-patch)
@@ -83,40 +83,25 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
 
-### Headless assessment and evidence parity
+### Headless HTTP-profile parity
 
-Finish the external CLI's consistently named surface for the remaining finding, HTTP-profile, and evidence-link work that the API already supports. The required routes already exist: manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
+Finish the external CLI's consistently named surface for the Project HTTP-profile routes that the API already supports. Keep this delivery independent of the one-off-probe and bounded-runner delivery gates.
 
-- [ ] Finish and document the grouped command tree so each remaining family lands under a grouped noun instead of a new bare verb:
-  - Extend `darklab evidence` with finding links: `evidence list <PROJECT> <FINDING>`, `evidence link <PROJECT> <FINDING>`, and `evidence unlink <PROJECT> <FINDING> <LINK_ID>`.
-  - Add `darklab finding create` and `darklab finding edit` as a singular noun, distinct from the existing `project-findings` listing.
-  - Add `darklab http-profile` with `list`, `create`, `show`, `update`, and `delete`.
-  - Record the decision so the review gate is checkable: two additional grouped nouns, the existing `evidence` noun extended in place, no second assessment-shaped noun, no new bare top-level verbs, and no new flat `project-*` entries.
-- [ ] Establish the shared CLI foundation the families depend on:
-  - Register every new family through its own `parsers/` module invoked from `_parser()`, following `register_assessment_parser` and `register_probe_parser`. `__main__.py` sits at its `split-target-phase4` budget and must not grow.
-  - Keep handlers in `commands/` modules and reuse `formatting.print_collection`, `print_payload`, and `print_table` instead of adding per-family output code.
-  - Resolve every Project argument through the existing `commands/project_references.resolve_active_project_id` so slugs and ids behave identically across families.
-  - Add one generic helper for reading structured request payloads from a file or stdin. Protected inputs must remain Secret names or workspace Files paths; the CLI must never read, accept, or send raw secret values.
-  - Match the established option contract: `--format` accepting `text`/`json`/`ndjson` for collections and `text`/`json` for single objects. Add `--limit` and `--offset` only where the backing route supports pagination, and do not accept ignored paging options for bounded whole-collection responses.
-- [ ] Add manual finding and evidence-link commands:
-  - Support `finding create` with a confirmed Project `target_id`, typed severity, title, summary, optional finding details, and optional initial evidence. Make duplicate handling explicit through the route's `allow_duplicate` contract.
-  - Support `finding edit` with an explicit `--expected-revision` value so concurrent edits fail closed rather than silently fetching and overwriting the latest revision.
-  - Support `evidence list`, `evidence link`, and `evidence unlink` against the existing finding-evidence routes, with typed source validation and bounded whole-collection output rather than unsupported paging flags.
-  - Treat a duplicate link as a reported no-op rather than an error, and require the evidence link id for `unlink` instead of inferring it.
-  - Confirm exact Project ownership for both the finding and the linked evidence, and reject cross-Project references.
 - [ ] Add Project HTTP-profile commands:
-  - Cover `list`, `create`, `show`, `update`, and `delete` against the existing route family.
+  - Add one grouped `darklab http-profile` noun with `list`, `create`, `show`, `update`, and `delete`; don't add bare verbs or another flat `project-*` command.
+  - Register the family through its own `parsers/` module and keep its handlers and formatters in focused `commands/` modules. `__main__.py` sits at its `split-target-phase4` budget and must not grow.
+  - Resolve every Project argument through `commands/project_references.resolve_active_project_id`, and reuse the generic bounded JSON-object reader for file or stdin input.
   - Define a script-friendly authoring contract for the profile's nested payload, using a structured input file or stdin plus focused flags where they remain unambiguous.
   - Accept only Secret names and workspace Files paths in protected fields. Never accept inline secret material and never echo submitted or stored secret values in text or JSON output.
   - Require an explicit `--revision` for updates so stale writes fail closed under the route's optimistic-concurrency contract.
   - Respect the route's reference-management permission split so a caller without it still gets usable non-secret output.
   - Include the reference counts the list route already returns so an operator can see the profile's composition before deleting it. These counts describe headers, protected references, scope, hosts, and capture rules rather than run usage.
-- [ ] Keep the architecture and documentation gates satisfied as each family lands:
+- [ ] Keep the architecture and documentation gates satisfied when the family lands:
   - Add a `ModuleSizeBudget` entry for every new CLI parser, handler, and formatter module; the CLI globs are already allowlisted, so a missing budget fails the architecture suite.
-  - Extend the CLI coverage that lives in `tests/py/test_api_v1.py`, following the existing `notify` and `team` command tests: assert help output, exit codes, JSON stability, auth and role handling, conflict responses, and request bounds. Add regressions for redacting protected values in both text and JSON output.
+  - Extend the CLI coverage in `tests/py/test_api_v1.py`: assert help output, exit codes, JSON stability, auth and role handling, stale-revision conflicts, request bounds, and protected-value redaction in both text and JSON output.
   - Verify the regenerated `docs/api-v1-openapi.json` matches the live contract, since the suite compares them directly.
-  - Update `docs/api.md`, `FEATURES.md`, and the test inventories in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md` with each delivered family. Maintain one evolving unreleased `CHANGELOG.md` entry for the overall CLI parity delivery, separating the new API route only when that reads more clearly, and update a release draft only when an active draft already exists.
-  - Run the PostgreSQL parity suite for any command that writes, so backend-specific behavior is proven rather than assumed.
+  - Update `docs/api.md`, `FEATURES.md`, and the test inventories in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`. Continue the evolving unreleased `CHANGELOG.md` entry, and update a release draft only when an active draft already exists.
+  - Run the PostgreSQL parity suite for the write commands so backend-specific behavior is proven rather than assumed.
 
 ## Known Issues
 

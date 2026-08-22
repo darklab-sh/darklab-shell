@@ -877,6 +877,14 @@ SSE streams send the same payloads as `event: schema`, `event: output`, `event: 
 
 The CLI talks only to `/api/v1` and has no Flask app imports.
 
+Finding create and edit commands read one JSON object of at most 1 MiB from
+`--input PATH`, or from standard input with `--input -`. Create input requires
+`target_id`, `title`, and `severity`; it can also include the finding detail
+fields and up to 20 initial typed evidence references documented by the API.
+Edit input contains only the fields being changed. Use the separate
+`--expected-revision` and `--allow-duplicate` flags for concurrency and duplicate
+decisions; those controls aren't accepted inside the input object.
+
 | Command | Purpose |
 | --- | --- |
 | `darklab whoami [--format text\|json]` | Check token auth. |
@@ -890,6 +898,11 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
 | `darklab artifacts <run_id>` | List run artifacts. |
 | `darklab evidence services <run_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page through typed Nmap service evidence for one saved run. `--limit` defaults to 50 and caps at 100; `--offset` caps at 100,000. |
+| `darklab evidence list <project-slug-or-id> <finding_id> [--format text\|json\|ndjson]` | List the complete bounded set of typed supporting-evidence links for one Project finding. The route doesn't page, so this command doesn't accept paging flags. |
+| `darklab evidence link <project-slug-or-id> <finding_id> <type> <evidence_id> [--line-number N] [--snippet TEXT] [--format text\|json]` | Link one Project-owned source. Supported types are `run`, `run_line`, `run_artifact`, `workspace_file`, `screenshot`, `atlas_entity`, `project_target`, `assessment_check`, and `retest_run`. `run_line` requires a zero-based line number; the line options are rejected for every other type. Repeating an existing link reports a no-op. |
+| `darklab evidence unlink <project-slug-or-id> <finding_id> <link_id> [--format text\|json]` | Remove one exact evidence link by its stable id without deleting the source record. |
+| `darklab finding create <project-slug-or-id> --input PATH\|- [--allow-duplicate] [--format text\|json]` | Create an assessor-authored finding for a confirmed Project target. Possible duplicates are rejected unless the explicit override is supplied. |
+| `darklab finding edit <project-slug-or-id> <finding_id> --expected-revision N --input PATH\|- [--allow-duplicate] [--format text\|json]` | Edit an assessor-authored finding. A stale expected revision fails closed and reports the current revision when the server provides it; the target and stable finding identity remain unchanged. |
 | `darklab risk status [--format text\|json\|ndjson]` | Show stored EPSS and KEV freshness, origin, versions, dates, record counts, safe failure state, attribution, and whether live refresh is enabled. This command never starts a refresh. |
 | `darklab advisory osv <PURL> <VERSION> [--format text\|json]` | Explicitly send one exact package identity and version to the configured OSV provider. This is the only CLI command that can start an OSV lookup. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |

@@ -8458,6 +8458,17 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                     b'"details":{"batch_ids":["wfx_cli"]}}}'
                 ),
             )
+        if req.full_url.endswith("/conflict"):
+            raise urllib.error.HTTPError(
+                req.full_url,
+                409,
+                "Conflict",
+                Message(),
+                io.BytesIO(
+                    b'{"ok":false,"updated":false,"conflict":"stale_revision",'
+                    b'"current_revision":3}'
+                ),
+            )
         return FakeResponse()
 
     monkeypatch.setattr(client_module.urllib.request, "urlopen", fake_urlopen)
@@ -8475,6 +8486,20 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
         assert exc.details == {"batch_ids": ["wfx_cli"]}
     else:
         raise AssertionError("expected HTTP error to fail")
+    try:
+        client.request("PATCH", "/conflict", body={"expected_revision": 2})
+    except DarklabCliError as exc:
+        assert str(exc) == "stale_revision"
+        assert exc.status == 409
+        assert exc.code == "stale_revision"
+        assert exc.details == {
+            "ok": False,
+            "updated": False,
+            "conflict": "stale_revision",
+            "current_revision": 3,
+        }
+    else:
+        raise AssertionError("expected mutation conflict to fail")
 
 
 def test_darklab_cli_config_preserves_http_scheme_and_port():
@@ -9854,6 +9879,7 @@ def test_darklab_cli_assessment_batch_follow_reports_resumable_interrupt(
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
     osv_requests = []
+    finding_requests = []
     help_text = cli_main._parser().format_help()
     assert "active            List active runs for the current token." in help_text
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
@@ -9861,12 +9887,16 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "download          Download one artifact by id." in help_text
     assert "advisory          Run explicit advisory lookups; ordinary reads never" in help_text
     assert "evidence          Read and manage typed evidence without copying" in help_text
+    assert "finding           Create and edit assessor-authored Project findings." in help_text
     assert "risk              Read configured CVE risk feed state without starting" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
-    assert "active advisory artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
+    assert (
+        "active advisory artifacts assessment atlas cancel completion download "
+        "evidence finding grep history notify"
+    ) in bash_completion
     assert (
         "assessment) _darklab_comp_words 'archive batch checks clear-state complete "
         "create delete list set-state show start-action'"
@@ -9875,7 +9905,10 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "advisory) _darklab_comp_words osv" in bash_completion
     assert "advisory:osv) _darklab_comp_words '--format --help -h'" in bash_completion
     assert "advisory:osv:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
-    assert "evidence) _darklab_comp_words services" in bash_completion
+    assert "evidence) _darklab_comp_words 'link list services unlink'" in bash_completion
+    assert "finding) _darklab_comp_words 'create edit'" in bash_completion
+    assert "evidence:link:--format) _darklab_comp_words 'text json'; return ;;" in bash_completion
+    assert "evidence:list:--format) _darklab_comp_words 'text json ndjson'; return ;;" in bash_completion
     assert "risk) _darklab_comp_words status" in bash_completion
     assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
@@ -10058,6 +10091,110 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                     "offset": 0,
                     "has_more": False,
                 }
+            if path == "/projects/prj_cli/findings" and method == "POST":
+                assert params is None
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("title") == "Forbidden finding":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                if body.get("title") == "Possible duplicate" and not body.get(
+                    "allow_duplicate"
+                ):
+                    raise cli_main.DarklabCliError(
+                        "possible_duplicate",
+                        status=409,
+                        code="possible_duplicate",
+                        details={"duplicates": [{"id": "fnd_existing"}]},
+                    )
+                return {
+                    "ok": True,
+                    "created": True,
+                    "duplicate_override": bool(body.get("allow_duplicate")),
+                    "finding": {
+                        "id": "fnd_manual_cli",
+                        "manual_revision": 1,
+                        "severity": body.get("severity"),
+                        "title": body.get("title"),
+                        "target_id": body.get("target_id"),
+                    },
+                }
+            if path == "/projects/prj_cli/findings/fnd_manual_cli" and method == "PATCH":
+                assert params is None
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("expected_revision") == 0:
+                    raise cli_main.DarklabCliError(
+                        "stale_revision",
+                        status=409,
+                        code="stale_revision",
+                        details={"current_revision": 2},
+                    )
+                return {
+                    "ok": True,
+                    "updated": True,
+                    "duplicate_override": False,
+                    "changed_fields": ["summary"],
+                    "finding": {
+                        "id": "fnd_manual_cli",
+                        "manual_revision": 2,
+                        "severity": "high",
+                        "title": "Manual CLI finding",
+                        "target_id": "ent_cli",
+                    },
+                }
+            evidence_path = "/projects/prj_cli/findings/fnd_manual_cli/evidence"
+            if path == evidence_path and method == "GET":
+                return {
+                    "evidence": [{
+                        "id": "fev_cli",
+                        "evidence_type": "run",
+                        "evidence_id": "run_cli",
+                        "line_number": -1,
+                        "source_state": "available",
+                        "label": "echo ok",
+                    }],
+                    "total": 1,
+                    "verification": {},
+                }
+            if path == evidence_path and method == "POST":
+                assert isinstance(body, dict)
+                finding_requests.append((method, path, body))
+                if body.get("evidence_id") == "run_forbidden":
+                    raise cli_main.DarklabCliError(
+                        "team_forbidden: denied",
+                        status=403,
+                        code="team_forbidden",
+                    )
+                created = body.get("evidence_id") != "run_cli"
+                return {
+                    "ok": True,
+                    "created": created,
+                    "evidence": {
+                        "id": "fev_new" if created else "fev_cli",
+                        "evidence_type": body.get("evidence_type"),
+                        "evidence_id": body.get("evidence_id"),
+                        "line_number": body.get("line_number", -1),
+                        "source_state": "available",
+                        "label": body.get("snippet") or "saved source",
+                    },
+                }
+            if path == evidence_path + "/fev_cli" and method == "DELETE":
+                finding_requests.append((method, path, body))
+                return {
+                    "ok": True,
+                    "evidence": {
+                        "id": "fev_cli",
+                        "evidence_type": "run",
+                        "evidence_id": "run_cli",
+                        "line_number": -1,
+                        "source_state": "unavailable",
+                        "label": "run_cli",
+                    },
+                }
             if path == "/risk/feeds":
                 assert method == "GET"
                 assert params is None
@@ -10229,6 +10366,165 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert capsys.readouterr().out == "No service evidence.\n"
     assert cli_main.main(["evidence", "services", "run_cli", "--limit", "101"]) == 1
     assert "limit must be between 1 and 100" in capsys.readouterr().err
+    create_input = tmp_path / "finding-create.json"
+    create_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Manual CLI finding",
+        "severity": "high",
+        "summary": "Confirmed from the headless client",
+        "evidence": [{"evidence_type": "run", "evidence_id": "run_cli"}],
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(create_input),
+    ]) == 0
+    assert "fnd_manual_cli" in capsys.readouterr().out
+    assert finding_requests[-1] == (
+        "POST",
+        "/projects/prj_cli/findings",
+        {
+            "target_id": "ent_cli",
+            "title": "Manual CLI finding",
+            "severity": "high",
+            "summary": "Confirmed from the headless client",
+            "evidence": [{"evidence_type": "run", "evidence_id": "run_cli"}],
+        },
+    )
+    edit_input = tmp_path / "finding-edit.json"
+    edit_input.write_text('{"summary":"Updated from automation"}', encoding="utf-8")
+    assert cli_main.main([
+        "finding", "edit", "prj_cli", "fnd_manual_cli",
+        "--expected-revision", "1", "--input", str(edit_input), "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["finding"]["manual_revision"] == 2
+    assert finding_requests[-1] == (
+        "PATCH",
+        "/projects/prj_cli/findings/fnd_manual_cli",
+        {"summary": "Updated from automation", "expected_revision": 1},
+    )
+    assert cli_main.main([
+        "finding", "edit", "prj_cli", "fnd_manual_cli",
+        "--expected-revision", "0", "--input", str(edit_input),
+    ]) == 1
+    stale_error = capsys.readouterr().err
+    assert "review the current record" in stale_error
+    assert "current revision is 2" in stale_error
+    duplicate_input = tmp_path / "finding-duplicate.json"
+    duplicate_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Possible duplicate",
+        "severity": "medium",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(duplicate_input),
+    ]) == 1
+    duplicate_error = capsys.readouterr().err
+    assert "--allow-duplicate" in duplicate_error
+    assert "fnd_existing" in duplicate_error
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(duplicate_input),
+        "--allow-duplicate",
+    ]) == 0
+    assert "Duplicate override: yes" in capsys.readouterr().out
+    assert finding_requests[-1][2]["allow_duplicate"] is True
+    forbidden_input = tmp_path / "finding-forbidden.json"
+    forbidden_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Forbidden finding",
+        "severity": "low",
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(forbidden_input),
+    ]) == 1
+    assert "TRIAGE_FINDINGS capability" in capsys.readouterr().err
+    invalid_input = tmp_path / "finding-invalid.json"
+    invalid_input.write_text("[]", encoding="utf-8")
+    request_count = len(finding_requests)
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(invalid_input),
+    ]) == 1
+    assert "must contain one JSON object" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    control_input = tmp_path / "finding-control.json"
+    control_input.write_text(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Hidden control",
+        "severity": "low",
+        "allow_duplicate": True,
+    }), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(control_input),
+    ]) == 1
+    assert "use --allow-duplicate" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    oversized_input = tmp_path / "finding-oversized.json"
+    oversized_input.write_text(" " * (1024 * 1024 + 1), encoding="utf-8")
+    assert cli_main.main([
+        "finding", "create", "prj_cli", "--input", str(oversized_input),
+    ]) == 1
+    assert "structured input exceeds 1048576 bytes" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    from io import StringIO
+    with mock.patch("darklab_cli.payloads.sys.stdin", new=StringIO(json.dumps({
+        "target_id": "ent_cli",
+        "title": "Finding from stdin",
+        "severity": "info",
+    }))):
+        assert cli_main.main([
+            "finding", "create", "prj_cli", "--input", "-", "--format", "json",
+        ]) == 0
+    assert json.loads(capsys.readouterr().out)["finding"]["title"] == "Finding from stdin"
+    assert finding_requests[-1][2] == {
+        "target_id": "ent_cli",
+        "title": "Finding from stdin",
+        "severity": "info",
+    }
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli",
+    ]) == 0
+    assert "fev_cli" in capsys.readouterr().out
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli", "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["total"] == 1
+    assert cli_main.main([
+        "evidence", "list", "prj_cli", "fnd_manual_cli", "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "fev_cli"
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli",
+        "run_line", "run_new", "--line-number", "3", "--snippet", "matched line",
+    ]) == 0
+    assert "Evidence linked." in capsys.readouterr().out
+    assert finding_requests[-1][2] == {
+        "evidence_type": "run_line",
+        "evidence_id": "run_new",
+        "line_number": 3,
+        "snippet": "matched line",
+    }
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run", "run_cli",
+    ]) == 0
+    assert "already exists; no changes" in capsys.readouterr().out
+    request_count = len(finding_requests)
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run_line", "run_new",
+    ]) == 1
+    assert "requires a zero-based --line-number" in capsys.readouterr().err
+    assert len(finding_requests) == request_count
+    assert cli_main.main([
+        "evidence", "link", "prj_cli", "fnd_manual_cli", "run", "run_forbidden",
+    ]) == 1
+    assert "TRIAGE_FINDINGS capability" in capsys.readouterr().err
+    assert cli_main.main([
+        "evidence", "unlink", "prj_cli", "fnd_manual_cli", "fev_cli",
+        "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["evidence"]["id"] == "fev_cli"
+    assert finding_requests[-1] == (
+        "DELETE",
+        "/projects/prj_cli/findings/fnd_manual_cli/evidence/fev_cli",
+        None,
+    )
     assert cli_main.main(["risk", "status"]) == 0
     risk_status = capsys.readouterr().out
     assert "stale" in risk_status
