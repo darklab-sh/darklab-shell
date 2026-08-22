@@ -19,7 +19,7 @@ def destructive_action_confirmed(
     confirmed: bool,
     output_format: str,
     action: str,
-    render_text: Callable[[Any], None],
+    render_text: Callable[[Any], object],
 ) -> bool:
     """Show a server-owned preview and return whether mutation may continue."""
     if output_format == "json":
