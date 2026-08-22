@@ -17,15 +17,13 @@ from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json, save_config_value
-from .commands.assessment import handle_assessment
-from .commands.probe import handle_probe
+from .commands import handle_assessment, handle_evidence, handle_probe
 from .formatting import (
     print_collection as _print_collection,
     print_payload as _print_payload,
     print_table as _print_table,
 )
-from .parsers.assessment import register_assessment_parser
-from .parsers.probe import register_probe_parser
+from .parsers import register_assessment_parser, register_evidence_parser, register_probe_parser
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
 STREAM_INTERRUPTED_EXIT_CODE = 130
@@ -256,8 +254,8 @@ def _parser() -> argparse.ArgumentParser:
     project_packages.add_argument("--offset", type=int, default=0)
     project_packages.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    register_assessment_parser(sub)
-    register_probe_parser(sub)
+    for register_parser in (register_assessment_parser, register_evidence_parser, register_probe_parser):
+        register_parser(sub)
 
     atlas = sub.add_parser("atlas", help="Read Atlas summaries, source runs, entities, and findings.")
     atlas_sub = atlas.add_subparsers(dest="atlas_command", required=True)
@@ -928,6 +926,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "project-packages":
             payload = client.request("GET", f"/projects/{args.project_id}/packages", params=_page_window_params(args))
             return _print_collection(payload, "packages", args.format, fields=("id", "status", "name"))
+        case "evidence":
+            return handle_evidence(client, args)
         case "assessment":
             return handle_assessment(client, args)
         case "probe":

@@ -85,17 +85,59 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
 
 ### Headless assessment and evidence parity
 
-Close the adjacent API and external CLI gaps independently of the one-off-probe and bounded-runner delivery gates. Reuse the external CLI modules and API conventions established by those plans where available, but do not delay either assessment feature solely for these parity commands.
+Give the external CLI a complete, consistently named surface for the evidence, risk, and assessment-lifecycle work the API already supports. Almost every required route exists: `/runs/<run_id>/service-evidence`, `/advisories/osv/lookup`, the project assessment create/read/update/delete family with its `delete-preview` companion, manual finding create and edit, finding evidence list/link/unlink, and the full project HTTP-profile family. Only configured CVE feed status still needs a route. Treat this as one external CLI delivery carrying a single new read-only API route rather than as parallel API and CLI workstreams, and keep it independent of the one-off-probe and bounded-runner delivery gates.
 
-- [ ] Choose consistent external CLI nouns for structured service evidence, risk/feed status, OSV lookup, manual findings, evidence links, and HTTP profiles so the command tree does not accumulate unrelated top-level verbs.
-- [ ] Expose structured Nmap service observations from the existing run service-evidence route through the chosen external CLI noun, with bounded pagination and text/JSON output.
-- [ ] Add a read-only API route and `darklab risk status` command for configured CVE feed source, age, bundled/live origin, refresh state, and safe failure information. Reading status must never refresh a feed.
-- [ ] Add an external CLI wrapper for the existing explicit OSV lookup route. Preserve exact package/version inputs, permissions, feature gating, cache behavior, provider error handling, and the rule that ordinary reads never start lookups.
-- [ ] Add API/CLI parity for assessment-cycle create, complete, archive, and delete operations, including profile selection, lifecycle conflicts, confirmation where destructive, and personal/team permissions.
-- [ ] Add external CLI support for manual finding create/edit and evidence list/link/unlink operations with revision checks, exact Project ownership, typed source validation, duplicate handling, and bounded output.
-- [ ] Add external CLI support for Project HTTP-profile list/create/show/update/delete operations. Accept only references to protected values and never echo submitted secret material.
-- [ ] Split new external CLI parsers, handlers, and formatters into focused ratcheted modules rather than growing the main command module. Give new API/OpenAPI modules their required architecture budgets and allowlist entries when they are added.
-- [ ] Add end-to-end API and CLI tests for each command, including help output, JSON stability, authentication, roles, conflict responses, rate/request bounds, and PostgreSQL parity. Update documentation, generated OpenAPI, test inventories/counts, `CHANGELOG.md`, and release drafts with each delivered command family.
+- [ ] Finish and document the grouped command tree so each remaining family lands under a grouped noun instead of a new bare verb:
+  - Extend `darklab evidence` with finding links: `evidence list <PROJECT> <FINDING>`, `evidence link <PROJECT> <FINDING>`, and `evidence unlink <PROJECT> <FINDING> <LINK_ID>`.
+  - Add `darklab risk status` for configured CVE feed state, leaving room for later per-CVE reads under the same noun.
+  - Add `darklab advisory osv <PURL> <VERSION>`, matching the `/advisories/` route prefix.
+  - Add `darklab finding create` and `darklab finding edit` as a singular noun, distinct from the existing `project-findings` listing.
+  - Add `darklab http-profile` with `list`, `create`, `show`, `update`, and `delete`.
+  - Extend the existing `darklab assessment` noun with `create`, `complete`, `archive`, and `delete` rather than adding a second assessment-shaped noun.
+  - Record the decision so the review gate is checkable: four additional grouped nouns, the existing `evidence` and `assessment` nouns extended in place, no new bare top-level verbs, and no new flat `project-*` entries.
+- [ ] Establish the shared CLI foundation the families depend on:
+  - Register every new family through its own `parsers/` module invoked from `_parser()`, following `register_assessment_parser` and `register_probe_parser`. `__main__.py` sits at its `split-target-phase4` budget and must not grow.
+  - Keep handlers in `commands/` modules and reuse `formatting.print_collection`, `print_payload`, and `print_table` instead of adding per-family output code.
+  - Resolve every Project argument through the existing `commands/project_references.resolve_active_project_id` so slugs and ids behave identically across families.
+  - Add one shared helper for destructive confirmation that follows the established `--confirm` convention, and one generic helper for reading structured request payloads from a file or stdin. Protected inputs must remain Secret names or workspace Files paths; the CLI must never read, accept, or send raw secret values.
+  - Match the established option contract: `--format` accepting `text`/`json`/`ndjson` for collections and `text`/`json` for single objects. Add `--limit` and `--offset` only where the backing route supports pagination, and do not accept ignored paging options for bounded whole-collection responses.
+- [ ] Add the one missing route, `GET /risk/feeds`, and its `darklab risk status` command:
+  - Back the route with the existing `services.cve_risk.store.get_configured_feed_status`, which already resolves `stale_after_hours` and `refresh_enabled` from effective config and performs no network work.
+  - Make the authenticated, viewer-readable response a stable collection envelope such as `{ "feeds": [...], "total": 2 }`. Return the per-source fields that function already produces: source, status, origin, source and model version, published, retrieved, and accepted timestamps, age in hours, record count, last attempt, last error, source URL, attribution, terms URL, and whether live refresh is enabled.
+  - Prove by test that a status read never triggers a refresh, never writes feed rows, and succeeds with `refresh_enabled` false and only bundled snapshots loaded.
+  - Surface `stale` distinctly from `unavailable` in text output so an operator can tell an aged feed from an absent one.
+  - Add the route and schema to the CVE-risk OpenAPI surface, extending `openapi_cve_risk.py` when its architecture budget permits or splitting a focused module when needed, then regenerate the checked-in contract with `python scripts/generate_api_openapi.py`.
+- [ ] Wrap the explicit OSV lookup without weakening its guarantees:
+  - Send only `purl` and `version`; the route rejects any other key, so the CLI must not add pass-through fields.
+  - Require both arguments as exact strings and fail locally on empty values rather than sending a request the route will reject.
+  - Report the `TRIAGE_FINDINGS` capability denial, the disabled-mode response, and provider errors as separate, actionable messages instead of one generic failure.
+  - Preserve the rule that ordinary reads never start lookups: this command is the only CLI path that may reach the provider, and its help must say so.
+- [ ] Complete assessment-cycle lifecycle parity:
+  - Add `create` with profile key and optional title, posting only the fields the existing route accepts. Profile version is snapshot metadata rather than a selectable catalog dimension and must not be exposed as a CLI option.
+  - Add `complete` and `archive` as PATCH transitions, and `delete` guarded by `--confirm`.
+  - Show the existing `delete-preview` read before any confirmed delete, and make an unconfirmed `delete` print that preview and stop.
+  - Handle the lifecycle conflict properly. Completing, archiving, or deleting a cycle with running batches returns HTTP 409 with the pending-cancellation code and details rather than succeeding, so the CLI must render the affected batches and the required next step instead of reporting a generic conflict.
+  - Cover personal and team scopes, including a member without write capability receiving a clean permission error.
+- [ ] Add manual finding and evidence-link commands:
+  - Support `finding create` with a confirmed Project `target_id`, typed severity, title, summary, optional finding details, and optional initial evidence. Make duplicate handling explicit through the route's `allow_duplicate` contract.
+  - Support `finding edit` with an explicit `--expected-revision` value so concurrent edits fail closed rather than silently fetching and overwriting the latest revision.
+  - Support `evidence list`, `evidence link`, and `evidence unlink` against the existing finding-evidence routes, with typed source validation and bounded whole-collection output rather than unsupported paging flags.
+  - Treat a duplicate link as a reported no-op rather than an error, and require the evidence link id for `unlink` instead of inferring it.
+  - Confirm exact Project ownership for both the finding and the linked evidence, and reject cross-Project references.
+- [ ] Add Project HTTP-profile commands:
+  - Cover `list`, `create`, `show`, `update`, and `delete` against the existing route family.
+  - Define a script-friendly authoring contract for the profile's nested payload, using a structured input file or stdin plus focused flags where they remain unambiguous.
+  - Accept only Secret names and workspace Files paths in protected fields. Never accept inline secret material and never echo submitted or stored secret values in text or JSON output.
+  - Require an explicit `--revision` for updates so stale writes fail closed under the route's optimistic-concurrency contract.
+  - Respect the route's reference-management permission split so a caller without it still gets usable non-secret output.
+  - Include the reference counts the list route already returns so an operator can see the profile's composition before deleting it. These counts describe headers, protected references, scope, hosts, and capture rules rather than run usage.
+- [ ] Keep the architecture and documentation gates satisfied as each family lands:
+  - Add a `ModuleSizeBudget` entry for every new CLI parser, handler, and formatter module; the CLI globs are already allowlisted, so a missing budget fails the architecture suite.
+  - Add budgets for the new API blueprint and OpenAPI modules when the risk-status route is added.
+  - Extend the CLI coverage that lives in `tests/py/test_api_v1.py`, following the existing `notify` and `team` command tests: assert help output, exit codes, JSON stability, auth and role handling, conflict responses, and request bounds. Add regressions for redacting protected values in both text and JSON output.
+  - Verify the regenerated `docs/api-v1-openapi.json` matches the live contract, since the suite compares them directly.
+  - Update `docs/api.md`, `FEATURES.md`, and the test inventories in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md` with each delivered family. Maintain one evolving unreleased `CHANGELOG.md` entry for the overall CLI parity delivery, separating the new API route only when that reads more clearly, and update a release draft only when an active draft already exists.
+  - Run the PostgreSQL parity suite for the new route and any command that writes, so backend-specific behavior is proven rather than assumed.
 
 ## Known Issues
 

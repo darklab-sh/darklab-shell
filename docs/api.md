@@ -514,9 +514,12 @@ Structured Nmap service observations are read-only and paged separately:
 ```bash
 curl -sS -H "Authorization: Bearer $DARKLAB_TOKEN" \
   "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/service-evidence?limit=50&offset=0"
+
+darklab evidence services "$RUN_ID" --limit 50 --offset 0
+darklab evidence services "$RUN_ID" --format json
 ```
 
-The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `limit` defaults to 50 and caps at 100; `offset` caps at 100,000. Free-form NSE output isn't returned. A run outside the active personal/team scope returns `404`.
+The response uses `observations`, `total`, `limit`, `offset`, and `has_more`. `limit` defaults to 50 and caps at 100; `offset` caps at 100,000. CLI text output shows the canonical port target, service, script, evidence kind, structured fields, and observation time. An existing run with no observations prints `No service evidence.` and exits successfully; JSON retains the complete empty page. Free-form NSE output isn't returned. A run outside the active personal/team scope returns `404`.
 
 Across these routes, lifecycle conflicts and quota failures return `409`; invalid profiles, filters, states, transitions, or evidence return `400`; cross-scope records return `404`; team permission failures return `403`; and rate limits return `429`. Responses and the OpenAPI contract omit personal session ids, profile file paths, secrets, protected HTTP context, private workspace paths, and stored command variables.
 
@@ -865,6 +868,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
 | `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
 | `darklab artifacts <run_id>` | List run artifacts. |
+| `darklab evidence services <run_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | Page through typed Nmap service evidence for one saved run. `--limit` defaults to 50 and caps at 100; `--offset` caps at 100,000. |
 | `darklab atlas summary [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
 | `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |
 | `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. `--limit` defaults to 50 and caps at 200. |

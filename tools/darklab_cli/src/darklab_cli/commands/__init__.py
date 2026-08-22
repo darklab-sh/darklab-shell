@@ -2,3 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 """Focused command handlers for the darklab CLI."""
+
+from .assessment import handle_assessment
+from .evidence import handle_evidence
+from .probe import handle_probe
+
+__all__ = ["handle_assessment", "handle_evidence", "handle_probe"]

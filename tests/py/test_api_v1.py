@@ -8406,7 +8406,10 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                 404,
                 "Not Found",
                 Message(),
-                io.BytesIO(b'{"error":{"code":"not_found","message":"missing"}}'),
+                io.BytesIO(
+                    b'{"error":{"code":"not_found","message":"missing",'
+                    b'"details":{"batch_ids":["wfx_cli"]}}}'
+                ),
             )
         return FakeResponse()
 
@@ -8419,6 +8422,10 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
         client.request("GET", "/missing")
     except DarklabCliError as exc:
         assert str(exc) == "not_found: missing"
+        assert exc.message == "not_found: missing"
+        assert exc.status == 404
+        assert exc.code == "not_found"
+        assert exc.details == {"batch_ids": ["wfx_cli"]}
     else:
         raise AssertionError("expected HTTP error to fail")
 
@@ -9611,11 +9618,13 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
     assert "fish." in help_text
     assert "download          Download one artifact by id." in help_text
+    assert "evidence          Read and manage typed evidence without copying" in help_text
     assert "commands:" not in help_text
     assert cli_main.main(["completion", "bash"]) == 0
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
-    assert "active artifacts assessment atlas cancel completion download grep history notify" in bash_completion
+    assert "active artifacts assessment atlas cancel completion download evidence grep history notify" in bash_completion
+    assert "evidence) _darklab_comp_words services" in bash_completion
     assert "assessment) _darklab_comp_words 'batch checks clear-state list set-state show start-action'" in bash_completion
     assert "assessment:batch) _darklab_comp_words 'cancel follow list plan retry show start'" in bash_completion
     assert "atlas) _darklab_comp_words 'entities entity finding findings runs summary'" in bash_completion
@@ -9747,6 +9756,32 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             if path == "/runs/run_cli/stream" and stream:
                 assert params == {"format": "ndjson", "after": "1-0"}
                 return FakeResponse()
+            if path == "/runs/run_cli/service-evidence":
+                assert params == {"limit": 25, "offset": 5}
+                return {
+                    "observations": [{
+                        "id": "nse_cli",
+                        "target": "104.161.46.133:443/tcp",
+                        "service": "https",
+                        "script_id": "ssl-cert",
+                        "evidence_kind": "certificate",
+                        "fields": [{"path": ["subject", "common_name"], "value": "darklab.sh"}],
+                        "observed_at": "2026-05-19T00:00:04+00:00",
+                    }],
+                    "total": 1,
+                    "limit": 25,
+                    "offset": 5,
+                    "has_more": False,
+                }
+            if path == "/runs/run_empty/service-evidence":
+                assert params == {"limit": 50, "offset": 0}
+                return {
+                    "observations": [],
+                    "total": 0,
+                    "limit": 50,
+                    "offset": 0,
+                    "has_more": False,
+                }
             if path == "/runs" and method == "GET":
                 return {
                     "runs": [
@@ -9854,6 +9889,26 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert '"event":"schema"' in tail_output
     assert '"event":"output"' in tail_output
     assert '"event_id":"2-0"' in tail_output
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+    ]) == 0
+    service_evidence = capsys.readouterr().out
+    assert "104.161.46.133:443/tcp" in service_evidence
+    assert "ssl-cert" in service_evidence
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+        "--format", "json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["observations"][0]["id"] == "nse_cli"
+    assert cli_main.main([
+        "evidence", "services", "run_cli", "--limit", "25", "--offset", "5",
+        "--format", "ndjson",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "nse_cli"
+    assert cli_main.main(["evidence", "services", "run_empty"]) == 0
+    assert capsys.readouterr().out == "No service evidence.\n"
+    assert cli_main.main(["evidence", "services", "run_cli", "--limit", "101"]) == 1
+    assert "limit must be between 1 and 100" in capsys.readouterr().err
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
     assert cli_main.main(["project-link", "run_cli", "prj_cli", "--format", "json"]) == 0

@@ -17,9 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-
-class DarklabCliError(Exception):
-    pass
+from .errors import DarklabCliError, error_from_http_error
 
 
 @dataclass(frozen=True)
@@ -215,8 +213,7 @@ class DarklabClient:
         try:
             resp = urllib.request.urlopen(req, timeout=self.config.timeout)  # nosec
         except urllib.error.HTTPError as exc:
-            message = _error_message(exc)
-            raise DarklabCliError(message) from exc
+            raise error_from_http_error(exc) from exc
         except urllib.error.URLError as exc:
             raise DarklabCliError(str(exc.reason)) from exc
         if stream:
@@ -278,22 +275,6 @@ def iter_sse_events(response) -> Iterator[dict[str, Any]]:
             event_id = line[3:].strip()
         elif line.startswith("data:"):
             data_lines.append(line[5:].strip())
-
-
-def _error_message(exc: urllib.error.HTTPError) -> str:
-    try:
-        body = exc.read().decode("utf-8", errors="replace")
-        payload = json.loads(body) if body else {}
-    except Exception:
-        payload = {}
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(error, dict):
-        code = str(error.get("code") or exc.code)
-        message = str(error.get("message") or exc.reason)
-        return f"{code}: {message}"
-    if isinstance(error, str):
-        return error
-    return f"HTTP {exc.code}: {exc.reason}"
 
 
 def _download_filename(disposition: str) -> str:
