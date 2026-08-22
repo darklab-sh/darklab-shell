@@ -92,6 +92,7 @@
         <span>Output line</span>
         <textarea name="classifier_line" rows="3" placeholder="Paste one output line to inspect">{{ inspector.line }}</textarea>
       </label>
+      <div class="diag-muted">Stateful parsers such as DNS alias chains may need earlier output. Use the Classifier Drift Report to replay a saved run in order.</div>
       <details class="diag-classifier-advanced"{% if inspector.cls %} open{% endif %}>
         <summary>Advanced</summary>
         <label class="diag-field">

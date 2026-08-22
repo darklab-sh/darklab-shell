@@ -19,6 +19,11 @@ _FUZZ_SUFFIX_RE = re.compile(r"/FUZZ\b.*$", re.I)
 _NMAP_OUTPUT_PREFIX_RE = re.compile(r"^-o[AGNX]$", re.I)
 _PORT_LIST_RE = re.compile(r"^\d+(?:,\d+)*$")
 _PORT_RANGE_RE = re.compile(r"^\d+(?:-\d+)?$")
+DNS_RECORD_TYPES = frozenset({
+    "a", "aaaa", "any", "caa", "cname", "dnskey", "ds", "mx", "ns",
+    "nsec", "nsec3", "nsec3param", "ptr", "rrsig", "soa", "srv", "txt",
+})
+DNS_CLASSES = frozenset({"in", "ch", "hs"})
 
 
 def tokenize_command(command: str) -> list[str]:
@@ -120,11 +125,14 @@ def _positional_targets(
 
 
 def _dns_target(tokens: list[str], root: str) -> str:
-    record_types = {"a", "aaaa", "cname", "mx", "ns", "txt", "soa", "ptr", "srv", "caa", "any"}
+    positionals = _positional_targets(
+        tokens,
+        skip_values_after={"-b", "-c", "-f", "-k", "-p", "-t", "-y"},
+    )
     positionals = [
-        token for token in tokens[1:]
-        if token and not token.startswith("-") and not token.startswith("+")
-        and not token.startswith("@") and token.lower() not in record_types
+        token for token in positionals
+        if not token.startswith(("+", "@"))
+        and token.lower() not in DNS_RECORD_TYPES | DNS_CLASSES
     ]
     if root == "nslookup" and _NSLOOKUP_SERVER_RE.match(positionals[0] if positionals else ""):
         return positionals[1] if len(positionals) > 1 else ""

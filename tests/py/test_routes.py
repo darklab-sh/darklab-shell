@@ -14759,6 +14759,7 @@ class TestDiagRoute:
         assert inspector["result"]["signals"] == []
         assert "Classifier Inspector" in body
         assert "Classifier Drift Report" in body
+        assert "DNS alias chains may need earlier output" in body
         assert "progress" in body
         assert "diag-classifier-form" in body
         assert "diag-drift-form" in body
