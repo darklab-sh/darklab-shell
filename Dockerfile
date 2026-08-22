@@ -64,6 +64,7 @@ ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991
 ARG APP_VERSION=2.8.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
+ARG APT_CACHE_EPOCH=1970-01-01
 ARG PYTHON_VERSION=3.14.6
 ARG PYTHON_BASE_DIGEST=unresolved
 ARG PYTHON_BASE_INDEX_DIGEST=unresolved
@@ -442,6 +443,7 @@ ARG PYTHON_BASE_INDEX_DIGEST
 ARG APP_VERSION
 ARG VCS_REF
 ARG BUILD_DATE
+ARG APT_CACHE_EPOCH
 ARG PYTHON_VERSION
 ARG SETUPTOOLS_VERSION
 ARG SSLYZE_VERSION
@@ -451,7 +453,11 @@ ARG POSTGRESQL_APT_KEY_SHA256
 
 # Install runtime packages only. Compilers and development headers remain in
 # builder stages, and apt indexes are not retained in the release image.
-RUN rm -f /etc/dpkg/dpkg.cfg.d/docker && \
+RUN case "${APT_CACHE_EPOCH}" in \
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; \
+        *) echo "APT_CACHE_EPOCH must use YYYY-MM-DD" >&2; exit 2 ;; \
+    esac && \
+    rm -f /etc/dpkg/dpkg.cfg.d/docker && \
     apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
     install -d /usr/share/postgresql-common/pgdg && \

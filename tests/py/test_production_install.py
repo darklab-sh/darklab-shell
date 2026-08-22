@@ -1395,6 +1395,9 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         ROOT / "scripts" / "container" / "create_portable_build_context.sh"
     )
     context_builder = context_builder_path.read_text(encoding="utf-8")
+    apt_cache_epoch_resolver = (
+        ROOT / "scripts" / "container" / "resolve_apt_cache_epoch.sh"
+    )
     image_smoke = (
         ROOT / "scripts" / "release" / "verify_repository_free_image.sh"
     ).read_text(
@@ -1423,6 +1426,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "org.opencontainers.image.licenses=\"AGPL-3.0-only\"" in dockerfile
     assert "COPY LICENSE /usr/share/doc/darklab-shell/LICENSE" in dockerfile
     assert "ARG POSTGRESQL_CLIENT_VERSION=18" in dockerfile
+    assert "ARG APT_CACHE_EPOCH=1970-01-01" in dockerfile
     assert (
         "ARG POSTGRESQL_APT_KEY_SHA256="
         "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76"
@@ -1632,6 +1636,38 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
+    assert "ARG APT_CACHE_EPOCH" in runtime_stage
+    assert runtime_stage.index('case "${APT_CACHE_EPOCH}" in') < (
+        runtime_stage.index("apt-get update")
+    )
+    assert "APT_CACHE_EPOCH" not in go_builder_stage
+    same_day_epochs = []
+    for timestamp in ("2026-08-22T00:00:01Z", "2026-08-22T23:59:59Z"):
+        resolved_epoch = subprocess.run(
+            ["sh", str(apt_cache_epoch_resolver), timestamp],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert resolved_epoch.returncode == 0, resolved_epoch.stderr
+        same_day_epochs.append(resolved_epoch.stdout.strip())
+    assert same_day_epochs == ["2026-08-22", "2026-08-22"]
+    next_day_epoch = subprocess.run(
+        ["sh", str(apt_cache_epoch_resolver), "2026-08-23T00:00:00Z"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert next_day_epoch.returncode == 0, next_day_epoch.stderr
+    assert next_day_epoch.stdout.strip() == "2026-08-23"
+    invalid_epoch = subprocess.run(
+        ["sh", str(apt_cache_epoch_resolver), "2026/08/22"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid_epoch.returncode == 2
+    assert "YYYY-MM-DD" in invalid_epoch.stderr
     assert "/usr/local/go" not in runtime_stage
     assert "/root/go" not in runtime_stage
     assert "build-essential" not in runtime_stage
@@ -2597,6 +2633,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert (
         "type=registry,ref=${CI_REGISTRY_IMAGE}:buildcache-amd64" in branch_build_script
     )
+    assert "resolve_apt_cache_epoch.sh" in branch_build_script
+    assert "$CI_PIPELINE_CREATED_AT" in branch_build_script
+    assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in branch_build_script
     assert '.platform.architecture == "amd64"' in branch_build_script
     assert (
         "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}"
@@ -2690,6 +2729,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "--output type=cacheonly" in amd64_warmer_script
     assert "create_portable_build_context.sh" in amd64_warmer_script
     assert '- < "$build_context"' in amd64_warmer_script
+    assert "resolve_apt_cache_epoch.sh" in amd64_warmer_script
+    assert "$CI_PIPELINE_CREATED_AT" in amd64_warmer_script
+    assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in amd64_warmer_script
+    assert "SCHEDULED_APT_CACHE_EPOCH=${apt_cache_epoch}" in amd64_warmer_script
     assert amd64_warmer["artifacts"]["reports"]["dotenv"] == (
         "scheduled-docker-cache.env"
     )
@@ -2699,6 +2742,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     ]
     scheduled_build_script = "\n".join(scheduled_build["script"])
     assert "SCHEDULED_PYTHON_BASE_DIGEST" in scheduled_build_script
+    assert "SCHEDULED_APT_CACHE_EPOCH" in scheduled_build_script
+    assert "resolve_apt_cache_epoch.sh" in scheduled_build_script
+    assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in scheduled_build_script
     assert "--cache-from" in scheduled_build_script
     assert "--load" in scheduled_build_script
     assert "--cache-to" not in scheduled_build_script
@@ -2724,9 +2770,15 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "podman build" in podman_warmer_script
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
+    assert "SCHEDULED_APT_CACHE_EPOCH" in podman_warmer_script
+    assert "resolve_apt_cache_epoch.sh" in podman_warmer_script
+    assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in podman_warmer_script
     assert "--format docker" in podman_warmer_script
     assert "create_portable_build_context.sh" not in podman_warmer_script
     assert 'cache_image="${CI_REGISTRY_IMAGE}:buildcache-${architecture}"' in publisher
+    assert "resolve_apt_cache_epoch.sh" in publisher
+    assert '"$RELEASE_BUILD_DATE"' in publisher
+    assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in publisher
     assert "RELEASE_CACHE_SCOPE" not in publisher
     assert "--progress=plain" in publisher
     assert "create_portable_build_context.sh" in publisher
@@ -3132,6 +3184,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert ".gitlab-ci.yml" in build_inputs["source"]["files"]
     assert "scripts/container/install_go_tool.sh" in build_inputs["source"]["files"]
     assert (
+        "scripts/container/resolve_apt_cache_epoch.sh"
+        in build_inputs["source"]["files"]
+    )
+    assert (
         "scripts/container/patches/httpx-disable-leakless.patch"
         in build_inputs["source"]["files"]
     )
@@ -3153,6 +3209,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "version_range",
     }
     effective_args = build_inputs["effective_build_args"]
+    assert effective_args["APT_CACHE_EPOCH"] == evidence_args["build_date"][:10]
     assert effective_args["VT_CLI_VERSION"] != "latest"
     assert effective_args["SECLISTS_VERSION"] == "2026.1"
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["SECLISTS_COMMIT"])
@@ -3592,6 +3649,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
     assert platform_first.returncode == 0, platform_first.stderr
     assert "docker buildx build" in platform_first_log
     assert "--push -" in platform_first_log
+    assert "--build-arg APT_CACHE_EPOCH=2026-07-21" in platform_first_log
     platform_metrics = dict(
         row.split("=", 1)
         for row in (tmp_path / "platform-first" / "release-image-amd64-build-metrics.txt")
