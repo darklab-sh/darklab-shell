@@ -400,7 +400,7 @@ Jobs carrying the default `self-hosted` tag, including `docker-build`, `containe
   [runners.docker]
     privileged = false
     volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]
-    image = "python:3.14.6-slim"
+    image = "python:3.14.7-slim"
 ```
 
 The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is ignored. Mounting the Docker socket gives a job control of that host's Docker daemon, so use an isolated runner and limit which projects and protected refs can reach it. The scheduled fanout first assigns its shared AMD64 cache warmer to any runner with the standard `self-hosted` tag. The warmer and every Docker consumer build from a tracked Git archive with fixed file modes, which keeps host ownership, timestamps, ACLs, and SELinux labels out of shared cache keys. The warmer also exports one validated UTC date key; every Docker and Podman fan-out build uses that same value so the refreshed runtime APT layer is shared for the day without rebuilding compiled tools. After that succeeds, `bael`, `bune`, `botis`, `babi`, `bile`, `barbas`, `beleth`, `baka`, and `bana` build concurrently; each runner needs the same socket contract and `self-hosted` capability in addition to its own host tag. The `baku` and `baal` fanout jobs use their dedicated SELinux Docker and rootless Podman runner contracts described below.
@@ -495,7 +495,7 @@ docker compose -f compose.dev.yaml up --build
 
 ## Dependency Version Tracking
 
-`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub-release versions versus the latest published versions it can find. Container checks read complete OCI registry-v2 tag listings from the image's own registry, reuse one listing per repository, and verify checked-in digest pins before showing the digest for a newer tag. Most Go tools use stable module tags from the public Go proxy. The checker follows the upstream release shape for exceptions: vt-cli uses the root module's latest canonical Go version, while IPinfo and urlscan-cli use their GitHub release tags. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
+`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub versions versus the latest published versions it can find. Container checks read complete OCI registry-v2 tag listings from the image's own registry, reuse one listing per repository, and verify checked-in digest pins before showing the digest for a newer tag. Most Go tools use stable module tags from the public Go proxy. The checker follows each upstream's release shape for exceptions: vt-cli uses the root module's latest canonical Go version; IPinfo, TLSX, and urlscan-cli use their GitHub releases; and SQLMap uses its monthly repository tags. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
 
 ```bash
 ./scripts/check_versions.sh

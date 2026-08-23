@@ -16,7 +16,7 @@ directory after `docker compose pull`, read one without starting the app with:
 
     image=$(sed -n 's/^DARKLAB_IMAGE=//p' .env)
     docker run --rm --entrypoint cat "$image" \
-        /usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt
+        /usr/share/doc/darklab-shell/licenses/WPScan-4.1.0.txt
 
 Replace the final path with another path named below when reviewing its terms.
 
@@ -26,7 +26,7 @@ Important usage terms
 WPScan uses the WPScan Public Source License rather than a standard
 open-source license. Some commercial uses require a separate license from
 the WPScan Team. Read
-/usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt in the image before
+/usr/share/doc/darklab-shell/licenses/WPScan-4.1.0.txt in the image before
 using WPScan in a commercial product or service. The image's
 wpscan-ruby-gems.json records the name, version, declared license, homepage,
 and default-gem status of every RubyGem installed with the WPScan runtime.

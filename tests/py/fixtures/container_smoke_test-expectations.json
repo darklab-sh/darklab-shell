@@ -1462,7 +1462,7 @@
       "exit_code": 0,
       "command": "schemathesis --version",
       "expected_text": [
-        "schemathesis, version 4.24.3"
+        "schemathesis, version 4.25.0"
       ]
     },
     {

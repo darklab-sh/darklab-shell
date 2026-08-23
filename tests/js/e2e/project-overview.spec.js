@@ -286,6 +286,13 @@ test.describe('project overview browser contract', () => {
       return response.request().method() === 'GET'
         && url.pathname === `/projects/${fixture.projectId}/overview`
     })
+    const findingsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${fixture.projectId}/findings`
+        && url.searchParams.get('target_id') === fixture.targetId
+        && url.searchParams.get('severity') === 'high'
+    })
     await page.locator('.rail-nav [data-action="projects"]').click()
     await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
@@ -310,13 +317,6 @@ test.describe('project overview browser contract', () => {
     await expect(overview.locator('.project-overview-target-chips')).toContainText('App ports')
     await expect(overview.locator('.project-overview-target-chips')).toContainText('Provider/app drift')
 
-    const findingsResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'GET'
-        && url.pathname === `/projects/${fixture.projectId}/findings`
-        && url.searchParams.get('target_id') === fixture.targetId
-        && url.searchParams.get('severity') === 'high'
-    })
     await overview.locator('[data-project-overview-action="findings"]').click()
     expect((await findingsResponse).ok()).toBe(true)
     await expect(page.locator('[data-project-tab="findings"]')).toHaveClass(/\bis-active\b/)

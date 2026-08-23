@@ -177,7 +177,7 @@ container run --rm --entrypoint sh -e EXPECTED_VERSION="$expected_version" "$ima
     require_file third_party_notices /usr/share/doc/darklab-shell/THIRD_PARTY_NOTICES.txt
     require_file container_license_inventory /usr/share/doc/darklab-shell/container-licenses.json
     require_file wpscan_ruby_gems /usr/share/doc/darklab-shell/wpscan-ruby-gems.json
-    require_file wpscan_license /usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt
+    require_file wpscan_license /usr/share/doc/darklab-shell/licenses/WPScan-4.1.0.txt
     require_file frontend_runtime_licenses /usr/share/doc/darklab-shell/licenses/frontend-runtime.txt
     require_file font_license /usr/share/doc/darklab-shell/licenses/OFL-1.1.txt
     require_file nikto_license /opt/Nikto/COPYING

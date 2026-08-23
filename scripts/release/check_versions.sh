@@ -73,10 +73,14 @@ GO_PACKAGE_MODULE_ROOTS = {
 }
 GO_MODULE_GITHUB_RELEASES = {
     "github.com/ipinfo/cli": ("ipinfo", "cli"),
+    "github.com/projectdiscovery/tlsx": ("projectdiscovery", "tlsx"),
     "github.com/urlscan/urlscan-cli": ("urlscan", "urlscan-cli"),
 }
 GO_MODULE_PROXY_LATEST = {
     "github.com/VirusTotal/vt-cli",
+}
+GITHUB_TAG_REPOSITORIES = {
+    ("sqlmapproject", "sqlmap"),
 }
 DOCKER_REGISTRY_HOST = "registry-1.docker.io"
 REGISTRY_TAG_PAGE_SIZE = 10_000
@@ -325,6 +329,44 @@ def _latest_github_release_version(owner: str, repo: str) -> str:
         return "unknown"
     tag = payload.get("tag_name")
     return tag if isinstance(tag, str) and tag else "unknown"
+
+
+def _latest_github_tag_version(owner: str, repo: str) -> str:
+    url = (
+        "https://api.github.com/repos/"
+        f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(repo, safe='')}/tags"
+        "?per_page=100"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "check_versions.sh"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return "unknown"
+    if not isinstance(payload, list):
+        return "unknown"
+
+    best: tuple[int, int, int] | None = None
+    best_tag = "unknown"
+    for item in payload:
+        tag = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(tag, str):
+            continue
+        match = NUMERIC_TAG_PATTERN.fullmatch(tag)
+        if match is None:
+            continue
+        key = (
+            int(match.group(2)),
+            int(match.group(3) or 0),
+            int(match.group(4) or 0),
+        )
+        if best is None or key > best:
+            best = key
+            best_tag = tag
+    return best_tag
 
 
 def _strip_v(version: str) -> str:
@@ -913,6 +955,7 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
                     package = f"{owner}/{repo}"
                 else:
                     package, version = groups
+                version = version.strip("\"'")
                 pins.append((lineno, label, package, version, line))
     if not pins:
         return
@@ -928,7 +971,10 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
             latest = _latest_rubygems_version(package)
         elif label == "github":
             owner, repo = package.split("/", 1)
-            latest = _latest_github_release_version(owner, repo)
+            if (owner, repo) in GITHUB_TAG_REPOSITORIES:
+                latest = _latest_github_tag_version(owner, repo)
+            else:
+                latest = _latest_github_release_version(owner, repo)
         else:
             latest = "unknown"
         if latest == "unknown":
