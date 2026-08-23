@@ -12,11 +12,14 @@ runtime configuration instead of a separately maintained list.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import email.utils
 import json
 import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,8 +49,9 @@ OPENAPI_SNAPSHOT = ROOT / "docs" / "api-v1-openapi.json"
 CONTAINER_LICENSE_INVENTORY = ROOT / "deploy" / "container-licenses.json"
 PRODUCTION_INSTALL_TEST = ROOT / "tests" / "py" / "test_production_install.py"
 PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(.+)$")
-IMAGE_PATTERN = re.compile(r"^([A-Za-z0-9./_-]+?)(?::([^@\s]+))?(?:@.+)?$")
-NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
+NUMERIC_TAG_PATTERN = re.compile(r"^(v?)(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
+SHA256_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+BEARER_PARAMETER_PATTERN = re.compile(r'([A-Za-z][A-Za-z0-9_-]*)="([^"\\]*(?:\\.[^"\\]*)*)"')
 ARG_PATTERN = re.compile(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
 DOCKER_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 GO_TOOLCHAIN_PATTERN = re.compile(r"go(\d+\.\d+(?:\.\d+)?)\.linux-")
@@ -63,9 +67,55 @@ GITHUB_CLONE_BRANCH_PATTERN = re.compile(
 GO_STABLE_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 CI_IMAGE_VAR_PATTERN = re.compile(r"^\s{2}(CI_[A-Z0-9_]+):\s*[\"']?([^\"'\n#]+)[\"']?\s*(?:#.*)?$")
 CI_IMAGE_REF_PATTERN = re.compile(r"^\s*image:\s*\$([A-Z0-9_]+)\s*(?:#.*)?$")
+GO_PACKAGE_MODULE_ROOTS = {
+    "github.com/VirusTotal/vt-cli/vt": "github.com/VirusTotal/vt-cli",
+    "github.com/ipinfo/cli/ipinfo": "github.com/ipinfo/cli",
+}
 GO_MODULE_GITHUB_RELEASES = {
+    "github.com/ipinfo/cli": ("ipinfo", "cli"),
     "github.com/urlscan/urlscan-cli": ("urlscan", "urlscan-cli"),
 }
+GO_MODULE_PROXY_LATEST = {
+    "github.com/VirusTotal/vt-cli",
+}
+DOCKER_REGISTRY_HOST = "registry-1.docker.io"
+REGISTRY_TAG_PAGE_SIZE = 10_000
+REGISTRY_MAX_TAG_PAGES = 20
+REGISTRY_MAX_TAGS = 50_000
+REGISTRY_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+REGISTRY_MAX_TOKEN_BYTES = 64 * 1024
+REGISTRY_HTTP_ATTEMPTS = 3
+REGISTRY_HTTP_TIMEOUT_SECONDS = 10
+REGISTRY_MAX_RETRY_DELAY_SECONDS = 10.0
+REGISTRY_MANIFEST_ACCEPT = ", ".join(
+    (
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
+
+
+class ImageReference:
+    __slots__ = ("registry", "repository", "tag", "digest")
+
+    def __init__(
+        self,
+        registry: str,
+        repository: str,
+        tag: str | None,
+        digest: str | None,
+    ) -> None:
+        self.registry = registry
+        self.repository = repository
+        self.tag = tag
+        self.digest = digest
+
+
+_REGISTRY_TAG_CACHE: dict[tuple[str, str], tuple[str, ...]] = {}
+_REGISTRY_REPOSITORY_TOKENS: dict[tuple[str, str], str] = {}
+_REGISTRY_TOKEN_CACHE: dict[tuple[str, str, str], str] = {}
 
 
 def _escape_go_module_path(path: str) -> str:
@@ -81,6 +131,9 @@ def _escape_go_module_path(path: str) -> str:
 
 
 def _go_module_root(package: str) -> str:
+    override = GO_PACKAGE_MODULE_ROOTS.get(package)
+    if override is not None:
+        return override
     parts = package.split("/")
     if len(parts) >= 2 and parts[-2] == "cmd":
         return "/".join(parts[:-2])
@@ -178,6 +231,17 @@ def _latest_rubygems_version(gem: str) -> str:
     return "unknown"
 
 
+def _latest_go_proxy_version(module: str) -> str:
+    url = f"https://proxy.golang.org/{_escape_go_module_path(module)}/@latest"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, UnicodeDecodeError, ValueError):
+        return "unknown"
+    version = payload.get("Version") if isinstance(payload, dict) else None
+    return version if isinstance(version, str) and version else "unknown"
+
+
 def _latest_golang_version(module: str, debug: bool = False) -> str:
     module_root = _go_module_root(module)
     github_release = GO_MODULE_GITHUB_RELEASES.get(module_root)
@@ -189,6 +253,15 @@ def _latest_golang_version(module: str, debug: bool = False) -> str:
             print(f"  debug: go module={module_root}")
             print(f"  debug: github releases repo={owner}/{repo}")
             print(f"  debug: github releases selected={latest}")
+        return latest
+
+    if module_root in GO_MODULE_PROXY_LATEST:
+        latest = _latest_go_proxy_version(module_root)
+        if debug:
+            print(f"  debug: go package={module}")
+            print(f"  debug: go module={module_root}")
+            print("  debug: go proxy query=@latest")
+            print(f"  debug: go proxy selected={latest}")
         return latest
 
     url = f"https://proxy.golang.org/{_escape_go_module_path(module_root)}/@v/list"
@@ -402,106 +475,362 @@ def _print_node_dependencies() -> None:
     _print_section("devDependencies", devdeps)
 
 
-def _parse_image_ref(ref: str) -> tuple[str, str | None] | None:
-    ref = ref.strip()
-    if not ref:
+def _parse_image_ref(ref: str) -> ImageReference | None:
+    value = ref.strip()
+    if not value or any(char.isspace() for char in value):
         return None
-    match = IMAGE_PATTERN.match(ref)
-    if not match:
+
+    if value.count("@") > 1:
         return None
-    name, tag = match.groups()
-    if "/" not in name:
-        name = f"library/{name}"
-    return name, tag
+    name_and_tag, separator, digest = value.partition("@")
+    if separator and not digest:
+        return None
+
+    last_slash = name_and_tag.rfind("/")
+    last_colon = name_and_tag.rfind(":")
+    if last_colon > last_slash:
+        name = name_and_tag[:last_colon]
+        tag = name_and_tag[last_colon + 1 :]
+        if not tag:
+            return None
+    else:
+        name = name_and_tag
+        tag = None
+
+    parts = name.split("/")
+    if not all(parts):
+        return None
+    first = parts[0].lower()
+    has_registry = "." in first or ":" in first or first == "localhost"
+    if has_registry:
+        if len(parts) < 2:
+            return None
+        registry = first
+        repository = "/".join(parts[1:])
+    else:
+        registry = DOCKER_REGISTRY_HOST
+        repository = name if len(parts) > 1 else f"library/{name}"
+
+    if registry in {"docker.io", "index.docker.io"}:
+        registry = DOCKER_REGISTRY_HOST
+    if not repository or repository.lower() != repository:
+        return None
+    return ImageReference(registry, repository, tag, digest or None)
 
 
-def _numeric_tag_key(tag: str) -> tuple[int, int, int] | None:
+def _numeric_tag_info(tag: str) -> tuple[tuple[int, int, int], int, bool] | None:
     match = NUMERIC_TAG_PATTERN.fullmatch(tag)
     if not match:
         return None
-    major = int(match.group(1))
-    minor = int(match.group(2) or 0)
-    patch = int(match.group(3) or 0)
-    return major, minor, patch
+    precision = 1 + int(match.group(3) is not None) + int(match.group(4) is not None)
+    key = (
+        int(match.group(2)),
+        int(match.group(3) or 0),
+        int(match.group(4) or 0),
+    )
+    return key, precision, bool(match.group(1))
 
 
-def _dockerhub_tags(repo: str) -> tuple[list[str], str | None]:
-    repo = urllib.parse.quote(repo, safe="/")
-    page = 1
-    tags: list[str] = []
-    while True:
-        url = f"https://hub.docker.com/v2/repositories/{repo}/tags/?page_size=100&page={page}"
-        last_error = "unknown error"
-        payload = None
-        for _ in range(3):
+def _numeric_tag_key(tag: str) -> tuple[int, int, int] | None:
+    info = _numeric_tag_info(tag)
+    return info[0] if info is not None else None
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, attempt: int) -> float:
+    value = exc.headers.get("Retry-After") if exc.headers is not None else None
+    if value:
+        try:
+            return min(max(float(value), 0.0), REGISTRY_MAX_RETRY_DELAY_SECONDS)
+        except ValueError:
             try:
-                with urllib.request.urlopen(url, timeout=5) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                last_error = ""
-                break
-            except urllib.error.HTTPError as exc:
-                last_error = f"HTTP {exc.code} on page {page}"
-            except urllib.error.URLError as exc:
-                reason = getattr(exc, 'reason', None)
-                last_error = f"URL error on page {page}: {reason or exc}"
-            except TimeoutError:
-                last_error = f"timeout on page {page}"
-            except ValueError:
-                last_error = f"invalid JSON on page {page}"
-        if payload is None:
-            if tags:
-                return tags, f"partial results ({last_error})"
-            return [], last_error
-        results = payload.get("results") or []
-        for item in results:
-            name = item.get("name")
-            if isinstance(name, str) and name:
-                tags.append(name)
-        next_page = payload.get("next")
-        if not next_page:
+                retry_at = email.utils.parsedate_to_datetime(value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                return min(max(delay, 0.0), REGISTRY_MAX_RETRY_DELAY_SECONDS)
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return min(0.25 * (2**attempt), REGISTRY_MAX_RETRY_DELAY_SECONDS)
+
+
+def _urlopen_with_retries(request: urllib.request.Request):
+    for attempt in range(REGISTRY_HTTP_ATTEMPTS):
+        try:
+            return urllib.request.urlopen(request, timeout=REGISTRY_HTTP_TIMEOUT_SECONDS)
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            if not retryable or attempt + 1 >= REGISTRY_HTTP_ATTEMPTS:
+                raise
+            retry_delay = _retry_after_seconds(exc, attempt)
+            exc.close()
+            time.sleep(retry_delay)
+        except (urllib.error.URLError, TimeoutError):
+            if attempt + 1 >= REGISTRY_HTTP_ATTEMPTS:
+                raise
+            time.sleep(min(0.25 * (2**attempt), REGISTRY_MAX_RETRY_DELAY_SECONDS))
+    raise RuntimeError("registry request retry loop ended unexpectedly")
+
+
+def _bounded_json_response(response, *, byte_limit: int) -> object:
+    data = response.read(byte_limit + 1)
+    if len(data) > byte_limit:
+        raise ValueError(f"registry response exceeded {byte_limit} bytes")
+    return json.loads(data.decode("utf-8"))
+
+
+def _bearer_challenge_parameters(challenge: str) -> dict[str, str] | None:
+    scheme, separator, raw_parameters = challenge.partition(" ")
+    if not separator or scheme.lower() != "bearer":
+        return None
+    parameters = {key.lower(): value for key, value in BEARER_PARAMETER_PATTERN.findall(raw_parameters)}
+    return parameters or None
+
+
+def _registry_bearer_token(
+    challenge: str,
+    *,
+    repository: str,
+    force_refresh: bool,
+) -> str:
+    parameters = _bearer_challenge_parameters(challenge)
+    if parameters is None or not parameters.get("realm"):
+        raise ValueError("registry returned an unsupported authentication challenge")
+
+    realm = parameters["realm"]
+    service = parameters.get("service", "")
+    scope = parameters.get("scope") or f"repository:{repository}:pull"
+    parsed_realm = urllib.parse.urlsplit(realm)
+    if parsed_realm.scheme != "https" or not parsed_realm.netloc:
+        raise ValueError("registry authentication realm must use HTTPS")
+
+    cache_key = (realm, service, scope)
+    if force_refresh:
+        _REGISTRY_TOKEN_CACHE.pop(cache_key, None)
+    cached = _REGISTRY_TOKEN_CACHE.get(cache_key)
+    if cached:
+        return cached
+
+    query = urllib.parse.parse_qsl(parsed_realm.query, keep_blank_values=True)
+    if service:
+        query.append(("service", service))
+    if scope:
+        query.append(("scope", scope))
+    token_url = urllib.parse.urlunsplit(
+        (
+            parsed_realm.scheme,
+            parsed_realm.netloc,
+            parsed_realm.path,
+            urllib.parse.urlencode(query),
+            "",
+        )
+    )
+    request = urllib.request.Request(
+        token_url,
+        headers={"Accept": "application/json", "User-Agent": "darklab-check-versions"},
+    )
+    with _urlopen_with_retries(request) as response:
+        payload = _bounded_json_response(response, byte_limit=REGISTRY_MAX_TOKEN_BYTES)
+    token = None
+    if isinstance(payload, dict):
+        candidate = payload.get("token") or payload.get("access_token")
+        if isinstance(candidate, str) and candidate:
+            token = candidate
+    if token is None:
+        raise ValueError("registry authentication response did not include a token")
+    _REGISTRY_TOKEN_CACHE[cache_key] = token
+    return token
+
+
+def _registry_open(
+    reference: ImageReference,
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+):
+    repository_key = (reference.registry, reference.repository)
+    token = _REGISTRY_REPOSITORY_TOKENS.get(repository_key)
+    request_headers = {"User-Agent": "darklab-check-versions", **(headers or {})}
+    if token:
+        request_headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=request_headers, method=method)
+    challenge = ""
+    try:
+        return _urlopen_with_retries(request)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401:
+            raise
+        challenge = exc.headers.get("WWW-Authenticate", "") if exc.headers is not None else ""
+        exc.close()
+
+    token = _registry_bearer_token(
+        challenge,
+        repository=reference.repository,
+        force_refresh=token is not None,
+    )
+    _REGISTRY_REPOSITORY_TOKENS[repository_key] = token
+    request_headers["Authorization"] = f"Bearer {token}"
+    authenticated_request = urllib.request.Request(url, headers=request_headers, method=method)
+    return _urlopen_with_retries(authenticated_request)
+
+
+def _registry_next_link(
+    raw_link: str | None,
+    *,
+    current_url: str,
+    reference: ImageReference,
+) -> str | None:
+    if not raw_link:
+        return None
+    next_target = None
+    for item in raw_link.split(","):
+        target_match = re.search(r"<([^>]+)>", item)
+        relation_match = re.search(r'(?:^|;)\s*rel\s*=\s*"?([^";,]+)', item, re.IGNORECASE)
+        if target_match and relation_match and "next" in relation_match.group(1).lower().split():
+            next_target = target_match.group(1)
             break
-        page += 1
+    if next_target is None:
+        return None
+
+    next_url = urllib.parse.urljoin(current_url, next_target)
+    parsed = urllib.parse.urlsplit(next_url)
+    expected_path = f"/v2/{urllib.parse.quote(reference.repository, safe='/')}/tags/list"
+    if parsed.scheme != "https" or parsed.netloc.lower() != reference.registry or parsed.path != expected_path:
+        raise ValueError("registry returned an unsafe pagination link")
+    return next_url
+
+
+def _registry_tags(reference: ImageReference) -> tuple[list[str], str | None]:
+    cache_key = (reference.registry, reference.repository)
+    cached = _REGISTRY_TAG_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached), None
+
+    quoted_repository = urllib.parse.quote(reference.repository, safe="/")
+    next_url = (
+        f"https://{reference.registry}/v2/{quoted_repository}/tags/list"
+        f"?n={REGISTRY_TAG_PAGE_SIZE}"
+    )
+    visited_urls: set[str] = set()
+    tags: list[str] = []
+    seen_tags: set[str] = set()
+    page_count = 0
+
+    try:
+        while next_url is not None:
+            if next_url in visited_urls:
+                raise ValueError("registry pagination loop detected")
+            if page_count >= REGISTRY_MAX_TAG_PAGES:
+                raise ValueError(f"registry tag listing exceeded {REGISTRY_MAX_TAG_PAGES} pages")
+            visited_urls.add(next_url)
+            page_count += 1
+
+            with _registry_open(reference, next_url, headers={"Accept": "application/json"}) as response:
+                payload = _bounded_json_response(response, byte_limit=REGISTRY_MAX_RESPONSE_BYTES)
+                raw_link = response.headers.get("Link")
+            if not isinstance(payload, dict):
+                raise ValueError("registry tag response was not an object")
+            page_tags = payload.get("tags")
+            if page_tags is None:
+                page_tags = []
+            if not isinstance(page_tags, list) or not all(isinstance(tag, str) and tag for tag in page_tags):
+                raise ValueError("registry tag response contained invalid tags")
+            for tag in page_tags:
+                if tag in seen_tags:
+                    continue
+                seen_tags.add(tag)
+                tags.append(tag)
+                if len(tags) > REGISTRY_MAX_TAGS:
+                    raise ValueError(f"registry tag listing exceeded {REGISTRY_MAX_TAGS} tags")
+            next_url = _registry_next_link(raw_link, current_url=next_url, reference=reference)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        return [], f"registry returned HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return [], f"registry request failed: {getattr(exc, 'reason', None) or exc}"
+    except TimeoutError:
+        return [], "registry request timed out"
+    except (UnicodeDecodeError, ValueError) as exc:
+        return [], str(exc)
+
+    _REGISTRY_TAG_CACHE[cache_key] = tuple(tags)
     return tags, None
 
 
+def _registry_manifest_digest(reference: ImageReference, tag: str) -> tuple[str | None, str | None]:
+    quoted_repository = urllib.parse.quote(reference.repository, safe="/")
+    quoted_tag = urllib.parse.quote(tag, safe="")
+    url = f"https://{reference.registry}/v2/{quoted_repository}/manifests/{quoted_tag}"
+    try:
+        with _registry_open(
+            reference,
+            url,
+            method="HEAD",
+            headers={"Accept": REGISTRY_MANIFEST_ACCEPT},
+        ) as response:
+            digest = response.headers.get("Docker-Content-Digest")
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        return None, f"registry returned HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return None, f"registry request failed: {getattr(exc, 'reason', None) or exc}"
+    except TimeoutError:
+        return None, "registry request timed out"
+    except ValueError as exc:
+        return None, str(exc)
+    if not isinstance(digest, str) or not SHA256_DIGEST_PATTERN.fullmatch(digest):
+        return None, "registry did not return a SHA-256 manifest digest"
+    return digest, None
+
+
+def _split_numeric_image_tag(tag: str) -> tuple[tuple[int, int, int], int, bool, str] | None:
+    base_tag, separator, suffix = tag.partition("-")
+    info = _numeric_tag_info(base_tag)
+    if info is None:
+        return None
+    key, precision, has_v_prefix = info
+    return key, precision, has_v_prefix, suffix if separator else ""
+
+
 def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
-    parsed = _parse_image_ref(current_image)
-    if not parsed:
+    reference = _parse_image_ref(current_image)
+    if reference is None:
         return None, "unparseable image reference"
-    repo, current_tag = parsed
-    if not current_tag:
+    if not reference.tag:
         return None, "missing tag"
 
-    tag_suffix = ""
-    base_tag = current_tag
-    if "-" in current_tag:
-        base_tag, tag_suffix = current_tag.split("-", 1)
+    current_info = _split_numeric_image_tag(reference.tag)
+    if current_info is None:
+        return None, f"unsupported tag format: {reference.tag}"
+    current_key, current_precision, current_v_prefix, tag_suffix = current_info
 
-    current_key = _numeric_tag_key(base_tag)
-    if current_key is None:
-        return None, f"unsupported tag format: {current_tag}"
-
-    tags, fetch_error = _dockerhub_tags(repo)
+    tags, fetch_error = _registry_tags(reference)
+    if fetch_error:
+        return None, fetch_error
     if not tags:
-        return None, fetch_error or "unable to fetch Docker Hub tags"
+        return None, "registry returned no tags"
 
     best_tag = None
     best_key = current_key
+    best_shape = (-1, -1, -1)
     for tag in tags:
-        candidate_base = tag
-        candidate_suffix = ""
-        if "-" in tag:
-            candidate_base, candidate_suffix = tag.split("-", 1)
-        if candidate_suffix != tag_suffix:
+        candidate_info = _split_numeric_image_tag(tag)
+        if candidate_info is None:
             continue
-        candidate_key = _numeric_tag_key(candidate_base)
-        if candidate_key is None:
+        candidate_key, candidate_precision, candidate_v_prefix, candidate_suffix = candidate_info
+        if candidate_suffix != tag_suffix or candidate_key <= current_key:
             continue
-        if candidate_key > best_key:
+        candidate_shape = (
+            int(candidate_precision == current_precision),
+            int(candidate_v_prefix == current_v_prefix),
+            candidate_precision,
+        )
+        if candidate_key > best_key or (candidate_key == best_key and candidate_shape > best_shape):
             best_key = candidate_key
+            best_shape = candidate_shape
             best_tag = tag
 
-    return best_tag, fetch_error
+    return best_tag, None
 
 
 def _docker_base_image() -> str | None:
@@ -639,6 +968,40 @@ def _print_python_requirements() -> None:
             print(f"- {package:24} pinned={pinned:12} latest={latest:12} {status}")
 
 
+def _print_registry_image_status(image: str) -> None:
+    newer, error = _latest_docker_tag(image)
+    if newer:
+        print(f"  newest: {newer}")
+    elif error:
+        print(f"  newest: unknown ({error})")
+    else:
+        print("  newest: none found; current tag appears up to date")
+
+    reference = _parse_image_ref(image)
+    if (
+        reference is None
+        or reference.tag is None
+        or reference.digest is None
+        or not SHA256_DIGEST_PATTERN.fullmatch(reference.digest)
+    ):
+        return
+
+    resolved_digest, digest_error = _registry_manifest_digest(reference, reference.tag)
+    if digest_error:
+        print(f"  pinned digest: unknown ({digest_error})")
+    elif resolved_digest == reference.digest:
+        print("  pinned digest: verified")
+    else:
+        print(f"  pinned digest: mismatch (tag resolves to {resolved_digest})")
+
+    if newer:
+        newest_digest, newest_digest_error = _registry_manifest_digest(reference, newer)
+        if newest_digest_error:
+            print(f"  newest digest: unknown ({newest_digest_error})")
+        else:
+            print(f"  newest digest: {newest_digest}")
+
+
 def _print_docker_image() -> None:
     image = _docker_base_image()
     if not image:
@@ -646,14 +1009,7 @@ def _print_docker_image() -> None:
         return
     print("\nDocker base image:")
     print(f"- {image}")
-    newer, error = _latest_docker_tag(image)
-    if newer:
-        suffix = f" ({error})" if error else ""
-        print(f"  newest: {newer}{suffix}")
-    elif error:
-        print(f"  newest: unknown ({error})")
-    else:
-        print("  newest: none found; current tag appears up to date")
+    _print_registry_image_status(image)
 
 
 def _print_ci_images() -> None:
@@ -670,14 +1026,7 @@ def _print_ci_images() -> None:
     for (var_name, image), job_names in grouped.items():
         used_by = ", ".join(job_names)
         print(f"- {var_name:20} {image:20} (used by {used_by})")
-        newer, error = _latest_docker_tag(image)
-        if newer:
-            suffix = f" ({error})" if error else ""
-            print(f"  newest: {newer}{suffix}")
-        elif error:
-            print(f"  newest: unknown ({error})")
-        else:
-            print("  newest: none found; current tag appears up to date")
+        _print_registry_image_status(image)
 
 
 def main() -> int:
@@ -766,8 +1115,8 @@ def main() -> int:
     )
     print(
         "- The Go check uses go.dev for the toolchain, GitHub Releases for modules that "
-        "publish installable CLI tags there, and the public Go module proxy for other "
-        "module pins; proxy module checks only consider stable release tags."
+        "publish installable CLI tags there, the proxy's canonical latest version for "
+        "explicit pseudo-version pins, and stable proxy release tags for other modules."
     )
     print(
         "- The Node check reads package.json/package-lock.json dependencies and "
@@ -775,7 +1124,8 @@ def main() -> int:
     )
     print(
         "- The Docker/runtime check reads the production base image from Dockerfile and CI "
-        "runner images from .gitlab-ci.yml, and ignores prerelease tags like alpha and rc builds."
+        "runner images from .gitlab-ci.yml, follows registry-v2 pagination, reuses one tag "
+        "listing per repository, verifies exact digest pins, and ignores prerelease tags."
     )
     print(
         "- Dockerfile pinned tool versions are checked against upstream: go→go.dev/proxy, "
