@@ -44,8 +44,8 @@ NEXT_VERSION = "2.8.4"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
-    "registry.gitlab.com/gitlab-org/cli:v1.107.0@"
-    "sha256:ea9708890660b1f766d8185ccbc99b8729633bfa34ea9fda35f6ef1fdf90e507"
+    "registry.gitlab.com/gitlab-org/cli:v1.114.0@"
+    "sha256:797256f9f46c6da08a337566eb11b3e53dee31fdef7d2d41b379d5841ed10cd7"
 )
 
 
@@ -605,7 +605,7 @@ def _write_release_publisher_contracts(
     source_commit = "revision-a"
     base_resolution = {
         "format": "darklab_shell.python_base_resolution.v1",
-        "image": "python:3.14.6-slim",
+        "image": "python:3.14.7-slim",
         "index_digest": _PUBLISHER_DIGESTS["base_index"],
         "resolved_at": build_date,
         "platforms": {
@@ -829,7 +829,7 @@ def _release_publisher_env(
         "RELEASE_PLATFORM_MODE": "dual",
         "RELEASE_DEGRADED_REASON": "",
         "RELEASE_BUILD_DATE": fixture["build_date"],
-        "PYTHON_BASE_IMAGE": "python:3.14.6-slim",
+        "PYTHON_BASE_IMAGE": "python:3.14.7-slim",
         "PYTHON_BASE_INDEX_DIGEST": _PUBLISHER_DIGESTS["base_index"],
         "PYTHON_BASE_AMD64_DIGEST": _PUBLISHER_DIGESTS["base_amd64"],
         "PYTHON_BASE_ARM64_DIGEST": _PUBLISHER_DIGESTS["base_arm64"],
@@ -1544,19 +1544,20 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "JSON.pretty_generate(payload))"
     ) in dockerfile
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
-    assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
+    assert "ARG PYTHON_BASE_IMAGE=python:3.14.7-slim" in dockerfile
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
+    assert "ARG GO_X_NET_VERSION=v0.55.0" in dockerfile
     assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
     assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
-    assert "ARG SCHEMATHESIS_VERSION=4.24.3" in dockerfile
+    assert "ARG SCHEMATHESIS_VERSION=4.25.0" in dockerfile
     dependency_pins = [
         line
         for line in schemathesis_constraints.splitlines()
         if line and not line.startswith("#")
     ]
-    assert "schemathesis==4.24.3" in dependency_pins
+    assert "schemathesis==4.25.0" in dependency_pins
     assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
         dependency_pins
     )
@@ -1569,6 +1570,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "mv /opt/schemathesis /out/opt/schemathesis" in dockerfile
     assert "COPY --from=schemathesis-asset /out/ /" in dockerfile
     assert 'install-go-tool "github.com/projectdiscovery/chaos-client' in dockerfile
+    assert (
+        '"github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}" \\\n'
+        '        "golang.org/x/net@${GO_X_NET_VERSION}"'
+    ) in dockerfile
     crypto_floor = 'go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"'
     tool_selection = 'go get "$tool_spec"'
     assert crypto_floor in go_installer
@@ -1634,6 +1639,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG NUCLEI_VERSION" not in other_go_stage
     assert "/usr/share/doc/darklab-shell/licenses/Go-toolchain.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt" in dockerfile
+    assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-net.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
@@ -2289,7 +2295,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         )
         for notice in (
             "Nmap-7.95-NPSL-0.95.txt",
-            "WPScan-4.0.1.txt",
+            "WPScan-4.1.0.txt",
             "frontend-runtime.txt",
             "OFL-1.1.txt",
         ):
@@ -2322,7 +2328,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         monkeypatch.setattr(
             container_checker,
             "WPSCAN_LICENSE",
-            license_dir / "WPScan-4.0.1.txt",
+            license_dir / "WPScan-4.1.0.txt",
         )
 
     intact_root = container_fixture("container-intact")
@@ -2365,7 +2371,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
                 encoding="utf-8",
             )
         else:
-            (fixture_root / "deploy" / "third-party-licenses" / "WPScan-4.0.1.txt").write_text(
+            (fixture_root / "deploy" / "third-party-licenses" / "WPScan-4.1.0.txt").write_text(
                 "changed\n",
                 encoding="utf-8",
             )
@@ -3134,7 +3140,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "commit_tag": f"v{RELEASE_VERSION}",
         "pipeline_url": "https://gitlab.com/darklab.sh/darklab_shell/-/pipelines/123",
         "pipeline_created_at": "2026-07-14T12:00:00Z",
-        "base_image": "python:3.14.6-slim",
+        "base_image": "python:3.14.7-slim",
         "base_image_digest": "sha256:" + "c" * 64,
         "build_date": "2026-07-14T12:00:00Z",
         "sbom_path": sbom,
@@ -3178,7 +3184,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     build_inputs_path = first_evidence / "release-build-inputs.json"
     build_inputs = json.loads(build_inputs_path.read_text())
     assert build_inputs["base_image"]["resolved_reference"] == (
-        "python:3.14.6-slim@sha256:" + "c" * 64
+        "python:3.14.7-slim@sha256:" + "c" * 64
     )
     assert build_inputs["reproducibility"]["container_image_byte_reproducible"] is False
     assert build_inputs["source"]["commit_sha"] == evidence_args["commit_sha"]
@@ -3214,7 +3220,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     assert effective_args["VT_CLI_VERSION"] != "latest"
     assert effective_args["SECLISTS_VERSION"] == "2026.1"
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["SECLISTS_COMMIT"])
-    assert effective_args["NIKTO_VERSION"] == "2.6.0"
+    assert effective_args["NIKTO_VERSION"] == "2.6.1"
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["NIKTO_COMMIT"])
     assert evidence_index["build_inputs"]["sha256"] == _sha256(build_inputs_path)
     provenance = json.loads((first_evidence / "provenance.intoto.jsonl").read_text())
@@ -3227,7 +3233,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     resolved = provenance["predicate"]["buildDefinition"]["resolvedDependencies"]
     assert resolved[0]["digest"]["gitCommit"] == evidence_args["commit_sha"]
     assert resolved[1] == {
-        "uri": "pkg:docker/python@3.14.6-slim",
+        "uri": "pkg:docker/python@3.14.7-slim",
         "digest": {"sha256": "c" * 64},
     }
 
@@ -3279,7 +3285,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "build_date": evidence_args["build_date"],
         "python_base": {
             "format": "darklab_shell.python_base_resolution.v1",
-            "image": "python:3.14.6-slim",
+            "image": "python:3.14.7-slim",
             "index_digest": "sha256:" + "c" * 64,
             "resolved_at": "2026-07-14T11:59:00Z",
             "platforms": {
@@ -3516,7 +3522,7 @@ def test_release_image_publication_handles_publish_retry_and_conflict_branches(t
         },
     ]}), encoding="utf-8")
     base_resolution = contract.resolve_base(
-        image="python:3.14.6-slim",
+        image="python:3.14.7-slim",
         index_digest=base_index_digest,
         raw_index_path=base_index_path,
     )

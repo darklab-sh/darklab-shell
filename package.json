@@ -44,15 +44,15 @@
     "jspdf": "4.2.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
-    "@vitest/coverage-v8": "^4.1.10",
-    "esbuild": "0.28.1",
-    "eslint": "^10.7.0",
-    "js-yaml": "5.2.2",
-    "jsdom": "^29.1.1",
-    "markdownlint-cli2": "^0.23.1",
+    "@playwright/test": "^1.62.1",
+    "@vitest/coverage-v8": "^4.1.11",
+    "esbuild": "0.28.2",
+    "eslint": "^10.9.0",
+    "js-yaml": "5.3.0",
+    "jsdom": "^30.0.1",
+    "markdownlint-cli2": "^0.23.2",
     "stylelint": "^17.14.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "brace-expansion": "5.0.9",

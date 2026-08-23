@@ -31,10 +31,14 @@ def test_nonstandard_go_cli_versions_use_explicit_upstream_metadata(monkeypatch)
         calls.append((owner, repo))
         return {
             ("ipinfo", "cli"): "ipinfo-3.3.2",
+            ("projectdiscovery", "tlsx"): "v1.3.0",
             ("urlscan", "urlscan-cli"): "v2026.06.12",
         }[(owner, repo)]
 
     class FakeResponse:
+        def __init__(self, body: bytes):
+            self.body = body
+
         def __enter__(self):
             return self
 
@@ -42,23 +46,37 @@ def test_nonstandard_go_cli_versions_use_explicit_upstream_metadata(monkeypatch)
             return False
 
         def read(self) -> bytes:
-            return b'{"Version":"v0.0.0-20260707165039-b4cf77c4340f"}'
+            return self.body
 
-    def fake_urlopen(url: str, timeout: int):
-        requested_urls.append(url)
-        return FakeResponse()
+    def fake_urlopen(url, timeout: int):
+        requested_url = url.full_url if hasattr(url, "full_url") else url
+        requested_urls.append(requested_url)
+        if requested_url.endswith("/sqlmapproject/sqlmap/tags?per_page=100"):
+            return FakeResponse(
+                b'[{"name":"1.10"},{"name":"1.10.8"},{"name":"1.9.12"}]'
+            )
+        return FakeResponse(b'{"Version":"v0.0.0-20260707165039-b4cf77c4340f"}')
 
     monkeypatch.setattr(module, "_latest_github_release_version", fake_latest_github_release_version)
     monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
 
     assert module._latest_golang_version("github.com/ipinfo/cli/ipinfo") == "ipinfo-3.3.2"
     assert module._latest_golang_version("github.com/urlscan/urlscan-cli") == "v2026.06.12"
+    assert module._latest_golang_version("github.com/projectdiscovery/tlsx/cmd/tlsx") == (
+        "v1.3.0"
+    )
     assert module._latest_golang_version("github.com/VirusTotal/vt-cli/vt") == (
         "v0.0.0-20260707165039-b4cf77c4340f"
     )
-    assert calls == [("ipinfo", "cli"), ("urlscan", "urlscan-cli")]
+    assert module._latest_github_tag_version("sqlmapproject", "sqlmap") == "1.10.8"
+    assert calls == [
+        ("ipinfo", "cli"),
+        ("urlscan", "urlscan-cli"),
+        ("projectdiscovery", "tlsx"),
+    ]
     assert requested_urls == [
         "https://proxy.golang.org/github.com/!virus!total/vt-cli/@latest",
+        "https://api.github.com/repos/sqlmapproject/sqlmap/tags?per_page=100",
     ]
 
 
@@ -103,21 +121,27 @@ def test_dockerfile_and_registry_reports_follow_checked_in_sources(monkeypatch, 
         "\n".join(
             [
                 "ARG NIKTO_VERSION=2.6.0",
+                "ARG WPSCAN_VERSION=4.1.0",
                 "FROM python:3.14-slim",
                 "RUN git clone --depth 1 --branch \"${NIKTO_VERSION}\" \\",
                 "    https://github.com/sullo/Nikto.git /out/opt/Nikto",
+                "RUN gem install wpscan -v \"${WPSCAN_VERSION}\"",
             ]
         ),
         encoding="utf-8",
     )
     monkeypatch.setattr(module, "DOCKERFILE", dockerfile)
     monkeypatch.setattr(module, "_latest_github_release_version", lambda owner, repo: "2.6.0")
+    monkeypatch.setattr(module, "_latest_rubygems_version", lambda package: "4.1.0")
 
-    module._print_dockerfile_pins(labels={"github"})
+    module._print_dockerfile_pins(labels={"gem", "github"})
 
     output = capsys.readouterr().out
     assert "sullo/Nikto" in output
     assert "pinned=2.6.0" in output
+    assert "wpscan" in output
+    assert "pinned=4.1.0" in output
+    assert output.count("up-to-date") == 2
 
     class RegistryResponse:
         def __init__(self, body: bytes = b"", headers: dict[str, str] | None = None):
