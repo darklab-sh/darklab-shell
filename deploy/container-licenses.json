@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.8.3",
-  "reviewed_on": "2026-08-07",
+  "reviewed_on": "2026-08-23",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -119,6 +119,13 @@
       "source": "https://github.com/getkin/kin-openapi",
       "license": "MIT",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt"
+    },
+    {
+      "name": "pgx PostgreSQL driver",
+      "version_arg": "KATANA_PGX_VERSION",
+      "source": "https://github.com/jackc/pgx",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt"
     },
     {
       "name": "gosu",

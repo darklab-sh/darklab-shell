@@ -1548,6 +1548,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
     assert "ARG GO_X_NET_VERSION=v0.55.0" in dockerfile
     assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
+    assert "ARG KATANA_PGX_VERSION=v5.9.0" in dockerfile
     assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
@@ -1625,6 +1626,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         '"github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"'
         in projectdiscovery_stage
     )
+    assert (
+        '"github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}" \\\n'
+        '        "github.com/jackc/pgx/v5@${KATANA_PGX_VERSION}"'
+        in projectdiscovery_stage
+    )
     assert "nuclei-kin-openapi" not in projectdiscovery_stage
     assert (
         "RUN install-go-tool \\\n"
@@ -1641,6 +1647,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-net.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt" in dockerfile
+    assert "/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
     assert "ARG APT_CACHE_EPOCH" in runtime_stage

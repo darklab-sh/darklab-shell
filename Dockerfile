@@ -10,6 +10,7 @@ ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
 ARG GO_X_NET_VERSION=v0.55.0
 ARG KIN_OPENAPI_VERSION=v0.146.0
+ARG KATANA_PGX_VERSION=v5.9.0
 ARG GOSU_VERSION=1.19
 ARG OPENSSL_VERSION=3.6.3
 ARG OPENSSL_SHA256=243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
@@ -117,6 +118,7 @@ ARG HTTPX_VERSION
 ARG DNSX_VERSION
 ARG NAABU_VERSION
 ARG KATANA_VERSION
+ARG KATANA_PGX_VERSION
 ARG TLSX_VERSION
 ARG CDNCHECK_VERSION
 ARG CHAOS_CLIENT_VERSION
@@ -130,7 +132,9 @@ RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/httpx-disable-leakless
     install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}"
-RUN install-go-tool "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}"
+RUN install-go-tool \
+        "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}" \
+        "github.com/jackc/pgx/v5@${KATANA_PGX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}"
@@ -144,7 +148,10 @@ RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdisc
         /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt && \
     install -m 0644 \
         "$(go env GOMODCACHE)/github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}/LICENSE" \
-        /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/jackc/pgx/v5@${KATANA_PGX_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt
 
 FROM go-builder-base AS go-other-tools
 ARG GOSU_VERSION
