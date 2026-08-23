@@ -47,7 +47,6 @@ BUILD_INPUT_FILES = (
     "scripts/container/install_go_tool.sh",
     "scripts/container/resolve_apt_cache_epoch.sh",
     "scripts/container/patches/httpx-disable-leakless.patch",
-    "scripts/container/patches/nuclei-kin-openapi-v0.144.patch",
 )
 NETWORK_BUILD_TOOLS = (
     "apt-get",
