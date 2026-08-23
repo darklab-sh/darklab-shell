@@ -495,7 +495,7 @@ docker compose -f compose.dev.yaml up --build
 
 ## Dependency Version Tracking
 
-`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub-release versions versus the latest published versions it can find. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
+`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub-release versions versus the latest published versions it can find. Container checks read complete OCI registry-v2 tag listings from the image's own registry, reuse one listing per repository, and verify checked-in digest pins before showing the digest for a newer tag. Most Go tools use stable module tags from the public Go proxy. The checker follows the upstream release shape for exceptions: vt-cli uses the root module's latest canonical Go version, while IPinfo and urlscan-cli use their GitHub release tags. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
 
 ```bash
 ./scripts/check_versions.sh
