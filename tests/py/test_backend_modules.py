@@ -29586,8 +29586,18 @@ class TestDatabaseInit:
         assert any("FROM projects" in query for query, _params in opened[0].queries)
         assert any("FROM projects" in query for query, _params in opened[1].queries)
         assert any("FROM runs" in query for query, _params in opened[2].queries)
+        deleted, _atlas_cleanup, _cleanup_log_fields = history_mutations.delete_history_run(
+            session_id="session",
+            owner_scope=owner_scope,
+            run_id="run-1",
+            prune_atlas=True,
+            prune_curated_atlas=False,
+            audit_fields={},
+        )
+        assert deleted == 0
+        assert opened[-1].queries[0] == ("BEGIN IMMEDIATE", ())
         assert history_mutations.bulk_export_rows(owner_scope, [], []) == ({}, {})
-        assert len(opened) == 5
+        assert len(opened) == 6
 
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
