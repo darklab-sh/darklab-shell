@@ -27,7 +27,6 @@ scripts/*
 !scripts/container/install_go_tool.sh
 !scripts/container/patches/
 !scripts/container/patches/httpx-disable-leakless.patch
-!scripts/container/patches/nuclei-kin-openapi-v0.144.patch
 !scripts/container/stage_runtime_source.sh
 !scripts/container/bootstrap_nuclei_templates.sh
 !scripts/container/prepare_nuclei_template_cache.sh

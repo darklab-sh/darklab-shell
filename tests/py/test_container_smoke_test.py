@@ -618,7 +618,7 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     go_installer = tmp_path / "scripts" / "container" / "install_go_tool.sh"
     patch_dir = tmp_path / "scripts" / "container" / "patches"
     patch_dir.mkdir()
-    nuclei_patch = patch_dir / "nuclei-kin-openapi-v0.144.patch"
+    httpx_patch = patch_dir / "httpx-disable-leakless.patch"
 
     dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
     requirements.write_text("flask==3.1.2\n", encoding="utf-8")
@@ -626,7 +626,7 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
     source_stager.write_text("#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\n", encoding="utf-8")
     go_installer.write_text("#!/usr/bin/env sh\ngo install \"$1\"\n", encoding="utf-8")
-    nuclei_patch.write_text("initial compatibility patch\n", encoding="utf-8")
+    httpx_patch.write_text("initial compatibility patch\n", encoding="utf-8")
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
 
@@ -660,7 +660,7 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     go_installer_key = _smoke_image_cache_key(tmp_path, dockerfile)
     assert go_installer_key != source_stager_key
 
-    nuclei_patch.write_text("updated compatibility patch\n", encoding="utf-8")
+    httpx_patch.write_text("updated compatibility patch\n", encoding="utf-8")
     assert _smoke_image_cache_key(tmp_path, dockerfile) != go_installer_key
 
 

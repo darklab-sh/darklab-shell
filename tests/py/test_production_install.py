@@ -1457,7 +1457,6 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "!scripts/operations/backup_system.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
-    assert "!scripts/container/patches/nuclei-kin-openapi-v0.144.patch" in dockerignore
     assert "!scripts/container/stage_runtime_source.sh" in dockerignore
     assert "!scripts/container/bootstrap_nuclei_templates.sh" in dockerignore
     assert "!scripts/container/prepare_nuclei_template_cache.sh" in dockerignore
@@ -1519,19 +1518,19 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     with tarfile.open(build_context_path) as build_context:
         context_members = {member.name: member for member in build_context.getmembers()}
         go_installer_member = context_members["scripts/container/install_go_tool.sh"]
-        nuclei_patch_member = context_members[
-            "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
+        httpx_patch_member = context_members[
+            "scripts/container/patches/httpx-disable-leakless.patch"
         ]
         nuclei_bootstrap_member = context_members[
             "scripts/container/bootstrap_nuclei_templates.sh"
         ]
         assert stat.S_IMODE(go_installer_member.mode) == 0o755
-        assert stat.S_IMODE(nuclei_patch_member.mode) == 0o644
+        assert stat.S_IMODE(httpx_patch_member.mode) == 0o644
         assert stat.S_IMODE(nuclei_bootstrap_member.mode) == 0o755
-        assert go_installer_member.uid == nuclei_patch_member.uid == (
+        assert go_installer_member.uid == httpx_patch_member.uid == (
             nuclei_bootstrap_member.uid
         ) == 0
-        assert go_installer_member.gid == nuclei_patch_member.gid == (
+        assert go_installer_member.gid == httpx_patch_member.gid == (
             nuclei_bootstrap_member.gid
         ) == 0
         assert all(
@@ -1547,7 +1546,8 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
     assert "ARG PYTHON_BASE_IMAGE=python:3.14.6-slim" in dockerfile
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
-    assert "ARG KIN_OPENAPI_VERSION=v0.144.0" in dockerfile
+    assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
+    assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
     assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
     assert "ARG SCHEMATHESIS_VERSION=4.24.3" in dockerfile
@@ -1620,9 +1620,10 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         '"github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"'
         in projectdiscovery_stage
     )
+    assert "nuclei-kin-openapi" not in projectdiscovery_stage
     assert (
-        "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
-        "nuclei-kin-openapi-v0.144.patch"
+        "RUN install-go-tool \\\n"
+        '        "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}"'
     ) in projectdiscovery_stage
     assert (
         "GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/"
@@ -1991,20 +1992,20 @@ def test_go_tool_installer_keeps_the_requested_release_above_the_crypto_floor(
         tmp_path / "success",
         selected_version="v1.10.0",
         embedded_version="v1.10.0",
-        dependency_floor=f"{dependency}@v0.144.0",
-        dependency_selected_version="v0.144.0",
-        dependency_embedded_version="v0.144.0",
+        dependency_floor=f"{dependency}@v0.146.0",
+        dependency_selected_version="v0.146.0",
+        dependency_embedded_version="v0.146.0",
         source_patch=True,
     )
 
     assert result.returncode == 0, result.stderr
     assert calls.index("get golang.org/x/crypto@v0.52.0") < calls.index(
-        f"get {dependency}@v0.144.0"
+        f"get {dependency}@v0.146.0"
     )
-    assert calls.index(f"get {dependency}@v0.144.0") < calls.index(
+    assert calls.index(f"get {dependency}@v0.146.0") < calls.index(
         "get github.com/projectdiscovery/httpx/cmd/httpx@v1.10.0"
     )
-    assert f"{dependency}=v0.144.0" in result.stdout
+    assert f"{dependency}=v0.146.0" in result.stdout
     assert "version=v1.10.0 x_crypto=v0.53.0" in result.stdout
     assert "Applied Go tool source patch" in result.stdout
     assert (tmp_path / "success" / "fake-git.log").read_text(
@@ -2024,8 +2025,8 @@ def test_go_tool_installer_keeps_the_requested_release_above_the_crypto_floor(
         tmp_path / "mismatch",
         selected_version="v1.10.0",
         embedded_version="v1.10.0",
-        dependency_floor=f"{dependency}@v0.144.0",
-        dependency_selected_version="v0.144.0",
+        dependency_floor=f"{dependency}@v0.146.0",
+        dependency_selected_version="v0.146.0",
         dependency_embedded_version="v0.132.0",
     )
     assert rejected.returncode == 1
@@ -3191,9 +3192,9 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
         "scripts/container/patches/httpx-disable-leakless.patch"
         in build_inputs["source"]["files"]
     )
-    assert (
-        "scripts/container/patches/nuclei-kin-openapi-v0.144.patch"
-        in build_inputs["source"]["files"]
+    assert all(
+        "nuclei-kin-openapi" not in path
+        for path in build_inputs["source"]["files"]
     )
     assert build_inputs["release_tool_images"] == {"gitlab_cli": GITLAB_CLI_IMAGE}
     assert evidence_index["release_tools"] == {"gitlab_cli_image": GITLAB_CLI_IMAGE}
