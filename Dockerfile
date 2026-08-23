@@ -2,30 +2,32 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-ARG PYTHON_BASE_IMAGE=python:3.14.6-slim
-ARG GO_VERSION=1.26.5
-ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
-ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
+ARG PYTHON_BASE_IMAGE=python:3.14.7-slim
+ARG GO_VERSION=1.27.0
+ARG GO_LINUX_AMD64_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+ARG GO_LINUX_ARM64_SHA256=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
 ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
+ARG GO_X_NET_VERSION=v0.55.0
 ARG KIN_OPENAPI_VERSION=v0.146.0
+ARG KATANA_PGX_VERSION=v5.9.0
 ARG GOSU_VERSION=1.19
 ARG OPENSSL_VERSION=3.6.3
 ARG OPENSSL_SHA256=243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
 ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.11.1
-ARG SUBFINDER_VERSION=v2.14.0
+ARG SUBFINDER_VERSION=v2.16.0
 ARG HTTPX_VERSION=v1.10.0
 ARG DNSX_VERSION=v1.3.0
 ARG NAABU_VERSION=v2.6.1
-ARG KATANA_VERSION=v1.6.1
+ARG KATANA_VERSION=v1.7.0
 ARG TLSX_VERSION=v1.2.2
-ARG CDNCHECK_VERSION=v1.2.45
+ARG CDNCHECK_VERSION=v1.2.50
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
 ARG FFUF_VERSION=v2.2.1
-ARG TRUFFLEHOG_VERSION=v3.95.9
+ARG TRUFFLEHOG_VERSION=v3.97.0
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.4
@@ -36,28 +38,28 @@ ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
-ARG DALFOX_VERSION=v3.1.2
-ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.1.2-linux-x86_64-musl.tar.gz
-ARG DALFOX_LINUX_AMD64_SHA256=0818b75082bf8527c5c4b6f4ed0f745f393290637328335788c9eadfea6cf0b2
-ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.1.2-linux-aarch64-musl.tar.gz
-ARG DALFOX_LINUX_ARM64_SHA256=d21f541038a40d8dd5c4b655fb88159a4b9a75c63f61c3e244647326a5199bc2
+ARG DALFOX_VERSION=v3.2.1
+ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.2.1-linux-x86_64-musl.tar.gz
+ARG DALFOX_LINUX_AMD64_SHA256=99d2bbe01a7c0ac6e455cba0363900c5aef2866bd08a2cd5f00b83d7b9671c20
+ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.2.1-linux-aarch64-musl.tar.gz
+ARG DALFOX_LINUX_ARM64_SHA256=e10f3f95e3033899c0912c1b9032d35f754caeeb002b0b8153e2958e54485694
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
-ARG SCHEMATHESIS_VERSION=4.24.3
+ARG SCHEMATHESIS_VERSION=4.25.0
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
 ARG SQLMAP_VERSION=1.10.8
 ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
 ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
 ARG TCPING_VERSION=v2.8.0
-ARG WPSCAN_VERSION=4.0.1
+ARG WPSCAN_VERSION=4.1.0
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
-ARG URLSCAN_CLI_VERSION=v2026.07.07
+ARG URLSCAN_CLI_VERSION=v2026.08.18
 ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SECLISTS_VERSION=2026.1
 ARG SECLISTS_COMMIT=190c6f7bd58c847ceadfe57d9853592737f059e8
-ARG NIKTO_VERSION=2.6.0
-ARG NIKTO_COMMIT=69681e2e4213c15b85a90c53b2169ecb2a88fb01
+ARG NIKTO_VERSION=2.6.1
+ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
@@ -65,7 +67,7 @@ ARG APP_VERSION=2.8.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
-ARG PYTHON_VERSION=3.14.6
+ARG PYTHON_VERSION=3.14.7
 ARG PYTHON_BASE_DIGEST=unresolved
 ARG PYTHON_BASE_INDEX_DIGEST=unresolved
 
@@ -78,6 +80,7 @@ ARG GO_LINUX_AMD64_SHA256
 ARG GO_LINUX_ARM64_SHA256
 ARG GO_BUILD_PARALLELISM
 ARG GO_X_CRYPTO_VERSION
+ARG GO_X_NET_VERSION
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential ca-certificates git libpcap-dev wget && \
@@ -98,6 +101,7 @@ ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
+ENV GO_X_NET_VERSION=${GO_X_NET_VERSION}
 COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
     mkdir -p /out/usr/local/bin /out/usr/sbin \
@@ -114,6 +118,7 @@ ARG HTTPX_VERSION
 ARG DNSX_VERSION
 ARG NAABU_VERSION
 ARG KATANA_VERSION
+ARG KATANA_PGX_VERSION
 ARG TLSX_VERSION
 ARG CDNCHECK_VERSION
 ARG CHAOS_CLIENT_VERSION
@@ -127,7 +132,9 @@ RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/httpx-disable-leakless
     install-go-tool "github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}"
-RUN install-go-tool "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}"
+RUN install-go-tool \
+        "github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}" \
+        "github.com/jackc/pgx/v5@${KATANA_PGX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/tlsx/cmd/tlsx@${TLSX_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/cdncheck/cmd/cdncheck@${CDNCHECK_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}"
@@ -141,7 +148,10 @@ RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdisc
         /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt && \
     install -m 0644 \
         "$(go env GOMODCACHE)/github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}/LICENSE" \
-        /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/jackc/pgx/v5@${KATANA_PGX_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt
 
 FROM go-builder-base AS go-other-tools
 ARG GOSU_VERSION
@@ -157,7 +167,9 @@ ARG IPINFO_CLI_VERSION
 ARG URLSCAN_CLI_VERSION
 ARG GAU_VERSION
 ARG GAU_MODULE_SUM
-RUN CGO_ENABLED=0 install-go-tool "github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}"
+RUN CGO_ENABLED=0 install-go-tool \
+        "github.com/owasp-amass/amass/v5/cmd/amass@${AMASS_VERSION}" \
+        "golang.org/x/net@${GO_X_NET_VERSION}"
 RUN install-go-tool "github.com/tomnomnom/assetfinder@${ASSETFINDER_VERSION}"
 RUN install-go-tool "github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}"
 RUN install-go-tool "github.com/ffuf/ffuf/v2@${FFUF_VERSION}"
@@ -231,7 +243,10 @@ RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
     install -m 0644 "$urlscan_license" \
         /out/usr/share/doc/darklab-shell/licenses/urlscan-cli.txt && \
     install -m 0644 "$gau_license" \
-        /out/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/golang.org/x/net@${GO_X_NET_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-net.txt
 
 FROM ${PYTHON_BASE_IMAGE} AS native-tools
 ARG OPENSSL_VERSION

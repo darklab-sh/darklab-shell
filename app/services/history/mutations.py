@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Any
 
 from core.database import delete_run_artifacts
-from core.database_access import get_db_connect
+from core.database_access import get_db_backend, get_db_connect
+from core.database_backend import dialect_for_backend
 from services.atlas.cleanup import atlas_run_cleanup_preview, delete_atlas_cleanup_preview
 from services.assessments.cleanup import mark_run_evidence_unavailable_on_conn
 from services.audit.models import AuditEventType
@@ -36,6 +37,7 @@ def delete_history_run(
     cleanup_preview: dict[str, Any] | None = None
     unavailable_evidence_count = 0
     with get_db_connect()() as conn:
+        conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         owned = conn.execute(
             "SELECT id, session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),

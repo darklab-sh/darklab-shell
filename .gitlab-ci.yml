@@ -6,11 +6,11 @@ default:
     - self-hosted
 
 variables:
-  CI_DEFAULT_IMAGE: "python:3.14.6-slim"
-  CI_PYTHON_E2E_IMAGE: "python:3.14.6"
-  CI_NODE_IMAGE: "node:26.5.0-slim"
-  CI_DOCKER_IMAGE: "docker:29.6.1"
-  CI_GITLAB_CLI_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.107.0@sha256:ea9708890660b1f766d8185ccbc99b8729633bfa34ea9fda35f6ef1fdf90e507"
+  CI_DEFAULT_IMAGE: "python:3.14.7-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14.7"
+  CI_NODE_IMAGE: "node:26.7.0-slim"
+  CI_DOCKER_IMAGE: "docker:29.7.2"
+  CI_GITLAB_CLI_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.114.0@sha256:797256f9f46c6da08a337566eb11b3e53dee31fdef7d2d41b379d5841ed10cd7"
   DOCKERHUB_IMAGE: "docker.io/darklabsh/darklab-shell"
   SYFT_VERSION: "1.42.3"
   SYFT_IMAGE: "anchore/syft:v1.42.3@sha256:5999d209a342e55e9edf70bf8930fb5b86d8f2a783fa401178372c50e21b1d36"

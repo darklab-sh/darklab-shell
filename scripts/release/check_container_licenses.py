@@ -122,7 +122,7 @@ NOTICE = ROOT / "deploy" / "THIRD_PARTY_NOTICES.txt"
 LICENSE_DIR = ROOT / "deploy" / "third-party-licenses"
 NMAP_LICENSE = LICENSE_DIR / "Nmap-7.95-NPSL-0.95.txt"
 NMAP_LICENSE_SHA256 = "9d9a9a763c0e6145172cfe7d8483e23b38ce60b6c79a82e4894242917bdae6d3"
-WPSCAN_LICENSE = LICENSE_DIR / "WPScan-4.0.1.txt"
+WPSCAN_LICENSE = LICENSE_DIR / "WPScan-4.1.0.txt"
 WPSCAN_LICENSE_SHA256 = "72eaecf9c3497bb34fb5722eba38a4b3b0ae39235c17378547101b8329b51008"
 
 
@@ -268,7 +268,7 @@ def main() -> int:
             raise ValueError(f"required third-party notice is missing or empty: {path.relative_to(ROOT)}")
     wpscan_hash = hashlib.sha256(WPSCAN_LICENSE.read_bytes()).hexdigest()
     if wpscan_hash != WPSCAN_LICENSE_SHA256:
-        raise ValueError("WPScan v4.0.1 license text differs from the reviewed upstream file")
+        raise ValueError("WPScan v4.1.0 license text differs from the reviewed upstream file")
     nmap_hash = hashlib.sha256(NMAP_LICENSE.read_bytes()).hexdigest()
     if nmap_hash != NMAP_LICENSE_SHA256:
         raise ValueError("Nmap v7.95 NPSL 0.95 text differs from the reviewed upstream file")

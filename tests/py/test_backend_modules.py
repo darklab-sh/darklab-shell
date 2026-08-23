@@ -26876,9 +26876,9 @@ class TestAutocompleteContextLoading:
 
         for arg_name, version, smoke_command in (
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.45", "cdncheck -h"),
+            ("CDNCHECK_VERSION", "v1.2.50", "cdncheck -h"),
             ("GAU_VERSION", "v2.2.4", "gau --version"),
-            ("TRUFFLEHOG_VERSION", "v3.95.9", "trufflehog --help"),
+            ("TRUFFLEHOG_VERSION", "v3.97.0", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):
@@ -29586,8 +29586,18 @@ class TestDatabaseInit:
         assert any("FROM projects" in query for query, _params in opened[0].queries)
         assert any("FROM projects" in query for query, _params in opened[1].queries)
         assert any("FROM runs" in query for query, _params in opened[2].queries)
+        deleted, _atlas_cleanup, _cleanup_log_fields = history_mutations.delete_history_run(
+            session_id="session",
+            owner_scope=owner_scope,
+            run_id="run-1",
+            prune_atlas=True,
+            prune_curated_atlas=False,
+            audit_fields={},
+        )
+        assert deleted == 0
+        assert opened[-1].queries[0] == ("BEGIN IMMEDIATE", ())
         assert history_mutations.bulk_export_rows(owner_scope, [], []) == ({}, {})
-        assert len(opened) == 5
+        assert len(opened) == 6
 
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

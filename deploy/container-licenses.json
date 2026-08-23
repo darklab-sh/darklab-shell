@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.8.3",
-  "reviewed_on": "2026-08-07",
+  "reviewed_on": "2026-08-23",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -107,11 +107,25 @@
       "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt"
     },
     {
+      "name": "Go networking module",
+      "version_arg": "GO_X_NET_VERSION",
+      "source": "https://pkg.go.dev/golang.org/x/net",
+      "license": "BSD-3-Clause",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-net.txt"
+    },
+    {
       "name": "kin-openapi",
       "version_arg": "KIN_OPENAPI_VERSION",
       "source": "https://github.com/getkin/kin-openapi",
       "license": "MIT",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt"
+    },
+    {
+      "name": "pgx PostgreSQL driver",
+      "version_arg": "KATANA_PGX_VERSION",
+      "source": "https://github.com/jackc/pgx",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt"
     },
     {
       "name": "gosu",
@@ -282,7 +296,7 @@
       "version_arg": "WPSCAN_VERSION",
       "source": "https://github.com/wpscanteam/wpscan",
       "license": "LicenseRef-WPScan-Public-Source",
-      "notice_location": "/usr/share/doc/darklab-shell/licenses/WPScan-4.0.1.txt",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/WPScan-4.1.0.txt",
       "usage_note": "Commercialization can require a separate WPScan license; the bundled terms control."
     },
     {
