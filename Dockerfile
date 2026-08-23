@@ -8,12 +8,12 @@ ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77b
 ARG GO_LINUX_ARM64_SHA256=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
 ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
-ARG KIN_OPENAPI_VERSION=v0.144.0
+ARG KIN_OPENAPI_VERSION=v0.146.0
 ARG GOSU_VERSION=1.19
 ARG OPENSSL_VERSION=3.6.3
 ARG OPENSSL_SHA256=243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
 ARG SSLSCAN_VERSION=2.2.2
-ARG NUCLEI_VERSION=v3.11.0
+ARG NUCLEI_VERSION=v3.11.1
 ARG SUBFINDER_VERSION=v2.14.0
 ARG HTTPX_VERSION=v1.10.0
 ARG DNSX_VERSION=v1.3.0
@@ -117,10 +117,7 @@ ARG KATANA_VERSION
 ARG TLSX_VERSION
 ARG CDNCHECK_VERSION
 ARG CHAOS_CLIENT_VERSION
-# Nuclei 3.11.0 pins kin-openapi 0.132.0; keep the secure floor and API
-# compatibility patch paired until a released Nuclei version supports it.
-RUN GO_TOOL_SOURCE_PATCH=/usr/local/share/darklab/patches/nuclei-kin-openapi-v0.144.patch \
-    install-go-tool \
+RUN install-go-tool \
         "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}" \
         "github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}"
 RUN install-go-tool "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}"

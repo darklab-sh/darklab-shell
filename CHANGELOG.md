@@ -628,6 +628,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Nuclei now uses the upstream kin-openapi compatibility path without a local source patch.**
+  - **Before:** Nuclei 3.11.0 required a two-line source change before the image could raise its embedded kin-openapi dependency above the vulnerable 0.132.0 release.
+  - **After:** The image builds Nuclei 3.11.1 unmodified, keeps an explicit kin-openapi 0.146.0 security floor, and still verifies the selected dependency in the finished binary. The retired patch is no longer part of the Docker context, smoke cache key, or release provenance; kin-openapi license and SBOM tracking remain in place.
+  - **Tests:** Production-install, smoke-cache, and release-evidence contracts pin the unpatched build and current dependency floor without changing test-function totals. A native ARM64 runtime build and an emulated AMD64 Nuclei build verify the selected Nuclei and embedded kin-openapi versions; the final ARM64 image also passes the CI-pinned Critical vulnerability gate.
 - **The headless API guide now has resource-oriented navigation.** The introduction reflects the full versioned `/api/v1` surface, and a contents list links directly to authentication, shared contracts, Projects and Assessments, connectors, teams, runs, Atlas, automation, streaming, and CLI guidance.
 - **The testing handbook now starts each suite with its purpose and canonical command.** Pytest, Vitest, and Playwright details are grouped by backend, import, connector, evidence, Assessment, browser-journey, and harness topics so contributors can choose a layer before reading its full coverage contract.
 - **The Project Workspaces feature reference is organized by task.** Short sections now separate Assessment state and actions, ZAP/OAST connectors, Project records, finding verification, Web Surface, HTTP profiles, packages, reports, and monitoring so readers can find limits and failure behavior without unpacking page-wide bullets.
