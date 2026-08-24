@@ -11,6 +11,7 @@ from core.helpers import get_log_session_id
 from services.assessments.batch.cancellation_settlement import finalize_canceling_batch_run
 from services.assessments.batch.execution import launch_assessment_batch
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
+from services.assessments.batch.terminal_observability import record_terminal_batch_milestone
 from services.workflows import storage
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
@@ -36,7 +37,9 @@ def finalize_assessment_batch_run(run_id: str, exit_code: int) -> dict[str, obje
         return None
     transition = finalized.get("parent_transition")
     if isinstance(transition, dict) and transition.get("terminal"):
-        enqueue_terminal_batch_summary(str(child.get("execution_id") or ""))
+        batch_id = str(child.get("execution_id") or "")
+        record_terminal_batch_milestone(batch_id, changed=True)
+        enqueue_terminal_batch_summary(batch_id)
     launch_assessment_batch(str(child.get("execution_id") or ""))
     return finalized
 
@@ -64,6 +67,7 @@ def finalize_assessment_batch_run_safely(
                 step_id=str(execution.get("current_step_id") or ""),
             )
             if failed:
+                record_terminal_batch_milestone(batch_id, changed=True)
                 enqueue_terminal_batch_summary(batch_id)
         log.error(
             "ASSESSMENT_BATCH_FINALIZE_ERROR",
@@ -76,7 +80,4 @@ def finalize_assessment_batch_run_safely(
         )
 
 
-__all__ = [
-    "finalize_assessment_batch_run",
-    "finalize_assessment_batch_run_safely",
-]
+__all__ = ["finalize_assessment_batch_run", "finalize_assessment_batch_run_safely"]

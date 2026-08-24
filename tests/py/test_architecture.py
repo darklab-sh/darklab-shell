@@ -1210,6 +1210,11 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/batch/retry_scope.py", 153, "split-package-ratchet"
     ),
     ModuleSizeBudget(
+        "app/services/assessments/batch/terminal_observability.py",
+        73,
+        "split-package-ratchet",
+    ),
+    ModuleSizeBudget(
         "app/services/assessments/batch/settings.py", 150, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/batch/start.py", 144, "split-package-ratchet"),
