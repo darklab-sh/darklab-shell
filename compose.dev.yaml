@@ -82,7 +82,7 @@ services:
       context: .
       args:
         APP_PORT: ${APP_PORT:-8888}
-        APP_VERSION: ${APP_VERSION:-2.9.0-dev}
+        APP_VERSION: ${APP_VERSION:-2.9.0-rc.1-dev}
         VCS_REF: ${GIT_SHA:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     labels:
