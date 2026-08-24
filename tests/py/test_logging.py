@@ -42,7 +42,6 @@ from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields, con
 from services.assessments import profiles as assessment_profiles
 from services.assessments.batch import active_monitor as assessment_active_monitor
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _emit(formatter, level, msg, extra=None):
@@ -492,7 +491,9 @@ class TestConfigureLogging:
         configure_logging({"log_level": "DEBUG"})
         assert self._logger().level == logging.DEBUG
         output = io.StringIO()
-        self._logger().handlers[0].setStream(output)
+        handler = self._logger().handlers[0]
+        assert isinstance(handler, logging.StreamHandler)
+        handler.setStream(output)
 
         assessment_profiles.log.info(
             "ASSESSMENT_PROFILE_CATALOG_LOADED",

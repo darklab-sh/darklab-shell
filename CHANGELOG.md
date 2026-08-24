@@ -11,7 +11,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.8.4] - Unreleased
+## [2.9.0] - Unreleased
 
 ### Added
 
@@ -54,6 +54,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment operators now get useful, privacy-safe lifecycle diagnostics.** Catalog failures, batch deferrals and terminal outcomes, Nuclei refresh failures, optional run-finalization errors, ZAP jobs, and private OAST sessions use consistent DEBUG, INFO, WARNING, and ERROR records with fixed phases, bounded counts, safe ids, retry context, and sanitized tracebacks. Targets, commands, profile material, provider responses, callback data, credentials, report contents, and filesystem paths remain redacted.
 
 - **Assessment and Atlas browser state now survives routine refreshes.** Planner and batch updates preserve scroll and focus, batch controls remain discoverable, Entity selection no longer jumps to the top, worklist filters and paging replace only their affected region, and stale lifecycle responses can't leave the Assessment tab stuck in a loading state. Archived Team assessments remain readable while mutation controls stay disabled.
+
+- **Contributor type checks now understand structured test records.** Assessment batch log assertions model their custom fields, container smoke filters preserve each case's mapping type, and logging tests narrow stream handlers before replacing their output stream.
 
 ---
 

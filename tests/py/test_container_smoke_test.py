@@ -32,7 +32,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from urllib.error import HTTPError
 
 import pytest
@@ -46,6 +46,7 @@ from core.output_signals import strip_ansi_codes
 
 
 ROOT = Path(__file__).resolve().parents[2]
+_SmokeCase = TypeVar("_SmokeCase", bound=Mapping[str, object])
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 WORKSPACE_EXPECTATIONS_FILE = (
     ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-workspace-expectations.json"
@@ -926,11 +927,11 @@ def _load_deterministic_commands() -> set[str]:
 
 
 def _filter_smoke_cases(
-    cases: Sequence[dict[str, object]],
+    cases: Sequence[_SmokeCase],
     *,
     tier: str,
     deterministic_commands: set[str],
-) -> list[dict[str, object]]:
+) -> list[_SmokeCase]:
     if tier == "all":
         return list(cases)
     deterministic = tier == "deterministic"

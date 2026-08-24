@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -63,9 +63,26 @@ def _mapping(value: object) -> dict[str, Any]:
     return value
 
 
-def _terminal_batch_records(caplog: Any, batch_id: str) -> list[logging.LogRecord]:
+class _AssessmentBatchLogRecord(logging.LogRecord):
+    batch_id: str
+    batch_status: str
+    reason_code: str
+    duration_ms: int
+    succeeded: int
+    failed: int
+    unavailable: int
+    canceled: int
+    could_not_cancel: int
+    launched_count: int
+    stage: str
+
+
+def _terminal_batch_records(
+    caplog: Any,
+    batch_id: str,
+) -> list[_AssessmentBatchLogRecord]:
     return [
-        record
+        cast(_AssessmentBatchLogRecord, record)
         for record in caplog.records
         if record.getMessage() == "ASSESSMENT_BATCH_COMPLETED"
         and getattr(record, "batch_id", "") == batch_id
@@ -775,7 +792,7 @@ def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch, c
     assert result["reason_code"] == "owner_parallel_limit"
     assert deferrals == ["owner_parallel_limit"]
     records = [
-        record
+        cast(_AssessmentBatchLogRecord, record)
         for record in caplog.records
         if record.getMessage() == "ASSESSMENT_BATCH_LAUNCH_DEFERRED"
     ]
@@ -1073,10 +1090,13 @@ def test_terminal_batch_notification_failure_does_not_roll_back_completion(
     assert settled is not None
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None and parent["status"] == "completed"
-    record = next(
-        item
-        for item in caplog.records
-        if item.getMessage() == "ASSESSMENT_BATCH_NOTIFICATION_ERROR"
+    record = cast(
+        _AssessmentBatchLogRecord,
+        next(
+            item
+            for item in caplog.records
+            if item.getMessage() == "ASSESSMENT_BATCH_NOTIFICATION_ERROR"
+        ),
     )
     assert record.batch_id == batch["batch_id"]
 
@@ -1513,10 +1533,13 @@ def test_batch_recovery_pages_all_executions_and_isolates_errors(monkeypatch, ca
     assert examined == [batch_id for batch_id, _created in refs]
     assert recorded.count("left_running") == 204
     assert recorded.count("failed") == 1
-    error = next(
-        record
-        for record in caplog.records
-        if record.getMessage() == "ASSESSMENT_BATCH_RECOVERY_ERROR"
+    error = cast(
+        _AssessmentBatchLogRecord,
+        next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "ASSESSMENT_BATCH_RECOVERY_ERROR"
+        ),
     )
     assert error.batch_id == refs[57][0]
     assert error.stage == "recover_batch"
