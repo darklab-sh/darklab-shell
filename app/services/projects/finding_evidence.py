@@ -146,19 +146,6 @@ def list_finding_evidence_links_on_conn(
     return result
 
 
-def list_finding_evidence_links(
-    session_id: str,
-    project_id: str,
-    finding_id: str,
-    *,
-    team_id: str = "",
-) -> list[dict[str, Any]]:
-    with get_db_connect()() as conn:
-        return list_finding_evidence_links_on_conn(
-            conn, session_id, project_id, finding_id, team_id=team_id
-        )
-
-
 def attach_finding_evidence_links(
     session_id: str,
     project_id: str,

@@ -460,7 +460,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/output_targets.py", 240, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_target_recon.py", 62, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_profile.py", 93, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/atlas/intel_evidence.py", 335, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/atlas/intel_evidence.py", 329, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_summary.py", 370, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup_query.py", 68, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/lookup_resolve.py", 347, "split-package-ratchet"),
@@ -622,7 +622,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/lifecycle.py", 376, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/mutations.py", 493, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/profiles.py", 686, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/assessments/profiles.py", 681, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 266, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/read_model_queries.py", 162, "split-package-ratchet"
@@ -661,7 +661,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/entity_monitoring.py", 139, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/finding_identity.py", 127, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/projects/finding_evidence.py", 327, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/projects/finding_evidence.py", 314, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/finding_evidence_sources.py", 232, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/verification_actions.py", 133, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/overview.py", 1081, "split-target-phase4"),

@@ -110,14 +110,6 @@ class AssessmentProfileCatalog:
 _CATALOG_CACHE: dict[tuple[str, str], dict[str, object]] = {}
 
 
-def default_assessment_profiles_path() -> Path:
-    return config_paths.config_asset_paths(
-        "assessment_profiles.yaml",
-        shipped_conf_dir=app_config.APP_CONF_DIR or None,
-        local_conf_dir=app_config.APP_LOCAL_CONF_DIR or None,
-    ).shipped
-
-
 def configured_assessment_profile_paths() -> config_paths.ConfigAssetPaths:
     return config_paths.config_asset_paths(
         "assessment_profiles.yaml",
