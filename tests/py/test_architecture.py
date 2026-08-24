@@ -632,8 +632,13 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/handoff.py", 62, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/lifecycle.py", 376, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/mutations.py", 493, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/assessments/profile_catalog_validation.py",
+        147,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/services/assessments/profile_summaries.py", 27, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/profiles.py", 677, "cohesive-ratchet"),
+    ModuleSizeBudget("app/services/assessments/profiles.py", 631, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/read_model.py", 266, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/read_model_queries.py", 162, "split-package-ratchet"

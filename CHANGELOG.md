@@ -664,6 +664,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Rejected Assessment profile catalogs no longer copy operator-authored values into warnings.** The warnings retain the catalog source and path plus a fixed error category and class, while rendered validation messages, unknown fields, action identifiers, matcher values, and YAML stay out of both text and GELF output.
 - **Assessment profile and active-batch monitor events now use the configured application log pipeline.**
   - **Why:** These events could bypass the selected text or GELF formatter and lose their structured context in production.
   - **What:** Both Assessment modules now emit through the dedicated `shell` logger used by runtime bootstrap.
