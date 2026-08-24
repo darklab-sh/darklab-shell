@@ -4,6 +4,7 @@
 import hashlib
 import io
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
@@ -1013,6 +1014,7 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
     monkeypatch.setattr(worker, "MANAGED_TEMPLATE_DIR", str(live))
     monkeypatch.setenv("NUCLEI_CONFIG_DIR", str(live_config_dir))
 
+    update_return_code = 0
     validation_return_code = 0
 
     def fake_run(args, **kwargs):
@@ -1029,7 +1031,7 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
                 "nuclei-templates-directory": str(stage),
                 "nuclei-templates-version": "v10.4.7",
             }), encoding="utf-8")
-            return subprocess.CompletedProcess(args, 0)
+            return subprocess.CompletedProcess(args, update_return_code)
         return subprocess.CompletedProcess(args, validation_return_code)
 
     monkeypatch.setattr(worker.subprocess, "run", fake_run)
@@ -1060,11 +1062,63 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
     failed_config.mkdir()
     failed = worker._run("/usr/local/bin/nuclei", failed_stage, failed_config)
 
-    assert failed == {"status": "failed", "reason_code": "staged_cache_incompatible"}
+    assert failed == {
+        "status": "failed",
+        "reason_code": "staged_cache_incompatible",
+        "phase": "validation",
+        "exit_status": 1,
+    }
     assert (live / ".checksum").read_text(encoding="utf-8") == installed_manifest
 
+    update_return_code = 17
+    update_stage = tmp_path / "stage-update-failure"
+    update_stage.mkdir()
+    update_config = tmp_path / "config-update-failure"
+    update_config.mkdir()
+    update_failed = worker._run(
+        "/usr/local/bin/nuclei",
+        update_stage,
+        update_config,
+    )
+    assert update_failed == {
+        "status": "failed",
+        "reason_code": "template_update_failed",
+        "phase": "update",
+        "exit_status": 17,
+    }
 
-def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, monkeypatch):
+    update_return_code = 0
+    validation_return_code = 0
+    for error in (OSError("install unavailable"), ValueError("invalid install")):
+        with monkeypatch.context() as install_patch:
+            install_patch.setattr(
+                worker,
+                "install_staged_template_cache",
+                lambda *_args, _error=error, **_kwargs: (_ for _ in ()).throw(_error),
+            )
+            error_name = type(error).__name__
+            install_stage = tmp_path / f"stage-install-{error_name}"
+            install_stage.mkdir()
+            install_config = tmp_path / f"config-install-{error_name}"
+            install_config.mkdir()
+            install_failed = worker._run(
+                "/usr/local/bin/nuclei",
+                install_stage,
+                install_config,
+            )
+        assert install_failed == {
+            "status": "failed",
+            "reason_code": "template_install_failed",
+            "phase": "install",
+            "error_class": error_name,
+        }
+
+
+def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
     from contextlib import contextmanager
 
     from services.nuclei import template_lock, template_refresh
@@ -1139,6 +1193,7 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
     monkeypatch.setattr(template_refresh, "managed_nuclei_template_lock", fake_lock)
     monkeypatch.setattr(template_refresh, "SCANNER_PREFIX", [])
     monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "true")
+    caplog.set_level(logging.WARNING, logger="shell")
     calls = []
 
     def fake_worker(args, **kwargs):
@@ -1166,7 +1221,12 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
         return subprocess.CompletedProcess(
             args,
             1,
-            json.dumps({"status": "failed", "reason_code": "template_install_failed"}),
+            json.dumps({
+                "status": "failed",
+                "reason_code": "template_install_failed",
+                "phase": "install",
+                "error_class": "OSError",
+            }),
             "",
         )
 
@@ -1178,6 +1238,71 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
             active_batch_exists=lambda: False,
             run_command=failed_worker,
         )
+    install_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        install_record.reason_code,
+        install_record.phase,
+        install_record.worker_exit_status,
+        install_record.error_class,
+    ) == ("template_install_failed", "install", 1, "OSError")
+    assert install_record.duration_ms >= 0
+
+    caplog.clear()
+
+    def malformed_worker(args, **_kwargs):
+        return subprocess.CompletedProcess(args, 0, "PRIVATE_WORKER_RESPONSE", "")
+
+    with pytest.raises(template_refresh.NucleiTemplateRefreshError):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=malformed_worker,
+        )
+    malformed_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        malformed_record.reason_code,
+        malformed_record.phase,
+        malformed_record.worker_exit_status,
+        malformed_record.error_class,
+    ) == ("worker_response_invalid", "response", 0, "JSONDecodeError")
+    assert "PRIVATE_WORKER_RESPONSE" not in caplog.text
+
+    caplog.clear()
+
+    def timed_out_worker(args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            args,
+            kwargs["timeout"],
+            output="PRIVATE_WORKER_OUTPUT",
+            stderr="PRIVATE_WORKER_ERROR",
+        )
+
+    with pytest.raises(
+        template_refresh.NucleiTemplateRefreshError,
+        match="timed out",
+    ):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=timed_out_worker,
+        )
+    timeout_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        timeout_record.reason_code,
+        timeout_record.phase,
+        timeout_record.error_class,
+    ) == ("template_refresh_timed_out", "worker", "TimeoutExpired")
+    assert "PRIVATE_WORKER" not in caplog.text
 
     with pytest.raises(template_refresh.NucleiTemplateRefreshError) as active:
         template_refresh.refresh_managed_nuclei_templates(

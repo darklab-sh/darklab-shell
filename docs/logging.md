@@ -225,6 +225,7 @@ The current event inventory is:
 | WARNING | `ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED` | local profile overlay rejected in favor of shipped or last valid catalog | source, path, fixed error_code, error_class; no rejected values or traceback |
 | WARNING | `ASSESSMENT_NUCLEI_PROFILE_CONTRACT_CHANGED` | saved generic Nuclei action no longer matches the deployment contract | project_id, assessment_id, check_id, profile_key, policy_level, deployment_gate_enabled; no traceback |
 | WARNING | `ASSESSMENT_NUCLEI_TEMPLATE_CACHE_CHANGED` | saved generic Nuclei action no longer matches the template cache | project_id, assessment_id, check_id, expected_state, current_state; no traceback |
+| INFO / WARNING | `NUCLEI_TEMPLATE_REFRESH_SUCCEEDED` / `NUCLEI_TEMPLATE_REFRESH_FAILED` | operator-controlled managed-template replacement | successful release version, or fixed reason_code and phase, duration_ms, bounded error_class, and the Nuclei update/validation exit status when available; child output, paths, template content, commands, targets, and credentials stay excluded |
 | INFO | `OAST_WORKER_STARTED` / `OAST_WORKER_STOPPED` | private OAST connector worker | pid |
 | INFO | `OAST_WORKER_LOCK_HELD` | private OAST connector worker | — |
 | ERROR | `OAST_WORKER_TICK_FAILED` | private OAST connector worker | traceback |
