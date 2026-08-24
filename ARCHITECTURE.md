@@ -2503,7 +2503,7 @@ This split exists to keep each risk at the cheapest useful layer:
 The browser test harness mirrors production constraints rather than abstracting them away:
 
 - the frontend uses committed CSS and ES module bundles; `Vitest` uses direct imports for converted modules while extraction helpers remain only where a focused legacy harness is still cheaper than rewriting the test
-- `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
+- `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects; GitLab requires both the full bundled suite and the focused source-module suite as separate jobs so each asset boundary reports failures independently
 - the standalone demo/capture Playwright configs share one visual-contract file so desktop/mobile viewport, density, touch, token, and seeded-history assumptions stay aligned across recording and screenshot flows
 - each parallel browser project gets its own Flask server port plus isolated internal `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports

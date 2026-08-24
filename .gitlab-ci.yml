@@ -56,7 +56,7 @@ cache:
 before_script:
   - pip install -q -r app/requirements.txt -r requirements-dev.txt
 
-test-js-e2e:
+.playwright-lane:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
   variables:
@@ -75,14 +75,22 @@ test-js-e2e:
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
     - npm ci
     - npx playwright install --with-deps chromium
-  script:
-    - npm run test:e2e
   artifacts:
     when: on_failure
     paths:
       - playwright-report/
       - test-results/
     expire_in: 1 week
+
+test-js-e2e:
+  extends: .playwright-lane
+  script:
+    - npm run test:e2e
+
+test-js-e2e-source:
+  extends: .playwright-lane
+  script:
+    - npm run test:e2e:source
 
 .pytest-lane:
   stage: test

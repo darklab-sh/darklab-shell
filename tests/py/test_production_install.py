@@ -2590,6 +2590,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "release-compose-restart-marker" in ci_config
     assert 'release-install/darklab-deploy" status' in ci_config
     parsed_ci = yaml.safe_load(ci_config)
+    assert parsed_ci["test-js-e2e"]["extends"] == ".playwright-lane"
+    assert parsed_ci["test-js-e2e"]["script"] == ["npm run test:e2e"]
+    assert parsed_ci["test-js-e2e-source"]["extends"] == ".playwright-lane"
+    assert parsed_ci["test-js-e2e-source"]["script"] == ["npm run test:e2e:source"]
+    assert "allow_failure" not in parsed_ci["test-js-e2e-source"]
     release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
     final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in release_rule
