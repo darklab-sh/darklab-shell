@@ -2606,6 +2606,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert public_smoke["variables"]["RUN_CONTAINER_SMOKE_TEST_RETRIES"] == "3"
     assert "--tier public-network" in "\n".join(public_smoke["script"])
     assert all("allow_failure" not in rule for rule in public_smoke["rules"])
+    for config_name in (
+        "playwright.config.js",
+        "playwright.parallel.config.js",
+    ):
+        playwright_config = (ROOT / ".tooling" / config_name).read_text(encoding="utf-8")
+        assert "failOnFlakyTests: Boolean(process.env.CI)" in playwright_config
+        assert "forbidOnly: Boolean(process.env.CI)" in playwright_config
     release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
     final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in release_rule
