@@ -1,6 +1,8 @@
 # Headless API and CLI
 
-darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, Project query services, and shared per-IP rate-limit policy as the browser run routes.
+darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, documented Project query services, and shared per-IP rate-limit policy as the browser run routes.
+
+API v1 isn't a one-for-one copy of the browser workspace. Its Project writes cover Assessment cycles and batches, assessor findings and typed evidence, HTTP profiles, probes, and completed-run links. General Project deletion, finding triage and remediation merging, Web Surface browsing, monitoring-risk updates, grouped retests, managed Nuclei-template refreshes, and interactive Atlas-intelligence refreshes remain browser-owned operations.
 
 The bundled `darklab` CLI is a thin wrapper around this API. Install it from the repo root with:
 
