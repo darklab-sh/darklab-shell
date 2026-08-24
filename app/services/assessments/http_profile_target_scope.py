@@ -49,21 +49,22 @@ def execution_target(profile: Mapping[str, Any], target: Mapping[str, str]) -> s
             "http_profile_scope_mismatch",
             "The HTTP profile contains an invalid saved URL boundary.",
         ) from exc
-    if target_type in {"domain", "ip"}:
-        target_value = str(target.get("value") or "")
-        if str(urlsplit(base_url).hostname or "").casefold() != target_value.strip("[]").casefold():
-            raise HttpProfileExecutionError(
-                "http_profile_scope_mismatch",
-                "The HTTP profile base URL no longer matches this exact Project target.",
-            )
-        return base_url
-    if target_type != "url":
-        raise HttpProfileExecutionError(
-            "http_profile_target_unsupported",
-            "HTTP profiles can only run against saved domain, IP, or URL targets.",
-        )
     try:
-        target_value = canonical_url(str(target.get("value") or ""))
+        if target_type in {"domain", "ip"}:
+            target_host = str(target.get("value") or "").strip("[]").casefold()
+            if str(urlsplit(base_url).hostname or "").casefold() != target_host:
+                raise HttpProfileExecutionError(
+                    "http_profile_scope_mismatch",
+                    "The HTTP profile base URL no longer matches this exact Project target.",
+                )
+            target_value = base_url
+        elif target_type == "url":
+            target_value = canonical_url(str(target.get("value") or ""))
+        else:
+            raise HttpProfileExecutionError(
+                "http_profile_target_unsupported",
+                "HTTP profiles can only run against saved domain, IP, or URL targets.",
+            )
         roots = [canonical_url(str(root)) for root in profile.get("scope_roots", [])]
         includes = [
             canonical_url_path(str(value), reject_dot_segments=True)
