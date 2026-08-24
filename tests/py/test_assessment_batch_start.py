@@ -15,7 +15,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.batch.contracts import AssessmentBatchError
-from services.assessments.batch.events import list_batch_events
+from services.assessments.batch.event_page import get_batch_event_page
 from services.assessments.batch.preview_compiler import compile_batch_preview
 from services.assessments.batch.preview_storage import get_batch_preview_items
 from services.assessments.batch.retry_compiler import compile_batch_retry_preview
@@ -26,6 +26,12 @@ from services.nuclei.template_cache import NucleiTemplateCacheSnapshot
 from services.nuclei.template_health import NucleiTemplateHealth
 from services.projects.crud import create_project, delete_project
 from services.projects.targets import add_project_target
+
+
+def _batch_events(session_id: str, batch_id: str) -> list[dict[str, object]]:
+    events = get_batch_event_page(session_id, batch_id)["events"]
+    assert isinstance(events, list)
+    return [event for event in events if isinstance(event, dict)]
 
 
 def _runtime() -> ProbePlanningRuntime:
@@ -502,7 +508,7 @@ def test_retry_preview_rebuilds_only_failed_work_and_creates_immutable_lineage(
         source_batch_id=source_id,
     )
     assert replay["batch_id"] == retry["batch_id"]
-    source_events = list_batch_events(session_id, source_id)
+    source_events = _batch_events(session_id, source_id)
     retry_created = [
         event for event in source_events if event["event_type"] == "retry_created"
     ]

@@ -27,6 +27,7 @@ from services.assessments.batch.cancellation_events import (
 )
 from services.assessments.batch.events import append_batch_event_on_conn
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
+from services.assessments.batch.terminal_observability import record_terminal_batch_milestone
 from services.assessments.batch.storage_read import get_batch_parent
 from services.assessments.batch.claim_fairness import lock_batch_claim_gate
 from services.projects.scope import shared_owner_where
@@ -139,8 +140,8 @@ def request_batch_cancellation_on_conn(
     batch_id: str,
     *,
     team_id: str = "",
-) -> tuple[str, ...] | None:
-    """Record cancellation intent and return bound runs that still need a signal."""
+) -> tuple[tuple[str, ...], bool] | None:
+    """Return bound runs plus whether this transaction terminalized the parent."""
     lock_batch_claim_gate(conn)
     owner_sql, owner_params = shared_owner_where(
         session_id, team_id=team_id, table_alias="e"
@@ -155,7 +156,7 @@ def request_batch_cancellation_on_conn(
         return None
     status = str(row["status"] or "")
     if status in BATCH_TERMINAL_STATUSES:
-        return ()
+        return (), False
     if status not in {"queued", "running", "canceling"}:
         raise AssessmentBatchError(
             "batch_state_mismatch",
@@ -189,8 +190,8 @@ def request_batch_cancellation_on_conn(
         _unfinished_rows(conn, batch_id),
         finished=finished,
     )
-    terminalize_batch_cancellation_on_conn(conn, batch_id, finished=finished)
-    return run_ids
+    terminalized = terminalize_batch_cancellation_on_conn(conn, batch_id, finished=finished)
+    return run_ids, terminalized
 
 
 def record_cancel_signal_failure(batch_id: str, run_id: str) -> bool:
@@ -267,13 +268,15 @@ def cancel_assessment_batch(
     """Request cancellation, signal active children, and return current progress."""
     with get_db_connect()() as conn:
         conn.execute(_dialect().begin_immediate_sql())
-        run_ids = request_batch_cancellation_on_conn(
+        requested = request_batch_cancellation_on_conn(
             conn, session_id, batch_id, team_id=team_id
         )
-        if run_ids is None:
+        if requested is None:
             conn.rollback()
             return None
+        run_ids, terminalized = requested
         conn.commit()
+    record_terminal_batch_milestone(batch_id, changed=terminalized)
     signal_failures = signal_batch_cancellation_runs(
         session_id,
         ((batch_id, run_ids),),

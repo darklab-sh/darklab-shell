@@ -13,9 +13,9 @@ from services.assessments.batch.cancellation import (
     signal_batch_cancellation_runs,
 )
 from services.assessments.batch.claim_fairness import lock_batch_claim_gate
+from services.assessments.batch.terminal_observability import record_terminal_batch_milestone
 from services.projects.scope import shared_owner_where
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
-
 
 BATCH_LIFECYCLE_PENDING_CODE = "assessment_batch_cancellation_pending"
 BATCH_LIFECYCLE_PENDING_MESSAGE = (
@@ -26,8 +26,6 @@ BATCH_LIFECYCLE_PENDING_MESSAGE = (
 
 @dataclass(frozen=True)
 class BatchLifecycleCancellation:
-    """Cancellation intent committed instead of the requested lifecycle change."""
-
     batch_runs: tuple[tuple[str, tuple[str, ...]], ...]
 
     @property
@@ -79,13 +77,14 @@ def _request_lifecycle_cancellation_on_conn(
     requested: list[tuple[str, tuple[str, ...]]] = []
     for row in rows:
         batch_id = str(row["id"])
-        run_ids = request_batch_cancellation_on_conn(
+        cancellation = request_batch_cancellation_on_conn(
             conn,
             session_id,
             batch_id,
             team_id=team_id,
         )
-        if run_ids is not None:
+        if cancellation is not None:
+            run_ids, _terminalized = cancellation
             requested.append((batch_id, run_ids))
     return BatchLifecycleCancellation(tuple(requested)) if requested else None
 
@@ -128,7 +127,8 @@ def signal_lifecycle_cancellation(
     *,
     team_id: str = "",
 ) -> int:
-    """Signal bound children only after the cancellation transaction commits."""
+    for batch_id in request.batch_ids:
+        record_terminal_batch_milestone(batch_id, changed=True)
     return signal_batch_cancellation_runs(
         session_id,
         request.batch_runs,

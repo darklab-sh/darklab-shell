@@ -95,6 +95,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: projects.length,
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: Boolean(process.env.CI),
+  forbidOnly: Boolean(process.env.CI),
   reporter: [['list'], ['html', { open: 'never' }]],
   projects,
   webServer: projects.map((project, index) =>

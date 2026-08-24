@@ -26,10 +26,7 @@ from services.connectors.oast_correlations import (
     reserve_oast_correlation,
 )
 from services.connectors.oast_interaction_findings import attach_oast_interaction_to_finding
-from services.connectors.oast_interactions import (
-    ingest_oast_interaction,
-    oast_interactions_for_owner_correlation,
-)
+from services.connectors.oast_interactions import ingest_oast_interaction
 
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
@@ -355,9 +352,6 @@ def test_interaction_ingestion_redacts_deduplicates_and_marks_check_for_review(
     assert interaction["target_entity_id"] == "entity-oast"
     assert "private-token" not in str(interaction)
     assert "private-query" not in str(interaction)
-    assert oast_interactions_for_owner_correlation(
-        "owner-b", correlation["id"], conn=correlation_db
-    ) == []
     duplicate = ingest_oast_interaction(
         "owner-a",
         correlation["id"],

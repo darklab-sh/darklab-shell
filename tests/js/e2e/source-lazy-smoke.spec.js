@@ -3,11 +3,13 @@
 
 import { test, expect } from '@playwright/test'
 import {
+  browserSessionId,
   clickHistoryRunMenuAction,
   ensurePromptReady,
   openHistoryWithEntries,
   openRailAction,
   runCommand,
+  seedProjectWebSurfaceFixture,
 } from './helpers.js'
 
 function trackSourceJsRequests(page) {
@@ -95,6 +97,10 @@ test.describe('source-mode lazy ESM surfaces', () => {
       if (!activeResp.ok) throw new Error(`active project failed: ${activeResp.status}`)
       return project.id
     })
+    const webSurfaceFixture = seedProjectWebSurfaceFixture(testInfo, {
+      sessionId: await browserSessionId(page),
+      projectId: overviewProjectId,
+    })
 
     await openRailAction(page, 'projects')
     await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
@@ -104,6 +110,58 @@ test.describe('source-mode lazy ESM surfaces', () => {
     await expect(page.locator(`.project-overview-root[data-project-overview-root="${overviewProjectId}"]`))
       .toBeVisible()
     await expect(page.locator('.project-overview-root')).toContainText('No project targets yet.')
+    const thumbnailResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname === `/projects/${overviewProjectId}/artifacts/${webSurfaceFixture.availableArtifactId}/download`
+    })
+    await page.locator('[data-project-tab="web-surface"]').click()
+    await expect(page.locator('[data-project-tab="web-surface"]')).toHaveClass(/\bis-active\b/)
+    const webSurfacePanel = page.locator('.project-explorer-tab-panel')
+    await expect(webSurfacePanel.locator('.project-web-surface-card')).toHaveCount(2)
+    const thumbnailResponse = await thumbnailResponsePromise
+    expect(thumbnailResponse.ok()).toBe(true)
+    expect(thumbnailResponse.headers()['content-type']).toContain('image/png')
+
+    const availableCapture = webSurfacePanel.locator('.project-web-surface-card', {
+      hasText: 'Playwright sign in',
+    })
+    const screenshot = availableCapture.locator('.project-web-surface-image')
+    await expect(screenshot).toBeVisible()
+    await expect.poll(() => screenshot.evaluate(image => ({
+      naturalWidth: image.naturalWidth,
+      source: image.src,
+    }))).toEqual(expect.objectContaining({ naturalWidth: 1 }))
+    expect(await screenshot.getAttribute('src')).toMatch(/^blob:/)
+
+    const unavailableCapture = webSurfacePanel.locator('.project-web-surface-card', {
+      hasText: 'Retired endpoint',
+    })
+    await expect(unavailableCapture).toContainText('unavailable')
+    await expect(unavailableCapture.locator('.project-web-surface-placeholder'))
+      .toHaveText('workspace file is not available')
+
+    const fullView = availableCapture.getByRole('button', { name: 'Full view' })
+    await fullView.focus()
+    await fullView.click()
+    const viewer = page.locator('#project-web-surface-viewer-overlay')
+    await expect(viewer).toHaveAttribute('aria-hidden', 'false')
+    await expect(viewer.locator('.project-web-surface-viewer-image')).toBeVisible()
+    await expect(viewer.locator('#project-web-surface-viewer-title')).toHaveText('Playwright sign in')
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveAttribute('aria-hidden', 'true')
+    await expect(fullView).toBeFocused()
+
+    await availableCapture.getByRole('button', { name: 'Add to package' }).click()
+    const packageWizard = page.locator('#project-package-wizard-overlay')
+    await expect(packageWizard).toHaveClass(/\bopen\b/)
+    await expect(packageWizard.locator('.project-package-step.is-active')).toContainText('Include')
+    await expect(packageWizard).toContainText("Screenshot files are binary and can't be redacted automatically")
+    await expect(packageWizard.locator(
+      `input[data-project-package-selection="artifact"][value="${webSurfaceFixture.availableArtifactId}"]`,
+    )).toBeChecked()
+    await packageWizard.locator('[data-project-action="package-wizard-cancel"]').click()
+    await expect(packageWizard).not.toHaveClass(/\bopen\b/)
     await page.locator('.project-workspace-close').click()
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
 

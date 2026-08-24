@@ -32,7 +32,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from urllib.error import HTTPError
 
 import pytest
@@ -46,12 +46,16 @@ from core.output_signals import strip_ansi_codes
 
 
 ROOT = Path(__file__).resolve().parents[2]
+_SmokeCase = TypeVar("_SmokeCase", bound=Mapping[str, object])
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 WORKSPACE_EXPECTATIONS_FILE = (
     ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-workspace-expectations.json"
 )
 INTERACTIVE_EXPECTATIONS_FILE = (
     ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-interactive-expectations.json"
+)
+DETERMINISTIC_COMMANDS_FILE = (
+    ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-deterministic-commands.txt"
 )
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
@@ -574,7 +578,7 @@ def test_needs_nuclei_template_warmup(cases: list[dict[str, object]], expected: 
     assert _needs_nuclei_template_warmup(cases) is expected
 
 
-def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
+def test_force_smoke_image_build_reads_wrapper_env(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", raising=False)
     assert _force_smoke_image_build() is False
 
@@ -604,6 +608,44 @@ def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
         "INTERACTIVE_PTY_ENABLED=true",
         "WORKSPACE_ENABLED=true",
     ]
+
+    deterministic_commands = _load_deterministic_commands()
+    assert deterministic_commands <= set(_load_expectations())
+    cases = [
+        {"command": "ping -h"},
+        {"command": "ping -c 4 darklab.sh"},
+    ]
+    assert _filter_smoke_cases(
+        cases,
+        tier="deterministic",
+        deterministic_commands=deterministic_commands,
+    ) == [{"command": "ping -h"}]
+    assert _filter_smoke_cases(
+        cases,
+        tier="public-network",
+        deterministic_commands=deterministic_commands,
+    ) == [{"command": "ping -c 4 darklab.sh"}]
+
+    retry_evidence = tmp_path / "retry-evidence.jsonl"
+    monkeypatch.setenv(
+        "RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE",
+        str(retry_evidence),
+    )
+    _record_smoke_retry_evidence(
+        case_kind="command",
+        command="dnsenum --noreverse darklab.sh",
+        attempt=1,
+        max_attempts=4,
+        exc=AssertionError("command timed out after 120 seconds"),
+    )
+    assert json.loads(retry_evidence.read_text(encoding="utf-8")) == {
+        "attempt": 1,
+        "case_kind": "command",
+        "command": "dnsenum --noreverse darklab.sh",
+        "error_class": "AssertionError",
+        "max_attempts": 4,
+        "reason_code": "timed_out",
+    }
 
 
 def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
@@ -864,6 +906,65 @@ def _selected_commands_from_env() -> list[str]:
     if not raw.strip():
         return []
     return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def _smoke_tier_from_env() -> str:
+    tier = os.environ.get("RUN_CONTAINER_SMOKE_TEST_TIER", "all").strip().lower()
+    if tier not in {"all", "deterministic", "public-network"}:
+        raise RuntimeError(f"unsupported RUN_CONTAINER_SMOKE_TEST_TIER: {tier}")
+    return tier
+
+
+def _load_deterministic_commands() -> set[str]:
+    commands = [
+        line.strip()
+        for line in DETERMINISTIC_COMMANDS_FILE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if len(commands) != len(set(commands)):
+        raise RuntimeError("deterministic container smoke commands must be unique")
+    return set(commands)
+
+
+def _filter_smoke_cases(
+    cases: Sequence[_SmokeCase],
+    *,
+    tier: str,
+    deterministic_commands: set[str],
+) -> list[_SmokeCase]:
+    if tier == "all":
+        return list(cases)
+    deterministic = tier == "deterministic"
+    return [
+        case
+        for case in cases
+        if (str(case.get("command", "")) in deterministic_commands) is deterministic
+    ]
+
+
+def _record_smoke_retry_evidence(
+    *,
+    case_kind: str,
+    command: str,
+    attempt: int,
+    max_attempts: int,
+    exc: Exception,
+) -> None:
+    raw_path = os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE", "").strip()
+    if not raw_path:
+        return
+    path = Path(raw_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "case_kind": case_kind,
+        "command": command,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "reason_code": "timed_out" if "timed out" in str(exc).lower() else "attempt_failed",
+        "error_class": type(exc).__name__,
+    }
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def _assert_contains(actual: list[str], expected: list[str], command: str) -> None:
@@ -1590,11 +1691,21 @@ def container_smoke_test_session_id() -> str:
 
 
 _SELECTED_COMMANDS = _selected_commands_from_env()
-WORKSPACE_SMOKE_CASES = _load_workspace_cases()
+_SMOKE_TIER = _smoke_tier_from_env()
+_DETERMINISTIC_COMMANDS = _load_deterministic_commands()
+WORKSPACE_SMOKE_CASES = (
+    [] if _SMOKE_TIER == "deterministic" else _load_workspace_cases()
+)
 _WORKSPACE_SMOKE_COMMANDS = {str(case["command"]) for case in WORKSPACE_SMOKE_CASES}
-INTERACTIVE_SMOKE_CASES = _load_interactive_cases()
+INTERACTIVE_SMOKE_CASES = (
+    [] if _SMOKE_TIER == "deterministic" else _load_interactive_cases()
+)
 _INTERACTIVE_SMOKE_COMMANDS = {str(case["command"]) for case in INTERACTIVE_SMOKE_CASES}
-SMOKE_TEST_CASES = _load_cases()
+SMOKE_TEST_CASES = _filter_smoke_cases(
+    _load_cases(),
+    tier=_SMOKE_TIER,
+    deterministic_commands=_DETERMINISTIC_COMMANDS,
+)
 if _SELECTED_COMMANDS:
     SMOKE_TEST_CASES = [
         case for case in SMOKE_TEST_CASES
@@ -2149,6 +2260,13 @@ def test_container_smoke_test_command_matches_expected_output(
         try:
             _assert_smoke_case_matches(container_smoke_test, attempt_session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="command",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(
@@ -2182,6 +2300,13 @@ def test_container_smoke_test_workspace_file_flags(
         try:
             _assert_workspace_smoke_case_matches(container_smoke_test, session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="workspace",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(
@@ -2214,6 +2339,13 @@ def test_container_smoke_test_interactive_pty_commands(
         try:
             _assert_interactive_smoke_case_matches(container_smoke_test, session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="interactive",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(

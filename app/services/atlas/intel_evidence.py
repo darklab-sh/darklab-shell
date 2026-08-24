@@ -46,15 +46,6 @@ def classify_certificate_status(days_until_expiry: int | None, *, has_certificat
     return CERT_STATUS_HEALTHY
 
 
-def empty_certificate_evidence() -> dict[str, Any]:
-    return {
-        "status": CERT_STATUS_UNKNOWN,
-        "expires_at": "",
-        "days_until_expiry": None,
-        "last_checked_at": "",
-    }
-
-
 def extract_intel_evidence(
     snapshots: Sequence[Mapping[str, Any]],
     *,

@@ -34618,6 +34618,47 @@ class TestAssessmentHttpProfileExecution:
             scoped_profile,
             {"type": "url", "value": "https://app.example/allowed/page/"},
         ) == "https://app.example/allowed/page/"
+        scoped_host_targets = (
+            ("domain", "app.example", "https://app.example"),
+            ("ip", "192.0.2.10", "https://192.0.2.10"),
+            ("ip", "2001:db8::10", "https://[2001:db8::10]"),
+        )
+        for target_type, target_value, origin in scoped_host_targets:
+            allowed_host = target_value
+            target = {"type": target_type, "value": target_value}
+            assert _execution_target(
+                {
+                    "base_url": f"{origin}/public",
+                    "scope_roots": [f"{origin}/public"],
+                    "allowed_hosts": [allowed_host],
+                    "include_paths": ["/public"],
+                    "exclude_paths": ["/public/private"],
+                },
+                target,
+            ) == f"{origin}/public"
+            rejected_profiles = (
+                {
+                    "base_url": f"{origin}/admin",
+                    "scope_roots": [f"{origin}/public"],
+                    "allowed_hosts": [allowed_host],
+                },
+                {
+                    "base_url": f"{origin}/admin",
+                    "scope_roots": [origin],
+                    "allowed_hosts": [allowed_host],
+                    "include_paths": ["/public"],
+                },
+                {
+                    "base_url": f"{origin}/admin",
+                    "scope_roots": [origin],
+                    "allowed_hosts": [allowed_host],
+                    "exclude_paths": ["/admin"],
+                },
+            )
+            for rejected_profile in rejected_profiles:
+                with pytest.raises(HttpProfileExecutionError) as exc_info:
+                    _execution_target(rejected_profile, target)
+                assert exc_info.value.code == "http_profile_scope_mismatch"
         for path in (
             "../secret",
             "%2e%2e/secret",
@@ -34631,12 +34672,41 @@ class TestAssessmentHttpProfileExecution:
                     {"type": "url", "value": f"https://app.example/allowed/{path}"},
                 )
             assert exc_info.value.code == "http_profile_scope_mismatch"
-        katana_scope = _scope_arguments(profile, "katana", "https://app.example/admin")
-        assert katana_scope[:2] == ["-fs", "fqdn"]
-        assert katana_scope[2::2] == ["-cs", "-cos"]
-        assert r"\[2001:db8::1\]" in _scope_arguments(
-            profile, "katana", "https://[2001:db8::1]/admin"
+        katana_scope = _scope_arguments(
+            {
+                "scope_roots": ["https://app.example/admin"],
+                "exclude_paths": ["/admin/logout"],
+            },
+            "katana",
+            "https://app.example/admin",
+        )
+        assert katana_scope == [
+            "-fs",
+            "fqdn",
+            "-cs",
+            r"^https://app\.example(?::443)?/admin(?:$|[/?#])",
+            "-cos",
+            r"^https://app\.example(?::443)?/admin/logout(?:$|[/?#])",
+        ]
+        assert _scope_arguments(
+            {
+                "scope_roots": ["https://app.example:8443/admin"],
+                "include_paths": ["/admin/api"],
+                "exclude_paths": ["/admin/api/private"],
+            },
+            "katana",
+            "https://app.example:8443/admin/api",
+        )[3::2] == [
+            r"^https://app\.example:8443/admin/api(?:$|[/?#])",
+            r"^https://app\.example:8443/admin/api/private(?:$|[/?#])",
+        ]
+        ipv6_scope = _scope_arguments(
+            {"scope_roots": ["http://[2001:db8::1]/admin"]},
+            "katana",
+            "http://[2001:db8::1]/admin",
         )[3]
+        assert ipv6_scope.startswith(r"^http://\[2001:db8::1\](?::80)?")
+        assert "https?" not in ipv6_scope
         assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
         assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
         with pytest.raises(HttpProfileExecutionError) as nuclei_scope:

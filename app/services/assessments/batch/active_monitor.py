@@ -19,7 +19,7 @@ from services.projects.scope import shared_owner_where
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("shell")
 
 
 def _progress_from_row(row: Any) -> dict[str, int]:

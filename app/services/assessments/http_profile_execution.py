@@ -6,15 +6,14 @@
 from __future__ import annotations
 
 import base64
-import re
 import shlex
 from dataclasses import dataclass
 from typing import Any, Mapping, cast
-from urllib.parse import urlsplit
 
 import config as app_config
 from core.database_access import get_db_connect
 from services.assessments.http_profile_contracts import HttpProfileError
+from services.assessments.http_profile_katana_scope import katana_scope_arguments
 from services.assessments.command_plans import command_plan
 from services.assessments.http_profile_material import (
     HttpProfileMaterialError,
@@ -222,14 +221,7 @@ def _scope_arguments(profile: Mapping[str, Any], tool: str, target_value: str) -
             "http_profile_tool_unsupported",
             NUCLEI_HTTP_PROFILE_UNAVAILABLE,
         )
-    raw_host = str(urlsplit(target_value).hostname or "")
-    host = re.escape(f"[{raw_host}]" if ":" in raw_host else raw_host)
-    arguments = ["-fs", "fqdn"]
-    for prefix in profile.get("include_paths", []):
-        arguments.extend(["-cs", rf"^https?://{host}(?::\d+)?{re.escape(str(prefix))}"])
-    for prefix in profile.get("exclude_paths", []):
-        arguments.extend(["-cos", rf"^https?://{host}(?::\d+)?{re.escape(str(prefix))}"])
-    return arguments
+    return katana_scope_arguments(profile)
 
 
 def materialize_http_profile_launch(

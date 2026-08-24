@@ -21,7 +21,7 @@ from core.database_access import get_db_connect
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
-from services.workflows.fanout import expand_collection_step, next_fanout_batch
+from services.workflows.fanout import expand_collection_step
 from services.workflows.fanout_child_lifecycle import (
     bind_fanout_child_run,
     claim_fanout_child,
@@ -555,17 +555,6 @@ def test_collection_fanout_renders_bounded_deduplicated_child_commands_without_p
     ]
     with pytest.raises(WorkflowDefinitionError, match="control characters"):
         expand_collection_step({"cmd": "probe {{host}}"}, {}, "host", ["bad\x01host"])
-
-
-def test_collection_fanout_next_batch_uses_source_ordinals_after_checkpoint_resume():
-    checkpoint = create_fanout_checkpoint(3).mark_completed([0])
-    children, resumed = next_fanout_batch(
-        {"cmd": "probe {{host}}"}, {}, "host", ["one", "two", "three"], checkpoint,
-        parallel_limit=2,
-    )
-    assert [child["ordinal"] for child in children] == [1, 2]
-    assert [child["command"] for child in children] == ["probe two", "probe three"]
-    assert resumed.running == (1, 2)
 
 
 def test_collection_fanout_policy_normalizes_retry_parallel_and_failure_modes():

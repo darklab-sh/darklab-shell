@@ -204,6 +204,8 @@ releases while `main` advances.
 
 **JavaScript and CSS assets** — the shell frontend uses ES module entries for the app shell and permalink page, plus lazy ES modules for first-use app surfaces. New JS logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the shell composition root near the end of the shell entry. CSS and JavaScript bundles are generated from `assets.config.json` into committed files under `app/static/build/`, including minified ESM output, linked source maps, and precompressed `.br` and `.gz` siblings for text assets; run `npm run assets:sync` after changing bundled asset membership or source files. `npm run assets:inventory` reports intentional browser globals and cross-file bare identifier reads when you need to understand coupling before moving code around, while `npm run assets:inventory:check` fails if an app-level bare read lacks an intentional browser-boundary publish path. Match the existing style of the file you are editing. ESLint checks app source, tests, tooling, and scripts, enforces syntax/global safety for browser code, and keeps the 2-space indentation, single quote, and no-semicolon rules scoped to config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
+The Project Assessment frontend family has exact module-size budgets in `tests/py/test_architecture.py`. Add each new `project_assessment*.js` sibling to that ratchet, and split an existing module by a clear UI responsibility when it reaches its budget instead of raising the baseline.
+
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
 **Configuration overlays** — `APP_CONF_DIR` selects the shipped/base config root and `APP_LOCAL_CONF_DIR` selects the operator overlay root for every supported `*.local.*` file. Development defaults both roots to `app/conf`, preserving sibling behavior. When adding or changing an overlay-capable surface, use `app/config_paths.py`, keep its merge/reload/cache behavior explicit, and update the production starter files and docs; don't make a filename look active when the runtime doesn't resolve it.
@@ -290,10 +292,13 @@ Docker Postgres container and removes it after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
 profile-gated Compose Postgres service without publishing the database port.
 
-External CLI mutation coverage belongs in `tests/py/test_api_v1.py`. Keep
+External CLI request and rendering coverage belongs in focused CLI modules
+under `tests/py/`; keep route and live-server integration in
+`tests/py/test_api_v1.py`. Reuse shared fake clients, give each command family
+an independently reported test, and parameterize equivalent output or outcome
+variants instead of hiding unrelated commands in one long smoke test. Keep
 structured file and stdin input, exact request bodies, text and JSON output,
-role failures, optimistic-concurrency conflicts, and idempotent responses in
-the focused command smoke test without adding one test function per case. When
+role failures, optimistic-concurrency conflicts, and idempotent responses. When
 a CLI command writes Project state, extend an existing PostgreSQL route test and
 run it through `bash scripts/run_postgres_tests.sh -- ...` as well.
 For HTTP profiles, also pin the explicit revision flag, read-before-delete
@@ -311,8 +316,9 @@ prove every confirmed item is preserved instead of silently truncating a plan.
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
-- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode Assessment, boot, share, and lazy-surface browser slice that is also part of `npm test`; pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
+- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode Assessment, boot, share, and lazy-surface browser slice that is also part of `npm test`; GitLab requires this source slice in its own job alongside the full bundled suite. Pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
+- CI retries a failed Playwright case once for trace evidence, but still fails the job when that retry passes. Focused `test.only` cases are also rejected in CI.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 
@@ -501,7 +507,7 @@ docker compose -f compose.dev.yaml up --build
 ./scripts/check_versions.sh
 ```
 
-The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
+The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. `--docker-only` reports only the production base image; the complete report also includes CI runner images, while the Go, pip, gem, and GitHub flags select Dockerfile tool pins. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 
 ---
 
@@ -552,8 +558,13 @@ After a Dockerfile, packaged-tool, or workspace file-flag change, run the contai
 
 ```bash
 ./scripts/container_smoke_test.sh
+./scripts/container_smoke_test.sh --tier deterministic
 ./scripts/container_smoke_test.sh --build
 ```
+
+GitLab automatically requires the deterministic tier for image, packaged dependency, container-helper, command/workflow catalog, and smoke-fixture changes. It uses only test-owned services and network-free tool commands, and it doesn't retry failures.
+
+Scheduled pipelines run `./scripts/container_smoke_test.sh --tier public-network` separately. Its JUnit, duration log, and `test-results/container-smoke-retries.jsonl` artifacts preserve failed attempts even when a retry later succeeds.
 
 If a tool's output has intentionally changed, run the capture script first. It runs the same commands in a browser and writes the raw output to `/tmp` as a reference — it does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`, so use the output to make those edits manually:
 

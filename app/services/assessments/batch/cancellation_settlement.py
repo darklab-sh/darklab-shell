@@ -25,6 +25,7 @@ from services.assessments.batch.lifecycle_events import (
     record_batch_child_settled_on_conn,
 )
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
+from services.assessments.batch.terminal_observability import record_terminal_batch_milestone
 from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 from services.workflows.fanout_checkpoint import checkpoint_from_payload
 
@@ -146,6 +147,7 @@ def finalize_canceling_batch_run(
         )
         conn.commit()
     if terminalized:
+        record_terminal_batch_milestone(str(row["execution_id"]), changed=True)
         enqueue_terminal_batch_summary(str(row["execution_id"]))
     return {
         "execution_id": str(row["execution_id"]),

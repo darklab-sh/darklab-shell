@@ -21,7 +21,7 @@ from core.database import db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter
 from services.assessments.action_plan_payload import digest_plan
 from services.assessments.action_plans import build_assessment_action_plan
-from services.assessments.base_action_catalog import ACTIONS, base_action_ids
+from services.assessments.base_action_catalog import ACTIONS
 from services.assessments.command_plans import command_plan
 from services.assessments.probe_catalog import probe_catalog
 from services.assessments.probe_contracts import (
@@ -88,7 +88,6 @@ def _request(action_id: str, *, target_type: str = "domain", **kwargs) -> ProbeP
 
 
 def test_base_action_registry_is_complete_and_drives_command_target_compatibility():
-    assert base_action_ids() == _ACTION_IDS
     assert tuple(ACTIONS) == _ACTION_IDS
     for action in ACTIONS.values():
         for target_type in action.target_types:

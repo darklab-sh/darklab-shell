@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 import config_paths
+from core.logging_setup import GELFFormatter, _TextFormatter
 from services.assessments import profiles
 
 
@@ -85,9 +86,9 @@ def _write_yaml(path: Path, data: object) -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_catalog_cache():
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
     yield
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
 
 
 def test_shipped_assessment_profiles_define_the_complete_versioned_catalog():
@@ -333,7 +334,7 @@ def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(
         "known_command_roots": KNOWN_COMMANDS,
         "known_workflow_ids": KNOWN_WORKFLOWS,
     }
-    with caplog.at_level("DEBUG"):
+    with caplog.at_level("DEBUG", logger="shell"):
         catalog = profiles.load_assessment_profile_catalog(**kwargs)
         cached = profiles.load_assessment_profile_catalog(**kwargs)
 
@@ -398,9 +399,14 @@ def test_invalid_local_catalog_on_first_load_falls_back_atomically_to_shipped(
     shipped = tmp_path / "assessment_profiles.yaml"
     local = tmp_path / "assessment_profiles.local.yaml"
     _write_yaml(shipped, _catalog(_profile("network", label="Shipped network")))
-    _write_yaml(local, _catalog(_profile("network", checks=[])))
+    sentinel = "operator_private_action_sentinel"
+    invalid_profile = _profile(
+        "network",
+        checks=[_check(recommended_action=f"command:{sentinel}")],
+    )
+    _write_yaml(local, _catalog(invalid_profile))
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("WARNING", logger="shell"):
         catalog = profiles.load_assessment_profile_catalog(
             shipped_path=shipped,
             local_path=local,
@@ -411,6 +417,16 @@ def test_invalid_local_catalog_on_first_load_falls_back_atomically_to_shipped(
     assert catalog.profiles[0]["label"] == "Shipped network"
     assert catalog.local_profile_keys == ()
     assert "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED" in caplog.messages
+    rejected = next(
+        record
+        for record in caplog.records
+        if record.message == "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED"
+    )
+    assert getattr(rejected, "source") == "local"
+    assert getattr(rejected, "error_code") == "unknown_action"
+    assert getattr(rejected, "error_class") == "AssessmentProfileCatalogError"
+    assert sentinel not in _TextFormatter().format(rejected)
+    assert sentinel not in GELFFormatter("test", "test").format(rejected)
 
 
 def test_invalid_local_yaml_keeps_the_last_valid_catalog(
@@ -433,7 +449,7 @@ def test_invalid_local_yaml_keeps_the_last_valid_catalog(
     assert catalog.profiles[0]["label"] == "Shipped network"
     assert "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED" in caplog.messages
 
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
     shipped.write_text("version: [\n", encoding="utf-8")
     caplog.clear()
     with caplog.at_level("ERROR"), pytest.raises(

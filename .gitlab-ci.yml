@@ -56,7 +56,7 @@ cache:
 before_script:
   - pip install -q -r app/requirements.txt -r requirements-dev.txt
 
-test-js-e2e:
+.playwright-lane:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
   variables:
@@ -75,14 +75,22 @@ test-js-e2e:
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
     - npm ci
     - npx playwright install --with-deps chromium
-  script:
-    - npm run test:e2e
   artifacts:
     when: on_failure
     paths:
       - playwright-report/
       - test-results/
     expire_in: 1 week
+
+test-js-e2e:
+  extends: .playwright-lane
+  script:
+    - npm run test:e2e
+
+test-js-e2e-source:
+  extends: .playwright-lane
+  script:
+    - npm run test:e2e:source
 
 .pytest-lane:
   stage: test
@@ -325,7 +333,7 @@ dependency-version-check:
       - version-check.txt
     expire_in: 1 week
 
-container-smoke-test:
+.container-smoke-lane:
   stage: build
   image: $CI_DOCKER_IMAGE
   variables:
@@ -334,12 +342,6 @@ container-smoke-test:
   before_script:
     - apk add --no-cache python3 py3-pip py3-pytest docker-cli-compose
     - python3 -m pip install --break-system-packages --root-user-action=ignore --quiet -r app/requirements.txt
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
-      when: manual
-      allow_failure: true
-    - when: manual
-      allow_failure: true
   script:
     - mkdir -p test-results
     - sh -o pipefail -c './scripts/container_smoke_test.sh | tee test-results/container-smoke-durations.txt'
@@ -351,9 +353,56 @@ container-smoke-test:
       - test-results/container_smoke_test.xml
       - test-results/container-smoke-durations.txt
       - test-results/container-smoke-files.txt
+      - test-results/container-smoke-retries.jsonl
     reports:
       junit: test-results/container_smoke_test.xml
     expire_in: 1 week
+
+container-smoke-test-deterministic:
+  extends: .container-smoke-lane
+  variables:
+    RUN_CONTAINER_SMOKE_TEST_RETRIES: "0"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes: &container-smoke-changes
+        - Dockerfile
+        - entrypoint.sh
+        - app/requirements.txt
+        - app/conf/commands.yaml
+        - app/conf/workflows/**/*
+        - deploy/schemathesis-constraints.txt
+        - scripts/container/**/*
+        - scripts/container_smoke_test.sh
+        - tests/py/test_container_smoke_test.py
+        - tests/py/fixtures/container_smoke_test-*
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *container-smoke-changes
+  script:
+    - mkdir -p test-results
+    - sh -o pipefail -c './scripts/container_smoke_test.sh --tier deterministic | tee test-results/container-smoke-durations.txt'
+
+container-smoke-test:
+  extends: .container-smoke-lane
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+    - when: manual
+      allow_failure: true
+
+container-smoke-test-public-network:
+  extends: .container-smoke-lane
+  variables:
+    RUN_CONTAINER_SMOKE_TEST_RETRIES: "3"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  script:
+    - mkdir -p test-results
+    - sh -o pipefail -c './scripts/container_smoke_test.sh --tier public-network | tee test-results/container-smoke-durations.txt'
 
 docker-build:
   stage: build

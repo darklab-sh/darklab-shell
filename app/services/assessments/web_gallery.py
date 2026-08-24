@@ -66,58 +66,6 @@ def web_surface_row_matches(row: object, filters: Mapping[str, object]) -> bool:
     )
 
 
-def filter_web_surface_rows(
-    rows: object,
-    *,
-    target: str = "",
-    status_code: int | None = None,
-    technology: str = "",
-    profile_role: str = "",
-    visual_hash: str = "",
-    changed_since: object = None,
-    offset: int = 0,
-    limit: int = MAX_GALLERY_ROWS,
-) -> list[dict[str, object]]:
-    """Filter and page metadata rows; binary artifacts remain behind Files routes."""
-    values = rows if isinstance(rows, list) else []
-    try:
-        page_offset = max(0, int(offset))
-    except (TypeError, ValueError):
-        page_offset = 0
-    try:
-        page_limit = min(MAX_GALLERY_ROWS, max(0, int(limit)))
-    except (TypeError, ValueError):
-        page_limit = MAX_GALLERY_ROWS
-    if page_limit == 0:
-        return []
-    filters = normalize_web_surface_filters({
-        "target": target,
-        "status_code": status_code,
-        "technology": technology,
-        "profile_role": profile_role,
-        "visual_hash": visual_hash,
-    })
-    previous = (
-        {str(value).strip().casefold() for value in changed_since}
-        if isinstance(changed_since, (list, tuple, set))
-        else set()
-    )
-    result: list[dict[str, object]] = []
-    for row in values:
-        if not web_surface_row_matches(row, filters):
-            continue
-        row_hash = str(row.get("visual_hash") or "").casefold()
-        if previous and row_hash in previous:
-            continue
-        if page_offset:
-            page_offset -= 1
-            continue
-        result.append({key: row[key] for key in _PUBLIC_FIELDS if key in row})
-        if len(result) >= page_limit:
-            break
-    return result
-
-
 def web_surface_rows_from_events(events: object) -> list[dict[str, object]]:
     """Extract normalized screenshot metadata from persisted run-event wires."""
     values = events if isinstance(events, list) else []

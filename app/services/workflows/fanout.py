@@ -9,7 +9,6 @@ from collections.abc import Iterable, Mapping
 
 from services.workflows.compiler import WorkflowDefinitionError, render_step_command, workflow_tokens
 from services.workflows.collections import MAX_CAPTURE_VALUE_BYTES
-from services.workflows.fanout_checkpoint import FanoutCheckpoint
 
 MAX_CHILD_RUNS = 32
 
@@ -51,29 +50,3 @@ def expand_collection_step(
         child_variables[name] = value
         expanded.append({"ordinal": len(expanded), "command": render_step_command(step, child_variables)})
     return expanded
-
-
-def next_fanout_batch(
-    step: Mapping[str, object],
-    variables: Mapping[str, str],
-    collection_name: str,
-    items: list[object],
-    checkpoint: FanoutCheckpoint,
-    *,
-    parallel_limit: int = 1,
-) -> tuple[list[dict[str, object]], FanoutCheckpoint]:
-    """Plan the next unlaunched child batch and checkpoint it as running."""
-    if checkpoint.cancelled:
-        return [], checkpoint
-    try:
-        limit = max(int(parallel_limit), 1)
-    except (TypeError, ValueError) as exc:
-        raise WorkflowDefinitionError("fan-out parallel limit must be an integer") from exc
-    ordinals = checkpoint.next_batch(limit)
-    selected = [items[index] for index in ordinals if 0 <= index < len(items)]
-    expanded = expand_collection_step(
-        step, variables, collection_name, selected, max_children=limit
-    )
-    # The planner returns ordinals relative to the batch; restore source ordinals.
-    children = [dict(child, ordinal=ordinal) for child, ordinal in zip(expanded, ordinals, strict=False)]
-    return children, checkpoint.mark_running(ordinals[:len(children)])

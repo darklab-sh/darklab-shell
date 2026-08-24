@@ -1,6 +1,8 @@
 # Headless API and CLI
 
-darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, Project query services, and shared per-IP rate-limit policy as the browser run routes.
+darklab_shell exposes a versioned `/api/v1` headless API for scripts, CI jobs, and local terminals that need to start runs or read saved data without opening the browser UI. The API uses the same session token, command validation, brokered run lifecycle, artifact storage, documented Project query services, and shared per-IP rate-limit policy as the browser run routes.
+
+API v1 isn't a one-for-one copy of the browser workspace. Its Project writes cover Assessment cycles and batches, assessor findings and typed evidence, HTTP profiles, probes, and completed-run links. General Project deletion, finding triage and remediation merging, Web Surface browsing, monitoring-risk updates, grouped retests, managed Nuclei-template refreshes, and interactive Atlas-intelligence refreshes remain browser-owned operations.
 
 The bundled `darklab` CLI is a thin wrapper around this API. Install it from the repo root with:
 
@@ -307,7 +309,7 @@ darklab advisory osv "pkg:pypi/requests" "2.30.0" --format json
 }
 ```
 
-That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The CLI distinguishes missing permission, disabled external mode, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The normal Team write limit and a small shared OSV budget prevent accidental bursts; a duplicate or busy request returns `429` and can be retried. The CLI distinguishes missing permission, disabled external mode, a busy provider, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
 
 ---
 
@@ -575,30 +577,30 @@ The bundled CLI exposes the same read and manual-state contract. Each Assessment
 
 ```bash
 darklab assessment list darklab-sh --status active
-darklab assessment show darklab-sh asmt_123
-darklab assessment checks darklab-sh asmt_123 --state not_started --policy-level safe
-darklab assessment set-state darklab-sh asmt_123 asmc_123 blocked --reason "Waiting for authorization"
-darklab assessment clear-state darklab-sh asmt_123 asmc_123
-darklab assessment start-action darklab-sh asmt_123 asmc_123
-darklab assessment start-action darklab-sh asmt_123 asmc_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
+darklab assessment show darklab-sh asm_123
+darklab assessment checks darklab-sh asm_123 --state not_started --policy-level safe
+darklab assessment set-state darklab-sh asm_123 ach_123 blocked --reason "Waiting for authorization"
+darklab assessment clear-state darklab-sh asm_123 ach_123
+darklab assessment start-action darklab-sh asm_123 ach_123
+darklab assessment start-action darklab-sh asm_123 ach_123 --confirm
+darklab assessment start-action darklab-sh asm_123 ach_123 \
   --http-profile-id htp_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
-  --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
+darklab assessment start-action darklab-sh asm_123 ach_123 \
+  --source-run-id run_123 --parameter-observation-id obs_123 --confirm
+darklab assessment start-action darklab-sh asm_123 ach_123 \
   --schema-artifact-id art_123 --confirm
-darklab assessment batch plan darklab-sh asmt_123
-darklab assessment batch plan darklab-sh asmt_123 \
+darklab assessment batch plan darklab-sh asm_123
+darklab assessment batch plan darklab-sh asm_123 \
   --target ent_123 --category discovery --exclude-category web
-darklab assessment batch start darklab-sh asmt_123 --confirm
-darklab assessment batch start darklab-sh asmt_123 \
+darklab assessment batch start darklab-sh asm_123 --confirm
+darklab assessment batch start darklab-sh asm_123 \
   --include-standard --confirm --confirm-standard
-darklab assessment batch list darklab-sh --assessment-id asmt_123
-darklab assessment batch show wfx_123 --items --events
-darklab assessment batch follow wfx_123 --cursor 42
-darklab assessment batch cancel wfx_123 --confirm
-darklab assessment batch retry wfx_123
-darklab assessment batch retry wfx_123 --confirm
+darklab assessment batch list darklab-sh --assessment-id asm_123
+darklab assessment batch show abx_123 --items --events
+darklab assessment batch follow abx_123 --cursor 42
+darklab assessment batch cancel abx_123 --confirm
+darklab assessment batch retry abx_123
+darklab assessment batch retry abx_123 --confirm
 ```
 
 List and check commands support `text`, `json`, and `ndjson`. Text-mode collections print `No results.` when the server returns no rows; JSON and NDJSON keep their machine-readable empty shapes. Cycle detail, state mutations, recommended actions, and batch previews support `text` and `json`; batch list and follow also offer NDJSON. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. Batch start does the same with a fresh server-owned preview and needs `--confirm-standard` when standard work is selected. Batch retry prints a fresh linked preview by default, selects no successful source item, and creates a new batch only with `--confirm`; standard retry work also needs `--confirm-standard`. Batch follow prints a resumable cursor on Ctrl+C and returns `0` for complete success, `3` for a completed partial result, `4` for canceled work, `1` for failure, or `130` when interrupted. Runs launched by a batch include nullable `assessment_batch` ancestry in API `RunSummary` responses, plus `assessment_batch_id` and `assessment_batch_item_index` convenience fields. The ancestry contains only the owning batch, Project, cycle, source lineage, current batch state, child attempt, exit result, and mapped-check count; it doesn't include commands, targets, profiles, plans, output, or private launch values. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.

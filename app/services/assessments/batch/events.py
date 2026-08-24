@@ -17,8 +17,6 @@ from services.assessments.batch.contracts import (
     AssessmentBatchError,
     BATCH_EVENT_DETAILS_MAX_BYTES,
 )
-from services.projects.scope import shared_owner_where
-from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 
 
 BATCH_EVENT_TYPES = frozenset(
@@ -245,67 +243,8 @@ def append_batch_event(
     return event
 
 
-def list_batch_events(
-    session_id: str,
-    batch_id: str,
-    *,
-    team_id: str = "",
-    after_sequence: int = 0,
-    limit: int = 100,
-) -> list[dict[str, object]]:
-    """Return a bounded owner-scoped event page after one acknowledged sequence."""
-    try:
-        cursor = max(0, int(after_sequence or 0))
-        page_limit = max(1, min(int(limit or 100), 100))
-    except (TypeError, ValueError) as exc:
-        raise AssessmentBatchError(
-            "invalid_batch_event_cursor",
-            "Assessment batch event cursor is invalid.",
-        ) from exc
-    owner_sql, owner_params = shared_owner_where(
-        session_id, team_id=team_id, table_alias="e"
-    )
-    event_sql = (
-        "SELECT event.* FROM assessment_batch_events event "  # nosec
-        "JOIN workflow_executions e ON e.id = event.batch_id "
-        "WHERE e.execution_kind = ? AND "
-        + owner_sql
-        + " AND event.batch_id = ? AND event.sequence > ? "
-        "ORDER BY event.sequence ASC LIMIT ?"
-    )
-    with get_db_connect()() as conn:
-        rows = conn.execute(
-            event_sql,
-            (
-                ASSESSMENT_BATCH_EXECUTION_KIND,
-                *owner_params,
-                batch_id,
-                cursor,
-                page_limit,
-            ),
-        ).fetchall()
-    return [
-        {
-            "batch_id": str(row["batch_id"]),
-            "sequence": int(row["sequence"]),
-            "event_type": str(row["event_type"]),
-            "chunk_index": row["chunk_index"],
-            "item_ordinal": row["item_ordinal"],
-            "status": str(row["status"] or ""),
-            "reason_code": str(row["reason_code"] or ""),
-            "run_id": str(row["run_id"] or ""),
-            "source_batch_id": str(row["source_batch_id"] or ""),
-            "retry_batch_id": str(row["retry_batch_id"] or ""),
-            "details": _dialect().decode_json_dict(row["details_json"]),
-            "created": str(row["created"] or ""),
-        }
-        for row in rows
-    ]
-
-
 __all__ = [
     "BATCH_EVENT_TYPES",
     "append_batch_event",
     "append_batch_event_on_conn",
-    "list_batch_events",
 ]

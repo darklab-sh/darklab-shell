@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -18,9 +19,12 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.cancellation import cancel_assessment_batch
 from services.assessments.batch.contracts import AssessmentBatchError, BatchConcurrency
-from services.assessments.batch.events import list_batch_events
+from services.assessments.batch.event_page import get_batch_event_page
 from services.assessments.batch.execution import launch_assessment_batch
-from services.assessments.batch.finalization import finalize_assessment_batch_run
+from services.assessments.batch.finalization import (
+    finalize_assessment_batch_run,
+    finalize_assessment_batch_run_safely,
+)
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
 from services.assessments.batch.nuclei_failure_diagnosis import (
     is_nuclei_template_failure,
@@ -48,9 +52,41 @@ from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
 from services.workflows.hooks import finalize_workflow_run_safely
 
 
+def _batch_events(session_id: str, batch_id: str) -> list[dict[str, object]]:
+    events = get_batch_event_page(session_id, batch_id)["events"]
+    assert isinstance(events, list)
+    return [event for event in events if isinstance(event, dict)]
+
+
 def _mapping(value: object) -> dict[str, Any]:
     assert isinstance(value, dict)
     return value
+
+
+class _AssessmentBatchLogRecord(logging.LogRecord):
+    batch_id: str
+    batch_status: str
+    reason_code: str
+    duration_ms: int
+    succeeded: int
+    failed: int
+    unavailable: int
+    canceled: int
+    could_not_cancel: int
+    launched_count: int
+    stage: str
+
+
+def _terminal_batch_records(
+    caplog: Any,
+    batch_id: str,
+) -> list[_AssessmentBatchLogRecord]:
+    return [
+        cast(_AssessmentBatchLogRecord, record)
+        for record in caplog.records
+        if record.getMessage() == "ASSESSMENT_BATCH_COMPLETED"
+        and getattr(record, "batch_id", "") == batch_id
+    ]
 
 
 @pytest.fixture
@@ -293,7 +329,7 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
             (batch["batch_id"],),
         ).fetchone()
     assert (child["run_id"], child["status"]) == ("run-batch-exact", "running")
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert [event["event_type"] for event in events[-3:]] == [
         "item_claimed",
         "item_launched",
@@ -681,7 +717,7 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
             (batch["batch_id"],),
         ).fetchall()
     assert [tuple(row) for row in children] == [(1, "", "failed", "plan_changed")]
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert events[-2]["event_type"] == "chunk_status_changed"
     assert events[-1]["event_type"] == "parent_status_changed"
     failed = next(event for event in events if event["event_type"] == "item_failed")
@@ -734,8 +770,9 @@ def test_batch_metrics_derive_active_queue_and_terminal_outcomes(batch_builder):
     ] == 1
 
 
-def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch):
+def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch, caplog):
     batch = batch_builder()
+    caplog.set_level(logging.DEBUG, logger="shell")
     deferrals: list[str] = []
     monkeypatch.setattr(
         "services.assessments.batch.execution.claim_next_batch_item",
@@ -754,6 +791,17 @@ def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch):
     assert result["launched"] == 0
     assert result["reason_code"] == "owner_parallel_limit"
     assert deferrals == ["owner_parallel_limit"]
+    records = [
+        cast(_AssessmentBatchLogRecord, record)
+        for record in caplog.records
+        if record.getMessage() == "ASSESSMENT_BATCH_LAUNCH_DEFERRED"
+    ]
+    assert len(records) == 1
+    assert (
+        records[0].batch_id,
+        records[0].reason_code,
+        records[0].launched_count,
+    ) == (batch["batch_id"], "owner_parallel_limit", 0)
 
 
 def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(
@@ -973,8 +1021,9 @@ def _batch_notification_events(batch: dict[str, str]) -> list[dict[str, Any]]:
     ]
 
 
-def test_terminal_batch_enqueues_one_bounded_preference_aware_summary(batch_builder):
+def test_terminal_batch_enqueues_one_bounded_preference_aware_summary(batch_builder, caplog):
     batch = batch_builder()
+    caplog.set_level(logging.INFO, logger="shell")
     _add_batch_notification_channels(batch)
     _make_batch_child_active(batch, run_id="run-batch-notification")
 
@@ -1009,6 +1058,18 @@ def test_terminal_batch_enqueues_one_bounded_preference_aware_summary(batch_buil
             f"/projects/{batch['project_id']}/assessment-batches/{batch['batch_id']}"
         ),
     }
+    milestones = _terminal_batch_records(caplog, batch["batch_id"])
+    assert len(milestones) == 1
+    milestone = milestones[0]
+    assert (milestone.batch_status, milestone.reason_code) == ("completed", "completed")
+    assert milestone.duration_ms >= 0
+    assert (
+        milestone.succeeded,
+        milestone.failed,
+        milestone.unavailable,
+        milestone.canceled,
+        milestone.could_not_cancel,
+    ) == (1, 0, 0, 0, 0)
 
 
 def test_terminal_batch_notification_failure_does_not_roll_back_completion(
@@ -1017,6 +1078,7 @@ def test_terminal_batch_notification_failure_does_not_roll_back_completion(
     caplog,
 ):
     batch = batch_builder()
+    caplog.set_level(logging.INFO, logger="shell")
     _make_batch_child_active(batch, run_id="run-batch-notification-failure")
     monkeypatch.setattr(
         "services.assessments.batch.notifications.dispatcher.enqueue",
@@ -1028,12 +1090,41 @@ def test_terminal_batch_notification_failure_does_not_roll_back_completion(
     assert settled is not None
     parent = get_batch_parent(batch["session_id"], batch["batch_id"])
     assert parent is not None and parent["status"] == "completed"
-    record = next(
-        item
-        for item in caplog.records
-        if item.getMessage() == "ASSESSMENT_BATCH_NOTIFICATION_ERROR"
+    record = cast(
+        _AssessmentBatchLogRecord,
+        next(
+            item
+            for item in caplog.records
+            if item.getMessage() == "ASSESSMENT_BATCH_NOTIFICATION_ERROR"
+        ),
     )
     assert record.batch_id == batch["batch_id"]
+
+    failed_batch = batch_builder()
+    _make_batch_child_active(failed_batch, run_id="run-batch-finalization-failure")
+    monkeypatch.setattr(
+        "services.assessments.batch.finalization.finalize_fanout_child_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("settlement failed")),
+    )
+
+    finalize_assessment_batch_run_safely(
+        "run-batch-finalization-failure",
+        failed_batch["session_id"],
+        0,
+    )
+
+    failed_parent = get_batch_parent(failed_batch["session_id"], failed_batch["batch_id"])
+    assert failed_parent is not None
+    assert (failed_parent["status"], failed_parent["failure_code"]) == (
+        "failed",
+        "finalization_hook_failed",
+    )
+    failed_milestones = _terminal_batch_records(caplog, failed_batch["batch_id"])
+    assert len(failed_milestones) == 1
+    assert (failed_milestones[0].batch_status, failed_milestones[0].reason_code) == (
+        "failed",
+        "finalization_hook_failed",
+    )
 
 
 def _make_batch_child_active(batch: dict[str, str], *, run_id: str) -> None:
@@ -1149,7 +1240,7 @@ def test_batch_recovery_resets_an_abandoned_claim_and_records_one_event(
     assert (child["status"], child["run_id"]) == ("pending", "")
     recovered_events = [
         event
-        for event in list_batch_events(batch["session_id"], batch["batch_id"])
+        for event in _batch_events(batch["session_id"], batch["batch_id"])
         if event["event_type"] == "item_recovered"
     ]
     assert [(event["reason_code"], event["details"]) for event in recovered_events] == [
@@ -1260,10 +1351,12 @@ def test_batch_recovery_reapplies_cancellation_without_retrying(
 def test_batch_recovery_fails_non_runnable_work_without_launching(
     batch_builder,
     monkeypatch,
+    caplog,
     failure,
     expected_code,
 ):
     batch = batch_builder()
+    caplog.set_level(logging.INFO, logger="shell")
     if failure == "scope":
         with get_db_connect()() as conn:
             conn.execute(
@@ -1298,6 +1391,13 @@ def test_batch_recovery_fails_non_runnable_work_without_launching(
     assert parent is not None
     assert (parent["status"], parent["failure_code"]) == ("failed", expected_code)
     assert _mapping(parent["progress"])["unavailable"] == (1 if failure == "scope" else 0)
+    milestones = _terminal_batch_records(caplog, batch["batch_id"])
+    assert len(milestones) == 1
+    assert (milestones[0].batch_status, milestones[0].reason_code) == (
+        "failed",
+        expected_code,
+    )
+    assert milestones[0].unavailable == (1 if failure == "scope" else 0)
 
 
 def test_batch_recovery_waits_for_a_live_run_after_project_scope_disappears(
@@ -1433,10 +1533,13 @@ def test_batch_recovery_pages_all_executions_and_isolates_errors(monkeypatch, ca
     assert examined == [batch_id for batch_id, _created in refs]
     assert recorded.count("left_running") == 204
     assert recorded.count("failed") == 1
-    error = next(
-        record
-        for record in caplog.records
-        if record.getMessage() == "ASSESSMENT_BATCH_RECOVERY_ERROR"
+    error = cast(
+        _AssessmentBatchLogRecord,
+        next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "ASSESSMENT_BATCH_RECOVERY_ERROR"
+        ),
     )
     assert error.batch_id == refs[57][0]
     assert error.stage == "recover_batch"
@@ -1490,8 +1593,12 @@ def test_runtime_bootstrap_runs_batch_recovery_after_workflow_recovery(monkeypat
     ]
 
 
-def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_builder):
+def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(
+    batch_builder,
+    caplog,
+):
     batch = batch_builder(2, parallel=2)
+    caplog.set_level(logging.INFO, logger="shell")
     _add_batch_notification_channels(batch)
     signaled: list[str] = []
 
@@ -1511,7 +1618,7 @@ def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_b
     assert _mapping(first["batch"])["status"] == "canceled"
     assert _mapping(_mapping(first["batch"])["progress"])["canceled"] == 2
     assert _mapping(second["batch"])["status"] == "canceled"
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert [event["event_type"] for event in events].count("item_canceled") == 2
     assert [event["status"] for event in events if event["event_type"] == "parent_status_changed"][-2:] == [
         "canceling",
@@ -1520,6 +1627,13 @@ def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_b
     deliveries = _batch_notification_events(batch)
     assert len(deliveries) == 1
     assert deliveries[0]["assessment_batch"]["status"] == "canceled"
+    milestones = _terminal_batch_records(caplog, batch["batch_id"])
+    assert len(milestones) == 1
+    assert (milestones[0].batch_status, milestones[0].reason_code) == (
+        "canceled",
+        "canceled",
+    )
+    assert milestones[0].canceled == 2
 
 
 def test_running_batch_cancellation_waits_for_the_bound_run_without_retry(batch_builder):

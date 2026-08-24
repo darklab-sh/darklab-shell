@@ -114,6 +114,22 @@ def test_generic_go_lookup_still_uses_module_proxy(monkeypatch):
     assert requested_urls == ["https://proxy.golang.org/github.com/example/tool/@v/list"]
 
 
+def test_docker_only_reports_only_the_production_base_image(monkeypatch):
+    module = _load_check_versions_module()
+    calls: list[str] = []
+    monkeypatch.setattr(module.sys, "argv", ["check_versions.sh", "--docker-only"])
+    monkeypatch.setattr(module, "_print_docker_image", lambda: calls.append("docker"))
+    monkeypatch.setattr(module, "_print_ci_images", lambda: calls.append("ci"))
+    monkeypatch.setattr(
+        module,
+        "_print_dockerfile_pins",
+        lambda **_kwargs: calls.append("dockerfile"),
+    )
+
+    assert module.main() == 0
+    assert calls == ["docker"]
+
+
 def test_dockerfile_and_registry_reports_follow_checked_in_sources(monkeypatch, tmp_path, capsys):
     module = _load_check_versions_module()
     dockerfile = tmp_path / "Dockerfile"
