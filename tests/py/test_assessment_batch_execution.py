@@ -753,8 +753,9 @@ def test_batch_metrics_derive_active_queue_and_terminal_outcomes(batch_builder):
     ] == 1
 
 
-def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch):
+def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch, caplog):
     batch = batch_builder()
+    caplog.set_level(logging.DEBUG, logger="shell")
     deferrals: list[str] = []
     monkeypatch.setattr(
         "services.assessments.batch.execution.claim_next_batch_item",
@@ -773,6 +774,17 @@ def test_batch_launch_records_concurrency_deferral(batch_builder, monkeypatch):
     assert result["launched"] == 0
     assert result["reason_code"] == "owner_parallel_limit"
     assert deferrals == ["owner_parallel_limit"]
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "ASSESSMENT_BATCH_LAUNCH_DEFERRED"
+    ]
+    assert len(records) == 1
+    assert (
+        records[0].batch_id,
+        records[0].reason_code,
+        records[0].launched_count,
+    ) == (batch["batch_id"], "owner_parallel_limit", 0)
 
 
 def test_batch_completion_advances_across_chunks_and_stays_out_of_workflows(
