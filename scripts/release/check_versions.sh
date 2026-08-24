@@ -1079,7 +1079,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-only", action="store_true", help="Only report Python requirements")
     parser.add_argument("--node-only", action="store_true", help="Only report Node dependencies and devDependencies")
-    parser.add_argument("--docker-only", action="store_true", help="Only report the Docker base image")
+    parser.add_argument(
+        "--docker-only",
+        action="store_true",
+        help="Only report the production Docker base image",
+    )
     parser.add_argument("--go-only", action="store_true", help="Only report Go toolchain and Go module pins from Dockerfile")
     parser.add_argument("--pip-only", action="store_true", help="Only report pip tool pins from Dockerfile")
     parser.add_argument("--gem-only", action="store_true", help="Only report gem tool pins from Dockerfile")
@@ -1143,8 +1147,6 @@ def main() -> int:
         _print_node_dependencies()
     elif args.docker_only:
         _print_docker_image()
-        _print_ci_images()
-        _print_dockerfile_pins(debug=args.debug)
     elif args.go_only:
         _print_dockerfile_pins(labels={"go-toolchain", "go"}, debug=args.debug)
     elif args.pip_only:

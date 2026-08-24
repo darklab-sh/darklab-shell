@@ -5,112 +5,56 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from datetime import datetime, timezone
-import hashlib
 import logging
-import socket
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 
-from config import resolve_effective_cfg
 from services.assessments.version_ranges import normalize_purl
-from .osv_external_store import accept_external_osv_query
+from services.storage.transactions import run_read, run_transaction
+
+from .osv_external_coordination import (
+    osv_lookup_guard,
+    osv_lookup_lease_seconds,
+    record_osv_acquisition,
+)
 from .osv_external_http import (
     OSV_QUERY_URL,
     download_osv_query,
     parse_osv_response,
 )
+from .osv_external_state import (
+    cached_external_osv_result,
+    external_osv_lookup_hash,
+    external_osv_settings,
+    record_external_osv_failure,
+)
+from .osv_external_store import accept_external_osv_query
 from .osv_parser import OsvDatasetError
-from .osv_store import OSV_ATTRIBUTION, OSV_TERMS_URL
-
 
 log = logging.getLogger("shell")
 
 
-def _settings(cfg: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    raw = resolve_effective_cfg(cfg).get("cve_risk")
-    return dict(raw) if isinstance(raw, Mapping) else {}
+@dataclass(frozen=True)
+class _ExternalLookup:
+    settings: dict[str, Any]
+    package_purl: str
+    version: str
+    lookup_key_hash: str
+    now: datetime
 
 
-def _parse_time(value: Any) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _lookup_hash(package_purl: str, version: str) -> str:
-    value = f"purl_version\0{package_purl}\0{version}".encode()
-    return hashlib.sha256(value).hexdigest()
-
-
-def _cached_result(
-    conn: Any,
-    *,
-    lookup_key_hash: str,
-    package_purl: str,
-    now: datetime,
-) -> dict[str, Any] | None:
-    row = conn.execute(
-        "SELECT result_state, expires_at, record_count FROM cve_advisory_lookup_cache "
-        "WHERE source = 'osv' AND lookup_kind = 'purl_version' AND lookup_key_hash = ?",
-        (lookup_key_hash,),
-    ).fetchone()
-    if not row:
-        return None
-    expires_at = _parse_time(row["expires_at"])
-    if expires_at is None or expires_at <= now:
-        return None
-    state = str(row["result_state"] or "")
-    if state == "positive":
-        stored = int(conn.execute(
-            "SELECT COUNT(*) AS count FROM package_advisories "
-            "WHERE source = 'osv' AND origin = 'external' "
-            "AND lookup_key_hash = ? AND package_purl = ? AND expires_at > ?",
-            (lookup_key_hash, package_purl, now.isoformat()),
-        ).fetchone()["count"])
-        if stored < 1:
-            return None
-        return {"source": "osv", "outcome": "positive_cached", "record_count": stored}
-    if state == "negative":
-        return {"source": "osv", "outcome": "negative_cached", "record_count": 0}
-    return None
-
-
-def _record_failure(conn: Any, *, attempted_at: str, error_type: str) -> None:
-    conn.execute(
-        "INSERT INTO cve_advisory_sources ("
-        "source, acquisition_mode, origin, status, source_url, last_attempt_at, last_error, "
-        "attribution, terms_url) VALUES ('osv', 'external', 'external', 'failed', ?, ?, ?, ?, ?) "
-        "ON CONFLICT(source) DO UPDATE SET acquisition_mode = 'external', status = 'failed', "
-        "last_attempt_at = excluded.last_attempt_at, last_error = excluded.last_error, "
-        "attribution = excluded.attribution, terms_url = excluded.terms_url",
-        (
-            OSV_QUERY_URL,
-            attempted_at,
-            str(error_type or "")[:128],
-            OSV_ATTRIBUTION,
-            OSV_TERMS_URL,
-        ),
-    )
-
-
-def query_external_osv(
-    conn: Any,
+def _lookup_request(
     package_purl: str,
     version: str,
     *,
-    cfg: Mapping[str, Any] | None = None,
-    force: bool = False,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Explicitly query one exact package/version without logging its identity."""
-    settings = _settings(cfg)
+    cfg: Mapping[str, Any] | None,
+    now: datetime | None,
+) -> _ExternalLookup | dict[str, Any]:
+    settings = external_osv_settings(cfg)
     if str(settings.get("osv_advisory_mode") or "disabled").casefold() != "external":
         return {"source": "osv", "outcome": "disabled"}
     normalized = normalize_purl(
@@ -122,82 +66,137 @@ def query_external_osv(
         raise ValueError("OSV external query requires an exact PURL and version")
     normalized_purl, normalized_version = normalized
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    lookup_key_hash = _lookup_hash(normalized_purl, normalized_version)
-    if not force:
-        cached = _cached_result(
+    return _ExternalLookup(
+        settings=settings,
+        package_purl=normalized_purl,
+        version=normalized_version,
+        lookup_key_hash=external_osv_lookup_hash(normalized_purl, normalized_version),
+        now=current,
+    )
+
+
+def _cached_lookup(lookup: _ExternalLookup) -> dict[str, Any] | None:
+    return run_read(
+        lambda conn: cached_external_osv_result(
             conn,
-            lookup_key_hash=lookup_key_hash,
-            package_purl=normalized_purl,
-            now=current,
+            lookup_key_hash=lookup.lookup_key_hash,
+            package_purl=lookup.package_purl,
+            now=lookup.now,
         )
-        if cached is not None:
-            return cached
-    max_attempts = max(1, min(int(settings.get("max_attempts") or 3), 5))
-    result: dict[str, Any] = {"outcome": "failed"}
-    try:
-        for attempt in range(1, max_attempts + 1):
-            try:
-                payload = download_osv_query(settings, normalized_purl, normalized_version)
-                parsed = parse_osv_response(
-                    payload,
-                    package_purl=normalized_purl,
-                    settings=settings,
-                )
-                result = accept_external_osv_query(
-                    conn,
-                    package_purl=normalized_purl,
-                    lookup_key_hash=lookup_key_hash,
-                    parsed=parsed,
-                    now=current,
-                    ttl_seconds=int(settings.get("advisory_positive_ttl_seconds") or 604800),
-                    negative_ttl_seconds=int(
-                        settings.get("advisory_negative_ttl_seconds") or 86400
-                    ),
-                    source_url=OSV_QUERY_URL,
-                )
-                break
-            except (HTTPError, URLError, TimeoutError, socket.timeout) as exc:
-                if attempt >= max_attempts:
-                    raise
-                log.warning("OSV_ADVISORY_LOOKUP_RETRY", extra={
+    )
+
+
+def _download_lookup(lookup: _ExternalLookup):
+    max_attempts = max(1, min(int(lookup.settings.get("max_attempts") or 3), 5))
+    for attempt in range(1, max_attempts + 1):
+        try:
+            payload = download_osv_query(
+                lookup.settings,
+                lookup.package_purl,
+                lookup.version,
+            )
+            return parse_osv_response(
+                payload,
+                package_purl=lookup.package_purl,
+                settings=lookup.settings,
+            )
+        except (HTTPError, URLError, TimeoutError) as exc:
+            if attempt >= max_attempts:
+                raise
+            log.warning(
+                "OSV_ADVISORY_LOOKUP_RETRY",
+                extra={
                     "source": "osv",
                     "attempt": attempt,
                     "max_attempts": max_attempts,
                     "error_type": type(exc).__name__,
-                })
-                time.sleep(min(2 ** (attempt - 1), 4))
-        from services.metrics.cve_risk import CVE_ADVISORY_ACQUISITIONS  # noqa: PLC0415
+                },
+            )
+            time.sleep(min(2 ** (attempt - 1), 4))
+    raise RuntimeError("unreachable OSV lookup attempt state")
 
-        CVE_ADVISORY_ACQUISITIONS.labels(
-            source="osv",
-            mode="external",
-            outcome=str(result["outcome"]),
-        ).inc()
-        log.info("OSV_ADVISORY_LOOKUP_STORED", extra={
+
+def _store_lookup(lookup: _ExternalLookup, parsed: Any) -> dict[str, Any]:
+    return run_transaction(
+        lambda conn: accept_external_osv_query(
+            conn,
+            package_purl=lookup.package_purl,
+            lookup_key_hash=lookup.lookup_key_hash,
+            parsed=parsed,
+            now=lookup.now,
+            ttl_seconds=int(
+                lookup.settings.get("advisory_positive_ttl_seconds") or 604800
+            ),
+            negative_ttl_seconds=int(
+                lookup.settings.get("advisory_negative_ttl_seconds") or 86400
+            ),
+            source_url=OSV_QUERY_URL,
+        )
+    )
+
+
+def query_external_osv(
+    package_purl: str,
+    version: str,
+    *,
+    cfg: Mapping[str, Any] | None = None,
+    force: bool = False,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Explicitly query one exact package/version without logging its identity."""
+    prepared = _lookup_request(package_purl, version, cfg=cfg, now=now)
+    if isinstance(prepared, dict):
+        return prepared
+    if not force and (cached := _cached_lookup(prepared)) is not None:
+        return cached
+    with osv_lookup_guard(
+        prepared.lookup_key_hash,
+        lease_seconds=osv_lookup_lease_seconds(prepared.settings),
+    ) as permit:
+        if not permit.acquired:
+            record_osv_acquisition("busy")
+            log.warning(
+                "OSV_ADVISORY_LOOKUP_DEFERRED",
+                extra={
+                    "source": "osv",
+                    "reason": permit.reason,
+                    "identifier_count": 1,
+                },
+            )
+            return {"source": "osv", "outcome": "busy", "reason": permit.reason}
+        if not force and (cached := _cached_lookup(prepared)) is not None:
+            return cached
+        try:
+            result = _store_lookup(prepared, _download_lookup(prepared))
+        except (HTTPError, URLError, TimeoutError, OsvDatasetError) as exc:
+            error_type = type(exc).__name__
+            run_transaction(
+                lambda conn: record_external_osv_failure(
+                    conn,
+                    attempted_at=prepared.now.isoformat(),
+                    error_type=error_type,
+                )
+            )
+            record_osv_acquisition("failed")
+            log.error(
+                "OSV_ADVISORY_LOOKUP_FAILED",
+                extra={
+                    "source": "osv",
+                    "error_type": error_type,
+                    "identifier_count": 1,
+                },
+            )
+            return {"source": "osv", "outcome": "failed", "error": error_type}
+    record_osv_acquisition(str(result["outcome"]))
+    log.info(
+        "OSV_ADVISORY_LOOKUP_STORED",
+        extra={
             "source": "osv",
             "outcome": result["outcome"],
             "record_count": int(result.get("record_count") or 0),
             "exact_version_count": int(result.get("exact_version_count") or 0),
             "range_count": int(result.get("range_count") or 0),
             "identifier_count": 1,
-        })
-        return result
-    except (HTTPError, URLError, TimeoutError, socket.timeout, OsvDatasetError) as exc:
-        attempted_at = current.isoformat()
-        _record_failure(conn, attempted_at=attempted_at, error_type=type(exc).__name__)
-        log.error("OSV_ADVISORY_LOOKUP_FAILED", extra={
-            "source": "osv",
-            "error_type": type(exc).__name__,
-            "identifier_count": 1,
-        })
-        from services.metrics.cve_risk import CVE_ADVISORY_ACQUISITIONS  # noqa: PLC0415
-
-        CVE_ADVISORY_ACQUISITIONS.labels(
-            source="osv",
-            mode="external",
-            outcome="failed",
-        ).inc()
-        return {"source": "osv", "outcome": "failed", "error": type(exc).__name__}
-
-
-__all__ = ["OSV_QUERY_URL", "query_external_osv"]
+        },
+    )
+    return result

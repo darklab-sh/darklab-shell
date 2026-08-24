@@ -114,6 +114,7 @@ def _create_protected_http_profile(
     base_url: str = "",
     allowed_host: str = "",
 ) -> tuple[str, str]:
+    resolved_base_url = base_url or f"https://{target_value}/app"
     stored = client.post(
         "/session/secrets",
         headers={"X-Session-ID": token},
@@ -126,8 +127,8 @@ def _create_protected_http_profile(
         json={
             "name": "Protected probe application",
             "role": "user",
-            "base_url": base_url or f"https://{target_value}",
-            "scope_roots": [base_url or f"https://{target_value}"],
+            "base_url": resolved_base_url,
+            "scope_roots": [resolved_base_url],
             "allowed_hosts": [allowed_host or target_value],
             "include_paths": ["/app"],
             "exclude_paths": ["/app/private"],
@@ -993,7 +994,7 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
         "credential_use": ["headers"],
         "scope": {
             "allowed_hosts": [target["value"]],
-            "scope_roots": [f"https://{target['value']}"],
+            "scope_roots": [f"https://{target['value']}/app"],
             "include_paths": ["/app"],
             "exclude_paths": ["/app/private"],
         },

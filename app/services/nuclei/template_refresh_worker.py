@@ -27,7 +27,31 @@ from services.nuclei.template_refresh_files import (
 UPDATE_TIMEOUT_SECONDS = 180
 
 
-def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
+def _failed(
+    reason_code: str,
+    phase: str,
+    *,
+    exit_status: int | None = None,
+    error: Exception | None = None,
+) -> dict[str, str | int]:
+    result: dict[str, str | int] = {
+        "status": "failed",
+        "reason_code": reason_code,
+        "phase": phase,
+    }
+    if exit_status is not None:
+        result["exit_status"] = int(exit_status)
+    if error is not None:
+        if isinstance(error, subprocess.TimeoutExpired):
+            result["error_class"] = "TimeoutExpired"
+        elif isinstance(error, OSError):
+            result["error_class"] = "OSError"
+        elif isinstance(error, ValueError):
+            result["error_class"] = "ValueError"
+    return result
+
+
+def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str | int]:
     environment = os.environ.copy()
     environment["HOME"] = str(config_root)
     environment["XDG_CONFIG_HOME"] = str(config_root / ".config")
@@ -42,14 +66,18 @@ def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
         timeout=UPDATE_TIMEOUT_SECONDS,
     )
     if update.returncode != 0:
-        return {"status": "failed", "reason_code": "template_update_failed"}
+        return _failed(
+            "template_update_failed",
+            "update",
+            exit_status=update.returncode,
+        )
     snapshot = managed_nuclei_template_snapshot(
         stage_dir,
         config_path=config_path,
         acquire_lock=False,
     )
     if snapshot.state != "ready" or not snapshot.release_version:
-        return {"status": "failed", "reason_code": "staged_cache_invalid"}
+        return _failed("staged_cache_invalid", "snapshot")
     validation = subprocess.run(
         [
             binary,
@@ -68,16 +96,20 @@ def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
         timeout=VALIDATION_TIMEOUT_SECONDS,
     )
     if validation.returncode != 0:
-        return {"status": "failed", "reason_code": "staged_cache_incompatible"}
+        return _failed(
+            "staged_cache_incompatible",
+            "validation",
+            exit_status=validation.returncode,
+        )
     live_dir = Path(MANAGED_TEMPLATE_DIR)
     try:
         rebase_staged_template_manifest(stage_dir, live_dir)
-    except (OSError, ValueError):
-        return {"status": "failed", "reason_code": "staged_manifest_rebase_failed"}
+    except (OSError, ValueError) as exc:
+        return _failed("staged_manifest_rebase_failed", "manifest", error=exc)
     try:
         config_payload = staged_release_config(config_path, live_dir)
-    except ValueError:
-        return {"status": "failed", "reason_code": "staged_release_metadata_invalid"}
+    except ValueError as exc:
+        return _failed("staged_release_metadata_invalid", "metadata", error=exc)
     try:
         install_staged_template_cache(
             stage_dir,
@@ -85,8 +117,8 @@ def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
             default_nuclei_config_path(),
             config_payload,
         )
-    except (OSError, ValueError):
-        return {"status": "failed", "reason_code": "template_install_failed"}
+    except (OSError, ValueError) as exc:
+        return _failed("template_install_failed", "install", error=exc)
     return {
         "status": "updated",
         "release_version": snapshot.release_version,
@@ -94,19 +126,19 @@ def _run(binary: str, stage_dir: Path, config_root: Path) -> dict[str, str]:
     }
 
 
-def refresh_worker() -> dict[str, str]:
+def refresh_worker() -> dict[str, str | int]:
     binary = resolve_runtime_command("nuclei")
     if not binary:
-        return {"status": "failed", "reason_code": "nuclei_not_installed"}
+        return _failed("nuclei_not_installed", "resolve")
     live_parent = Path(MANAGED_TEMPLATE_DIR).parent
     stage_dir = Path(tempfile.mkdtemp(prefix=".darklab-nuclei-stage-", dir=live_parent))
     config_root = Path(tempfile.mkdtemp(prefix=".darklab-nuclei-config-", dir=live_parent))
     try:
         return _run(binary, stage_dir, config_root)
-    except subprocess.TimeoutExpired:
-        return {"status": "failed", "reason_code": "template_refresh_timed_out"}
-    except (OSError, ValueError):
-        return {"status": "failed", "reason_code": "template_refresh_failed"}
+    except subprocess.TimeoutExpired as exc:
+        return _failed("template_refresh_timed_out", "worker", error=exc)
+    except (OSError, ValueError) as exc:
+        return _failed("template_refresh_failed", "worker", error=exc)
     finally:
         shutil.rmtree(stage_dir, ignore_errors=True)
         shutil.rmtree(config_root, ignore_errors=True)

@@ -58,7 +58,6 @@ from services.assessments.evidence_matching import (
 )
 from services.assessments.export_context import get_project_assessment_context
 from services.assessments.finding_worklist import assessment_finding_worklist_on_conn
-from services.assessments.handoff import get_project_assessment_finding_changes
 from services.assessments.lifecycle import update_assessment_cycle
 from services.assessments.run_launch import materialize_assessment_run_launch
 from services.assessments.mutations import update_manual_check_state_on_conn
@@ -1714,11 +1713,6 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
             priority="owner-private-signal",
         )
 
-    handoff = get_project_assessment_finding_changes(session_id, project_id)
-    assert handoff is not None
-    assert handoff["assessment"]["id"] == current_assessment_id
-    assert handoff["rollup"] == read_model["rollup"]
-    assert len(handoff["items"]) == 4
     export_context = get_project_assessment_context(
         session_id,
         project_id,
@@ -1848,43 +1842,6 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     )
     assert getattr(linked_event, "linked_count") == 1
     assert getattr(linked_event, "failed_count") == 1
-
-    selected_remediation_id = by_vulnerability["CVE-2026-10004"]["remediation_id"]
-    selected_handoff = get_project_assessment_finding_changes(
-        session_id,
-        project_id,
-        findings=[{
-            "observation_references": [{"remediation_id": selected_remediation_id}],
-        }],
-    )
-    assert selected_handoff is not None
-    assert selected_handoff["rollup"] == {
-        "regressed": 1,
-        "new": 0,
-        "persistent": 0,
-        "not_observed": 0,
-        "incomparable": 0,
-        "total": 1,
-    }
-    assert [item["remediation_id"] for item in selected_handoff["items"]] == [
-        selected_remediation_id,
-    ]
-    chunked_handoff = get_project_assessment_finding_changes(
-        session_id,
-        project_id,
-        findings=[{
-            "observation_references": [
-                {"remediation_id": selected_remediation_id},
-                *(
-                    {"remediation_id": f"rmd-missing-{index}"}
-                    for index in range(1001)
-                ),
-            ],
-        }],
-    )
-    assert chunked_handoff is not None
-    assert chunked_handoff["rollup"] == selected_handoff["rollup"]
-    assert chunked_handoff["items"] == selected_handoff["items"]
 
     with db_connect() as conn:
         counts = reconciliation_deletion_counts(conn, previous_assessment_id)

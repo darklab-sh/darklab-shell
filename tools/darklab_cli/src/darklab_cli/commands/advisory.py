@@ -12,9 +12,7 @@ from ..formatting import print_payload
 
 
 _ACTIONABLE_ERRORS = {
-    "team_forbidden": (
-        "OSV lookup requires the TRIAGE_FINDINGS capability for the selected team."
-    ),
+    "team_forbidden": "OSV lookup requires the TRIAGE_FINDINGS capability for the selected team.",
     "osv_lookup_disabled": (
         "External OSV lookups are disabled. Set cve_risk.osv_advisory_mode "
         "to external and retry."
@@ -23,6 +21,7 @@ _ACTIONABLE_ERRORS = {
         "The OSV provider lookup failed. Check outbound access and provider "
         "availability, then retry."
     ),
+    "osv_lookup_busy": "The OSV lookup budget is temporarily busy. Wait a moment, then retry.",
 }
 
 

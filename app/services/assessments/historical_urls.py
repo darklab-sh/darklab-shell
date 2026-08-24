@@ -48,22 +48,6 @@ def normalize_historical_url(value: object, *, source: str = "gau", run_id: str 
     }
 
 
-def normalize_historical_urls(values: object, *, source: str = "gau", run_id: str = "") -> list[dict[str, str]]:
-    """Normalize, deduplicate, and bound passive URL results."""
-    rows = values if isinstance(values, (list, tuple)) else []
-    result: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for value in rows:
-        row = normalize_historical_url(value, source=source, run_id=run_id)
-        if not row or row["url"] in seen:
-            continue
-        seen.add(row["url"])
-        result.append(row)
-        if len(result) >= MAX_HISTORICAL_URLS:
-            break
-    return result
-
-
 def normalize_domain_scoped_historical_urls(
     values: object,
     domain: object,
@@ -105,36 +89,3 @@ def historical_url_entity_attributes(row: object) -> dict[str, str]:
     if source_run_id:
         attributes["source_run_id"] = source_run_id
     return attributes
-
-
-def filter_historical_urls(
-    rows: object,
-    *,
-    allowed_hosts: object = (),
-    scope_roots: object = (),
-) -> list[dict[str, str]]:
-    """Keep normalized URLs whose host and path match an explicit scope."""
-    host_values = allowed_hosts if isinstance(allowed_hosts, (list, tuple, set, frozenset)) else ()
-    root_values = scope_roots if isinstance(scope_roots, (list, tuple, set, frozenset)) else ()
-    hosts = {str(host).strip().casefold().rstrip(".") for host in host_values if str(host).strip()}
-    roots = [str(root).strip() for root in root_values if str(root).strip()]
-    values = rows if isinstance(rows, list) else []
-    filtered: list[dict[str, str]] = []
-    for row in values:
-        if not isinstance(row, dict):
-            continue
-        url = str(row.get("url") or "")
-        try:
-            parsed = urlsplit(url)
-        except ValueError:
-            continue
-        host = (parsed.hostname or "").casefold().rstrip(".")
-        if hosts and host not in hosts:
-            continue
-        if roots and not any(
-            url == root or url.startswith(root.rstrip("/") + "/")
-            for root in roots
-        ):
-            continue
-        filtered.append(dict(row))
-    return filtered

@@ -82,7 +82,7 @@ services:
       context: .
       args:
         APP_PORT: ${APP_PORT:-8888}
-        APP_VERSION: ${APP_VERSION:-2.8.3-dev}
+        APP_VERSION: ${APP_VERSION:-2.9.0-dev}
         VCS_REF: ${GIT_SHA:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     labels:
@@ -153,6 +153,7 @@ services:
       - RAW_PACKET_SCANNING_ENABLED=${RAW_PACKET_SCANNING_ENABLED:-false}
       - ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=${ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED:-false}
       - NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}
+      - NUCLEI_TEMPLATE_REFRESH_ENABLED=${NUCLEI_TEMPLATE_REFRESH_ENABLED:-}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

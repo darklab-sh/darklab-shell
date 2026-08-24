@@ -1,0 +1,53 @@
+ping -h
+httping --help
+tcping --help
+dig -h
+tlsx -h
+cdncheck -h
+gau --version
+trufflehog --help
+puredns -h
+traceroute --help
+curl -h
+nmap -h
+shodan --help
+vt --help
+greynoise --help
+ipinfo --help
+urlscan-cli --help
+chaos -h
+testssl --help
+dnsrecon -h
+nikto -Help
+dalfox --help
+dalfox scan --help
+nuclei -h
+subfinder -h
+amass -h
+httpx -h
+dnsx -h
+fping -h
+ffuf -h
+gobuster -h
+naabu -help
+wafw00f --help
+katana -help
+masscan --help
+rustscan --help
+mtr -h
+wget -h
+dnsenum -h
+fierce -h
+wpscan -h
+sslscan -h
+sslyze --help
+whois --help
+nc -h
+openssl s_client -help
+openssl ciphers -help
+openssl ciphers -v
+openssl ciphers -s -v 'ALL:@SECLEVEL=2'
+gau -h
+schemathesis --help
+schemathesis --version
+sqlmap --help

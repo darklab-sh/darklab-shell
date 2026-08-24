@@ -41,7 +41,7 @@ On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `cur
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.8.3/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.0/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -91,11 +91,7 @@ See [FEATURES.md](FEATURES.md) for the full feature reference.
 
 Open **Quick Lookup** beside Atlas on the desktop rail or mobile menu, or press `Alt+Q` / `Option+Q`. Enter one hostname, IP address, or absolute `http://` or `https://` URL and darklab_shell opens the matching saved Atlas profile in your current personal or team scope. **Auto** detects the input type, while the other choices let you require a hostname, IP address, or URL.
 
-Quick Lookup reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. If there isn't an exact record, the result explains what was missing and can take you to normal Atlas search; an unmatched URL can also offer its known parent host. Use **Refresh intel** from a saved profile only when you want a live provider refresh.
-
-Atlas can preview external scanner reports before saving any rows. Alongside Nuclei, Nessus, Greenbone, ZAP, Burp Suite, CSV, and JSONL, the import picker accepts SARIF 2.1 JSON and CycloneDX JSON. Any supported report can also arrive as gzip or as a ZIP containing one report; upload and expanded-size limits keep compressed files from consuming unbounded space. Greenbone's native XML reports map hosts, CVEs, and findings into the same Atlas and Project review flow, and repeated exports of the same NVT against the same target don't create duplicate findings. Importing a report doesn't connect to or manage a Greenbone service. SARIF keeps stable fingerprints, automation context, and safe web or repository-relative locations for review, while local file URIs, traversal paths, credential-bearing URLs, and other unsafe locations are left out and never fetched. CycloneDX previews show components, dependency links, vulnerability assertions, and VEX dispositions separately. Nessus previews can also keep exact service versions with the host, port, service, scan time, and parser details that produced them. You can keep that evidence with the import batch; inventory alone doesn't become a finding, and an imported `not affected` or `resolved` claim never closes existing work. When the app checks a Nessus version against stored NVD rules, it has to re-read that exact applied evidence row before it can save an inferred finding.
-
-Within a Project, **Entities** groups linked domains, URLs, hosts, IPs, ports, CVEs, and hashes into focused tabs. Select mode lets you review and unlink several visible rows at once, and each selection keeps the list at your current reading position.
+Quick Lookup only reads evidence and Intel snapshots the app has already saved. It doesn't run a command, create an Atlas record, or contact an Intel provider. See [Atlas and Quick Lookup](FEATURES.md#session-entity-atlas) for imports, profile views, Project links, and live Intel refreshes.
 
 ### Run a Project assessment
 
@@ -104,7 +100,7 @@ Within a Project, **Entities** groups linked domains, URLs, hosts, IPs, ports, C
 3. Run one recommended action, build a reviewed **Run assessment plan** for several safe checks, or link compatible evidence the Project already has. Mark a check blocked, skipped, or not applicable only when you have a reason to keep with the cycle.
 4. Review findings and retests, complete the cycle, then choose that cycle when you build an evidence package or engagement report.
 
-Coverage stays factual: a saved run counts only when its target, tool, outcome, version, and evidence match the frozen check. Each target keeps its full-cycle totals even when the worklist spans several pages. **Run assessment plan** previews the selected targets, categories, commands, limits, skipped work, potential coverage, and estimated completion window before anything starts. Its advanced limit choices stop at the deployment's configured ceilings, so every value it offers can be previewed. After the preview is built, a decision bar stays within reach, names the plan's current state, and keeps **Run assessment plan**, **Update templates**, or **Refresh preview** visible as the next step. Exact commands and exclusions start as count-labeled details that you can expand when you need them. Safe checks are selected by default; standard checks need a separate acknowledgement, and intrusive or credentialed work stays individual. Plans with Nuclei work also show the managed template release, digest, refresh age, validation result, and affected command count. A stale but valid snapshot can be updated and rebuilt or deliberately kept for an offline or pinned run; an invalid or incompatible snapshot blocks the plan. A successful update adopts the rebuilt preview immediately, while a rebuild that still fails preflight reports the validation problem instead of claiming success. Previewing, updating templates, changing the standard-check choice, and changing a batch limit keep your place in the Assessment tab, so their loading messages and controls remain visible. An unstarted plan also stays available when you close and reopen the Project workspace in the same browser page. The durable batch monitor survives reloads, keeps completed evidence when another command fails or the batch is canceled, and sends one final summary through your existing run-complete notification preference instead of pinging you for every child command. Status Monitor also lists active Assessment plans and the commands they're launching or running, with a direct **View batch** action. Polling updates only the batch monitor, so the Assessment tab keeps your scroll position and focused control while progress changes. Batch runs identify their batch and item in History, Run Details, Recent evidence, reports, and evidence packages; **View batch** returns to the exact monitor that launched the run. A retry builds a fresh preview for failed or unfinished work and starts a new linked batch, so successful commands and their evidence are never reopened. When several Nuclei commands fail while loading templates, the monitor combines them into one diagnosis and offers a template update plus a fresh retry preview without removing the original runs or evidence. **Fix first** ranks current issues without making untested checks look complete, and the **Retest queue** groups two to ten findings only when they share the same safe, credential-free plan. Completed and archived cycles are read-only, and team viewers can inspect the work without changing it.
+Coverage stays factual: a run counts only when its target, tool, outcome, version, and evidence match the frozen check. Plans show their commands, exclusions, safety policy, and limits before approval, then keep durable progress and child-run evidence across reloads, cancellation, and retries. See [Project Workspaces](FEATURES.md#project-workspaces) for the complete assessor flow and [Assessment configuration](CONFIGURATION.md#assessment-profile-catalog) for profiles, limits, Nuclei templates, and optional connectors.
 
 ### Run a one-off Project probe
 
@@ -116,23 +112,7 @@ probe plan httpx --project example-project https://app.example.test
 probe run httpx --project example-project https://app.example.test
 ```
 
-Probes accept an active Project slug or stable id and only use confirmed, compatible Project targets. Planning is read-only; running shows the exact bounded command, waits for confirmation, streams in the same tab, and saves an ordinary Project-linked run in History. Supported web tools can add an enabled HTTP profile by name or id, while Nuclei remains anonymous because its templates can't enforce a saved profile's exact path boundary. See [Project probes](FEATURES.md#project-probes) for the action matrix, permissions, autocomplete, profile, Nuclei-template, and failure guidance.
-
-### Use reviewed actions and integrations
-
-Every available action shows its exact target, policy, scope, limits, and credential use before it starts. Reusable HTTP profiles keep role and scope settings while referring to darklab_shell Secrets and Files instead of copying credential values. You can manage the same profiles from a script with `darklab http-profile`, using a JSON file or stdin for nested settings and an explicit revision for updates. Saved service evidence can suggest a fixed Nmap profile, but uncertain or conflicting fingerprints don't produce an action.
-
-Operators can optionally connect ZAP for reviewed external web scans or a private Interactsh-compatible service for blind-XSS callbacks. Both integrations are off by default, use separate workers, and keep scanner credentials and callback details out of visible commands and browser storage. See [ZAP and OAST worker setup](CONFIGURATION.md#running-zap-and-oast-workers).
-
-Projects also include a **Web Surface** gallery for saved HTTPx screenshots. It shows current response context and visual changes, keeps unavailable captures visible, and can hand an available image to an evidence package or report without opening captured HTML in the app.
-
-### Review findings and hand off the cycle
-
-Create a finding from an Assessment check, Atlas profile, or selected Run Details lines, then attach typed references to the runs, artifacts, screenshots, targets, and checks that support it. Compatible retest results can suggest a status, but the final verification remains a human decision. Completing a cycle compares it with the newest compatible earlier cycle and keeps new, persistent, no-longer-observed, regressed, and incomparable work separate.
-
-Reports and evidence packages can use any saved cycle, including archived history. They keep its frozen scope, coverage, exclusions, evidence references, fix-first priorities, comparison basis, and warnings when a source or screenshot is unavailable.
-
-Release-pinned EPSS and CISA KEV data help explain which saved CVEs deserve attention first without making an outbound request. Optional NVD and OSV data can add advisory or exact package-version context, while Project Monitoring records later risk changes without rewriting the original finding. Inventory and inferred version matches stay separate from findings that an active check confirmed.
+Probes accept an active Project slug or stable id and only use confirmed, compatible Project targets. Planning is read-only; running shows the exact bounded command, waits for confirmation, streams in the same tab, and saves an ordinary Project-linked run in History. See [Project probes](FEATURES.md#project-probes) for supported actions, HTTP profiles, permissions, and failure guidance.
 
 ---
 
@@ -251,8 +231,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.8.3/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.8.3/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.0/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.0/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -260,11 +240,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.8.3/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.8.3/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.0/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.0/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.8.3" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.9.0" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```

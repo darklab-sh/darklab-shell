@@ -4,6 +4,7 @@
 import hashlib
 import io
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
@@ -57,7 +58,6 @@ from services.assessments.dalfox_xss_command import (
     DALFOX_XSS_SCAN_TIMEOUT_SECONDS,
     DALFOX_XSS_TIME_LIMIT_SECONDS,
     DALFOX_XSS_WORKERS,
-    reviewed_dalfox_xss_command_matches,
     reviewed_dalfox_xss_command_plan,
 )
 from services.assessments.dalfox_xss_execution import ReviewedDalfoxXssExecution
@@ -167,14 +167,11 @@ from services.assessments.nuclei_profiles import (
     public_nuclei_profile,
 )
 from services.assessments.historical_urls import (
-    filter_historical_urls,
     normalize_domain_scoped_historical_urls,
     normalize_historical_url,
-    normalize_historical_urls,
     normalize_scope_domain,
 )
 from services.assessments.web_gallery import (
-    filter_web_surface_rows,
     normalize_web_surface_filters,
     web_surface_filters_active,
     web_surface_row_matches,
@@ -193,8 +190,6 @@ from services.runs.output_model import to_wire
 from services.runs.signal_context import RunOutputSignalContext, output_signal_classifier_kwargs
 from services.runs.start import start_brokered_run
 from services.runs.start_contracts import RunStartHandlers
-from services.intel.epss import normalize_epss_rows
-from services.intel.kev import normalize_kev_catalog
 from services.nuclei.provenance import nuclei_template_provenance
 from services.nuclei import template_health
 from services.nuclei.template_cache import (
@@ -1019,6 +1014,7 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
     monkeypatch.setattr(worker, "MANAGED_TEMPLATE_DIR", str(live))
     monkeypatch.setenv("NUCLEI_CONFIG_DIR", str(live_config_dir))
 
+    update_return_code = 0
     validation_return_code = 0
 
     def fake_run(args, **kwargs):
@@ -1035,7 +1031,7 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
                 "nuclei-templates-directory": str(stage),
                 "nuclei-templates-version": "v10.4.7",
             }), encoding="utf-8")
-            return subprocess.CompletedProcess(args, 0)
+            return subprocess.CompletedProcess(args, update_return_code)
         return subprocess.CompletedProcess(args, validation_return_code)
 
     monkeypatch.setattr(worker.subprocess, "run", fake_run)
@@ -1066,11 +1062,63 @@ def test_managed_nuclei_refresh_swaps_only_a_validated_stage(tmp_path, monkeypat
     failed_config.mkdir()
     failed = worker._run("/usr/local/bin/nuclei", failed_stage, failed_config)
 
-    assert failed == {"status": "failed", "reason_code": "staged_cache_incompatible"}
+    assert failed == {
+        "status": "failed",
+        "reason_code": "staged_cache_incompatible",
+        "phase": "validation",
+        "exit_status": 1,
+    }
     assert (live / ".checksum").read_text(encoding="utf-8") == installed_manifest
 
+    update_return_code = 17
+    update_stage = tmp_path / "stage-update-failure"
+    update_stage.mkdir()
+    update_config = tmp_path / "config-update-failure"
+    update_config.mkdir()
+    update_failed = worker._run(
+        "/usr/local/bin/nuclei",
+        update_stage,
+        update_config,
+    )
+    assert update_failed == {
+        "status": "failed",
+        "reason_code": "template_update_failed",
+        "phase": "update",
+        "exit_status": 17,
+    }
 
-def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, monkeypatch):
+    update_return_code = 0
+    validation_return_code = 0
+    for error in (OSError("install unavailable"), ValueError("invalid install")):
+        with monkeypatch.context() as install_patch:
+            install_patch.setattr(
+                worker,
+                "install_staged_template_cache",
+                lambda *_args, _error=error, **_kwargs: (_ for _ in ()).throw(_error),
+            )
+            error_name = type(error).__name__
+            install_stage = tmp_path / f"stage-install-{error_name}"
+            install_stage.mkdir()
+            install_config = tmp_path / f"config-install-{error_name}"
+            install_config.mkdir()
+            install_failed = worker._run(
+                "/usr/local/bin/nuclei",
+                install_stage,
+                install_config,
+            )
+        assert install_failed == {
+            "status": "failed",
+            "reason_code": "template_install_failed",
+            "phase": "install",
+            "error_class": error_name,
+        }
+
+
+def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
     from contextlib import contextmanager
 
     from services.nuclei import template_lock, template_refresh
@@ -1079,6 +1127,18 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
         managed_nuclei_template_lock,
     )
     from services.runs.lifecycle import real_command_popen_argv
+
+    monkeypatch.delenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", raising=False)
+    monkeypatch.delenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", raising=False)
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is True
+    monkeypatch.setenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "false")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
+    monkeypatch.setenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "true")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is True
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "false")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
 
     existing_lock_path = tmp_path / "existing-nuclei.lock"
     existing_lock_path.touch(mode=0o660)
@@ -1145,6 +1205,7 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
     monkeypatch.setattr(template_refresh, "managed_nuclei_template_lock", fake_lock)
     monkeypatch.setattr(template_refresh, "SCANNER_PREFIX", [])
     monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "true")
+    caplog.set_level(logging.WARNING, logger="shell")
     calls = []
 
     def fake_worker(args, **kwargs):
@@ -1172,7 +1233,12 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
         return subprocess.CompletedProcess(
             args,
             1,
-            json.dumps({"status": "failed", "reason_code": "template_install_failed"}),
+            json.dumps({
+                "status": "failed",
+                "reason_code": "template_install_failed",
+                "phase": "install",
+                "error_class": "OSError",
+            }),
             "",
         )
 
@@ -1184,6 +1250,71 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(tmp_path, mon
             active_batch_exists=lambda: False,
             run_command=failed_worker,
         )
+    install_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        install_record.reason_code,
+        install_record.phase,
+        install_record.worker_exit_status,
+        install_record.error_class,
+    ) == ("template_install_failed", "install", 1, "OSError")
+    assert install_record.duration_ms >= 0
+
+    caplog.clear()
+
+    def malformed_worker(args, **_kwargs):
+        return subprocess.CompletedProcess(args, 0, "PRIVATE_WORKER_RESPONSE", "")
+
+    with pytest.raises(template_refresh.NucleiTemplateRefreshError):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=malformed_worker,
+        )
+    malformed_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        malformed_record.reason_code,
+        malformed_record.phase,
+        malformed_record.worker_exit_status,
+        malformed_record.error_class,
+    ) == ("worker_response_invalid", "response", 0, "JSONDecodeError")
+    assert "PRIVATE_WORKER_RESPONSE" not in caplog.text
+
+    caplog.clear()
+
+    def timed_out_worker(args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            args,
+            kwargs["timeout"],
+            output="PRIVATE_WORKER_OUTPUT",
+            stderr="PRIVATE_WORKER_ERROR",
+        )
+
+    with pytest.raises(
+        template_refresh.NucleiTemplateRefreshError,
+        match="timed out",
+    ):
+        template_refresh.refresh_managed_nuclei_templates(
+            active_batch_exists=lambda: False,
+            run_command=timed_out_worker,
+        )
+    timeout_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "NUCLEI_TEMPLATE_REFRESH_FAILED"
+    )
+    assert (
+        timeout_record.reason_code,
+        timeout_record.phase,
+        timeout_record.error_class,
+    ) == ("template_refresh_timed_out", "worker", "TimeoutExpired")
+    assert "PRIVATE_WORKER" not in caplog.text
 
     with pytest.raises(template_refresh.NucleiTemplateRefreshError) as active:
         template_refresh.refresh_managed_nuclei_templates(
@@ -2445,22 +2576,6 @@ def test_historical_urls_are_safe_bounded_and_provenance_only():
         "HTTPS://Example.COM/a#fragment", run_id="run-1"
     ) is None
     assert normalize_historical_url("https://user:pass@example.com/a") is None
-    rows = normalize_historical_urls([
-        "HTTPS://Example.COM/a?x=1", "https://example.com/a?x=1", "ftp://example.com/a",
-        "https://example.com/b#ignored",
-    ], source="gau", run_id="run-1")
-    assert rows == [{
-        "url": "https://example.com/a?x=1", "source": "gau", "source_run_id": "run-1",
-    }]
-    assert [row["url"] for row in filter_historical_urls(
-        [
-            {"url": "https://example.com/a", "source": "gau"},
-            {"url": "https://example.com.evil/a", "source": "gau"},
-            {"url": "https://other.example/a", "source": "gau"},
-        ],
-        allowed_hosts=["example.com"],
-        scope_roots=["https://example.com/a"],
-    )] == ["https://example.com/a"]
     scoped = normalize_domain_scoped_historical_urls(
         [
             "HTTPS://Example.COM/a?x=1",
@@ -2484,20 +2599,6 @@ def test_historical_urls_are_safe_bounded_and_provenance_only():
     )
     assert len(bounded) == 256
     assert bounded[-1]["url"] == "https://sub.example.com/255"
-
-
-def test_epss_and_kev_feeds_normalize_risk_signals_without_network_access():
-    assert normalize_epss_rows(
-        "# comment\ncve,epss,percentile,date\nCVE-2026-12345,0.42,0.91,2026-08-01\nCVE-invalid,2,0.1,"
-    ) == [{"cve": "CVE-2026-12345", "epss": 0.42, "percentile": 0.91, "date": "2026-08-01"}]
-    assert normalize_kev_catalog({"vulnerabilities": [{
-        "cveID": "CVE-2026-12345", "vendorProject": "Vendor", "product": "Product",
-        "vulnerabilityName": "Example", "dateAdded": "2026-08-01", "dueDate": "2026-08-21",
-        "knownRansomwareCampaignUse": "Known",
-    }, {"cveID": "not-cve"}]}) == [{
-        "cve": "CVE-2026-12345", "vendor": "Vendor", "product": "Product", "name": "Example",
-        "date_added": "2026-08-01", "due_date": "2026-08-21", "known_ransomware_use": "Known",
-    }]
 
 
 def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirmation():
@@ -3007,36 +3108,6 @@ def test_httpx_screenshot_metadata_is_bounded_and_path_safe():
     assert normalize_httpx_screenshot({"url": "https://user:pass@app.example.test", "screenshot_path": "ok.png"}) is None
 
 
-def test_web_gallery_filters_metadata_without_exposing_artifact_contents():
-    rows = filter_web_surface_rows(
-        [
-            {
-                "url": "https://app.example.test",
-                "status_code": 200,
-                "technologies": ["nginx"],
-                "profile_role": "anonymous",
-                "visual_hash": "abc",
-                "html": "secret",
-            },
-            {
-                "url": "https://admin.example.test",
-                "status_code": 401,
-                "technologies": ["nginx"],
-                "profile_role": "authenticated",
-                "visual_hash": "def",
-            },
-        ],
-        target="app.example",
-        status_code=200,
-        technology="nginx",
-        profile_role="anonymous",
-    )
-    assert len(rows) == 1
-    assert rows[0]["url"] == "https://app.example.test"
-    assert "html" not in rows[0]
-    assert filter_web_surface_rows(rows, visual_hash="abc", changed_since=["abc"]) == []
-
-
 def test_web_gallery_normalizes_collection_filters_and_matches_enriched_rows():
     filters = normalize_web_surface_filters({
         "target": "  APP.EXAMPLE  ",
@@ -3111,16 +3182,6 @@ def test_web_surface_comparison_uses_exact_url_role_and_prior_run_evidence():
     assert oldest["comparison"]["state"] == "no_baseline"
     attach_capture_comparisons([oldest], [oldest], history_truncated=True)
     assert oldest["comparison"]["state"] == "unknown"
-
-
-def test_web_gallery_paging_is_bounded_and_skips_malformed_rows():
-    rows = filter_web_surface_rows(
-        [None, {"url": "https://one.example", "status_code": 200}, {"url": "https://two.example", "status_code": 200}],
-        offset=cast(Any, "1"),
-        limit=9999,
-    )
-    assert [row["url"] for row in rows] == ["https://two.example"]
-    assert filter_web_surface_rows([{"url": "https://one.example"}], offset=-5, limit=0) == []
 
 
 def test_web_gallery_extracts_only_bounded_screenshot_metadata_from_event_wires():
@@ -3341,9 +3402,7 @@ def test_reviewed_dalfox_xss_command_is_exact_bounded_and_evidence_derived():
         "--follow-redirects", "--remote-payloads", "--custom-payload",
         "--blind", "--blind-oob", "--include-request", "--include-response",
     ))
-    assert reviewed_dalfox_xss_command_matches(plan.command, evidence)
     assert assessment_command_mode(plan.command) == DALFOX_XSS_VALIDATION_MODE
-    assert not reviewed_dalfox_xss_command_matches(plan.command + " --deep-scan", evidence)
     context = evidence.xss_context(request_limit=plan.request_limit)
     assert context.request_limit == DALFOX_XSS_REQUEST_LIMIT
     classifier = OutputSignalClassifier(

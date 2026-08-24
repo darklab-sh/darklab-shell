@@ -311,28 +311,4 @@ def ingest_oast_interaction(
         return {"created": True, "interaction": _interaction_row(active_conn, row)}
 
 
-def oast_interactions_for_owner_correlation(
-    session_id: str,
-    correlation_id: str,
-    *,
-    team_id: str = "",
-    limit: int = 25,
-    conn=None,
-) -> list[dict[str, Any]]:
-    bounded_limit = max(1, min(int(limit), 100))
-    owner_sql, owner_params = _owner_predicate(
-        str(session_id or ""), str(team_id or ""), table_prefix="c"
-    )
-    with _connection_scope(conn) as active_conn:
-        rows = active_conn.execute(
-            _select_sql(owner_sql)
-            + " AND i.correlation_id = ? ORDER BY i.observed_at DESC, i.id DESC LIMIT ?",  # nosec
-            (*owner_params, correlation_id, bounded_limit),
-        ).fetchall()
-        return [_interaction_row(active_conn, row) for row in rows]
-
-
-__all__ = [
-    "ingest_oast_interaction",
-    "oast_interactions_for_owner_correlation",
-]
+__all__ = ["ingest_oast_interaction"]

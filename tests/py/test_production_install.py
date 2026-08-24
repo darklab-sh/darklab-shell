@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.8.3"
+RELEASE_VERSION = "2.9.0"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
@@ -40,7 +40,7 @@ NEXT_RC_VERSION = (
     if _CURRENT_RC_NUMBER
     else RC_TWO_VERSION
 )
-NEXT_VERSION = "2.8.4"
+NEXT_VERSION = "2.9.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
@@ -1003,6 +1003,9 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED"] == (
         "${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
     )
+    assert shell["environment"]["NUCLEI_TEMPLATE_REFRESH_ENABLED"] == (
+        "${NUCLEI_TEMPLATE_REFRESH_ENABLED:-}"
+    )
     assert shell["healthcheck"]["start_period"] == "210s"
     assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
     assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
@@ -1042,6 +1045,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
     assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in env_example
+    assert "# NUCLEI_TEMPLATE_REFRESH_ENABLED=false" in env_example
     assert "# DARKLAB_ZAP_API_KEY=" in env_example
     assert "# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=" in env_example
     assert "# DARKLAB_OAST_TOKEN=" in env_example
@@ -1131,6 +1135,10 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
         in development_environment
     )
+    assert (
+        "NUCLEI_TEMPLATE_REFRESH_ENABLED=${NUCLEI_TEMPLATE_REFRESH_ENABLED:-}"
+        in development_environment
+    )
     assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
     assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
     assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
@@ -1139,6 +1147,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "DARKLAB_IMAGE=" not in development_env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in development_env_example
     assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in development_env_example
+    assert "# NUCLEI_TEMPLATE_REFRESH_ENABLED=false" in development_env_example
     assert "nuclei-templates" in development_compose["volumes"]
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 
@@ -2590,6 +2599,29 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "release-compose-restart-marker" in ci_config
     assert 'release-install/darklab-deploy" status' in ci_config
     parsed_ci = yaml.safe_load(ci_config)
+    assert parsed_ci["test-js-e2e"]["extends"] == ".playwright-lane"
+    assert parsed_ci["test-js-e2e"]["script"] == ["npm run test:e2e"]
+    assert parsed_ci["test-js-e2e-source"]["extends"] == ".playwright-lane"
+    assert parsed_ci["test-js-e2e-source"]["script"] == ["npm run test:e2e:source"]
+    assert "allow_failure" not in parsed_ci["test-js-e2e-source"]
+    deterministic_smoke = parsed_ci["container-smoke-test-deterministic"]
+    assert deterministic_smoke["extends"] == ".container-smoke-lane"
+    assert deterministic_smoke["variables"]["RUN_CONTAINER_SMOKE_TEST_RETRIES"] == "0"
+    assert "--tier deterministic" in "\n".join(deterministic_smoke["script"])
+    assert all("allow_failure" not in rule for rule in deterministic_smoke["rules"])
+    assert parsed_ci["container-smoke-test"]["extends"] == ".container-smoke-lane"
+    public_smoke = parsed_ci["container-smoke-test-public-network"]
+    assert public_smoke["extends"] == ".container-smoke-lane"
+    assert public_smoke["variables"]["RUN_CONTAINER_SMOKE_TEST_RETRIES"] == "3"
+    assert "--tier public-network" in "\n".join(public_smoke["script"])
+    assert all("allow_failure" not in rule for rule in public_smoke["rules"])
+    for config_name in (
+        "playwright.config.js",
+        "playwright.parallel.config.js",
+    ):
+        playwright_config = (ROOT / ".tooling" / config_name).read_text(encoding="utf-8")
+        assert "failOnFlakyTests: Boolean(process.env.CI)" in playwright_config
+        assert "forbidOnly: Boolean(process.env.CI)" in playwright_config
     release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
     final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in release_rule
@@ -2692,11 +2724,14 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert postgres_pytest_job["artifacts"]["reports"]["junit"].endswith(
         "pytest-postgres.xml"
     )
-    container_smoke_job = parsed_ci["container-smoke-test"]
+    container_smoke_job = parsed_ci[".container-smoke-lane"]
     assert container_smoke_job["artifacts"]["reports"]["junit"].endswith(
         "container_smoke_test.xml"
     )
     assert "container-smoke-durations.txt" in "\n".join(
+        container_smoke_job["artifacts"]["paths"]
+    )
+    assert "container-smoke-retries.jsonl" in "\n".join(
         container_smoke_job["artifacts"]["paths"]
     )
     container_smoke_setup = "\n".join(container_smoke_job["before_script"])

@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "860a7b89d13925bc41f2d0e0fc51cb7bff87e6fa51f24010779293ccf675926e"
+_LOG_EVENT_INVENTORY_HASH = "4096500fa94c0930ae62c565b1fb8f39291b8520aa2b9de5a1544afdcb56af59"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
@@ -867,7 +867,7 @@ class TestLoggingReference:
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 362
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 366
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()
@@ -1044,6 +1044,44 @@ class TestDocumentationDurability:
             "tests/README.md must retain lightweight live-suite listing commands:\n"
             + "\n".join(f"  {command}" for command in missing)
         )
+
+    def test_api_assessment_cli_examples_use_storage_id_families(self):
+        api_text = (_REPO_ROOT / "docs" / "api.md").read_text()
+        expected_examples = {
+            "asm_123": (
+                _REPO_ROOT / "app" / "services" / "assessments" / "storage.py",
+                'return "asm_" + secrets.token_hex(12)',
+            ),
+            "ach_123": (
+                _REPO_ROOT / "app" / "services" / "assessments" / "storage.py",
+                'return "ach_" + secrets.token_hex(12)',
+            ),
+            "obs_123": (
+                _REPO_ROOT
+                / "app"
+                / "services"
+                / "assessments"
+                / "dalfox_parameter_observations.py",
+                'return "obs_" + digest[:32]',
+            ),
+            "abx_123": (
+                _REPO_ROOT
+                / "app"
+                / "services"
+                / "assessments"
+                / "batch"
+                / "storage.py",
+                '_new_id("abx_")',
+            ),
+        }
+        missing = [example for example in expected_examples if example not in api_text]
+        assert not missing, f"Assessment CLI examples are missing public ids: {missing}"
+        for example, (source_path, source_contract) in expected_examples.items():
+            assert source_contract in source_path.read_text(), (
+                f"The documented {example} family no longer matches {source_path}"
+            )
+        obsolete = re.findall(r"\b(?:asmt|asmc|dpx|wfx)_\d+\b", api_text)
+        assert not obsolete, f"Assessment CLI examples use obsolete id families: {obsolete}"
 
     def test_reader_docs_do_not_hardcode_test_totals(self):
         total_re = re.compile(

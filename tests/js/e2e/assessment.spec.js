@@ -841,9 +841,14 @@ test.describe('project assessment qualification', () => {
     await expect(assessment.locator('.project-assessment-cycle')).toHaveCount(0)
   })
 
-  test('keeps missing HTTP credentials unavailable and restores the launch control', async ({ page }) => {
+  test('persists HTTP profile lifecycle and keeps missing credentials unavailable', async ({ page }) => {
     test.setTimeout(90_000)
+    let useMissingFixture = false
     await page.route('**/session/secrets', async (route) => {
+      if (!useMissingFixture || route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -858,6 +863,10 @@ test.describe('project assessment qualification', () => {
       })
     })
     await page.route('**/projects/*/http-profiles', async (route) => {
+      if (!useMissingFixture || route.request().method() !== 'GET') {
+        await route.continue()
+        return
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -885,20 +894,110 @@ test.describe('project assessment qualification', () => {
         }),
       })
     })
+    const suffix = Date.now().toString(36).toUpperCase()
+    const secretName = `PLAYWRIGHT_HTTP_TOKEN_${suffix}`
+    const profileName = `Playwright member ${suffix}`
+    await page.evaluate(async ({ name }) => {
+      const response = await apiFetch('/session/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          value: 'synthetic-playwright-token',
+          consumer_envs: [name],
+        }),
+      })
+      if (!response.ok) throw new Error(`secret create failed: ${response.status}`)
+    }, { name: secretName })
     await createAssessmentProject(
       page,
-      `Assessment Missing Secret ${Date.now()}`,
-      { type: 'url', value: 'http://127.0.0.1:1/' },
+      `Assessment HTTP Profiles ${Date.now()}`,
+      { type: 'url', value: 'http://127.0.0.1:1/app' },
     )
     await openAssessment(page)
 
     const assessment = page.locator('#project-explorer-body .project-assessment-root')
+    await expect(assessment.locator('.project-http-profiles')).toContainText(
+      'No HTTP profiles are saved for this Project yet.',
+    )
     await startAssessmentCycle(page, assessment, 'web', 'Web assessment')
 
     await page.setViewportSize({ width: 810, height: 766 })
-    const newProfile = assessment.getByRole('button', { name: 'New HTTP profile' })
-    await newProfile.click()
-    const profileEditor = page.locator('#confirm-host .project-http-profile-editor')
+    const createProfileButton = assessment.getByRole('button', { name: 'New HTTP profile' })
+    await createProfileButton.click()
+    let profileEditor = page.locator('#confirm-host .project-http-profile-editor')
+    await expect(profileEditor).toBeVisible()
+    await profileEditor.getByLabel('Profile name').fill(profileName)
+    await profileEditor.getByLabel('Authentication role').fill('member')
+    await profileEditor.getByLabel('Base URL').fill('http://127.0.0.1:1/')
+    await profileEditor.getByLabel('Scope roots').fill('http://127.0.0.1:1/')
+    await profileEditor.getByLabel('Allowed Project hosts').fill('127.0.0.1')
+    await profileEditor.getByLabel('Included paths').fill('/app')
+    await profileEditor.getByLabel('Bearer token Secret').selectOption(secretName)
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && /\/projects\/[^/]+\/http-profiles$/.test(url.pathname)
+    })
+    await confirmAssessmentAction(page, 'save')
+    const createdResponse = await createResponse
+    expect(createdResponse.status()).toBe(201)
+    const createdProfile = (await createdResponse.json()).profile
+    const profileRow = assessment.locator('.project-http-profile-row').filter({ hasText: profileName })
+    await expect(profileRow).toContainText('Credentials ready')
+    await expect(profileRow).toContainText('bearer token')
+
+    await assessment.locator('.project-assessment-target-toggle').click()
+    const runHttpx = assessment.getByRole('button', { name: 'Run Httpx' })
+    await runHttpx.click()
+    const confirm = page.locator('#confirm-host')
+    const profileSelect = confirm.locator('select[aria-label="HTTP profile for assessment run"]')
+    await profileSelect.selectOption(createdProfile.id)
+    const previewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET'
+        && url.pathname.endsWith('/recommended-action')
+        && url.searchParams.get('http_profile_id') === createdProfile.id
+    })
+    await confirmAssessmentAction(page, 'continue')
+    expect((await previewResponse).status()).toBe(200)
+    await expect(confirm).toContainText(profileName)
+    await expect(confirm).toContainText('bearer token')
+    await confirmAssessmentAction(page, 'cancel')
+
+    await profileRow.getByRole('button', { name: 'Edit profile' }).click()
+    profileEditor = page.locator('#confirm-host .project-http-profile-editor')
+    await expect(profileEditor).toBeVisible()
+    await profileEditor.getByLabel('Allow this profile to be selected for assessment runs').uncheck()
+    const updateResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PATCH'
+        && url.pathname.endsWith(`/http-profiles/${createdProfile.id}`)
+    })
+    await confirmAssessmentAction(page, 'save')
+    expect((await updateResponse).status()).toBe(200)
+    await expect(profileRow).toContainText('Disabled')
+
+    useMissingFixture = true
+    const deleteResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'DELETE'
+        && url.pathname.endsWith(`/http-profiles/${createdProfile.id}`)
+    })
+    await profileRow.getByRole('button', { name: 'Delete profile' }).click()
+    await confirmAssessmentAction(page, 'delete')
+    expect((await deleteResponse).status()).toBe(200)
+    await expect(assessment.locator('.project-http-profile-row').filter({ hasText: profileName })).toHaveCount(0)
+    await expect(assessment).toContainText('Member role with missing token')
+
+    await page.evaluate(async ({ name }) => {
+      const response = await apiFetch(`/session/secrets/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) throw new Error(`secret delete failed: ${response.status}`)
+    }, { name: secretName })
+
+    await createProfileButton.click()
+    profileEditor = page.locator('#confirm-host .project-http-profile-editor')
     await expect(profileEditor).toBeVisible()
     const passwordSecret = profileEditor.getByLabel('Basic password Secret')
     await expect(passwordSecret).toHaveValue('')
@@ -928,11 +1027,8 @@ test.describe('project assessment qualification', () => {
     await confirmAssessmentAction(page, 'cancel')
     await expect(profileEditor).toBeHidden()
 
-    await assessment.locator('.project-assessment-target-toggle').click()
-    const runHttpx = assessment.getByRole('button', { name: 'Run Httpx' })
     await runHttpx.click()
 
-    const confirm = page.locator('#confirm-host')
     await expect(confirm).toContainText('Choose the web role for this run.')
     const missingOption = confirm.locator('option', { hasText: 'Member role with missing token' })
     await expect(missingOption).toContainText('missing Secret')

@@ -116,6 +116,14 @@ def launch_assessment_batch(batch_id: str) -> dict[str, object]:
             reason_code = str(claim.get("reason_code") or "")
             if claim_status == "deferred":
                 app_metrics.record_assessment_batch_deferral(reason_code)
+                log.debug(
+                    "ASSESSMENT_BATCH_LAUNCH_DEFERRED",
+                    extra={
+                        "batch_id": str(batch_id),
+                        "reason_code": reason_code,
+                        "launched_count": launched,
+                    },
+                )
             break
         child = claim.get("child")
         item = claim.get("item")

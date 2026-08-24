@@ -16,6 +16,7 @@ from services.assessments.batch.cancellation import (
     request_batch_cancellation_on_conn,
     signal_batch_cancellation_runs,
 )
+from services.assessments.batch.terminal_observability import record_terminal_batch_milestone
 from services.assessments.batch.cancellation_settlement import (
     finalize_canceling_batch_run,
 )
@@ -69,13 +70,15 @@ def _recover_canceling(
     dialect = dialect_for_backend(get_db_backend())
     with get_db_connect()() as conn:
         conn.execute(dialect.begin_immediate_sql())
-        run_ids = request_batch_cancellation_on_conn(
+        requested = request_batch_cancellation_on_conn(
             conn,
             session_id,
             batch_id,
             team_id=team_id,
         )
         conn.commit()
+    run_ids, terminalized = requested or ((), False)
+    record_terminal_batch_milestone(batch_id, changed=terminalized)
     if run_ids:
         signal_batch_cancellation_runs(
             session_id,

@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import shlex
-from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from services.assessments.command_plan_contracts import CommandPlan
@@ -78,15 +77,6 @@ def reviewed_dalfox_xss_command_plan(
     )
 
 
-def reviewed_dalfox_xss_command_matches(
-    command: Any,
-    evidence: ReviewedDalfoxParameterEvidence,
-) -> bool:
-    """Return whether a command is the exact app-owned plan for saved evidence."""
-    expected = reviewed_dalfox_xss_command_plan(evidence)
-    return expected is not None and str(command or "") == expected.command
-
-
 __all__ = [
     "DALFOX_XSS_MAX_PAYLOADS_PER_PARAMETER",
     "DALFOX_XSS_RATE_LIMIT_PER_SECOND",
@@ -94,6 +84,5 @@ __all__ = [
     "DALFOX_XSS_SCAN_TIMEOUT_SECONDS",
     "DALFOX_XSS_TIME_LIMIT_SECONDS",
     "DALFOX_XSS_WORKERS",
-    "reviewed_dalfox_xss_command_matches",
     "reviewed_dalfox_xss_command_plan",
 ]

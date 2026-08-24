@@ -21,12 +21,20 @@ import config as app_config
 import config_paths
 from services.assessments.command_modes import ASSESSMENT_COMMAND_MODES
 from services.assessments.dalfox_oast_contracts import DALFOX_OAST_ACTION_KEY
-from services.projects.contracts import ProjectWorkspaceError
+from services.assessments.profile_catalog_validation import (
+    AssessmentProfileCatalogError,
+    catalog_error as _catalog_error,
+    catalog_rejection_fields,
+    mapping as _mapping,
+    reject_unknown_fields as _reject_unknown_fields,
+    required_text as _required_text,
+    stable_key as _stable_key,
+    string_list as _string_list,
+    version as _version,
+)
 
 
 ASSESSMENT_PROFILE_CATALOG_VERSION = 1
-ASSESSMENT_PROFILE_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-ASSESSMENT_PROFILE_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,2}$")
 ASSESSMENT_COMPATIBLE_VERSION_RE = re.compile(r"^[0-9A-Za-z*<>=., _+\-]{1,64}$")
 ASSESSMENT_TARGET_TYPES = frozenset({"domain", "ip", "port", "url"})
 ASSESSMENT_EVIDENCE_TYPES = frozenset({
@@ -59,7 +67,6 @@ ASSESSMENT_STRUCTURED_OUTPUT_KINDS = frozenset({
 ASSESSMENT_PROFILE_MAX_PROFILES = 25
 ASSESSMENT_PROFILE_MAX_CHECKS = 100
 ASSESSMENT_PROFILE_MAX_RULES = 10
-ASSESSMENT_PROFILE_MAX_LIST_ITEMS = 32
 ASSESSMENT_PROFILE_LABEL_MAX_LEN = 120
 ASSESSMENT_PROFILE_PURPOSE_MAX_LEN = 1000
 ASSESSMENT_PROFILE_GUIDANCE_MAX_LEN = 2000
@@ -92,11 +99,7 @@ _EVIDENCE_RULE_FIELDS = frozenset({
     "negative_evidence",
 })
 
-log = logging.getLogger(__name__)
-
-
-class AssessmentProfileCatalogError(ProjectWorkspaceError):
-    """Raised when an assessment-profile catalog is invalid."""
+log = logging.getLogger("shell")
 
 
 @dataclass(frozen=True)
@@ -108,14 +111,6 @@ class AssessmentProfileCatalog:
 
 
 _CATALOG_CACHE: dict[tuple[str, str], dict[str, object]] = {}
-
-
-def default_assessment_profiles_path() -> Path:
-    return config_paths.config_asset_paths(
-        "assessment_profiles.yaml",
-        shipped_conf_dir=app_config.APP_CONF_DIR or None,
-        local_conf_dir=app_config.APP_LOCAL_CONF_DIR or None,
-    ).shipped
 
 
 def configured_assessment_profile_paths() -> config_paths.ConfigAssetPaths:
@@ -133,73 +128,6 @@ def _catalog_signature(path: Path) -> tuple[str, int | None, int | None]:
     except OSError:
         return normalized, None, None
     return normalized, stat.st_mtime_ns, stat.st_size
-
-
-def _catalog_error(message: str) -> AssessmentProfileCatalogError:
-    return AssessmentProfileCatalogError(f"assessment profile catalog {message}")
-
-
-def _mapping(value: object, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise _catalog_error(f"{label} must be an object")
-    return value
-
-
-def _reject_unknown_fields(value: dict[str, Any], allowed: frozenset[str], label: str) -> None:
-    unknown = sorted(str(field) for field in value if field not in allowed)
-    if unknown:
-        raise _catalog_error(f"{label} has unknown fields: {', '.join(unknown)}")
-
-
-def _required_text(value: object, label: str, max_length: int) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise _catalog_error(f"{label} must be non-empty text")
-    normalized = value.strip()
-    if len(normalized) > max_length:
-        raise _catalog_error(f"{label} exceeds {max_length} characters")
-    return normalized
-
-
-def _stable_key(value: object, label: str) -> str:
-    normalized = _required_text(value, label, 64).lower()
-    if not ASSESSMENT_PROFILE_KEY_RE.fullmatch(normalized):
-        raise _catalog_error(
-            f"{label} must use lowercase letters, numbers, underscores, or hyphens"
-        )
-    return normalized
-
-
-def _version(value: object, label: str) -> str:
-    normalized = _required_text(value, label, 20)
-    if not ASSESSMENT_PROFILE_VERSION_RE.fullmatch(normalized):
-        raise _catalog_error(f"{label} must be a numeric dotted version")
-    return normalized
-
-
-def _string_list(
-    value: object,
-    label: str,
-    *,
-    allowed: frozenset[str] | None = None,
-    allow_empty: bool = False,
-) -> list[str]:
-    if not isinstance(value, list):
-        raise _catalog_error(f"{label} must be a list")
-    if len(value) > ASSESSMENT_PROFILE_MAX_LIST_ITEMS:
-        raise _catalog_error(f"{label} exceeds the item cap")
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        normalized = _required_text(item, label, 128).lower()
-        if allowed is not None and normalized not in allowed:
-            raise _catalog_error(f"{label} contains unsupported value: {normalized}")
-        if normalized in seen:
-            raise _catalog_error(f"{label} contains duplicate value: {normalized}")
-        seen.add(normalized)
-        result.append(normalized)
-    if not result and not allow_empty:
-        raise _catalog_error(f"{label} must not be empty")
-    return result
 
 
 def _known_action_references() -> tuple[frozenset[str], frozenset[str]]:
@@ -237,7 +165,10 @@ def _recommended_action(
         return action
     if kind == "workflow" and identifier in known_workflow_ids:
         return action
-    raise _catalog_error(f"recommended_action references unknown {kind or 'action'}: {identifier}")
+    raise _catalog_error(
+        f"recommended_action references unknown {kind or 'action'}: {identifier}",
+        error_code="unknown_action",
+    )
 
 
 def _normalize_evidence_rule(
@@ -253,7 +184,8 @@ def _normalize_evidence_rule(
     unknown_commands = sorted(set(command_roots) - known_command_roots)
     if unknown_commands:
         raise _catalog_error(
-            f"evidence rule command_roots contains unknown commands: {', '.join(unknown_commands)}"
+            f"evidence rule command_roots contains unknown commands: {', '.join(unknown_commands)}",
+            error_code="unknown_command",
         )
     workflow_actions = _string_list(
         rule.get("workflow_actions", []),
@@ -263,7 +195,8 @@ def _normalize_evidence_rule(
     unknown_workflows = sorted(set(workflow_actions) - known_workflow_ids)
     if unknown_workflows:
         raise _catalog_error(
-            f"evidence rule workflow_actions contains unknown workflows: {', '.join(unknown_workflows)}"
+            f"evidence rule workflow_actions contains unknown workflows: {', '.join(unknown_workflows)}",
+            error_code="unknown_workflow",
         )
     compatible_versions = _string_list(
         rule.get("compatible_versions", ["*"]), "evidence rule compatible_versions"
@@ -306,9 +239,15 @@ def _normalize_evidence_rule(
 
 def _validate_evidence_rule_choices(rule: dict[str, Any]) -> None:
     if rule["target_match"] not in ASSESSMENT_TARGET_MATCHES:
-        raise _catalog_error(f"evidence rule target_match is unsupported: {rule['target_match']}")
+        raise _catalog_error(
+            f"evidence rule target_match is unsupported: {rule['target_match']}",
+            error_code="unsupported_value",
+        )
     if rule["completion"] not in ASSESSMENT_COMPLETION_CONDITIONS:
-        raise _catalog_error(f"evidence rule completion is unsupported: {rule['completion']}")
+        raise _catalog_error(
+            f"evidence rule completion is unsupported: {rule['completion']}",
+            error_code="unsupported_value",
+        )
     if not any((rule["command_roots"], rule["workflow_actions"], rule["structured_output_kinds"])):
         if set(rule["evidence_types"]) <= {"run", "workflow_execution"}:
             raise _catalog_error("run evidence rules must declare a command, workflow, or output matcher")
@@ -350,7 +289,10 @@ def _normalize_check(
         rules.append(rule)
     policy_level = _required_text(check.get("policy_level"), "policy_level", 32).lower()
     if policy_level not in ASSESSMENT_POLICY_LEVELS:
-        raise _catalog_error(f"unsupported policy_level: {policy_level}")
+        raise _catalog_error(
+            f"unsupported policy_level: {policy_level}",
+            error_code="unsupported_value",
+        )
     recommended_action = _recommended_action(
         check.get("recommended_action"),
         known_command_roots=known_command_roots,
@@ -481,9 +423,12 @@ def _load_yaml(path: Path, *, required: bool) -> object | None:
     except FileNotFoundError:
         if not required:
             return None
-        raise _catalog_error(f"is missing: {path}") from None
+        raise _catalog_error(f"is missing: {path}", error_code="catalog_missing") from None
     except yaml.YAMLError as exc:
-        raise _catalog_error(f"contains invalid YAML ({type(exc).__name__})") from None
+        raise _catalog_error(
+            f"contains invalid YAML ({type(exc).__name__})",
+            error_code="invalid_yaml",
+        ) from None
 
 
 def _merge_catalogs(
@@ -507,10 +452,6 @@ def _merge_catalogs(
         local_profile_keys=tuple(local_keys),
         profiles=tuple(profiles_by_key[key] for key in order),
     )
-
-
-def clear_assessment_profile_catalog_cache() -> None:
-    _CATALOG_CACHE.clear()
 
 
 def _catalog_counts(catalog: AssessmentProfileCatalog) -> tuple[int, int]:
@@ -598,7 +539,11 @@ def load_assessment_profile_catalog(
             raise
         log.warning(
             "ASSESSMENT_PROFILE_CATALOG_RELOAD_REJECTED",
-            extra={"source": "shipped", "path": str(shipped), "error": str(exc)[:240]},
+            extra=catalog_rejection_fields(
+                exc,
+                source="shipped",
+                path=str(shipped),
+            ),
         )
         cache.update({"signature": signature, "catalog": cached})
         return cached
@@ -609,7 +554,7 @@ def load_assessment_profile_catalog(
         fallback = cached if isinstance(cached, AssessmentProfileCatalog) else shipped_catalog
         log.warning(
             "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED",
-            extra={"path": str(local), "error": str(exc)[:240]},
+            extra=catalog_rejection_fields(exc, source="local", path=str(local)),
         )
         cache.update({"signature": signature, "catalog": fallback})
         if not isinstance(cached, AssessmentProfileCatalog):
@@ -636,7 +581,7 @@ def load_assessment_profile_catalog(
             fallback = cached if isinstance(cached, AssessmentProfileCatalog) else shipped_catalog
             log.warning(
                 "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED",
-                extra={"path": str(local), "error": str(exc)[:240]},
+                extra=catalog_rejection_fields(exc, source="local", path=str(local)),
             )
             cache.update({"signature": signature, "catalog": fallback})
             if not isinstance(cached, AssessmentProfileCatalog):

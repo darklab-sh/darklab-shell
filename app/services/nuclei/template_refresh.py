@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from typing import Any
 
 from config import SCANNER_PREFIX
@@ -23,6 +24,10 @@ from services.nuclei.template_lock import (
 )
 from services.nuclei.template_refresh_worker import (
     UPDATE_TIMEOUT_SECONDS,
+)
+from services.nuclei.template_refresh_observability import (
+    log_refresh_failure,
+    worker_failure_details,
 )
 
 
@@ -57,7 +62,7 @@ class NucleiTemplateRefreshError(RuntimeError):
 
 def managed_nuclei_template_refresh_enabled() -> bool:
     configured = os.environ.get("NUCLEI_TEMPLATE_REFRESH_ENABLED")
-    if configured is None:
+    if configured is None or not configured.strip():
         configured = os.environ.get("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "true")
     return configured.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -76,6 +81,7 @@ def refresh_managed_nuclei_templates(
     active_batch_exists: Callable[[], bool],
     run_command: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> dict[str, Any]:
+    started = time.monotonic()
     if not managed_nuclei_template_refresh_enabled():
         raise NucleiTemplateRefreshError(
             "nuclei_template_refresh_disabled",
@@ -110,28 +116,57 @@ def refresh_managed_nuclei_templates(
             "The managed Nuclei template lock is unavailable.",
             status_code=503,
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        log_refresh_failure(
+            "template_refresh_timed_out",
+            "worker",
+            started,
+            error_class="TimeoutExpired",
+        )
+        raise NucleiTemplateRefreshError(
+            "nuclei_template_refresh_failed",
+            "The managed template refresh timed out; the previous cache was kept.",
+            status_code=503,
+        ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("NUCLEI_TEMPLATE_REFRESH_FAILED", extra={"reason_code": "worker_unavailable"})
+        log_refresh_failure(
+            "worker_unavailable",
+            "worker",
+            started,
+            error_class="OSError" if isinstance(exc, OSError) else "SubprocessError",
+        )
         raise NucleiTemplateRefreshError(
             "nuclei_template_refresh_failed",
             "The managed template refresh failed; the previous cache was kept.",
             status_code=503,
         ) from exc
     output = completed.stdout or ""
+    response_error_class = ""
     if len(output.encode("utf-8", errors="replace")) > MAX_WORKER_RESPONSE_BYTES:
         result: object = None
+        response_error_class = "WorkerResponseTooLarge"
     else:
         try:
             result = json.loads(output)
         except json.JSONDecodeError:
             result = None
+            response_error_class = "JSONDecodeError"
     if completed.returncode != 0 or not isinstance(result, dict) or result.get("status") != "updated":
-        reason_code = (
-            str(result.get("reason_code") or "template_refresh_failed")
-            if isinstance(result, dict)
-            else "worker_response_invalid"
+        failure = worker_failure_details(result, completed.returncode)
+        if failure is None:
+            reason_code = "worker_response_invalid"
+            phase = "response"
+            worker_exit_status = completed.returncode
+            error_class = response_error_class or "WorkerResponseInvalid"
+        else:
+            reason_code, phase, worker_exit_status, error_class = failure
+        log_refresh_failure(
+            reason_code,
+            phase,
+            started,
+            worker_exit_status=worker_exit_status,
+            error_class=error_class,
         )
-        log.warning("NUCLEI_TEMPLATE_REFRESH_FAILED", extra={"reason_code": reason_code})
         raise NucleiTemplateRefreshError(
             "nuclei_template_refresh_failed",
             _REFRESH_FAILURE_MESSAGES.get(reason_code, _DEFAULT_REFRESH_FAILURE_MESSAGE),
