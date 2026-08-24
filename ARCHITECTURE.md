@@ -887,6 +887,8 @@ This section is the browser-runtime home for page composition, prompt/composer s
 
 The Assessment workspace keeps manual check decisions behind the existing Project-mutation permission and active-cycle boundary. `project_assessment_check_state.js` owns the shared reason-required editor for blocked, intentionally skipped, and not-applicable states, plus restoring the authoritative evidence-derived state. The shared check renderer keeps the profile purpose separate from the saved decision and shows its reason, privacy-safe actor, and recorded time on desktop and mobile. Desktop buttons and the mobile action sheet open the same editor; completed and archived cycles and view-only memberships keep the action disabled. Its browser-failure reporter preserves stable Assessment event names and bounded workspace ids, treats expected response and degraded-network failures as warnings, and raises unexpected server or client-code failures to errors without sending targets, commands, protected profile data, callback URLs, response bodies, or finding text.
 
+The Project Assessment browser modules are also covered by exact module-size budgets. New Assessment siblings must be classified by the architecture suite, and an existing file can't grow past its recorded baseline. When a module reaches its budget, split it along a real UI responsibility such as data loading, rendering, lifecycle actions, or connector behavior instead of raising the baseline.
+
 ### Frontend Composition
 
 ```mermaid
@@ -1267,7 +1269,7 @@ Route modules are grouped by the user-facing resource they handle. Large bluepri
 
 Service modules are split by responsibility rather than by line count alone. Query helpers, payload shaping, lifecycle orchestration, config/default helpers, and import/export helpers live in focused sibling modules when there is a clean seam. Cohesive artifacts such as generated schema baselines or the OpenAPI source dictionary stay in one file because splitting them would make them harder to read.
 
-`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings, plus bare-dict config replacement sentinels, so new import-time bindings and unvalidated config replacement tests do not appear.
+`tests/py/test_architecture.py` also keeps a raw `wc -l` size ratchet for tracked Python modules and the Project Assessment frontend family. Split packages and cohesive ratchet-only modules cannot grow past their recorded baselines without updating the architectural intent, and every file in the decomposed module families must have an explicit budget entry. The same architecture suite pins the decomposed blueprint method/path/endpoint contract and representative parent-module import seams, so route splits stay compatible unless a contract update is intentional. It also guards the approved baseline for local DB, config, and Redis singleton bindings, plus bare-dict config replacement sentinels, so new import-time bindings and unvalidated config replacement tests do not appear.
 
 ### Backend Runtime Boundaries
 

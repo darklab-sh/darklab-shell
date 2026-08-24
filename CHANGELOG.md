@@ -628,6 +628,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Project Assessment browser modules now have enforced size budgets.** Every `project_assessment*.js` module is classified by the architecture suite and pinned to its current line-count ceiling, so new siblings can't escape review and existing modules must split along a clear UI responsibility before growing.
 - **Internal service boundaries now match the helpers the application actually uses.** Unreferenced compatibility wrappers and test-only service APIs were removed across Assessment handoff, profiles, batch events, Web Surface, historical URLs, OAST, Atlas evidence, findings, probes, and workflow fan-out. The obsolete parallel EPSS and KEV normalizers were removed in favor of the strict production feed parsers, batch tests now use the same paged event reader as the browser and API, and the affected module-size budgets were lowered to preserve the cleanup.
 - **Runtime libraries, development tools, build images, and bundled scanners now use current compatible releases.**
   - **Before:** The application and CI still used the preceding Python, Node, Docker, GitLab CLI, Go, browser-test, lint, DOM-test, and scanner releases, while Schemathesis's isolated constraints described its older dependency graph.

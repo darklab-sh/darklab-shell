@@ -1304,6 +1304,66 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/http_profile.py", 65, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/probe.py", 44, "split-package-ratchet"),
     ModuleSizeBudget("tools/darklab_cli/src/darklab_cli/parsers/risk.py", 21, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment.js",
+        909,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_actions.js",
+        388,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_batch.js",
+        809,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_batch_renderer.js",
+        776,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_batch_retry.js",
+        52,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_check_state.js",
+        185,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_client_log.js",
+        53,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_evidence.js",
+        266,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_oast.js",
+        511,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_renderer.js",
+        1556,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_risk_renderer.js",
+        249,
+        "project-assessment-frontend-ratchet",
+    ),
+    ModuleSizeBudget(
+        "app/static/js/features/projects/project_assessment_zap.js",
+        608,
+        "project-assessment-frontend-ratchet",
+    ),
 )
 
 _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
@@ -1318,6 +1378,7 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
     "app/services/pty/*.py",
     "app/services/workspace/*.py",
     "app/services/history/insights.py",
+    "app/static/js/features/projects/project_assessment*.js",
     "app/services/history/mutations.py",
     "app/services/history/queries.py",
     "app/services/history/retention.py",
