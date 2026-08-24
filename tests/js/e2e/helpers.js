@@ -566,6 +566,139 @@ print(json.dumps({"targetId": target_id, "runId": run_id, "portIds": port_ids}))
   return JSON.parse(result.stdout)
 }
 
+export function seedProjectWebSurfaceFixture(testInfo, { sessionId, projectId }) {
+  if (!sessionId || !projectId) {
+    throw new Error('Cannot seed Project Web Surface without a session and project id')
+  }
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import base64
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+run_id = "run_e2e_web_surface_" + uuid.uuid4().hex[:16]
+available_artifact_id = "rfa_e2e_web_surface_" + uuid.uuid4().hex[:16]
+missing_artifact_id = "rfa_e2e_web_surface_missing_" + uuid.uuid4().hex[:12]
+available_path = "captures/playwright-web-surface.png"
+missing_path = "captures/playwright-missing.png"
+image = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZgJ8AAAAASUVORK5CYII="
+)
+workspace_name = "sess_" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+image_path = Path(data_dir) / "workspaces" / workspace_name / available_path
+image_path.parent.mkdir(parents=True, exist_ok=True)
+image_path.write_bytes(image)
+preview = [{
+    "text": "https://web-surface.example.test/login [200]",
+    "source_detail": {
+        "screenshots": [
+            {
+                "url": "https://web-surface.example.test/login",
+                "artifact_path": available_path,
+                "status_code": 200,
+                "title": "Playwright sign in",
+                "technologies": ["nginx"],
+                "captured_at": "2026-08-24T00:00:02Z",
+                "visual_hash": "playwright-visual-current",
+                "source_run_id": run_id,
+                "profile_role": "authenticated",
+            },
+            {
+                "url": "https://web-surface.example.test/retired",
+                "artifact_path": missing_path,
+                "status_code": 404,
+                "title": "Retired endpoint",
+                "technologies": ["nginx"],
+                "captured_at": "2026-08-24T00:00:01Z",
+                "visual_hash": "playwright-visual-missing",
+                "source_run_id": run_id,
+                "profile_role": "anonymous",
+            },
+        ],
+    },
+}]
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, 1, 0, 0)",
+        (
+            run_id,
+            session_id,
+            "httpx -ss -srd captures -u https://web-surface.example.test/login",
+            "2026-08-24T00:00:00+00:00",
+            "2026-08-24T00:00:03+00:00",
+            json.dumps(preview),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+        "VALUES (?, ?, 'run', ?, 'e2e', ?)",
+        (
+            "pl_e2e_web_surface_" + uuid.uuid4().hex[:16],
+            project_id,
+            run_id,
+            "2026-08-24T00:00:03+00:00",
+        ),
+    )
+    conn.executemany(
+        "INSERT INTO run_file_artifacts "
+        "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+        "detected_by, content_type, preview_type, content_sha256, created) "
+        "VALUES (?, ?, ?, ?, ?, 'screenshot', ?, 'httpx_screenshot', 'image/png', 'image', ?, ?)",
+        [
+            (
+                available_artifact_id,
+                session_id,
+                run_id,
+                available_path,
+                "playwright-web-surface.png",
+                len(image),
+                hashlib.sha256(image).hexdigest(),
+                "2026-08-24T00:00:02+00:00",
+            ),
+            (
+                missing_artifact_id,
+                session_id,
+                run_id,
+                missing_path,
+                "playwright-missing.png",
+                len(image),
+                hashlib.sha256(image).hexdigest(),
+                "2026-08-24T00:00:01+00:00",
+            ),
+        ],
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({
+    "runId": run_id,
+    "availableArtifactId": available_artifact_id,
+    "missingArtifactId": missing_artifact_id,
+}))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, projectId],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed Project Web Surface fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
+
 export function seedProjectActivityFixture(testInfo, { sessionId, projectId }) {
   const dataDir = e2eDataDirForProject(testInfo)
   const script = String.raw`
