@@ -34672,12 +34672,41 @@ class TestAssessmentHttpProfileExecution:
                     {"type": "url", "value": f"https://app.example/allowed/{path}"},
                 )
             assert exc_info.value.code == "http_profile_scope_mismatch"
-        katana_scope = _scope_arguments(profile, "katana", "https://app.example/admin")
-        assert katana_scope[:2] == ["-fs", "fqdn"]
-        assert katana_scope[2::2] == ["-cs", "-cos"]
-        assert r"\[2001:db8::1\]" in _scope_arguments(
-            profile, "katana", "https://[2001:db8::1]/admin"
+        katana_scope = _scope_arguments(
+            {
+                "scope_roots": ["https://app.example/admin"],
+                "exclude_paths": ["/admin/logout"],
+            },
+            "katana",
+            "https://app.example/admin",
+        )
+        assert katana_scope == [
+            "-fs",
+            "fqdn",
+            "-cs",
+            r"^https://app\.example(?::443)?/admin(?:$|[/?#])",
+            "-cos",
+            r"^https://app\.example(?::443)?/admin/logout(?:$|[/?#])",
+        ]
+        assert _scope_arguments(
+            {
+                "scope_roots": ["https://app.example:8443/admin"],
+                "include_paths": ["/admin/api"],
+                "exclude_paths": ["/admin/api/private"],
+            },
+            "katana",
+            "https://app.example:8443/admin/api",
+        )[3::2] == [
+            r"^https://app\.example:8443/admin/api(?:$|[/?#])",
+            r"^https://app\.example:8443/admin/api/private(?:$|[/?#])",
+        ]
+        ipv6_scope = _scope_arguments(
+            {"scope_roots": ["http://[2001:db8::1]/admin"]},
+            "katana",
+            "http://[2001:db8::1]/admin",
         )[3]
+        assert ipv6_scope.startswith(r"^http://\[2001:db8::1\](?::80)?")
+        assert "https?" not in ipv6_scope
         assert _scope_arguments(profile, "curl", "https://app.example/admin") == []
         assert _scope_arguments(profile, "dalfox", "https://app.example/admin") == []
         with pytest.raises(HttpProfileExecutionError) as nuclei_scope:
