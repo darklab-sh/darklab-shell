@@ -536,7 +536,7 @@ def test_api_v1_osv_lookup_is_explicit_audited_and_privacy_safe(caplog):
         "outcome": "stored",
         "record_count": 2,
     }
-    assert lookup.call_args.args[1:] == (package_purl, package_version)
+    assert lookup.call_args.args == (package_purl, package_version)
     audit = _audit_event_rows(
         target_id="osv",
         event_type="cve_advisory.refresh",
@@ -554,7 +554,10 @@ def test_api_v1_osv_lookup_is_explicit_audited_and_privacy_safe(caplog):
     assert package_version not in caplog.text
 
 
-def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(caplog):
+def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(
+    caplog,
+    monkeypatch,
+):
     client = get_client()
     token = _token(client)
     endpoint = "/api/v1/advisories/osv/lookup"
@@ -570,6 +573,11 @@ def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(caplog)
         return_value={"source": "osv", "outcome": "failed", "error": "URLError"},
     ):
         failed = client.post(endpoint, headers=_headers(token), json=body)
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value={"source": "osv", "outcome": "busy", "reason": "provider_busy"},
+    ):
+        busy = client.post(endpoint, headers=_headers(token), json=body)
     with mock.patch("blueprints.api_v1_osv_lookup.query_external_osv") as lookup:
         invalid = client.post(
             endpoint,
@@ -600,6 +608,8 @@ def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(caplog)
     assert disabled.get_json()["error"]["code"] == "osv_lookup_disabled"
     assert failed.status_code == 503
     assert failed.get_json()["error"]["code"] == "osv_lookup_failed"
+    assert busy.status_code == 429
+    assert busy.get_json()["error"]["code"] == "osv_lookup_busy"
     assert invalid.status_code == 400
     assert invalid.get_json()["error"]["code"] == "invalid_osv_lookup"
     assert extra.status_code == 400
@@ -609,6 +619,20 @@ def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(caplog)
     lookup.assert_not_called()
     assert invalid_purl not in caplog.text
     assert invalid_version not in caplog.text
+
+    rate_token = _token(client)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_second", 1000)
+    monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1)
+    with mock.patch(
+        "blueprints.api_v1_osv_lookup.query_external_osv",
+        return_value={"source": "osv", "outcome": "disabled"},
+    ):
+        first_limited = client.post(endpoint, headers=_headers(rate_token), json=body)
+        second_limited = client.post(endpoint, headers=_headers(rate_token), json=body)
+    assert first_limited.status_code == 409
+    assert second_limited.status_code == 429
+    assert second_limited.get_json()["error"]["code"] == "rate_limited"
 
 
 def test_api_v1_osv_lookup_requires_team_triage_capability():
@@ -9968,6 +9992,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                 error_code = {
                     "pkg:pypi/forbidden": ("team_forbidden", 403),
                     "pkg:pypi/disabled": ("osv_lookup_disabled", 409),
+                    "pkg:pypi/busy": ("osv_lookup_busy", 429),
                     "pkg:pypi/provider-failure": ("osv_lookup_failed", 503),
                 }.get(body["purl"])
                 if error_code:
@@ -10896,6 +10921,7 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     for purl, message in (
         ("pkg:pypi/forbidden", "requires the TRIAGE_FINDINGS capability"),
         ("pkg:pypi/disabled", "Set cve_risk.osv_advisory_mode to external"),
+        ("pkg:pypi/busy", "lookup budget is temporarily busy"),
         ("pkg:pypi/provider-failure", "Check outbound access and provider availability"),
     ):
         assert cli_main.main(["advisory", "osv", purl, "2.30.0"]) == 1

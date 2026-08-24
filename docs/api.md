@@ -309,7 +309,7 @@ darklab advisory osv "pkg:pypi/requests" "2.30.0" --format json
 }
 ```
 
-That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The CLI distinguishes missing permission, disabled external mode, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
+That action sends only those two values to OSV. It doesn't upload an SBOM, saved package inventory, finding, or Project target, and simply reading API or browser data never starts a lookup. It's the only CLI command that can start an OSV request. Team viewers receive `403`; operators and other roles with finding-triage permission can use the action. A successful response reports only whether the result was stored or came from the positive/negative cache and how many advisory rows matched. The normal Team write limit and a small shared OSV budget prevent accidental bursts; a duplicate or busy request returns `429` and can be retried. The CLI distinguishes missing permission, disabled external mode, a busy provider, and provider failure so the next step is clear. A provider failure keeps the last accepted data.
 
 ---
 

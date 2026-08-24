@@ -5,10 +5,8 @@
 
 from __future__ import annotations
 
-from flask import jsonify, request
-
-from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
+from flask import request
 from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -16,6 +14,9 @@ from services.cve_risk.osv_external import query_external_osv
 from services.storage.transactions import run_transaction
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
+
+from blueprints import api_v1 as api_routes
+from blueprints.api_v1_osv_result import osv_lookup_response
 
 
 def _error(code: str, message: str, status: int):
@@ -35,6 +36,10 @@ def _request_values(data: dict) -> tuple[str, str]:
 
 
 @api_routes.api_v1_bp.route("/advisories/osv/lookup", methods=["POST"])
+@api_routes.limiter.limit(
+    api_routes._api_team_write_route_limit,
+    key_func=api_routes._api_team_rate_limit_key,
+)
 @api_routes.require_api_auth
 def api_osv_advisory_lookup():
     session_id = ""
@@ -48,8 +53,9 @@ def api_osv_advisory_lookup():
         )
         purl, version = _request_values(api_routes._json_body())
 
-        def _lookup(conn):
-            result = query_external_osv(conn, purl, version)
+        result = query_external_osv(purl, version)
+
+        def _record_audit(conn):
             record_event(
                 AuditEventType.CVE_ADVISORY_REFRESH,
                 target_id="osv",
@@ -62,55 +68,21 @@ def api_osv_advisory_lookup():
                 conn=conn,
                 **route_audit_fields(session_id, request, owner_scope),
             )
-            return result
 
-        result = run_transaction(_lookup)
+        run_transaction(_record_audit)
     except TeamPermissionDenied as exc:
         return _error("team_forbidden", str(exc), 403)
     except ValueError as exc:
-        api_routes.log.warning("API_OSV_ADVISORY_LOOKUP_REJECTED", extra={
-            "ip": get_client_ip(),
-            "session": get_log_session_id(session_id),
-            "team_id": getattr(owner_scope, "team_id", ""),
-            "source": "osv",
-            "reason": "invalid_request",
-        })
+        api_routes.log.warning(
+            "API_OSV_ADVISORY_LOOKUP_REJECTED",
+            extra={
+                "ip": get_client_ip(),
+                "session": get_log_session_id(session_id),
+                "team_id": getattr(owner_scope, "team_id", ""),
+                "source": "osv",
+                "reason": "invalid_request",
+            },
+        )
         return _error("invalid_osv_lookup", str(exc), 400)
 
-    outcome = str(result.get("outcome") or "unknown")
-    fields = {
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "team_id": owner_scope.team_id,
-        "source": "osv",
-        "outcome": outcome,
-        "record_count": int(result.get("record_count") or 0),
-    }
-    if outcome == "disabled":
-        api_routes.log.warning("API_OSV_ADVISORY_LOOKUP_REJECTED", extra=fields)
-        return _error(
-            "osv_lookup_disabled",
-            "External OSV package lookups are disabled.",
-            409,
-        )
-    if outcome == "failed":
-        api_routes.log.error("API_OSV_ADVISORY_LOOKUP_FAILED", extra=fields)
-        return _error(
-            "osv_lookup_failed",
-            "The external OSV package lookup failed.",
-            503,
-        )
-    if outcome not in {"stored", "positive_cached", "negative_cached"}:
-        api_routes.log.error("API_OSV_ADVISORY_LOOKUP_FAILED", extra=fields)
-        return _error(
-            "osv_lookup_failed",
-            "The external OSV package lookup returned an invalid result.",
-            503,
-        )
-    api_routes.log.info("API_OSV_ADVISORY_LOOKUP_COMPLETED", extra=fields)
-    return jsonify({
-        "ok": True,
-        "source": "osv",
-        "outcome": outcome,
-        "record_count": fields["record_count"],
-    })
+    return osv_lookup_response(result, session_id=session_id, owner_scope=owner_scope)
