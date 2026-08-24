@@ -292,10 +292,13 @@ Docker Postgres container and removes it after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
 profile-gated Compose Postgres service without publishing the database port.
 
-External CLI mutation coverage belongs in `tests/py/test_api_v1.py`. Keep
+External CLI request and rendering coverage belongs in focused CLI modules
+under `tests/py/`; keep route and live-server integration in
+`tests/py/test_api_v1.py`. Reuse shared fake clients, give each command family
+an independently reported test, and parameterize equivalent output or outcome
+variants instead of hiding unrelated commands in one long smoke test. Keep
 structured file and stdin input, exact request bodies, text and JSON output,
-role failures, optimistic-concurrency conflicts, and idempotent responses in
-the focused command smoke test without adding one test function per case. When
+role failures, optimistic-concurrency conflicts, and idempotent responses. When
 a CLI command writes Project state, extend an existing PostgreSQL route test and
 run it through `bash scripts/run_postgres_tests.sh -- ...` as well.
 For HTTP profiles, also pin the explicit revision flag, read-before-delete
