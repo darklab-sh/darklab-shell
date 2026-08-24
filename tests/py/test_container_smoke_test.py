@@ -53,6 +53,9 @@ WORKSPACE_EXPECTATIONS_FILE = (
 INTERACTIVE_EXPECTATIONS_FILE = (
     ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-interactive-expectations.json"
 )
+DETERMINISTIC_COMMANDS_FILE = (
+    ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-deterministic-commands.txt"
+)
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
 )
@@ -605,6 +608,23 @@ def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
         "WORKSPACE_ENABLED=true",
     ]
 
+    deterministic_commands = _load_deterministic_commands()
+    assert deterministic_commands <= set(_load_expectations())
+    cases = [
+        {"command": "ping -h"},
+        {"command": "ping -c 4 darklab.sh"},
+    ]
+    assert _filter_smoke_cases(
+        cases,
+        tier="deterministic",
+        deterministic_commands=deterministic_commands,
+    ) == [{"command": "ping -h"}]
+    assert _filter_smoke_cases(
+        cases,
+        tier="public-network",
+        deterministic_commands=deterministic_commands,
+    ) == [{"command": "ping -c 4 darklab.sh"}]
+
 
 def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
     app_dir = tmp_path / "app"
@@ -864,6 +884,40 @@ def _selected_commands_from_env() -> list[str]:
     if not raw.strip():
         return []
     return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def _smoke_tier_from_env() -> str:
+    tier = os.environ.get("RUN_CONTAINER_SMOKE_TEST_TIER", "all").strip().lower()
+    if tier not in {"all", "deterministic", "public-network"}:
+        raise RuntimeError(f"unsupported RUN_CONTAINER_SMOKE_TEST_TIER: {tier}")
+    return tier
+
+
+def _load_deterministic_commands() -> set[str]:
+    commands = [
+        line.strip()
+        for line in DETERMINISTIC_COMMANDS_FILE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if len(commands) != len(set(commands)):
+        raise RuntimeError("deterministic container smoke commands must be unique")
+    return set(commands)
+
+
+def _filter_smoke_cases(
+    cases: Sequence[dict[str, object]],
+    *,
+    tier: str,
+    deterministic_commands: set[str],
+) -> list[dict[str, object]]:
+    if tier == "all":
+        return list(cases)
+    deterministic = tier == "deterministic"
+    return [
+        case
+        for case in cases
+        if (str(case.get("command", "")) in deterministic_commands) is deterministic
+    ]
 
 
 def _assert_contains(actual: list[str], expected: list[str], command: str) -> None:
@@ -1590,11 +1644,21 @@ def container_smoke_test_session_id() -> str:
 
 
 _SELECTED_COMMANDS = _selected_commands_from_env()
-WORKSPACE_SMOKE_CASES = _load_workspace_cases()
+_SMOKE_TIER = _smoke_tier_from_env()
+_DETERMINISTIC_COMMANDS = _load_deterministic_commands()
+WORKSPACE_SMOKE_CASES = (
+    [] if _SMOKE_TIER == "deterministic" else _load_workspace_cases()
+)
 _WORKSPACE_SMOKE_COMMANDS = {str(case["command"]) for case in WORKSPACE_SMOKE_CASES}
-INTERACTIVE_SMOKE_CASES = _load_interactive_cases()
+INTERACTIVE_SMOKE_CASES = (
+    [] if _SMOKE_TIER == "deterministic" else _load_interactive_cases()
+)
 _INTERACTIVE_SMOKE_COMMANDS = {str(case["command"]) for case in INTERACTIVE_SMOKE_CASES}
-SMOKE_TEST_CASES = _load_cases()
+SMOKE_TEST_CASES = _filter_smoke_cases(
+    _load_cases(),
+    tier=_SMOKE_TIER,
+    deterministic_commands=_DETERMINISTIC_COMMANDS,
+)
 if _SELECTED_COMMANDS:
     SMOKE_TEST_CASES = [
         case for case in SMOKE_TEST_CASES

@@ -27,6 +27,8 @@
 # Usage:
 #   scripts/container_smoke_test.sh
 #   scripts/container_smoke_test.sh --build
+#   scripts/container_smoke_test.sh --tier deterministic
+#   scripts/container_smoke_test.sh --tier public-network
 #   scripts/container_smoke_test.sh --cmd "nuclei -u https://ip.darklab.sh -t network/"
 #   scripts/container_smoke_test.sh --cmd "host ip.darklab.sh" --cmd "dig +short MX ip.darklab.sh"
 #   scripts/container_smoke_test.sh -k nuclei
@@ -46,6 +48,7 @@ cd "$ROOT_DIR"
 SELECTED_COMMANDS=""
 PYTEST_ARGS=""
 FORCE_BUILD=0
+SMOKE_TIER=all
 
 append_pytest_arg() {
     if [ -z "$PYTEST_ARGS" ]; then
@@ -77,6 +80,22 @@ while [ "$#" -gt 0 ]; do
             append_selected_command "$2"
             shift 2
             ;;
+        --tier)
+            if [ "$#" -lt 2 ]; then
+                echo "missing value for $1" >&2
+                exit 1
+            fi
+            case "$2" in
+                all|deterministic|public-network)
+                    SMOKE_TIER=$2
+                    ;;
+                *)
+                    echo "unsupported smoke tier: $2" >&2
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
         *)
             append_pytest_arg "$1"
             shift
@@ -100,6 +119,7 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         RUN_CONTAINER_SMOKE_TEST=1 \
         RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
         RUN_CONTAINER_SMOKE_TEST_COMMANDS="$SELECTED_COMMANDS" \
+        RUN_CONTAINER_SMOKE_TEST_TIER="$SMOKE_TIER" \
         sh "$ROOT_DIR/scripts/run_pytest.sh" \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
         --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
@@ -111,6 +131,7 @@ fi
 exec env \
     RUN_CONTAINER_SMOKE_TEST=1 \
     RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
+    RUN_CONTAINER_SMOKE_TEST_TIER="$SMOKE_TIER" \
     sh "$ROOT_DIR/scripts/run_pytest.sh" \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \

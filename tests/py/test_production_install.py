@@ -2595,6 +2595,12 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["test-js-e2e-source"]["extends"] == ".playwright-lane"
     assert parsed_ci["test-js-e2e-source"]["script"] == ["npm run test:e2e:source"]
     assert "allow_failure" not in parsed_ci["test-js-e2e-source"]
+    deterministic_smoke = parsed_ci["container-smoke-test-deterministic"]
+    assert deterministic_smoke["extends"] == ".container-smoke-lane"
+    assert deterministic_smoke["variables"]["RUN_CONTAINER_SMOKE_TEST_RETRIES"] == "0"
+    assert "--tier deterministic" in "\n".join(deterministic_smoke["script"])
+    assert all("allow_failure" not in rule for rule in deterministic_smoke["rules"])
+    assert parsed_ci["container-smoke-test"]["extends"] == ".container-smoke-lane"
     release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
     final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in release_rule
@@ -2697,7 +2703,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert postgres_pytest_job["artifacts"]["reports"]["junit"].endswith(
         "pytest-postgres.xml"
     )
-    container_smoke_job = parsed_ci["container-smoke-test"]
+    container_smoke_job = parsed_ci[".container-smoke-lane"]
     assert container_smoke_job["artifacts"]["reports"]["junit"].endswith(
         "container_smoke_test.xml"
     )

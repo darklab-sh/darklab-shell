@@ -554,8 +554,11 @@ After a Dockerfile, packaged-tool, or workspace file-flag change, run the contai
 
 ```bash
 ./scripts/container_smoke_test.sh
+./scripts/container_smoke_test.sh --tier deterministic
 ./scripts/container_smoke_test.sh --build
 ```
+
+GitLab automatically requires the deterministic tier for image, packaged dependency, container-helper, command/workflow catalog, and smoke-fixture changes. It uses only test-owned services and network-free tool commands, and it doesn't retry failures.
 
 If a tool's output has intentionally changed, run the capture script first. It runs the same commands in a browser and writes the raw output to `/tmp` as a reference — it does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`, so use the output to make those edits manually:
 
