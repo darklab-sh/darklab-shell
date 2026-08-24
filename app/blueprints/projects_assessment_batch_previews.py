@@ -6,11 +6,9 @@
 from flask import jsonify, request
 
 from blueprints import projects as project_routes
+from blueprints.assessment_batch_request_body import selection_body as _selection_body
 from extensions import limiter
-from services.assessments.batch.contracts import (
-    AssessmentBatchError,
-    BATCH_PREVIEW_REQUEST_MAX_BYTES,
-)
+from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.preview_compiler import compile_batch_preview
 from services.assessments.batch.preview_storage import (
     get_batch_preview,
@@ -23,32 +21,6 @@ def _error(exc: AssessmentBatchError):
     if exc.details:
         payload["details"] = exc.details
     return jsonify(payload), exc.status_code
-
-
-def _selection_body() -> dict[str, object]:
-    if (
-        request.content_length
-        and request.content_length > BATCH_PREVIEW_REQUEST_MAX_BYTES
-    ):
-        raise AssessmentBatchError(
-            "batch_preview_request_too_large",
-            "Assessment batch preview request exceeds the 64 KiB limit.",
-            status_code=413,
-        )
-    data = request.get_json(silent=True)
-    if data is None:
-        if request.get_data(cache=True):
-            raise AssessmentBatchError(
-                "invalid_batch_selection",
-                "Assessment batch selection must be valid JSON.",
-            )
-        return {}
-    if not isinstance(data, dict):
-        raise AssessmentBatchError(
-            "invalid_batch_selection",
-            "Assessment batch selection must be an object.",
-        )
-    return data
 
 
 def _owner():

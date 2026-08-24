@@ -265,17 +265,22 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects.py", 577, "split-target-phase3"),
+    ModuleSizeBudget(
+        "app/blueprints/assessment_batch_request_body.py",
+        74,
+        "split-package-ratchet",
+    ),
     ModuleSizeBudget("app/blueprints/projects_assessment_action_launch.py", 187, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_actions.py", 162, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_assessment_batches.py", 120, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/projects_assessment_batch_mutations.py",
-        196,
+        175,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/blueprints/projects_assessment_batch_previews.py",
-        110,
+        82,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -325,12 +330,12 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_assessment_batches.py", 145, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_mutations.py",
-        192,
+        172,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_previews.py",
-        122,
+        94,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -551,10 +556,10 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/http_profile_contracts.py", 34, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/httpx_version_observations.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/httpx_stored_nvd.py", 70, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/http_profile_execution.py", 328, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/http_profile_execution.py", 325, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/assessments/http_profile_katana_scope.py",
-        81,
+        78,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/services/assessments/http_profile_material.py", 163, "split-package-ratchet"),

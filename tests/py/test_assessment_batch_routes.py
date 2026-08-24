@@ -567,6 +567,16 @@ def test_batch_start_and_cancel_reject_unbounded_or_unsupported_bodies(
         headers={**headers, "Content-Type": "application/json"},
         data='{"preview_id":"' + "x" * (16 * 1024) + '"}',
     )
+    streamed_oversized = client.post(
+        start_route,
+        headers={**headers, "Content-Type": "application/json"},
+        data='{"preview_id":"' + "x" * (16 * 1024) + '"}',
+        environ_overrides={
+            "CONTENT_LENGTH": "",
+            "HTTP_TRANSFER_ENCODING": "chunked",
+            "wsgi.input_terminated": True,
+        },
+    )
     bad_cancel = client.post(
         f"{prefix}/projects/{project_id}/assessment-batches/wfx_missing/cancel",
         headers=headers,
@@ -585,6 +595,12 @@ def test_batch_start_and_cancel_reject_unbounded_or_unsupported_bodies(
         oversized_payload.get("code") == "batch_mutation_request_too_large"
         or oversized_payload["error"]["code"]
         == "batch_mutation_request_too_large"
+    )
+    assert streamed_oversized.status_code == 413
+    streamed_payload = streamed_oversized.get_json()
+    assert (
+        streamed_payload.get("code") == "batch_mutation_request_too_large"
+        or streamed_payload["error"]["code"] == "batch_mutation_request_too_large"
     )
     assert bad_cancel.status_code == 400
     bad_cancel_payload = bad_cancel.get_json()
@@ -811,6 +827,16 @@ def test_preview_routes_reject_invalid_and_oversized_request_bodies(
         headers={**headers, "Content-Type": "application/json"},
         data='{"categories":["' + "x" * (64 * 1024) + '"]}',
     )
+    streamed_oversized = client.post(
+        route,
+        headers={**headers, "Content-Type": "application/json"},
+        data='{"categories":["' + "x" * (64 * 1024) + '"]}',
+        environ_overrides={
+            "CONTENT_LENGTH": "",
+            "HTTP_TRANSFER_ENCODING": "chunked",
+            "wsgi.input_terminated": True,
+        },
+    )
 
     assert invalid.status_code == 400
     invalid_payload = invalid.get_json()
@@ -823,6 +849,12 @@ def test_preview_routes_reject_invalid_and_oversized_request_bodies(
     assert (
         oversized_payload.get("code") == "batch_preview_request_too_large"
         or oversized_payload["error"]["code"] == "batch_preview_request_too_large"
+    )
+    assert streamed_oversized.status_code == 413
+    streamed_payload = streamed_oversized.get_json()
+    assert (
+        streamed_payload.get("code") == "batch_preview_request_too_large"
+        or streamed_payload["error"]["code"] == "batch_preview_request_too_large"
     )
 
 

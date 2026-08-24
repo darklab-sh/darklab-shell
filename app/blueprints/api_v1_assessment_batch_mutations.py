@@ -9,6 +9,7 @@ from typing import Any, cast
 from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
+from blueprints.assessment_batch_request_body import mutation_body as _body
 from core.helpers import get_log_session_id
 from services.assessments.batch.contracts import AssessmentBatchError
 from services.assessments.batch.lifecycle_actions import (
@@ -16,7 +17,6 @@ from services.assessments.batch.lifecycle_actions import (
     start_confirmed_assessment_batch,
 )
 from services.assessments.batch.lifecycle_contracts import (
-    BATCH_MUTATION_REQUEST_MAX_BYTES,
     normalize_batch_cancel_request,
     normalize_batch_start_request,
 )
@@ -40,25 +40,6 @@ def _error(exc: Exception):
     if isinstance(exc, TeamPermissionDenied):
         return api_routes._api_json_error("team_forbidden", str(exc), 403)
     raise exc
-
-
-def _body(*, optional: bool = False) -> object:
-    if request.content_length and request.content_length > BATCH_MUTATION_REQUEST_MAX_BYTES:
-        raise AssessmentBatchError(
-            "batch_mutation_request_too_large",
-            "Assessment batch request exceeds the 16 KiB limit.",
-            status_code=413,
-        )
-    data = request.get_json(silent=True)
-    if data is None and request.get_data(cache=True):
-        raise AssessmentBatchError(
-            "invalid_batch_request", "Assessment batch request must be valid JSON."
-        )
-    if data is None and not optional:
-        raise AssessmentBatchError(
-            "invalid_batch_start", "Assessment batch start must be a JSON object."
-        )
-    return data
 
 
 def _mapping(value: object) -> dict[str, object]:

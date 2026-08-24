@@ -664,6 +664,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Assessment preview and lifecycle body limits now hold when `Content-Length` is missing.** Browser and API routes read at most one byte beyond their 64 KiB preview or 16 KiB mutation budget before decoding JSON, so chunked and other terminated request streams can't move an oversized body past the documented boundary.
 - **Protected Katana crawls now keep credentials inside the complete saved URL scope.** Crawl and exclusion expressions use each canonical root's exact scheme, effective port, and path, intersect roots with included paths, and retain saved exclusions. Profiles without include paths stay limited to their roots; custom ports, IPv6 hosts, and opposite schemes no longer broaden the header boundary.
 - **Protected domain and IP launches now enforce the HTTP profile's complete path scope.** A profile's base URL must remain inside its saved roots and included paths and outside its exclusions before credentials can be prepared, matching the existing URL-target boundary. Focused domain, IPv4, and IPv6 regressions cover valid scope plus root, include, and exclude rejections.
 - **Deleting a History run now waits for concurrent SQLite writes instead of occasionally returning an internal server error.** Run cleanup reserves its write transaction before reading the live Atlas cleanup preview, preventing a read-to-write upgrade race while keeping the complete deletion, evidence, and audit work atomic.
