@@ -92,7 +92,7 @@ _EVIDENCE_RULE_FIELDS = frozenset({
     "negative_evidence",
 })
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("shell")
 
 
 class AssessmentProfileCatalogError(ProjectWorkspaceError):

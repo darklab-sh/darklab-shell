@@ -664,6 +664,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Assessment profile and active-batch monitor events now use the configured application log pipeline.**
+  - **Why:** These events could bypass the selected text or GELF formatter and lose their structured context in production.
+  - **What:** Both Assessment modules now emit through the dedicated `shell` logger used by runtime bootstrap.
+  - **Tests:** Logging coverage configures the real pipeline and verifies that profile and active-monitor events retain their structured fields.
 - **Assessment preview and lifecycle body limits now hold when `Content-Length` is missing.** Browser and API routes read at most one byte beyond their 64 KiB preview or 16 KiB mutation budget before decoding JSON, so chunked and other terminated request streams can't move an oversized body past the documented boundary.
 - **Protected Katana crawls now keep credentials inside the complete saved URL scope.** Crawl and exclusion expressions use each canonical root's exact scheme, effective port, and path, intersect roots with included paths, and retain saved exclusions. Profiles without include paths stay limited to their roots; custom ports, IPv6 hosts, and opposite schemes no longer broaden the header boundary.
 - **Protected domain and IP launches now enforce the HTTP profile's complete path scope.** A profile's base URL must remain inside its saved roots and included paths and outside its exclusions before credentials can be prepared, matching the existing URL-target boundary. Focused domain, IPv4, and IPv6 regressions cover valid scope plus root, include, and exclude rejections.

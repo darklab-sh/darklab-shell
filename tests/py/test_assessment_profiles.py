@@ -333,7 +333,7 @@ def test_local_catalog_replaces_complete_profiles_and_appends_new_profiles(
         "known_command_roots": KNOWN_COMMANDS,
         "known_workflow_ids": KNOWN_WORKFLOWS,
     }
-    with caplog.at_level("DEBUG"):
+    with caplog.at_level("DEBUG", logger="shell"):
         catalog = profiles.load_assessment_profile_catalog(**kwargs)
         cached = profiles.load_assessment_profile_catalog(**kwargs)
 

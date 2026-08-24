@@ -39,6 +39,8 @@ from conftest import make_test_app as _test_app
 import core.database as db_module
 from core.database import DB_PATH, db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields, configure_logging
+from services.assessments import profiles as assessment_profiles
+from services.assessments.batch import active_monitor as assessment_active_monitor
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -486,9 +488,26 @@ class TestConfigureLogging:
         configure_logging({})
         assert self._logger().level == logging.INFO
 
-    def test_log_level_debug_from_cfg(self):
+    def test_log_level_debug_and_assessment_events_use_pipeline(self):
         configure_logging({"log_level": "DEBUG"})
         assert self._logger().level == logging.DEBUG
+        output = io.StringIO()
+        self._logger().handlers[0].setStream(output)
+
+        assessment_profiles.log.info(
+            "ASSESSMENT_PROFILE_CATALOG_LOADED",
+            extra={"profile_count": 5},
+        )
+        assessment_active_monitor.log.warning(
+            "ACTIVE_ASSESSMENT_BATCH_MONITOR_ERROR",
+            extra={"session": "masked-session"},
+        )
+
+        rendered = output.getvalue()
+        assert "ASSESSMENT_PROFILE_CATALOG_LOADED" in rendered
+        assert "profile_count=5" in rendered
+        assert "ACTIVE_ASSESSMENT_BATCH_MONITOR_ERROR" in rendered
+        assert "session=masked-session" in rendered
 
     def test_log_level_warn_from_cfg(self):
         configure_logging({"log_level": "WARN"})
