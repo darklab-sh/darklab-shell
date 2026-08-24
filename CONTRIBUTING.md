@@ -501,7 +501,7 @@ docker compose -f compose.dev.yaml up --build
 ./scripts/check_versions.sh
 ```
 
-The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
+The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. `--docker-only` reports only the production base image; the complete report also includes CI runner images, while the Go, pip, gem, and GitHub flags select Dockerfile tool pins. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 
 ---
 
