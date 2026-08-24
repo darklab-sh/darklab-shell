@@ -1003,6 +1003,9 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert shell["environment"]["NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED"] == (
         "${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
     )
+    assert shell["environment"]["NUCLEI_TEMPLATE_REFRESH_ENABLED"] == (
+        "${NUCLEI_TEMPLATE_REFRESH_ENABLED:-}"
+    )
     assert shell["healthcheck"]["start_period"] == "210s"
     assert shell["environment"]["SECRETS_MASTER_KEY"] == "${SECRETS_MASTER_KEY:-}"
     assert shell["environment"]["DARKLAB_ZAP_API_KEY"] == (
@@ -1042,6 +1045,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "# RAW_PACKET_SCANNING_ENABLED=true" in env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in env_example
     assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in env_example
+    assert "# NUCLEI_TEMPLATE_REFRESH_ENABLED=false" in env_example
     assert "# DARKLAB_ZAP_API_KEY=" in env_example
     assert "# DARKLAB_ZAP_SCOPE_POLICY_TOKEN=" in env_example
     assert "# DARKLAB_OAST_TOKEN=" in env_example
@@ -1131,6 +1135,10 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
         "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=${NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED:-true}"
         in development_environment
     )
+    assert (
+        "NUCLEI_TEMPLATE_REFRESH_ENABLED=${NUCLEI_TEMPLATE_REFRESH_ENABLED:-}"
+        in development_environment
+    )
     assert "DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-}" in development_environment
     assert "DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-}" in development_environment
     assert "AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-}" in development_environment
@@ -1139,6 +1147,7 @@ def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     assert "DARKLAB_IMAGE=" not in development_env_example
     assert "# ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED=true" in development_env_example
     assert "# NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED=false" in development_env_example
+    assert "# NUCLEI_TEMPLATE_REFRESH_ENABLED=false" in development_env_example
     assert "nuclei-templates" in development_compose["volumes"]
     assert not (ROOT / "examples" / "docker-compose.prod.yml").exists()
 

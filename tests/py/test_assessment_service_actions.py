@@ -1128,6 +1128,18 @@ def test_nuclei_refresh_is_locked_bounded_and_wraps_scan_processes(
     )
     from services.runs.lifecycle import real_command_popen_argv
 
+    monkeypatch.delenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", raising=False)
+    monkeypatch.delenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", raising=False)
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is True
+    monkeypatch.setenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "false")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
+    monkeypatch.setenv("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "true")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is True
+    monkeypatch.setenv("NUCLEI_TEMPLATE_REFRESH_ENABLED", "false")
+    assert template_refresh.managed_nuclei_template_refresh_enabled() is False
+
     existing_lock_path = tmp_path / "existing-nuclei.lock"
     existing_lock_path.touch(mode=0o660)
     real_open = template_lock.os.open

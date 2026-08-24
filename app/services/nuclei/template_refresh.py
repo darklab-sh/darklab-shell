@@ -62,7 +62,7 @@ class NucleiTemplateRefreshError(RuntimeError):
 
 def managed_nuclei_template_refresh_enabled() -> bool:
     configured = os.environ.get("NUCLEI_TEMPLATE_REFRESH_ENABLED")
-    if configured is None:
+    if configured is None or not configured.strip():
         configured = os.environ.get("NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED", "true")
     return configured.strip().lower() in {"1", "true", "yes", "on"}
 
