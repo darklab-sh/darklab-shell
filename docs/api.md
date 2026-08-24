@@ -577,30 +577,30 @@ The bundled CLI exposes the same read and manual-state contract. Each Assessment
 
 ```bash
 darklab assessment list darklab-sh --status active
-darklab assessment show darklab-sh asmt_123
-darklab assessment checks darklab-sh asmt_123 --state not_started --policy-level safe
-darklab assessment set-state darklab-sh asmt_123 asmc_123 blocked --reason "Waiting for authorization"
-darklab assessment clear-state darklab-sh asmt_123 asmc_123
-darklab assessment start-action darklab-sh asmt_123 asmc_123
-darklab assessment start-action darklab-sh asmt_123 asmc_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
+darklab assessment show darklab-sh asm_123
+darklab assessment checks darklab-sh asm_123 --state not_started --policy-level safe
+darklab assessment set-state darklab-sh asm_123 ach_123 blocked --reason "Waiting for authorization"
+darklab assessment clear-state darklab-sh asm_123 ach_123
+darklab assessment start-action darklab-sh asm_123 ach_123
+darklab assessment start-action darklab-sh asm_123 ach_123 --confirm
+darklab assessment start-action darklab-sh asm_123 ach_123 \
   --http-profile-id htp_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
-  --source-run-id run_123 --parameter-observation-id dpx_123 --confirm
-darklab assessment start-action darklab-sh asmt_123 asmc_123 \
+darklab assessment start-action darklab-sh asm_123 ach_123 \
+  --source-run-id run_123 --parameter-observation-id obs_123 --confirm
+darklab assessment start-action darklab-sh asm_123 ach_123 \
   --schema-artifact-id art_123 --confirm
-darklab assessment batch plan darklab-sh asmt_123
-darklab assessment batch plan darklab-sh asmt_123 \
+darklab assessment batch plan darklab-sh asm_123
+darklab assessment batch plan darklab-sh asm_123 \
   --target ent_123 --category discovery --exclude-category web
-darklab assessment batch start darklab-sh asmt_123 --confirm
-darklab assessment batch start darklab-sh asmt_123 \
+darklab assessment batch start darklab-sh asm_123 --confirm
+darklab assessment batch start darklab-sh asm_123 \
   --include-standard --confirm --confirm-standard
-darklab assessment batch list darklab-sh --assessment-id asmt_123
-darklab assessment batch show wfx_123 --items --events
-darklab assessment batch follow wfx_123 --cursor 42
-darklab assessment batch cancel wfx_123 --confirm
-darklab assessment batch retry wfx_123
-darklab assessment batch retry wfx_123 --confirm
+darklab assessment batch list darklab-sh --assessment-id asm_123
+darklab assessment batch show abx_123 --items --events
+darklab assessment batch follow abx_123 --cursor 42
+darklab assessment batch cancel abx_123 --confirm
+darklab assessment batch retry abx_123
+darklab assessment batch retry abx_123 --confirm
 ```
 
 List and check commands support `text`, `json`, and `ndjson`. Text-mode collections print `No results.` when the server returns no rows; JSON and NDJSON keep their machine-readable empty shapes. Cycle detail, state mutations, recommended actions, and batch previews support `text` and `json`; batch list and follow also offer NDJSON. `start-action` is a read-only preview unless `--confirm` is present; even then, the server recomputes the plan and rejects a changed target, stale plan, unsupported command, or disallowed policy. Batch start does the same with a fresh server-owned preview and needs `--confirm-standard` when standard work is selected. Batch retry prints a fresh linked preview by default, selects no successful source item, and creates a new batch only with `--confirm`; standard retry work also needs `--confirm-standard`. Batch follow prints a resumable cursor on Ctrl+C and returns `0` for complete success, `3` for a completed partial result, `4` for canceled work, `1` for failure, or `130` when interrupted. Runs launched by a batch include nullable `assessment_batch` ancestry in API `RunSummary` responses, plus `assessment_batch_id` and `assessment_batch_item_index` convenience fields. The ancestry contains only the owning batch, Project, cycle, source lineage, current batch state, child attempt, exit result, and mapped-check count; it doesn't include commands, targets, profiles, plans, output, or private launch values. The optional HTTP-profile, saved Dalfox observation, and Schemathesis schema flags select the same saved inputs as the browser. ZAP and private OAST use their dedicated review, queue or reservation, and launch routes because those connectors have extra lifecycle steps. Selecting `--status archived` includes archived cycles automatically; use `--include-archived` to include them without narrowing to that status. Use the global `--team` option or saved CLI team scope for team-owned Projects; the server still makes the permission decision.

@@ -1045,6 +1045,44 @@ class TestDocumentationDurability:
             + "\n".join(f"  {command}" for command in missing)
         )
 
+    def test_api_assessment_cli_examples_use_storage_id_families(self):
+        api_text = (_REPO_ROOT / "docs" / "api.md").read_text()
+        expected_examples = {
+            "asm_123": (
+                _REPO_ROOT / "app" / "services" / "assessments" / "storage.py",
+                'return "asm_" + secrets.token_hex(12)',
+            ),
+            "ach_123": (
+                _REPO_ROOT / "app" / "services" / "assessments" / "storage.py",
+                'return "ach_" + secrets.token_hex(12)',
+            ),
+            "obs_123": (
+                _REPO_ROOT
+                / "app"
+                / "services"
+                / "assessments"
+                / "dalfox_parameter_observations.py",
+                'return "obs_" + digest[:32]',
+            ),
+            "abx_123": (
+                _REPO_ROOT
+                / "app"
+                / "services"
+                / "assessments"
+                / "batch"
+                / "storage.py",
+                '_new_id("abx_")',
+            ),
+        }
+        missing = [example for example in expected_examples if example not in api_text]
+        assert not missing, f"Assessment CLI examples are missing public ids: {missing}"
+        for example, (source_path, source_contract) in expected_examples.items():
+            assert source_contract in source_path.read_text(), (
+                f"The documented {example} family no longer matches {source_path}"
+            )
+        obsolete = re.findall(r"\b(?:asmt|asmc|dpx|wfx)_\d+\b", api_text)
+        assert not obsolete, f"Assessment CLI examples use obsolete id families: {obsolete}"
+
     def test_reader_docs_do_not_hardcode_test_totals(self):
         total_re = re.compile(
             r"current totals:"
