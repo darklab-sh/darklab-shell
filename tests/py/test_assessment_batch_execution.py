@@ -18,7 +18,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.cancellation import cancel_assessment_batch
 from services.assessments.batch.contracts import AssessmentBatchError, BatchConcurrency
-from services.assessments.batch.events import list_batch_events
+from services.assessments.batch.event_page import get_batch_event_page
 from services.assessments.batch.execution import launch_assessment_batch
 from services.assessments.batch.finalization import finalize_assessment_batch_run
 from services.assessments.batch.notifications import enqueue_terminal_batch_summary
@@ -46,6 +46,12 @@ from services.workflows.child_launch_spec import ChildLaunchSpec
 from services.workflows.executions import finalize_workflow_run
 from services.workflows.fanout_child_lifecycle import finalize_fanout_child_run
 from services.workflows.hooks import finalize_workflow_run_safely
+
+
+def _batch_events(session_id: str, batch_id: str) -> list[dict[str, object]]:
+    events = get_batch_event_page(session_id, batch_id)["events"]
+    assert isinstance(events, list)
+    return [event for event in events if isinstance(event, dict)]
 
 
 def _mapping(value: object) -> dict[str, Any]:
@@ -293,7 +299,7 @@ def test_batch_launch_binds_exact_display_command_and_records_events(
             (batch["batch_id"],),
         ).fetchone()
     assert (child["run_id"], child["status"]) == ("run-batch-exact", "running")
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert [event["event_type"] for event in events[-3:]] == [
         "item_claimed",
         "item_launched",
@@ -681,7 +687,7 @@ def test_stale_batch_item_settles_without_a_run_or_retry(batch_builder, monkeypa
             (batch["batch_id"],),
         ).fetchall()
     assert [tuple(row) for row in children] == [(1, "", "failed", "plan_changed")]
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert events[-2]["event_type"] == "chunk_status_changed"
     assert events[-1]["event_type"] == "parent_status_changed"
     failed = next(event for event in events if event["event_type"] == "item_failed")
@@ -1149,7 +1155,7 @@ def test_batch_recovery_resets_an_abandoned_claim_and_records_one_event(
     assert (child["status"], child["run_id"]) == ("pending", "")
     recovered_events = [
         event
-        for event in list_batch_events(batch["session_id"], batch["batch_id"])
+        for event in _batch_events(batch["session_id"], batch["batch_id"])
         if event["event_type"] == "item_recovered"
     ]
     assert [(event["reason_code"], event["details"]) for event in recovered_events] == [
@@ -1511,7 +1517,7 @@ def test_queued_batch_cancellation_settles_immediately_and_is_idempotent(batch_b
     assert _mapping(first["batch"])["status"] == "canceled"
     assert _mapping(_mapping(first["batch"])["progress"])["canceled"] == 2
     assert _mapping(second["batch"])["status"] == "canceled"
-    events = list_batch_events(batch["session_id"], batch["batch_id"])
+    events = _batch_events(batch["session_id"], batch["batch_id"])
     assert [event["event_type"] for event in events].count("item_canceled") == 2
     assert [event["status"] for event in events if event["event_type"] == "parent_status_changed"][-2:] == [
         "canceling",

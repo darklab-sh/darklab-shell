@@ -114,10 +114,6 @@ def base_action(action_id: str) -> BaseAction | None:
     return ACTIONS.get(str(action_id or "").strip().casefold())
 
 
-def base_action_ids() -> tuple[str, ...]:
-    return tuple(ACTIONS)
-
-
 def base_action_target_types(action_id: str) -> frozenset[str]:
     selected = base_action(action_id)
     return selected.target_types if selected else frozenset()
@@ -127,6 +123,5 @@ __all__ = [
     "ACTIONS",
     "BaseAction",
     "base_action",
-    "base_action_ids",
     "base_action_target_types",
 ]

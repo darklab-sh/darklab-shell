@@ -14,8 +14,14 @@ from conftest import make_test_app
 from core.database_access import get_db_connect
 from services.assessments.batch.claim import claim_next_batch_item
 from services.assessments.batch.contracts import BatchConcurrency
-from services.assessments.batch.events import list_batch_events
+from services.assessments.batch.event_page import get_batch_event_page
 from services.assessments.batch.storage import create_batch_parent
+
+
+def _batch_events(session_id: str, batch_id: str) -> list[dict[str, object]]:
+    events = get_batch_event_page(session_id, batch_id)["events"]
+    assert isinstance(events, list)
+    return [event for event in events if isinstance(event, dict)]
 
 
 @pytest.fixture
@@ -162,7 +168,7 @@ def test_claim_skips_busy_targets_and_records_authoritative_events(batch_factory
         (2, "launching"),
     ]
     assert run_count == initial_run_count
-    events = list_batch_events("batch-claim-owner", batch_id)
+    events = _batch_events("batch-claim-owner", batch_id)
     assert [event["event_type"] for event in events[-4:]] == [
         "parent_status_changed",
         "chunk_status_changed",

@@ -85,9 +85,9 @@ def _write_yaml(path: Path, data: object) -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_catalog_cache():
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
     yield
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
 
 
 def test_shipped_assessment_profiles_define_the_complete_versioned_catalog():
@@ -433,7 +433,7 @@ def test_invalid_local_yaml_keeps_the_last_valid_catalog(
     assert catalog.profiles[0]["label"] == "Shipped network"
     assert "ASSESSMENT_PROFILE_LOCAL_CATALOG_REJECTED" in caplog.messages
 
-    profiles.clear_assessment_profile_catalog_cache()
+    profiles._CATALOG_CACHE.clear()
     shipped.write_text("version: [\n", encoding="utf-8")
     caplog.clear()
     with caplog.at_level("ERROR"), pytest.raises(

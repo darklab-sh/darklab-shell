@@ -27,7 +27,8 @@ from services.assessments.batch.contracts import (
     BATCH_PREVIEW_PAGE_MAX_ITEMS,
     BATCH_PREVIEW_TTL_SECONDS,
 )
-from services.assessments.batch.events import append_batch_event, list_batch_events
+from services.assessments.batch.event_page import get_batch_event_page
+from services.assessments.batch.events import append_batch_event
 from services.assessments.batch.plan_policy import (
     batch_execution_key,
     evaluate_shared_batch,
@@ -45,6 +46,20 @@ from services.assessments.batch.settings import (
     configured_preview_policy,
 )
 from services.assessments.batch.storage import active_batch_count, create_batch_parent
+
+
+def _batch_events(
+    session_id: str,
+    batch_id: str,
+    *,
+    cursor: object = 0,
+    limit: object = 100,
+) -> list[dict[str, object]]:
+    events = get_batch_event_page(
+        session_id, batch_id, cursor=cursor, limit=limit
+    )["events"]
+    assert isinstance(events, list)
+    return [event for event in events if isinstance(event, dict)]
 
 
 def test_assessment_batch_limits_chunking_and_progress_are_fixed():
@@ -408,7 +423,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
     }
     assert active_batch_count(session_id) == 1
 
-    events = list_batch_events(session_id, batch_id)
+    events = _batch_events(session_id, batch_id)
     assert [event["sequence"] for event in events] == [1, 2, 3]
     assert [event["event_type"] for event in events] == [
         "parent_created",
@@ -416,13 +431,14 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         "chunk_initialized",
     ]
     assert events[-1]["details"] == {"item_count": 1}
-    assert list_batch_events("another-owner", batch_id) == []
+    with pytest.raises(AssessmentBatchError, match="wasn't found"):
+        _batch_events("another-owner", batch_id)
     assert [
         event["sequence"]
-        for event in list_batch_events(
+        for event in _batch_events(
             session_id,
             batch_id,
-            after_sequence=1,
+            cursor=1,
             limit=1,
         )
     ] == [2]
@@ -434,7 +450,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         )
     with pytest.raises(AssessmentBatchError, match="status is invalid"):
         append_batch_event(batch_id, "item_claimed", status="unknown_status")
-    assert len(list_batch_events(session_id, batch_id)) == 3
+    assert len(_batch_events(session_id, batch_id)) == 3
 
     with pytest.raises(
         AssessmentBatchError, match="Active assessment batch limit reached"

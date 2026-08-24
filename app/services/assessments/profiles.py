@@ -501,10 +501,6 @@ def _merge_catalogs(
     )
 
 
-def clear_assessment_profile_catalog_cache() -> None:
-    _CATALOG_CACHE.clear()
-
-
 def _catalog_counts(catalog: AssessmentProfileCatalog) -> tuple[int, int]:
     return len(catalog.profiles), sum(
         len(profile.get("checks") or ()) for profile in catalog.profiles
