@@ -2601,6 +2601,11 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "--tier deterministic" in "\n".join(deterministic_smoke["script"])
     assert all("allow_failure" not in rule for rule in deterministic_smoke["rules"])
     assert parsed_ci["container-smoke-test"]["extends"] == ".container-smoke-lane"
+    public_smoke = parsed_ci["container-smoke-test-public-network"]
+    assert public_smoke["extends"] == ".container-smoke-lane"
+    assert public_smoke["variables"]["RUN_CONTAINER_SMOKE_TEST_RETRIES"] == "3"
+    assert "--tier public-network" in "\n".join(public_smoke["script"])
+    assert all("allow_failure" not in rule for rule in public_smoke["rules"])
     release_rule = parsed_ci[".protected-release-tag"]["rules"][0]["if"]
     final_release_rule = parsed_ci[".protected-final-release-tag"]["rules"][0]["if"]
     assert "(-rc\\.[0-9]+)?" in release_rule
@@ -2708,6 +2713,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "container_smoke_test.xml"
     )
     assert "container-smoke-durations.txt" in "\n".join(
+        container_smoke_job["artifacts"]["paths"]
+    )
+    assert "container-smoke-retries.jsonl" in "\n".join(
         container_smoke_job["artifacts"]["paths"]
     )
     container_smoke_setup = "\n".join(container_smoke_job["before_script"])

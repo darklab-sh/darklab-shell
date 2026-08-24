@@ -49,6 +49,8 @@ SELECTED_COMMANDS=""
 PYTEST_ARGS=""
 FORCE_BUILD=0
 SMOKE_TIER=all
+RETRY_EVIDENCE_FILE=${RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE:-$ROOT_DIR/test-results/container-smoke-retries.jsonl}
+: > "$RETRY_EVIDENCE_FILE"
 
 append_pytest_arg() {
     if [ -z "$PYTEST_ARGS" ]; then
@@ -119,6 +121,7 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         RUN_CONTAINER_SMOKE_TEST=1 \
         RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
         RUN_CONTAINER_SMOKE_TEST_COMMANDS="$SELECTED_COMMANDS" \
+        RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE="$RETRY_EVIDENCE_FILE" \
         RUN_CONTAINER_SMOKE_TEST_TIER="$SMOKE_TIER" \
         sh "$ROOT_DIR/scripts/run_pytest.sh" \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
@@ -131,6 +134,7 @@ fi
 exec env \
     RUN_CONTAINER_SMOKE_TEST=1 \
     RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
+    RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE="$RETRY_EVIDENCE_FILE" \
     RUN_CONTAINER_SMOKE_TEST_TIER="$SMOKE_TIER" \
     sh "$ROOT_DIR/scripts/run_pytest.sh" \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \

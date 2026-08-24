@@ -577,7 +577,7 @@ def test_needs_nuclei_template_warmup(cases: list[dict[str, object]], expected: 
     assert _needs_nuclei_template_warmup(cases) is expected
 
 
-def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
+def test_force_smoke_image_build_reads_wrapper_env(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", raising=False)
     assert _force_smoke_image_build() is False
 
@@ -624,6 +624,27 @@ def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
         tier="public-network",
         deterministic_commands=deterministic_commands,
     ) == [{"command": "ping -c 4 darklab.sh"}]
+
+    retry_evidence = tmp_path / "retry-evidence.jsonl"
+    monkeypatch.setenv(
+        "RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE",
+        str(retry_evidence),
+    )
+    _record_smoke_retry_evidence(
+        case_kind="command",
+        command="dnsenum --noreverse darklab.sh",
+        attempt=1,
+        max_attempts=4,
+        exc=AssertionError("command timed out after 120 seconds"),
+    )
+    assert json.loads(retry_evidence.read_text(encoding="utf-8")) == {
+        "attempt": 1,
+        "case_kind": "command",
+        "command": "dnsenum --noreverse darklab.sh",
+        "error_class": "AssertionError",
+        "max_attempts": 4,
+        "reason_code": "timed_out",
+    }
 
 
 def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
@@ -918,6 +939,31 @@ def _filter_smoke_cases(
         for case in cases
         if (str(case.get("command", "")) in deterministic_commands) is deterministic
     ]
+
+
+def _record_smoke_retry_evidence(
+    *,
+    case_kind: str,
+    command: str,
+    attempt: int,
+    max_attempts: int,
+    exc: Exception,
+) -> None:
+    raw_path = os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_EVIDENCE_FILE", "").strip()
+    if not raw_path:
+        return
+    path = Path(raw_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "case_kind": case_kind,
+        "command": command,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "reason_code": "timed_out" if "timed out" in str(exc).lower() else "attempt_failed",
+        "error_class": type(exc).__name__,
+    }
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def _assert_contains(actual: list[str], expected: list[str], command: str) -> None:
@@ -2213,6 +2259,13 @@ def test_container_smoke_test_command_matches_expected_output(
         try:
             _assert_smoke_case_matches(container_smoke_test, attempt_session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="command",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(
@@ -2246,6 +2299,13 @@ def test_container_smoke_test_workspace_file_flags(
         try:
             _assert_workspace_smoke_case_matches(container_smoke_test, session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="workspace",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(
@@ -2278,6 +2338,13 @@ def test_container_smoke_test_interactive_pty_commands(
         try:
             _assert_interactive_smoke_case_matches(container_smoke_test, session_id, case)
         except Exception as exc:
+            _record_smoke_retry_evidence(
+                case_kind="interactive",
+                command=command,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                exc=exc,
+            )
             if attempt >= max_attempts:
                 raise
             print(

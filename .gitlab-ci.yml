@@ -353,6 +353,7 @@ dependency-version-check:
       - test-results/container_smoke_test.xml
       - test-results/container-smoke-durations.txt
       - test-results/container-smoke-files.txt
+      - test-results/container-smoke-retries.jsonl
     reports:
       junit: test-results/container_smoke_test.xml
     expire_in: 1 week
@@ -390,6 +391,18 @@ container-smoke-test:
       allow_failure: true
     - when: manual
       allow_failure: true
+
+container-smoke-test-public-network:
+  extends: .container-smoke-lane
+  variables:
+    RUN_CONTAINER_SMOKE_TEST_RETRIES: "3"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  script:
+    - mkdir -p test-results
+    - sh -o pipefail -c './scripts/container_smoke_test.sh --tier public-network | tee test-results/container-smoke-durations.txt'
 
 docker-build:
   stage: build

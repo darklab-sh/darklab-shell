@@ -560,6 +560,8 @@ After a Dockerfile, packaged-tool, or workspace file-flag change, run the contai
 
 GitLab automatically requires the deterministic tier for image, packaged dependency, container-helper, command/workflow catalog, and smoke-fixture changes. It uses only test-owned services and network-free tool commands, and it doesn't retry failures.
 
+Scheduled pipelines run `./scripts/container_smoke_test.sh --tier public-network` separately. Its JUnit, duration log, and `test-results/container-smoke-retries.jsonl` artifacts preserve failed attempts even when a retry later succeeds.
+
 If a tool's output has intentionally changed, run the capture script first. It runs the same commands in a browser and writes the raw output to `/tmp` as a reference — it does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`, so use the output to make those edits manually:
 
 ```bash
