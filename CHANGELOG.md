@@ -11,7 +11,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.9.0] - Unreleased
+## [2.9.1] - Unreleased
+
+No changes yet.
+
+---
+
+## [2.9.0] - 2026-08-25
 
 ### Added
 
@@ -49,6 +55,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **ARM64 release builds no longer duplicate the SecLists tree while assembling the runtime image.**
+  - **Root cause:** Copying SecLists from an independent asset stage created a second multi-gigabyte BuildKit snapshot and exhausted GitLab's 30 GB hosted ARM64 runner before export.
+  - **Fix:** The runtime stage now inherits the SecLists asset stage, preserving the same packaged wordlists in one shared layer while the ARM64 publisher remains uncached.
+  - **Tests:** The production-installation contract now requires the shared stage ancestry and rejects a separate SecLists copy; focused Dockerfile, documentation, and license checks cover the release inputs.
+
 - **Assessment launch boundaries now fail closed on scope, size, and provider limits.** Domain- and IP-based protected HTTP launches enforce saved roots and included/excluded paths, and protected Katana crawls keep the saved scheme, port, roots, and path scope instead of applying only headers. Assessment mutation endpoints enforce their 16 KiB or 64 KiB limits even when `Content-Length` is missing, and external OSV requests release database connections before a bounded provider call. These fixes preserve the existing public error envelopes and keep protected values out of responses, audit data, metrics, and logs.
 
 - **Assessment operators now get useful, privacy-safe lifecycle diagnostics.** Catalog failures, batch deferrals and terminal outcomes, Nuclei refresh failures, optional run-finalization errors, ZAP jobs, and private OAST sessions use consistent DEBUG, INFO, WARNING, and ERROR records with fixed phases, bounded counts, safe ids, retry context, and sanitized tracebacks. Targets, commands, profile material, provider responses, callback data, credentials, report contents, and filesystem paths remain redacted.
@@ -67,15 +78,3 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Root cause:** request logs used the generic `_status` field for numeric HTTP codes while Intel provider and other lifecycle events reused it for text such as `ok` and `error`. Once OpenSearch mapped `_status` as a number, it rejected later text values with `mapper_parsing_exception`.
   - **Fix:** HTTP codes now use numeric `http_status`, while provider, workflow, schedule/watcher, AI, Project, team, and export states use feature-specific string fields. The shared GELF boundary no longer emits `_status`; it safely routes any remaining generic or invalid status value away from established numeric mappings.
   - **Tests:** formatter coverage exercises current semantic status fields, legacy numeric and string status payloads, invalid HTTP values, and explicit-field precedence. Existing request, Intel, AI, team, Atlas, Project, and export-log assertions now pin their replacement fields without increasing the test count.
-
----
-
-## [2.8.2] - 2026-07-28
-
-### Fixed
-
-- **Production lifecycle commands now keep operator Compose overrides active.** When `compose.operator.yaml` exists beside the installed stack, `darklab-deploy` includes it for backup, restore, database migration, upgrade validation and printed restart commands, and removal. Restored containers no longer restart from the release-owned base alone.
-
-- **History bulk deletion now follows the active filters and previews the exact number of affected runs.** The confirmation shows matching and non-favorite totals, and both desktop History and mobile recents delete the complete filtered result set instead of clearing unrelated runs or processing only the first page.
-
-- **Unassigned watcher Project scope is now represented consistently in run-finalization type hints.** This removes a false editor error from the watcher-scope regression coverage without changing runtime behavior.

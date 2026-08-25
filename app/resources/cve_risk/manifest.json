@@ -1,33 +1,33 @@
 {
-  "generated_at": "2026-08-04T06:17:02.080106+00:00",
+  "generated_at": "2026-08-24T23:12:14.724051+00:00",
   "schema_version": 1,
   "sources": [
     {
       "attribution": "Exploit Prediction Scoring System (EPSS) data provided by FIRST. EPSS estimates exploitation probability and is not a complete risk score.",
-      "compressed_bytes": 2508985,
+      "compressed_bytes": 2570898,
       "filename": "epss.csv.gz",
       "model_version": "v2026.06.15",
-      "published_at": "2026-08-03T12:00:16Z",
-      "record_count": 354846,
-      "retrieved_at": "2026-08-04T06:17:02.080106+00:00",
-      "sha256": "1e04813559991e0f9e9f11422912a9eca3c3be2b46741b74c92e72cbed2dfac5",
+      "published_at": "2026-08-24T12:02:36Z",
+      "record_count": 363908,
+      "retrieved_at": "2026-08-24T23:12:14.724051+00:00",
+      "sha256": "8cae68542b78435cce77baa1a2f1ad2e766d897c6e0b10942eb4f0ab1e54f741",
       "source": "epss",
       "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
-      "source_version": "v2026.06.15:2026-08-03T12:00:16Z",
+      "source_version": "v2026.06.15:2026-08-24T12:02:36Z",
       "terms_url": "https://www.first.org/about/policies/terms"
     },
     {
       "attribution": "Known Exploited Vulnerabilities catalog data provided by CISA. Catalog inclusion and BOD 22-01 dates do not create a private-sector remediation SLA.",
-      "compressed_bytes": 175624,
+      "compressed_bytes": 178315,
       "filename": "kev.json.gz",
       "model_version": "",
-      "published_at": "2026-08-03T18:55:09.067Z",
-      "record_count": 1657,
-      "retrieved_at": "2026-08-04T06:17:02.080106+00:00",
-      "sha256": "f46deaeb634934d4103d3c9b5a216673c5a9b1491653e6627db7db3257fa561c",
+      "published_at": "2026-08-24T18:00:04.7056Z",
+      "record_count": 1675,
+      "retrieved_at": "2026-08-24T23:12:14.724051+00:00",
+      "sha256": "7ae1b77d96e61145a0375299256106c67dff3d8d3fdcb73743c0705f4b9bcd84",
       "source": "kev",
       "source_url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-      "source_version": "2026.08.03",
+      "source_version": "2026.08.24",
       "terms_url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
     }
   ]
