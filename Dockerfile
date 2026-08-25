@@ -448,7 +448,10 @@ RUN grep -qx "schemathesis==${SCHEMATHESIS_VERSION}" /tmp/schemathesis-constrain
     mv /opt/schemathesis /out/opt/schemathesis && \
     ln -s /opt/schemathesis/bin/schemathesis /out/usr/local/bin/schemathesis
 
-FROM ${PYTHON_BASE_IMAGE} AS runtime
+# Keep the large SecLists tree in the runtime ancestry. Copying it from an
+# independent stage materializes a second BuildKit snapshot and can exhaust the
+# 30 GB hosted ARM64 release runner while the image is assembled.
+FROM wordlist-assets AS runtime
 ARG TARGETARCH
 ARG PYTHON_BASE_DIGEST
 ARG PYTHON_BASE_INDEX_DIGEST
@@ -500,7 +503,6 @@ RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 COPY --from=go-projectdiscovery /out/ /
 COPY --from=go-other-tools /out/ /
 COPY --from=native-tools /out/ /
-COPY --from=wordlist-assets /usr/share/wordlists/seclists/ /usr/share/wordlists/seclists/
 COPY --from=script-assets /out/ /
 COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
