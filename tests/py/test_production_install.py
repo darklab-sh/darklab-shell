@@ -1608,14 +1608,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "FROM go-builder-base AS go-projectdiscovery" in dockerfile
     assert "FROM go-builder-base AS go-other-tools" in dockerfile
     assert "FROM ${PYTHON_BASE_IMAGE} AS native-tools" in dockerfile
-    assert "FROM ${PYTHON_BASE_IMAGE} AS runtime" in dockerfile
+    assert "FROM wordlist-assets AS runtime" in dockerfile
     assert "WORKDIR /app" in dockerfile
     assert "COPY --from=go-projectdiscovery /out/ /" in dockerfile
     assert "COPY --from=go-other-tools /out/ /" in dockerfile
-    assert (
-        "COPY --from=wordlist-assets /usr/share/wordlists/seclists/ "
-        "/usr/share/wordlists/seclists/"
-    ) in dockerfile
+    assert "COPY --from=wordlist-assets" not in dockerfile
     assert "/out/usr/share/wordlists/seclists" not in dockerfile
     go_builder_stage = dockerfile.split(
         "FROM ${PYTHON_BASE_IMAGE} AS go-builder-base", 1
@@ -1658,7 +1655,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt" in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/pgx.txt" in dockerfile
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
-    runtime_stage = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS runtime", 1)[1]
+    runtime_stage = dockerfile.split("FROM wordlist-assets AS runtime", 1)[1]
     assert "ARG APT_CACHE_EPOCH" in runtime_stage
     assert runtime_stage.index('case "${APT_CACHE_EPOCH}" in') < (
         runtime_stage.index("apt-get update")
