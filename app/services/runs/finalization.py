@@ -27,7 +27,6 @@ from services.commands.registry import command_project_target_inputs
 from services.metrics_lazy import app_metrics
 from services.notifications.hooks import enqueue_run_complete
 from services.projects.auto_promote import apply_run_rules_on_conn as apply_auto_promote_rules_for_run
-from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.findings import record_run_findings
 from services.projects.links import (
     link_active_project_run_entities,
@@ -52,6 +51,9 @@ from services.runs.finalization_summaries import (
     auto_promote_summary_ids,
     auto_promote_summary_log_results,
     auto_promote_summary_results,
+)
+from services.runs.finalization_project_targets import (
+    discover_project_targets_for_finalize as _discover_project_targets_for_finalize,
 )
 from services.runs.output_model import (
     LineEvent,
@@ -433,52 +435,6 @@ def _save_run_project_link_for_finalize(
     return None
 
 
-def _discover_project_targets_for_finalize(
-    conn,
-    session_id,
-    run_id,
-    command,
-    active_project_link,
-    *,
-    cfg: Mapping[str, Any] | None = None,
-    command_project_target_inputs_fn: Callable = command_project_target_inputs,
-    record_project_target_discoveries_fn: Callable = record_project_target_discoveries,
-) -> list:
-    if not active_project_link:
-        return []
-    try:
-        return run_finalize_savepoint(
-            conn,
-            "project_target_discovery",
-            lambda: record_project_target_discoveries_fn(
-                conn,
-                session_id,
-                active_project_link["project_id"],
-                run_id,
-                command_project_target_inputs_fn(command, cfg=app_config.CFG if cfg is None else cfg),
-            ),
-        )
-    except ProjectWorkspaceQuotaExceeded as exc:
-        active_project_link["target_discovery_skipped_reason"] = str(exc)
-        log.warning("PROJECT_TARGET_DISCOVERY_SKIPPED", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "project_id": active_project_link["project_id"],
-            "cmd": command,
-            "reason": str(exc),
-        })
-    except Exception:
-        log.error("PROJECT_TARGET_DISCOVERY_ERROR", exc_info=True, extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "team_id": str(active_project_link.get("team_id") or ""),
-            "project_id": str(active_project_link.get("project_id") or ""),
-            "cmd": command,
-            "target_discovery_skipped_reason": str(active_project_link.get("target_discovery_skipped_reason") or ""),
-        })
-    return []
-
-
 def _record_run_findings_for_finalize(
     conn,
     session_id,
@@ -798,6 +754,7 @@ def save_completed_run(
                 run_id,
                 command,
                 records.active_project_link,
+                records.recorded_entities,
                 cfg=cfg,
                 command_project_target_inputs_fn=command_project_target_inputs_fn,
                 record_project_target_discoveries_fn=record_project_target_discoveries_fn,
