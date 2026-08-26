@@ -253,6 +253,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_runtime.py", 173, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_secret_specs.py", 157, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_smoke.py", 199, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/commands/registry_target_parsing.py", 52, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/services/commands/registry_targets.py", 345, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_trufflehog.py", 70, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_validate.py", 178, "split-package-ratchet"),
@@ -781,6 +784,11 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/runs/finalization_nmap_xml.py", 79, "split-package-ratchet"
+    ),
+    ModuleSizeBudget(
+        "app/services/runs/finalization_project_targets.py",
+        105,
+        "split-package-ratchet",
     ),
     ModuleSizeBudget(
         "app/services/runs/finalization_observability.py", 52, "split-package-ratchet"

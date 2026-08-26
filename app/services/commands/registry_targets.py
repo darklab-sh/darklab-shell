@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 
 from services.commands import registry_autocomplete
 from services.commands.registry_loader import dedupe_preserve_order as _dedupe_preserve_order
+from services.commands.registry_target_parsing import (
+    DNS_COMMAND_ROOTS,
+    dns_project_target_inputs,
+    flag_value_from_token,
+)
 from services.commands.registry_validation import split_command_argv
 
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
@@ -167,19 +172,6 @@ def autocomplete_spec_for_tokens(
     return (spec if isinstance(spec, dict) else {}), start_index
 
 
-def flag_value_from_token(tokens: list[str], index: int, flag: str) -> tuple[str | None, int | None]:
-    token = tokens[index]
-    if token == flag:
-        if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
-            return None, None
-        return tokens[index + 1], index + 1
-    if flag.startswith("--") and token.startswith(f"{flag}="):
-        return token[len(flag) + 1:], index
-    if not flag.startswith("--") and token.startswith(flag) and token != flag:
-        return token[len(flag):], index
-    return None, None
-
-
 def command_project_target_inputs(
     command: str,
     cfg: Mapping[str, Any] | None = None,
@@ -190,6 +182,8 @@ def command_project_target_inputs(
     tokens = split_command_argv(command)
     if not tokens:
         return []
+    if tokens[0].lower() in DNS_COMMAND_ROOTS:
+        return dns_project_target_inputs(command)
     spec, start_index = autocomplete_spec_for_tokens(tokens, cfg=cfg, load_autocomplete_context=load_autocomplete_context)
     if not spec:
         return []
