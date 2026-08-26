@@ -19687,6 +19687,36 @@ class TestDerivedCommandRegistry:
             },
         ]
 
+        dns_cases = (
+            ("dig @1.1.1.1 kali.darklab.sh A +comments +stats", ["kali.darklab.sh"]),
+            ("dig @1.1.1.1 darklab.sh ANY +multiline", ["darklab.sh"]),
+            ("dig @1.1.1.1 darklab.sh SOA +multiline", ["darklab.sh"]),
+            ("dig @1.1.1.1 darklab.sh DNSKEY +dnssec +multiline", ["darklab.sh"]),
+            ("dig @1.1.1.1 darklab.sh A +tcp +stats", ["darklab.sh"]),
+            (
+                "dig @1.1.1.1 does-not-exist.darklab.sh A +comments +stats",
+                ["does-not-exist.darklab.sh"],
+            ),
+            ("dig -c IN darklab.sh A", ["darklab.sh"]),
+            ("dig '*.darklab.sh' A", ["darklab.sh"]),
+            ("dig darklab.sh A example.org A", ["darklab.sh", "example.org"]),
+            ("nslookup -debug kali.darklab.sh 1.1.1.1", ["kali.darklab.sh"]),
+            ("nslookup -d2 kali.darklab.sh 1.1.1.1", ["kali.darklab.sh"]),
+            ("nslookup -type=any darklab.sh 1.1.1.1", ["darklab.sh"]),
+            ("nslookup -type=soa darklab.sh 1.1.1.1", ["darklab.sh"]),
+            ("nslookup -type=ns darklab.sh 1.1.1.1", ["darklab.sh"]),
+            ("nslookup -type=mx darklab.sh 1.1.1.1", ["darklab.sh"]),
+            ("nslookup -type=txt darklab.sh 1.1.1.1", ["darklab.sh"]),
+            ("nslookup -vc kali.darklab.sh 1.1.1.1", ["kali.darklab.sh"]),
+            ("nslookup 104.161.46.133 1.1.1.1", ["104.161.46.133"]),
+            ("nslookup does-not-exist.darklab.sh 1.1.1.1", ["does-not-exist.darklab.sh"]),
+        )
+        for command, expected_values in dns_cases:
+            inputs = commands.command_project_target_inputs(command)
+            assert [item["value"] for item in inputs] == expected_values
+            assert {item["value_type"] for item in inputs} == {"host"}
+            assert all(item["value"] not in {"a", "any", "soa", "dnskey", "1.1.1.1"} for item in inputs)
+
     def test_subcommand_and_flag_url_target_discovery_uses_the_real_target(self):
         inputs = commands.command_project_target_inputs(
             "nuclei -u https://ip.darklab.sh -t http/",
