@@ -1358,6 +1358,76 @@ class TestRunStreaming:
         assert by_value["darklab.sh"]["source_detail"]["kind"] == "positional"
         assert "80" not in by_value
 
+        dns_proc = _FakeProc(lines=[
+            ";; ANSWER SECTION:\n",
+            "dns.darklab.sh. 60 IN A 104.161.46.134\n",
+            "",
+        ])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=dns_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            dns_resp = _post_run(
+                client,
+                json={"command": "dig @1.1.1.1 dns.darklab.sh A +comments"},
+                headers={"X-Session-ID": session_id},
+            )
+            dns_resp.get_data(as_text=True)
+        assert dns_resp.status_code == 200
+
+        negative_dns_proc = _FakeProc(lines=[
+            ";; QUESTION SECTION:\n",
+            ";does-not-exist.darklab.sh. IN A\n",
+            "",
+        ])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=negative_dns_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            negative_dns_resp = _post_run(
+                client,
+                json={"command": "dig @1.1.1.1 does-not-exist.darklab.sh A +comments"},
+                headers={"X-Session-ID": session_id},
+            )
+            negative_dns_resp.get_data(as_text=True)
+        assert negative_dns_resp.status_code == 200
+
+        negative_nslookup_proc = _FakeProc(lines=[
+            "Server: 1.1.1.1\n",
+            "*** Can't find missing-nslookup.darklab.sh: No answer\n",
+            "",
+        ])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=negative_nslookup_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            negative_nslookup_resp = _post_run(
+                client,
+                json={"command": "nslookup missing-nslookup.darklab.sh 1.1.1.1"},
+                headers={"X-Session-ID": session_id},
+            )
+            negative_nslookup_resp.get_data(as_text=True)
+        assert negative_nslookup_resp.status_code == 200
+
+        dns_targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)["targets"]
+        dns_target_values = {item["value"] for item in dns_targets}
+        assert "dns.darklab.sh" in dns_target_values
+        dns_target = next(item for item in dns_targets if item["value"] == "dns.darklab.sh")
+        assert dns_target["source"] == "auto_command"
+        assert dns_target["review_state"] == "pending"
+        assert "does-not-exist.darklab.sh" not in dns_target_values
+        assert "missing-nslookup.darklab.sh" not in dns_target_values
+        assert not {"a", "1.1.1.1"} & dns_target_values
+
         findings_resp = client.get(
             f"/projects/{project['id']}/findings?target_id={by_value['darklab.sh']['id']}",
             headers={"X-Session-ID": session_id},
