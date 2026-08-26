@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "reviewed_for_release": "2.9.0",
-  "reviewed_on": "2026-08-23",
+  "reviewed_for_release": "2.9.1-rc.1",
+  "reviewed_on": "2026-08-26",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
