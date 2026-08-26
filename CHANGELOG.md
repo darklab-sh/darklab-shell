@@ -13,7 +13,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.9.1] - Unreleased
 
-No changes yet.
+### Fixed
+
+- **DNS command options and resolvers no longer become Project entities.** `dig` and `nslookup` target discovery now recognizes the actual query and waits for a matching parsed answer before adding it. Record types, output options, selected resolvers, and names from negative lookups stay out of Atlas and Project targets.
 
 ---
 
