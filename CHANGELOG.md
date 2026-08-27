@@ -6,12 +6,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## Archives
 
-- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.8.1
+- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.8.3
 - [1.x releases](docs/changelog/1.x.md) - versions 1.0 through 1.7
 
 ---
 
-## [2.9.1] - Unreleased
+## [2.9.2] - Unreleased
+
+No changes yet.
+
+---
+
+## [2.9.1] - 2026-08-26
 
 ### Fixed
 
@@ -69,14 +75,3 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Assessment and Atlas browser state now survives routine refreshes.** Planner and batch updates preserve scroll and focus, batch controls remain discoverable, Entity selection no longer jumps to the top, worklist filters and paging replace only their affected region, and stale lifecycle responses can't leave the Assessment tab stuck in a loading state. Archived Team assessments remain readable while mutation controls stay disabled.
 
 - **Contributor type checks now understand structured test records.** Assessment batch log assertions model their custom fields, container smoke filters preserve each case's mapping type, and logging tests narrow stream handlers before replacing their output stream.
-
----
-
-## [2.8.3] - 2026-07-29
-
-### Fixed
-
-- **GELF status fields now keep one OpenSearch-compatible type across the event stream.**
-  - **Root cause:** request logs used the generic `_status` field for numeric HTTP codes while Intel provider and other lifecycle events reused it for text such as `ok` and `error`. Once OpenSearch mapped `_status` as a number, it rejected later text values with `mapper_parsing_exception`.
-  - **Fix:** HTTP codes now use numeric `http_status`, while provider, workflow, schedule/watcher, AI, Project, team, and export states use feature-specific string fields. The shared GELF boundary no longer emits `_status`; it safely routes any remaining generic or invalid status value away from established numeric mappings.
-  - **Tests:** formatter coverage exercises current semantic status fields, legacy numeric and string status payloads, invalid HTTP values, and explicit-field precedence. Existing request, Intel, AI, team, Atlas, Project, and export-log assertions now pin their replacement fields without increasing the test count.
