@@ -66,6 +66,14 @@ const MOBILE_KEYBOARD_WIDTH = Number(
 )
 const MOBILE_KEYBOARD_GUTTER_COLOR = process.env.DEMO_MOBILE_KEYBOARD_GUTTER_COLOR || '#161617'
 const DEMO_OBS_ARMING_FILE = process.env.DEMO_OBS_ARMING_FILE || ''
+const DEMO_PROJECT_IP = '107.178.109.44'
+
+function currentMonthDateRange() {
+  const now = new Date()
+  const pad = value => String(value).padStart(2, '0')
+  const yearMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+  return `${yearMonth}-01 to ${yearMonth}-${pad(now.getDate())}`
+}
 
 function typingDelay(char, index, baseDelay) {
   const cadence = [0, 20, 8, 30, 12, 25, 6, 36, 15]
@@ -203,7 +211,8 @@ async function selectAutocompleteWithArrowDowns(page, targetValue, arrowPresses 
         if (item && typeof item === 'object') return String(item.insertValue || item.value || item.label || '')
         return String(item || '')
       }
-      return Array.isArray(acFiltered) && acFiltered.some((item) => valueFor(item) === target)
+      const state = globalThis.APP_STATE_API?.getAutocompleteState?.() || {}
+      return Array.isArray(state.filtered) && state.filtered.some((item) => valueFor(item) === target)
     },
     targetValue,
     { timeout: 10_000 },
@@ -215,21 +224,27 @@ async function selectAutocompleteWithArrowDowns(page, targetValue, arrowPresses 
         if (item && typeof item === 'object') return String(item.insertValue || item.value || item.label || '')
         return String(item || '')
       }
-      const index = Array.isArray(acFiltered)
-        ? acFiltered.findIndex((item) => valueFor(item) === target)
+      const api = globalThis.APP_STATE_API
+      const state = api?.getAutocompleteState?.() || {}
+      const filtered = Array.isArray(state.filtered) ? state.filtered : []
+      const index = filtered.length
+        ? filtered.findIndex((item) => valueFor(item) === target)
         : -1
       if (index < 0) throw new Error(`Autocomplete target not found: ${target}`)
-      acIndex = index - presses
-      if (typeof acShow === 'function') acShow(acFiltered)
+      api.setAutocompleteState({ index: index - presses })
+      if (typeof globalThis.acShow === 'function') globalThis.acShow(filtered)
     },
     { target: targetValue, presses: arrowPresses },
   )
 
   for (let i = 0; i < arrowPresses; i++) {
     await page.evaluate(() => {
-      if (!Array.isArray(acFiltered) || !acFiltered.length) return
-      acIndex = (acIndex + 1) % acFiltered.length
-      if (typeof acShow === 'function') acShow(acFiltered)
+      const api = globalThis.APP_STATE_API
+      const state = api?.getAutocompleteState?.() || {}
+      const filtered = Array.isArray(state.filtered) ? state.filtered : []
+      if (!filtered.length) return
+      api.setAutocompleteState({ index: (state.index + 1) % filtered.length })
+      if (typeof globalThis.acShow === 'function') globalThis.acShow(filtered)
     })
     await page.waitForTimeout(320)
   }
@@ -242,8 +257,9 @@ async function selectAutocompleteWithArrowDowns(page, targetValue, arrowPresses 
       if (item && typeof item === 'object') return String(item.insertValue || item.value || item.label || '')
       return String(item || '')
     }
-    const item = Array.isArray(acFiltered)
-      ? acFiltered.find((entry) => valueFor(entry) === target)
+    const state = globalThis.APP_STATE_API?.getAutocompleteState?.() || {}
+    const item = Array.isArray(state.filtered)
+      ? state.filtered.find((entry) => valueFor(entry) === target)
       : null
     if (!item) throw new Error(`Autocomplete target not found: ${target}`)
     const currentValue = typeof getComposerValue === 'function'
@@ -370,20 +386,43 @@ async function openFilesPanelWithResponseFile(page) {
   await page.waitForTimeout(3_300)
   await page.locator('#workspace-close-viewer-btn').click()
   await expect(page.locator('#workspace-viewer')).toHaveClass(/u-hidden/)
-  await page.evaluate(() => {
-    if (typeof closeWorkspace === 'function') closeWorkspace()
-  })
+  await tapMobileSheetHandle(page, '#workspace-modal')
   await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
   await page.waitForTimeout(1_000)
 }
 
+async function openWorkflowsPanelForDemo(page) {
+  await openMobileMenuAction(page, 'workflows')
+  await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+  const catalogItem = page.locator('.workflow-catalog-item', { hasText: 'Subdomain HTTP Triage' })
+  await catalogItem.waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(1_100)
+  await catalogItem.click()
+  const workflowCard = page.locator('.workflow-card', { hasText: 'Subdomain HTTP Triage' })
+  await expect(workflowCard).toBeVisible()
+  await workflowCard.locator('.workflow-input-control').fill('darklab.sh')
+  await expect(workflowCard.locator('.workflow-run-all')).toBeEnabled()
+  await page.waitForTimeout(3_400)
+  await tapMobileSheetHandle(page, '#workflows-modal')
+  await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
 async function openProjectsPanelForDemo(page, runId) {
-  await createCaptureProjectFixture(page, {
+  const project = await createCaptureProjectFixture(page, {
     name: 'Mobile Demo Investigation',
     runIds: [runId],
     target: 'noc.darklab.sh',
     note: 'Mobile projects keep linked runs, targets, notes, and evidence together.',
   })
+  await page.evaluate(async ({ projectId, targetIp }) => {
+    const response = await apiFetch(`/projects/${encodeURIComponent(projectId)}/targets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'ip', value: targetIp }),
+    })
+    if (!response.ok) throw new Error(`project target create failed: ${response.status}`)
+  }, { projectId: project.id, targetIp: DEMO_PROJECT_IP })
   await openMobileMenuAction(page, 'projects')
   await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
   await expect(page.locator('#project-mobile-root')).toBeVisible()
@@ -392,47 +431,69 @@ async function openProjectsPanelForDemo(page, runId) {
   await page.waitForTimeout(1_100)
   await row.click()
   await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+
+  await page.locator('[data-project-mobile-detail-tab="overview"]').click()
+  const overview = page.locator(`[data-project-overview-root="${project.id}"].is-mobile`)
+  await expect(overview).toBeVisible({ timeout: 15_000 })
+  await expect(overview).toContainText('noc.darklab.sh')
+  await expect(overview).toContainText(DEMO_PROJECT_IP)
+  await page.waitForTimeout(2_800)
+
   await page.locator('[data-project-mobile-detail-tab="details"]').click()
   await expect(page.locator('#project-mobile-detail-body')).toContainText('noc.darklab.sh')
-  await page.waitForTimeout(3_300)
-  await page.evaluate(() => {
-    if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace({ refocus: false })
+  await page.waitForTimeout(2_400)
+
+  const assessmentTab = page.locator('[data-project-mobile-detail-tab="assessment"]')
+  await assessmentTab.scrollIntoViewIfNeeded()
+  await assessmentTab.click()
+  const assessment = page.locator('#project-mobile-detail-body .project-assessment-root')
+  await expect(assessment.locator('.project-assessment-start-form select')).toBeVisible({ timeout: 15_000 })
+  await assessment.locator('.project-assessment-start-form select').selectOption('network')
+  const assessmentStarted = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'POST' && /\/projects\/[^/]+\/assessments$/.test(url.pathname)
   })
+  await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
+  expect((await assessmentStarted).status()).toBe(201)
+  await expect(assessment.locator('.project-assessment-cycle')).toContainText('Network assessment')
+  const target = assessment.locator('.project-assessment-target-toggle', { hasText: DEMO_PROJECT_IP })
+  await target.click()
+  await expect(assessment.locator('.project-assessment-check-row').first()).toBeVisible()
+  await page.waitForTimeout(3_400)
+
+  const reportTab = page.locator('[data-project-mobile-detail-tab="report"]')
+  await reportTab.scrollIntoViewIfNeeded()
+  await reportTab.click()
+  const report = page.locator('#project-mobile-detail-body .project-report-root').first()
+  const engagementName = report.locator('[data-project-report-metadata="engagement_name"]')
+  await expect(engagementName).toBeVisible({ timeout: 15_000 })
+  await engagementName.fill('Mobile Demo Investigation Report')
+  await report.locator('[data-project-report-metadata="date_range"]').fill(currentMonthDateRange())
+  await report.locator('[data-project-report-metadata="executive_summary"]')
+    .fill('Current targets, assessment coverage, findings, and supporting evidence.')
+  await report.locator('[data-project-report-action="preview"]').click()
+  await expect(report.frameLocator('.project-report-preview-frame').locator('body'))
+    .toContainText('Mobile Demo Investigation Report', { timeout: 15_000 })
+  await page.waitForTimeout(3_400)
+
+  await tapMobileSheetHandle(page, '#project-workspace-modal')
   await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_000)
 }
 
 async function openAtlasPanelForDemo(page) {
-  await openMobileMenuAction(page, 'atlas')
+  await openMobileMenuAction(page, 'quick-lookup')
   await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
-  await expect(page.locator('#atlas-mobile-root')).toBeVisible()
-  await page.waitForTimeout(900)
-
-  await page.locator('.atlas-mobile-filters-toggle').click()
-  await expect(page.locator('#atlas-mobile-filters-panel')).toBeVisible()
-  await page.waitForTimeout(1_000)
-
-  await page.locator('.atlas-mobile-overflow-btn').click()
-  await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
-  await page.waitForTimeout(1_100)
-  await page.locator('#action-sheet-overlay').click({ position: { x: 10, y: 10 } })
-  await expect(page.locator('#action-sheet-overlay')).not.toHaveClass(/\bopen\b/)
-  await page.waitForTimeout(650)
-
-  await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
-  const hostRow = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' }).first()
-  await expect(hostRow).toBeVisible()
-  await page.waitForTimeout(850)
-  await hostRow.click()
-  await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
-  await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Shodan')
-  await page.waitForTimeout(900)
-  await page.locator('#atlas-mobile-entity-body .atlas-intel-card-toggle').filter({ hasText: 'Shodan' }).click()
-  await expect(page.locator('#atlas-mobile-entity-body .atlas-intel-card.is-open')).toContainText(/ports/i)
+  await expect(page.locator('#atlas-quick-lookup')).toBeVisible()
+  await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+  await page.locator('#atlas-lookup-mode').selectOption('ip')
+  await page.locator('#atlas-lookup-input').fill('107.178.109.44')
+  await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+  await expect(page.locator('#atlas-lookup-profile')).toContainText('107.178.109.44')
+  await page.locator('#atlas-lookup-profile [data-atlas-profile-view="intel"]').click()
+  await expect(page.locator('#atlas-lookup-profile')).toContainText('Shodan')
   await page.waitForTimeout(3_200)
-  await page.evaluate(() => {
-    if (typeof closeAtlas === 'function') closeAtlas({ refocus: false })
-  })
+  await tapMobileSheetHandle(page, '#atlas-surface')
   await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_000)
 }
@@ -442,13 +503,7 @@ async function openRunComparisonForDemo(page) {
   await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
   await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
   await page.waitForTimeout(4_200)
-  await page.evaluate(() => {
-    if (typeof closeHistoryCompareOverlay === 'function') {
-      closeHistoryCompareOverlay()
-      return
-    }
-    document.querySelector('.history-compare-close')?.click()
-  })
+  await tapMobileSheetHandle(page, '#history-compare-modal')
   await expect(page.locator('#history-compare-overlay')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_000)
 }
@@ -583,6 +638,12 @@ async function openMobileMenuAction(page, action) {
   await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
   await page.waitForTimeout(900)
   await page.locator(`#mobile-menu-sheet [data-menu-action="${action}"]`).click()
+}
+
+async function tapMobileSheetHandle(page, surfaceSelector) {
+  const handle = page.locator(`${surfaceSelector} > .sheet-grab`).first()
+  await handle.waitFor({ state: 'visible', timeout: 10_000 })
+  await handle.click()
 }
 
 /**
@@ -854,10 +915,13 @@ test('demo-mobile', async ({ page }) => {
   // ── Files panel: captured response file ──────────────────────────────────
   await openFilesPanelWithResponseFile(page)
 
-  // ── Projects panel: active project with a linked run ─────────────────────
+  // ── Workflows: reusable multi-step automation with resolved inputs ───────
+  await openWorkflowsPanelForDemo(page)
+
+  // ── Projects: overview, assessment planning, and report preview ──────────
   await openProjectsPanelForDemo(page, workspaceRunId)
 
-  // ── Atlas: entity-first triage with intel context ────────────────────────
+  // ── Atlas Quick Lookup: focused profile and saved provider intelligence ──
   await openAtlasPanelForDemo(page)
 
   // ── Run comparison: mobile comparison sheet ──────────────────────────────
@@ -889,9 +953,7 @@ test('demo-mobile', async ({ page }) => {
   await page.waitForTimeout(5_000)
   await killActiveRunFromStatusMonitor(page)
   await page.waitForTimeout(1_000)
-  await page.evaluate(() => {
-    if (typeof closeStatusMonitor === 'function') closeStatusMonitor()
-  })
+  await tapMobileSheetHandle(page, '#status-monitor')
   await page.locator('#status-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.waitForTimeout(1_000)
 
@@ -911,9 +973,7 @@ test('demo-mobile', async ({ page }) => {
   await smoothScroll(page, '.history-panel-body', 0, { durationMs: 1_250 })
   await page.waitForTimeout(1_200)
 
-  await page.evaluate(() => {
-    if (typeof hideHistoryPanel === 'function') hideHistoryPanel()
-  })
+  await tapMobileSheetHandle(page, '#history-panel')
   await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_100)
 

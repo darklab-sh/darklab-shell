@@ -13,7 +13,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [2.9.2] - Unreleased
 
-No changes yet.
+### Changed
+
+- **The desktop and mobile demo tours now reflect the current investigation workflow.** Both recordings cover reusable Workflows, the Project overview, Assessment planning, report preview, and Atlas Quick Lookup alongside the existing command, Files, comparison, monitoring, History, theme, and desktop PTY scenes. The wrappers also accept `--playback-only` to run the complete seeded journey headlessly and catch stale selectors or stalled scenes without requiring OBS.
 
 ---
 

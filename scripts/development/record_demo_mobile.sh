@@ -20,6 +20,7 @@
 #   scripts/record_demo_mobile.sh
 #   scripts/record_demo_mobile.sh --base-url http://localhost:9000
 #   scripts/record_demo_mobile.sh --no-arm
+#   scripts/record_demo_mobile.sh --playback-only
 #   OBS_WS_PASSWORD=... scripts/record_demo_mobile.sh
 #
 # Optional:
@@ -45,6 +46,7 @@ PLAYWRIGHT_OUTPUT_DIR="${DEMO_PLAYWRIGHT_OUTPUT_DIR:-/tmp/darklab_shell-mobile-d
 DEMO_HISTORY_FIXTURE="${DEMO_HISTORY_FIXTURE:-visual-flows}"
 OBS_WS_URL="${OBS_WS_URL:-ws://127.0.0.1:4455}"
 ARM_BEFORE_RECORDING=1
+PLAYBACK_ONLY=0
 MOBILE_OBS_VIEWPORT_WIDTH="${DEMO_MOBILE_OBS_VIEWPORT_WIDTH:-502}"
 MOBILE_OBS_VIEWPORT_HEIGHT=932
 MOBILE_WINDOW_WIDTH="${DEMO_MOBILE_WINDOW_WIDTH:-$MOBILE_OBS_VIEWPORT_WIDTH}"
@@ -75,6 +77,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --no-arm|--start-immediately)
+      ARM_BEFORE_RECORDING=0
+      shift
+      ;;
+    --playback-only|--validate)
+      PLAYBACK_ONLY=1
       ARM_BEFORE_RECORDING=0
       shift
       ;;
@@ -140,6 +147,27 @@ seed_demo_history() {
 
 seed_demo_history
 require_workspace_enabled
+
+if [ "$PLAYBACK_ONLY" = "1" ]; then
+  rm -rf "$PLAYWRIGHT_OUTPUT_DIR"
+  echo "Running the complete mobile demo playback without OBS ..."
+  DEMO_BASE_URL="$BASE_URL" \
+  DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
+  DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+  DEMO_HEADED=0 \
+  DEMO_DISABLE_FRAME_CAPTURE=1 \
+  DEMO_PLAYBACK_ONLY=1 \
+  DEMO_OBS_ARMING_FILE="" \
+  DEMO_MOBILE_OBS_VIEWPORT_WIDTH="$MOBILE_OBS_VIEWPORT_WIDTH" \
+  DEMO_MOBILE_TOP_SAFE_AREA_PX="$MOBILE_TOP_SAFE_AREA" \
+  DEMO_MOBILE_BOTTOM_SAFE_AREA_PX="$MOBILE_BOTTOM_SAFE_AREA" \
+  DEMO_MOBILE_KEYBOARD_WIDTH="$MOBILE_KEYBOARD_WIDTH" \
+  DEMO_MOBILE_KEYBOARD_GUTTER_COLOR="$MOBILE_KEYBOARD_GUTTER_COLOR" \
+  RUN_DEMO=1 npx playwright test \
+    --config .tooling/playwright.demo.mobile.config.js
+  echo "Mobile demo playback passed."
+  exit 0
+fi
 
 obs_recording_started=0
 stop_obs_recording() {

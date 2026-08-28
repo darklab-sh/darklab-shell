@@ -7,8 +7,9 @@ import { MOBILE_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 const BASE_URL = process.env.DEMO_BASE_URL || 'http://localhost:8888'
 const HEADED_DEMO = process.env.DEMO_HEADED === '1'
 const OBS_DEMO = HEADED_DEMO && process.env.DEMO_DISABLE_FRAME_CAPTURE === '1'
+const PLAYBACK_ONLY = process.env.DEMO_PLAYBACK_ONLY === '1'
 const MOBILE_OBS_VIEWPORT_WIDTH = Number(process.env.DEMO_MOBILE_OBS_VIEWPORT_WIDTH || 502)
-const MOBILE_VIEWPORT = OBS_DEMO
+const MOBILE_VIEWPORT = OBS_DEMO || PLAYBACK_ONLY
   ? { ...MOBILE_VISUAL_CONTRACT.viewport, width: MOBILE_OBS_VIEWPORT_WIDTH }
   : MOBILE_VISUAL_CONTRACT.viewport
 const MOBILE_WINDOW_WIDTH = Number(
@@ -27,6 +28,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
+    actionTimeout: 30_000,
     // isMobile: false with an explicit mobile viewport gives full-height page
     // content without Chromium's simulated mobile keyboard/browser chrome. The
     // OBS headed path widens slightly by default because Chromium's desktop
