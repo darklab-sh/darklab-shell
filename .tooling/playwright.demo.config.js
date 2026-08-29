@@ -16,6 +16,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
+    actionTimeout: 30_000,
     browserName: 'chromium',
     baseURL: BASE_URL,
     headless: !HEADED_DEMO,

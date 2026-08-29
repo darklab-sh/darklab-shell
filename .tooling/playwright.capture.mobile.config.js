@@ -15,6 +15,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
+    actionTimeout: 15_000,
     isMobile: false,
     browserName: 'chromium',
     viewport: MOBILE_VISUAL_CONTRACT.viewport,

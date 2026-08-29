@@ -885,6 +885,69 @@ export async function installCommonCaptureMocks(page) {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
+      const atlasEntityDetail = (entity) => ({
+        entity,
+        intel_snapshots: entity.type === 'ip'
+          ? [{
+              provider: 'Shodan',
+              status: 'ok',
+              summary: '2 open ports and 1 hostname',
+              data: {
+                providers: {
+                  shodan: {
+                    ports: [80, 443],
+                    hostnames: ['edge.darklab.sh'],
+                    cves: ['CVE-2026-0001'],
+                    services: [
+                      { port: 443, transport: 'tcp', product: 'nginx' },
+                    ],
+                  },
+                },
+              },
+              fetched_at: '2026-05-15T00:06:00Z',
+            }]
+          : [],
+        intel_summary: entity.type === 'ip'
+          ? {
+              status: 'available',
+              providers_with_data: ['shodan', 'censys'],
+              highlight_count: 3,
+              highlights: [
+                {
+                  label: 'Open ports',
+                  value: '80, 443',
+                  provider: 'shodan',
+                  provider_label: 'Shodan',
+                  tone: 'neutral',
+                },
+                {
+                  label: 'Hostname',
+                  value: 'edge.darklab.sh',
+                  provider: 'shodan',
+                  provider_label: 'Shodan',
+                  tone: 'neutral',
+                },
+                {
+                  label: 'CVEs',
+                  value: 'CVE-2026-0001',
+                  provider: 'shodan',
+                  provider_label: 'Shodan',
+                  tone: 'warning',
+                },
+              ],
+              updated_at: '2026-05-15T00:06:00Z',
+            }
+          : { status: 'none', providers_with_data: [], highlight_count: 0, highlights: [] },
+        runs: [
+          {
+            run_id: 'capture-run-nmap',
+            command: 'nmap -sV 107.178.109.44',
+            occurrence_count: 2,
+            last_seen_at: '2026-05-15T00:04:00Z',
+          },
+        ],
+        findings: atlasData.findings.filter(finding => finding.entity_id === entity.id),
+      })
       const mockRunResponse = (mock) => {
         mockRunIndex += 1
         const runId = `capture-mock-run-${mockRunIndex}`
@@ -949,6 +1012,38 @@ export async function installCommonCaptureMocks(page) {
           })
         }
 
+        if (method === 'POST' && path === '/atlas/lookup') {
+          const payload = JSON.parse(rawBody || '{}')
+          const requested = String(payload.value || '').trim()
+          const entity = atlasData.entities.find(item => (
+            item.type === 'ip' && item.canonical_value === requested
+          ))
+          if (!entity) {
+            return jsonResponse({
+              requested_type: payload.mode || 'auto',
+              detected_type: payload.mode || 'auto',
+              canonical_value: requested,
+              project_id: '',
+              match_state: 'not_found',
+              detail: null,
+              candidates: [],
+              candidates_truncated: false,
+              parent_host_candidate: null,
+            })
+          }
+          return jsonResponse({
+            requested_type: payload.mode || 'auto',
+            detected_type: entity.type,
+            canonical_value: entity.canonical_value,
+            project_id: '',
+            match_state: 'found',
+            detail: atlasEntityDetail(entity),
+            candidates: [],
+            candidates_truncated: false,
+            parent_host_candidate: null,
+          })
+        }
+
         if (method === 'GET' && path.startsWith('/atlas/entities/')) {
           const entityId = decodeURIComponent(path.replace('/atlas/entities/', '').split('/')[0])
           const entity = atlasData.entities.find(item => item.id === entityId)
@@ -958,69 +1053,7 @@ export async function installCommonCaptureMocks(page) {
               headers: { 'Content-Type': 'application/json' },
             })
           }
-          return jsonResponse({
-            entity,
-            intel_snapshots: entity.type === 'ip'
-              ? [{
-                  provider: 'Shodan',
-                  status: 'ok',
-                  summary: '2 open ports and 1 hostname',
-                  data: {
-                    providers: {
-                      shodan: {
-                        ports: [80, 443],
-                        hostnames: ['edge.darklab.sh'],
-                        cves: ['CVE-2026-0001'],
-                        services: [
-                          { port: 443, transport: 'tcp', product: 'nginx' },
-                        ],
-                      },
-                    },
-                  },
-                  fetched_at: '2026-05-15T00:06:00Z',
-                }]
-              : [],
-            intel_summary: entity.type === 'ip'
-              ? {
-                  status: 'available',
-                  providers_with_data: ['shodan', 'censys'],
-                  highlight_count: 3,
-                  highlights: [
-                    {
-                      label: 'Open ports',
-                      value: '80, 443',
-                      provider: 'shodan',
-                      provider_label: 'Shodan',
-                      tone: 'neutral',
-                    },
-                    {
-                      label: 'Hostname',
-                      value: 'edge.darklab.sh',
-                      provider: 'shodan',
-                      provider_label: 'Shodan',
-                      tone: 'neutral',
-                    },
-                    {
-                      label: 'CVEs',
-                      value: 'CVE-2026-0001',
-                      provider: 'shodan',
-                      provider_label: 'Shodan',
-                      tone: 'warning',
-                    },
-                  ],
-                  updated_at: '2026-05-15T00:06:00Z',
-                }
-              : { status: 'none', providers_with_data: [], highlight_count: 0, highlights: [] },
-            runs: [
-              {
-                run_id: 'capture-run-nmap',
-                command: 'nmap -sV 107.178.109.44',
-                occurrence_count: 2,
-                last_seen_at: '2026-05-15T00:04:00Z',
-              },
-            ],
-            findings: atlasData.findings.filter(finding => finding.entity_id === entity.id),
-          })
+          return jsonResponse(atlasEntityDetail(entity))
         }
 
         if (url.endsWith('/config')) {
@@ -1335,7 +1368,10 @@ export async function createCaptureProjectFixture(page, {
       method: 'POST',
       body: JSON.stringify({ label: 'external' }),
     })
-    return project
+    return {
+      ...project,
+      captureTarget: targetResp.target,
+    }
   }, {
     projectName: name,
     linkedRunIds: runIds,
