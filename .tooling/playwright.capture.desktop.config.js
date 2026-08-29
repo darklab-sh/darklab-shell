@@ -16,6 +16,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     ...devices['Desktop Chrome'],
+    actionTimeout: 15_000,
     baseURL: 'http://localhost:5010',
     viewport: DESKTOP_VISUAL_CONTRACT.viewport,
     deviceScaleFactor: DESKTOP_VISUAL_CONTRACT.deviceScaleFactor,

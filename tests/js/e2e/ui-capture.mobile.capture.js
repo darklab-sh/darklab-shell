@@ -8,6 +8,8 @@ import {
   createShareSnapshot,
   seedProjectActivityFixture,
   seedProjectMonitoringFixture,
+  seedProjectOverviewFixture,
+  seedProjectWebSurfaceFixture,
   setComposerValueForTest,
   waitForHistoryRuns,
 } from './helpers.js'
@@ -89,6 +91,41 @@ async function createAndShowWorkspaceResponseFileMobile(page) {
   await expect(page.locator('#workspace-modal')).toBeVisible()
   const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
   await expect(row).toBeVisible()
+  return row
+}
+
+async function openWorkspaceFullViewMobile(page) {
+  const row = await createAndShowWorkspaceResponseFileMobile(page)
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+  await expect(page.locator('#workspace-viewer-text')).toContainText('captured response file')
+}
+
+async function openParameterizedWorkflowWorkspaceMobile(page) {
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+  await expect(page.locator('#workflows-modal')).toBeVisible()
+  const catalogItem = page.locator('.workflow-catalog-item', { hasText: 'Subdomain HTTP Triage' })
+  await expect(catalogItem).toBeVisible({ timeout: 10_000 })
+  await catalogItem.click()
+  const workflowCard = page.locator('.workflow-card', { hasText: 'Subdomain HTTP Triage' })
+  await expect(workflowCard).toBeVisible()
+  await workflowCard.locator('.workflow-input-control').fill('darklab.sh')
+  await expect(workflowCard.locator('.workflow-run-all')).toBeEnabled()
+}
+
+async function activateMobileProjectDetailTab(page, tabId) {
+  const selector = `[data-project-mobile-detail-tab="${tabId}"]`
+  const tab = page.locator(selector)
+  await expect(tab).toBeVisible({ timeout: 15_000 })
+  await tab.evaluate((element) => {
+    element.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+    element.click()
+  })
+  const activeTab = page.locator(selector)
+  await expect(activeTab).toHaveClass(/\bis-active\b/)
+  return activeTab
 }
 
 async function openMobileProjectsWithCaptureProject(page, themeName) {
@@ -106,7 +143,7 @@ async function openMobileProjectsWithCaptureProject(page, themeName) {
   await expect(row).toBeVisible()
   await row.click()
   await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
-  await page.locator('[data-project-mobile-detail-tab="details"]').click()
+  await activateMobileProjectDetailTab(page, 'details')
   await expect(page.locator('#project-mobile-detail-body')).toContainText('mobile.capture.darklab.sh')
   return project
 }
@@ -148,8 +185,7 @@ async function openMobileProjectTabCaptureScene(page, themeName, tabId, testInfo
       if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
     })
   }
-  await page.locator(`[data-project-mobile-detail-tab="${tabId}"]`).click()
-  await expect(page.locator(`[data-project-mobile-detail-tab="${tabId}"]`)).toHaveClass(/\bis-active\b/)
+  await activateMobileProjectDetailTab(page, tabId)
   const detailBody = page.locator('#project-mobile-detail-body')
   if (tabId === 'monitoring') {
     const root = detailBody.locator(`[data-project-monitoring-root="${project.id}"].is-mobile`)
@@ -167,12 +203,125 @@ async function openMobileProjectTabCaptureScene(page, themeName, tabId, testInfo
     await expect(root.locator('[data-project-report-metadata="engagement_name"]')).toBeVisible({ timeout: 15_000 })
     await root.locator('[data-project-report-metadata="engagement_name"]').fill(`Mobile Capture Report ${themeLabel(themeName)}`)
     await root.locator('[data-project-report-metadata="date_range"]').fill('2026-06-01 to 2026-06-05')
-    await root.locator('[data-project-report-metadata="executive_summary"]').fill('Capture summary for the v2.2 mobile project workspace.')
+    await root.locator('[data-project-report-metadata="executive_summary"]')
+      .fill('Current targets, assessment coverage, findings, and supporting evidence.')
     await root.locator('[data-project-report-action="preview"]').click()
     await expect(root.frameLocator('.project-report-preview-frame').locator('body')).toContainText('Mobile Capture Report', {
       timeout: 15_000,
     })
   }
+}
+
+async function openMobileProjectDigestCaptureScene(page, themeName) {
+  const project = await openMobileProjectsWithCaptureProject(page, themeName)
+  await activateMobileProjectDetailTab(page, 'monitoring')
+  await expect(page.locator(
+    `[data-project-monitoring-root="${project.id}"].is-mobile`,
+  )).toBeVisible({ timeout: 15_000 })
+  const digest = page.locator('#project-mobile-detail-body .project-monitoring-digest.is-mobile')
+  await expect(digest).toBeVisible({ timeout: 15_000 })
+  await expect(digest).toContainText('Digest Notifications')
+  await expect(digest).toContainText('Send scheduled digests')
+  await expect(digest.getByRole('button', { name: 'Save' })).toBeVisible()
+  await digest.scrollIntoViewIfNeeded()
+}
+
+async function openMobileProjectOverviewCaptureScene(page, themeName, testInfo) {
+  const project = await openMobileProjectsWithCaptureProject(page, themeName)
+  const target = project.captureTarget
+  seedProjectOverviewFixture(testInfo, {
+    sessionId: await browserSessionId(page),
+    projectId: project.id,
+    targetId: target.id,
+    targetValue: target.value,
+  })
+  await page.evaluate(async () => {
+    if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+  })
+  await activateMobileProjectDetailTab(page, 'overview')
+  const overview = page.locator(`[data-project-overview-root="${project.id}"].is-mobile`)
+  await expect(overview).toBeVisible({ timeout: 15_000 })
+  await expect(overview).toContainText(target.value)
+  await expect(overview).toContainText('8443')
+  await expect(overview).toContainText('1 finding awaiting verification')
+}
+
+async function openMobileProjectAssessmentCaptureScene(page, themeName, { preview = false } = {}) {
+  const project = await openMobileProjectsWithCaptureProject(page, themeName)
+  await activateMobileProjectDetailTab(page, 'assessment')
+  const assessment = page.locator('#project-mobile-detail-body .project-assessment-root')
+  await expect(assessment.locator('.project-assessment-start-form select')).toBeVisible({ timeout: 15_000 })
+  await assessment.locator('.project-assessment-start-form select').selectOption('network')
+  const started = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && /\/projects\/[^/]+\/assessments$/.test(new URL(response.url()).pathname)
+  ))
+  await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
+  expect((await started).status()).toBe(201)
+  await expect(assessment.locator('.project-assessment-cycle')).toContainText('Network assessment')
+  const target = assessment.locator('.project-assessment-target-toggle', {
+    hasText: project.captureTarget.value,
+  })
+  await target.click()
+  await expect(assessment.locator('.project-assessment-check-row').first()).toBeVisible()
+  await expect(page.locator('#permalink-toast')).not.toHaveClass(
+    /(?:^|\s)show(?:\s|$)/,
+    { timeout: 5_000 },
+  )
+  if (!preview) return
+
+  const batch = assessment.locator('.project-assessment-batch')
+  const previewButton = batch.getByRole('button', { name: 'Preview assessment plan' })
+  await expect(previewButton).toBeEnabled()
+  const previewed = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/batch-previews')
+  ))
+  await previewButton.click()
+  expect((await previewed).status()).toBe(201)
+  await expect(batch.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
+  const decision = batch.locator('.project-assessment-batch-decision')
+  await expect(decision).toBeVisible()
+  await expect(batch.getByRole('button', { name: 'Run assessment plan' })).toBeVisible()
+  await decision.scrollIntoViewIfNeeded()
+}
+
+async function openMobileProjectWebSurfaceCaptureScene(page, themeName, testInfo) {
+  const project = await openMobileProjectsWithCaptureProject(page, themeName)
+  const fixture = seedProjectWebSurfaceFixture(testInfo, {
+    sessionId: await browserSessionId(page),
+    projectId: project.id,
+  })
+  await page.evaluate(async () => {
+    if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+  })
+  const thumbnail = page.waitForResponse(response => (
+    response.request().method() === 'GET'
+    && new URL(response.url()).pathname.endsWith(`/artifacts/${fixture.availableArtifactId}/download`)
+  ), { timeout: 15_000 })
+  await activateMobileProjectDetailTab(page, 'web-surface')
+  const panel = page.locator('#project-mobile-detail-body')
+  await expect(panel.locator('.project-web-surface-card')).toHaveCount(2)
+  expect((await thumbnail).ok()).toBe(true)
+  await expect(panel.locator('.project-web-surface-card', { hasText: 'Playwright sign in' })
+    .locator('.project-web-surface-image')).toBeVisible()
+  await expect(panel.locator('.project-web-surface-card', { hasText: 'Retired endpoint' }))
+    .toContainText('unavailable')
+}
+
+async function openMobileAtlasQuickLookupCaptureScene(page) {
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="quick-lookup"]').click()
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#atlas-quick-lookup')).toBeVisible()
+  await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+  await page.locator('#atlas-lookup-mode').selectOption('ip')
+  await page.locator('#atlas-lookup-input').fill('107.178.109.44')
+  await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+  const profile = page.locator('#atlas-lookup-profile')
+  await expect(profile).toContainText('107.178.109.44')
+  await profile.locator('[data-atlas-profile-view="intel"]').click()
+  await expect(profile).toContainText('Shodan')
 }
 
 async function openMobileAtlasWithCaptureData(page) {
@@ -315,6 +464,15 @@ const scenes = [
     },
   },
   {
+    slug: 'files-panel-full-view',
+    title: 'Main UI - Files response file in the mobile viewer',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openWorkspaceFullViewMobile(page)
+    },
+  },
+  {
     slug: 'projects-modal',
     title: 'Projects modal with active project',
     route: '/',
@@ -324,12 +482,57 @@ const scenes = [
     },
   },
   {
+    slug: 'project-overview-tab',
+    title: 'Projects modal Overview tab',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectOverviewCaptureScene(page, themeName, testInfo)
+    },
+  },
+  {
     slug: 'project-monitoring-tab',
     title: 'Projects modal Monitoring tab',
     route: '/',
     run: async (page, themeName, testInfo) => {
       await freshCaptureHome(page, { themeName })
       await openMobileProjectTabCaptureScene(page, themeName, 'monitoring', testInfo)
+    },
+  },
+  {
+    slug: 'project-monitoring-digest-settings',
+    title: 'Project digest notification settings',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectDigestCaptureScene(page, themeName)
+    },
+  },
+  {
+    slug: 'project-assessment-tab',
+    title: 'Project Assessment cycle',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectAssessmentCaptureScene(page, themeName)
+    },
+  },
+  {
+    slug: 'project-assessment-plan-preview',
+    title: 'Project Assessment plan preview',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectAssessmentCaptureScene(page, themeName, { preview: true })
+    },
+  },
+  {
+    slug: 'project-web-surface-tab',
+    title: 'Project Web Surface gallery',
+    route: '/',
+    run: async (page, themeName, testInfo) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectWebSurfaceCaptureScene(page, themeName, testInfo)
     },
   },
   {
@@ -357,6 +560,15 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await openMobileAtlasWithCaptureData(page)
+    },
+  },
+  {
+    slug: 'atlas-quick-lookup-profile',
+    title: 'Atlas Quick Lookup profile',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileAtlasQuickLookupCaptureScene(page)
     },
   },
   {
@@ -485,8 +697,14 @@ const scenes = [
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
       await openRecentsSheet(page)
+      await page.locator('#history-mobile-filters-toggle').click()
+      await expect(page.locator('#history-advanced-filters')).toBeVisible()
+      await page.locator('#history-search-input').fill('host')
+      await expect(page.locator('#history-active-filters')).not.toHaveClass(/u-hidden/)
       await page.locator('#hist-clear-all-btn').click()
       await expect(page.locator('#confirm-host')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-body]'))
+        .toContainText('matching the current filters')
     },
   },
   {
@@ -520,6 +738,15 @@ const scenes = [
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
       await expect(page.locator('#workflows-modal')).toBeVisible()
+    },
+  },
+  {
+    slug: 'workflow-parameterized-playbook',
+    title: 'Parameterized workflow playbook',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openParameterizedWorkflowWorkspaceMobile(page)
     },
   },
   {
