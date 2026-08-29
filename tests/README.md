@@ -317,11 +317,15 @@ scripts/record_demo.sh                              # desktop OBS recording, 160
 scripts/record_demo_mobile.sh                       # mobile OBS recording, 502×932 OBS canvas by default
 scripts/record_demo.sh --base-url http://localhost:9000
 scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
+scripts/record_demo.sh --playback-only              # validate the full desktop flow without OBS
+scripts/record_demo_mobile.sh --playback-only       # validate the full mobile flow without OBS
 ```
 
-Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use the grouped OBS helper to start and stop recording over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token through the configured app database, and probe `GET /workspace/files` with that token so the Files segment can create `response.html`. The full tour covers live commands, Files, reusable Workflows, Project overview and details, Assessment planning, report preview, Atlas Quick Lookup, run comparison, Status Monitor, History, themes, and the desktop PTY experience. Normal recording opens a headed Chromium window and uses the grouped OBS helper to start and stop recording over its WebSocket API. By default the wrapper pauses on a holding screen first, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up.
 
-OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
+Use `--playback-only` before recording to run the same seeded desktop or mobile journey headlessly. It skips OBS and frame capture, but keeps the real timing, assertions, health check, session setup, and workspace probe so stale selectors and stalled scenes fail before you start a recording session. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+
+OBS must be installed and running for a recording run, but isn't needed for `--playback-only`. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
 
 Desktop OBS preset:
 
