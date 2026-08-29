@@ -317,11 +317,15 @@ scripts/record_demo.sh                              # desktop OBS recording, 160
 scripts/record_demo_mobile.sh                       # mobile OBS recording, 502×932 OBS canvas by default
 scripts/record_demo.sh --base-url http://localhost:9000
 scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
+scripts/record_demo.sh --playback-only              # validate the full desktop flow without OBS
+scripts/record_demo_mobile.sh --playback-only       # validate the full mobile flow without OBS
 ```
 
-Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use the grouped OBS helper to start and stop recording over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token through the configured app database, and probe `GET /workspace/files` with that token so the Files segment can create `response.html`. The full tour covers live commands, Files, reusable Workflows, Project overview and details, Assessment planning, report preview, Atlas Quick Lookup, run comparison, Status Monitor, History, themes, and the desktop PTY experience. Normal recording opens a headed Chromium window and uses the grouped OBS helper to start and stop recording over its WebSocket API. By default the wrapper pauses on a holding screen first, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up.
 
-OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
+Use `--playback-only` before recording to run the same seeded desktop or mobile journey headlessly. It skips OBS and frame capture, but keeps the real timing, assertions, health check, session setup, and workspace probe so stale selectors and stalled scenes fail before you start a recording session. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+
+OBS must be installed and running for a recording run, but isn't needed for `--playback-only`. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
 
 Desktop OBS preset:
 
@@ -373,7 +377,7 @@ Both demo specs also read from one named visual-history fixture in `tests/js/e2e
 
 ### UI Screenshot Capture
 
-Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper. The wrapper accepts `--asset-bundle-mode source|bundle` when a capture needs to compare local source assets with the committed release bundles.
+Standalone Playwright specs generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). The 48 desktop and 41 mobile scenes cover the shell, Files, reusable Workflows, Project Overview, Monitoring and digest settings, Assessment planning, Web Surface, reports, Atlas and Quick Lookup, run comparison, History, themes, sharing, and operator diagnostics. They are guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only through the wrapper. The wrapper accepts `--asset-bundle-mode source|bundle` when a capture needs to compare local source assets with the committed release bundles.
 
 ```bash
 scripts/capture_ui_screenshots.sh
@@ -383,7 +387,7 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, Files panel states, and the Status Monitor active-telemetry modal look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1`, routes both capture configs through the normal Playwright helper, and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, Files panel states, and the Status Monitor active-telemetry modal look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 

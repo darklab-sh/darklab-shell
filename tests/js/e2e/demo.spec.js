@@ -29,6 +29,7 @@ import {
   createCaptureProjectFixture,
   installCommonCaptureMocks,
   openCaptureRunComparison,
+  waitForWorkflowsReady,
 } from './ui_capture_shared.js'
 import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
 
@@ -45,6 +46,14 @@ const HIGH_CPU_DEMO_CMD = [
 ].join(' ')
 const DEMO_THEME_NAME = 'charcoal_lavender'
 const DEMO_OBS_ARMING_FILE = process.env.DEMO_OBS_ARMING_FILE || ''
+const DEMO_PROJECT_IP = '107.178.109.44'
+
+function currentMonthDateRange() {
+  const now = new Date()
+  const pad = value => String(value).padStart(2, '0')
+  const yearMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+  return `${yearMonth}-01 to ${yearMonth}-${pad(now.getDate())}`
+}
 
 function typingDelay(char, index, baseDelay) {
   const cadence = [0, 18, 7, 28, 11, 23, 5, 34, 14]
@@ -142,7 +151,8 @@ async function selectAutocompleteWithArrowDowns(page, targetValue, arrowPresses 
         if (item && typeof item === 'object') return String(item.insertValue || item.value || item.label || '')
         return String(item || '')
       }
-      return Array.isArray(acFiltered) && acFiltered.some((item) => valueFor(item) === target)
+      const state = globalThis.APP_STATE_API?.getAutocompleteState?.() || {}
+      return Array.isArray(state.filtered) && state.filtered.some((item) => valueFor(item) === target)
     },
     targetValue,
     { timeout: 10_000 },
@@ -154,12 +164,15 @@ async function selectAutocompleteWithArrowDowns(page, targetValue, arrowPresses 
         if (item && typeof item === 'object') return String(item.insertValue || item.value || item.label || '')
         return String(item || '')
       }
-      const index = Array.isArray(acFiltered)
-        ? acFiltered.findIndex((item) => valueFor(item) === target)
+      const api = globalThis.APP_STATE_API
+      const state = api?.getAutocompleteState?.() || {}
+      const filtered = Array.isArray(state.filtered) ? state.filtered : []
+      const index = filtered.length
+        ? filtered.findIndex((item) => valueFor(item) === target)
         : -1
       if (index < 0) throw new Error(`Autocomplete target not found: ${target}`)
-      acIndex = index - presses
-      if (typeof acShow === 'function') acShow(acFiltered)
+      api.setAutocompleteState({ index: index - presses })
+      if (typeof globalThis.acShow === 'function') globalThis.acShow(filtered)
     },
     { target: targetValue, presses: arrowPresses },
   )
@@ -345,13 +358,45 @@ async function openFilesPanelWithResponseFile(page) {
   await page.waitForTimeout(1_000)
 }
 
+async function openWorkflowsPanelForDemo(page) {
+  await waitForWorkflowsReady(page)
+  const workflowsClosed = await page.locator('#rail-section-workflows').evaluate((node) => (
+    node.classList.contains('closed')
+  ))
+  if (workflowsClosed) await page.locator('#rail-workflows-header').click()
+  await page.locator('#rail-workflows-list .rail-workflows-browse-all').click()
+  await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+  const catalogItem = page.locator('.workflow-catalog-item', { hasText: 'Subdomain HTTP Triage' })
+  await catalogItem.waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(1_100)
+  await catalogItem.click()
+  const workflowCard = page.locator('.workflow-card', { hasText: 'Subdomain HTTP Triage' })
+  await expect(workflowCard).toBeVisible()
+  await workflowCard.locator('.workflow-input-control').fill('darklab.sh')
+  await expect(workflowCard.locator('.workflow-run-all')).toBeEnabled()
+  await page.waitForTimeout(3_400)
+  await page.locator('.workflows-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.workflows-close').click()
+  await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
 async function openProjectsPanelForDemo(page, runId) {
-  await createCaptureProjectFixture(page, {
+  const project = await createCaptureProjectFixture(page, {
     name: 'Demo Investigation',
     runIds: [runId],
     target: 'noc.darklab.sh',
     note: 'Group related runs, notes, targets, and evidence packages in one place.',
   })
+  await page.evaluate(async ({ projectId, targetIp }) => {
+    const response = await apiFetch(`/projects/${encodeURIComponent(projectId)}/targets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'ip', value: targetIp }),
+    })
+    if (!response.ok) throw new Error(`project target create failed: ${response.status}`)
+  }, { projectId: project.id, targetIp: DEMO_PROJECT_IP })
   await page.locator('.rail-nav [data-action="projects"]').hover()
   await page.waitForTimeout(650)
   await page.locator('.rail-nav [data-action="projects"]').click()
@@ -359,9 +404,47 @@ async function openProjectsPanelForDemo(page, runId) {
   await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
   await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
   await page.waitForTimeout(900)
+
+  await page.locator('[data-project-tab="overview"]').click()
+  const overview = page.locator(`[data-project-overview-root="${project.id}"]`)
+  await expect(overview).toBeVisible({ timeout: 15_000 })
+  await expect(overview).toContainText('noc.darklab.sh')
+  await expect(overview).toContainText(DEMO_PROJECT_IP)
+  await page.waitForTimeout(2_800)
+
   await page.locator('[data-project-tab="details"]').click()
   await expect(page.locator('#project-explorer-body')).toContainText('noc.darklab.sh')
-  await page.waitForTimeout(3_200)
+  await page.waitForTimeout(2_400)
+
+  await page.locator('[data-project-tab="assessment"]').click()
+  const assessment = page.locator('#project-explorer-body .project-assessment-root')
+  await expect(assessment.locator('.project-assessment-start-form select')).toBeVisible({ timeout: 15_000 })
+  await assessment.locator('.project-assessment-start-form select').selectOption('network')
+  const assessmentStarted = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'POST' && /\/projects\/[^/]+\/assessments$/.test(url.pathname)
+  })
+  await assessment.locator('.project-assessment-start-form button[type="submit"]').click()
+  expect((await assessmentStarted).status()).toBe(201)
+  await expect(assessment.locator('.project-assessment-cycle')).toContainText('Network assessment')
+  const target = assessment.locator('.project-assessment-target-toggle', { hasText: DEMO_PROJECT_IP })
+  await target.click()
+  await expect(assessment.locator('.project-assessment-check-row').first()).toBeVisible()
+  await page.waitForTimeout(3_400)
+
+  await page.locator('[data-project-tab="report"]').click()
+  const report = page.locator('.project-report-root').first()
+  const engagementName = report.locator('[data-project-report-metadata="engagement_name"]')
+  await expect(engagementName).toBeVisible({ timeout: 15_000 })
+  await engagementName.fill('Demo Investigation Report')
+  await report.locator('[data-project-report-metadata="date_range"]').fill(currentMonthDateRange())
+  await report.locator('[data-project-report-metadata="executive_summary"]')
+    .fill('Current targets, assessment coverage, findings, and supporting evidence.')
+  await report.locator('[data-project-report-action="preview"]').click()
+  await expect(report.frameLocator('.project-report-preview-frame').locator('body'))
+    .toContainText('Demo Investigation Report', { timeout: 15_000 })
+  await page.waitForTimeout(3_400)
+
   await page.locator('.project-workspace-close').hover()
   await page.waitForTimeout(600)
   await page.locator('.project-workspace-close').click()
@@ -370,14 +453,17 @@ async function openProjectsPanelForDemo(page, runId) {
 }
 
 async function openAtlasPanelForDemo(page) {
-  await page.locator('.rail-nav [data-action="atlas"]').hover()
+  await page.locator('.rail-nav [data-action="quick-lookup"]').hover()
   await page.waitForTimeout(650)
-  await page.locator('.rail-nav [data-action="atlas"]').click()
+  await openRailAction(page, 'quick-lookup')
   await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
-  await page.waitForTimeout(900)
-  await page.locator('[data-atlas-tab="ip"]').click()
-  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
-  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+  await expect(page.locator('#atlas-lookup-input')).toBeFocused()
+  await page.locator('#atlas-lookup-mode').selectOption('ip')
+  await page.locator('#atlas-lookup-input').fill('107.178.109.44')
+  await page.locator('#atlas-lookup-form').evaluate(form => form.requestSubmit())
+  await expect(page.locator('#atlas-lookup-profile')).toContainText('107.178.109.44')
+  await page.locator('#atlas-lookup-profile [data-atlas-profile-view="intel"]').click()
+  await expect(page.locator('#atlas-lookup-profile')).toContainText('Shodan')
   await page.waitForTimeout(3_400)
   await page.locator('.atlas-close').hover()
   await page.waitForTimeout(600)
@@ -674,10 +760,13 @@ test('demo', async ({ page }) => {
   // ── Files panel: captured response file ──────────────────────────────────
   await openFilesPanelWithResponseFile(page)
 
-  // ── Projects panel: active project with a linked run ─────────────────────
+  // ── Workflows: reusable multi-step automation with resolved inputs ───────
+  await openWorkflowsPanelForDemo(page)
+
+  // ── Projects: overview, assessment planning, and report preview ──────────
   await openProjectsPanelForDemo(page, workspaceRunId)
 
-  // ── Atlas: entity-first triage with intel context ────────────────────────
+  // ── Atlas Quick Lookup: focused profile and saved provider intelligence ──
   await openAtlasPanelForDemo(page)
 
   // ── Run comparison: side-by-side output and changed findings ─────────────
