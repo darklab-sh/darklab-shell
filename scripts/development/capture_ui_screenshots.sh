@@ -117,8 +117,10 @@ mkdir -p "$PW_E2E_SERVER_LOG_DIR"
 run_capture() {
   local config="$1"
   echo "Running ${config} ..."
-  RUN_CAPTURE=1 CAPTURE_THEME="$THEME" CAPTURE_THEME_VARIANT="$THEME_VARIANT" CAPTURE_OUT_DIR="$OUT_DIR" ASSET_BUNDLE_MODE="$ASSET_BUNDLE_MODE" \
-    npx playwright test --config "$config"
+  RUN_CAPTURE=1 CAPTURE_THEME="$THEME" CAPTURE_THEME_VARIANT="$THEME_VARIANT" CAPTURE_OUT_DIR="$OUT_DIR" \
+    bash scripts/run_playwright.sh \
+      --asset-bundle-mode "$ASSET_BUNDLE_MODE" \
+      --config "$config"
 }
 
 if [[ "$UI" == "desktop" || "$UI" == "all" ]]; then

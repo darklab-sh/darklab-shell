@@ -1368,7 +1368,10 @@ export async function createCaptureProjectFixture(page, {
       method: 'POST',
       body: JSON.stringify({ label: 'external' }),
     })
-    return project
+    return {
+      ...project,
+      captureTarget: targetResp.target,
+    }
   }, {
     projectName: name,
     linkedRunIds: runIds,
