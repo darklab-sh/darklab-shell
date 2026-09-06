@@ -25543,6 +25543,67 @@ class TestOutputSignals:
         assert ("ip", "fd00::1") in values
         assert ("url", "http://127.0.0.1/private") in values
 
+    def test_whois_entities_are_limited_to_the_validated_command_target(self):
+        assert extract_target("whois 164.111.15.52") == "164.111.15.52"
+        assert extract_target("whois -h whois.iana.org darklab.sh") == "darklab.sh"
+        assert extract_target("whois -p 43 -h whois.arin.net 164.111.15.52") == "164.111.15.52"
+        assert extract_target("whois -I -c 193.0.6.139") == "193.0.6.139"
+        assert extract_target("whois -T route -s RIPE 193.0.6.139") == "193.0.6.139"
+        assert extract_target("whois -q version") is None
+        assert extract_target("whois -h whois.iana.org") is None
+
+        fixture_root = Path(__file__).parent / "fixtures"
+        cases = (
+            ("whois 164.111.15.52", "whois-arin-164.111.15.52.txt", {("ip", "164.111.15.52")}),
+            ("whois example.com", "whois-domain-example.com.txt", {("domain", "example.com")}),
+            ("whois 193.0.6.139", "whois-ripe-193.0.6.139.txt", {("ip", "193.0.6.139")}),
+        )
+        for command, fixture_name, expected in cases:
+            transcript = (fixture_root / fixture_name).read_text(encoding="utf-8")
+            assert _transcript_entity_values(command, transcript) == expected
+
+        arin_transcript = (fixture_root / "whois-arin-164.111.15.52.txt").read_text(encoding="utf-8")
+        classifier = OutputSignalClassifier("whois 164.111.15.52")
+        entity_metadata = []
+        for source_line, line in enumerate(arin_transcript.splitlines()):
+            metadata = classifier.classify_line(line)
+            if metadata.get("entities"):
+                entity_metadata.append((source_line, metadata))
+        assert len(entity_metadata) == 1
+        assert entity_metadata[0][0] == 0
+        assert entity_metadata[0][1]["entities"] == [{
+            "type": "ip",
+            "value": "164.111.15.52",
+            "canonical_value": "164.111.15.52",
+            "confidence": "high",
+            "source_line": 0,
+        }]
+        assert _transcript_entity_values("whois AS13335", "origin: AS13335\nsource: RADB") == set()
+
+        whois_classifier = OutputSignalClassifier("whois darklab.sh")
+        whois_target = whois_classifier.classify_line("Domain Name: darklab.sh")
+        assert whois_target["signals"] == ["findings"]
+        assert {
+            (entity["type"], entity["canonical_value"])
+            for entity in cast("list[dict[str, object]]", whois_target["entities"])
+        } == {("domain", "darklab.sh")}
+        for line in (
+            "Registrar WHOIS Server: whois.namecheap.com",
+            "Registrar URL: https://www.namecheap.com/",
+            "Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+            "Name Server: ruth.ns.cloudflare.com",
+            "Name Server: frank.ns.cloudflare.com",
+        ):
+            metadata = whois_classifier.classify_line(line)
+            assert metadata["signals"] == ["findings"]
+            assert "entities" not in metadata
+        for line in (
+            "URL of the ICANN Whois Inaccuracy Complaint Form: https://icann.org/wicf/",
+            "For more information on Whois status codes, please visit https://icann.org/epp",
+            "Access can be requested at https://www.identity.digital/about/policies/whois-layered-access/.",
+        ):
+            assert "entities" not in whois_classifier.classify_line(line)
+
     def test_classifier_adds_entity_metadata_to_real_output(self):
         classifier = OutputSignalClassifier("host darklab.sh")
         metadata = classifier.classify_line("darklab.sh has address 104.21.4.35")
@@ -26036,33 +26097,6 @@ darklab.sh rdata_257 = 0 issue \"letsencrypt.org\"""",
             ("domain", "kali.darklab.sh"),
             ("ip", "104.161.46.133"),
         }
-
-        whois_classifier = OutputSignalClassifier("whois darklab.sh")
-        whois_target = whois_classifier.classify_line("Domain Name: darklab.sh")
-        assert whois_target["signals"] == ["findings"]
-        assert {
-            (entity["type"], entity["canonical_value"])
-            for entity in cast("list[dict[str, object]]", whois_target["entities"])
-        } == {("domain", "darklab.sh")}
-        whois_provider_findings = (
-            "Registrar WHOIS Server: whois.namecheap.com",
-            "Registrar URL: https://www.namecheap.com/",
-            "Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
-            "Name Server: ruth.ns.cloudflare.com",
-            "Name Server: frank.ns.cloudflare.com",
-        )
-        for line in whois_provider_findings:
-            metadata = whois_classifier.classify_line(line)
-            assert metadata["signals"] == ["findings"]
-            assert "entities" not in metadata
-        whois_reference_lines = (
-            "URL of the ICANN Whois Inaccuracy Complaint Form: https://icann.org/wicf/",
-            "For more information on Whois status codes, please visit https://icann.org/epp",
-            "Access can be requested at "
-            "https://www.identity.digital/about/policies/whois-layered-access/.",
-        )
-        for line in whois_reference_lines:
-            assert "entities" not in whois_classifier.classify_line(line)
 
         nmap_http = nmap_classifier.classify_line(
             "6080/tcp  open  http        syn-ack Python BaseHTTPServer http.server 2 or 3.0 - 3.1"

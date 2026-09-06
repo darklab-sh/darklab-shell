@@ -1,0 +1,94 @@
+#
+# ARIN WHOIS data and services are subject to the Terms of Use
+# available at: https://www.arin.net/resources/registry/whois/tou/
+#
+# If you see inaccuracies in the results, please report at
+# https://www.arin.net/resources/registry/whois/inaccuracy_reporting/
+#
+# Copyright 1997-2026, American Registry for Internet Numbers, Ltd.
+#
+
+
+NetRange:       164.111.0.0 - 164.111.255.255
+CIDR:           164.111.0.0/16
+NetName:        UAB-2
+NetHandle:      NET-164-111-0-0-1
+Parent:         NET164 (NET-164-0-0-0-0)
+NetType:        Direct Allocation
+OriginAS:
+Organization:   University of Alabama at Birmingham - The University Computer Center (UCC-21)
+RegDate:        1993-02-23
+Updated:        2024-01-11
+Ref:            https://rdap.arin.net/registry/ip/164.111.0.0
+
+
+OrgName:        University of Alabama at Birmingham - The University Computer Center
+OrgId:          UCC-21
+Address:        UAB Station, Rust 120
+City:           Birmingham
+StateProv:      AL
+PostalCode:     35294-2070
+Country:        US
+RegDate:        1993-02-23
+Updated:        2024-01-11
+Ref:            https://rdap.arin.net/registry/entity/UCC-21
+
+
+OrgNOCHandle: UNUS-ARIN
+OrgNOCName:   UABIT Network and User Services
+OrgNOCPhone:  +1-205-934-3540
+OrgNOCEmail:  UserServices@uab.edu
+OrgNOCRef:    https://rdap.arin.net/registry/entity/UNUS-ARIN
+
+OrgTechHandle: LM62-ARIN
+OrgTechName:   Manderson, Landy
+OrgTechPhone:  +1-205-934-3540
+OrgTechEmail:  landy@uab.edu
+OrgTechRef:    https://rdap.arin.net/registry/entity/LM62-ARIN
+
+OrgTechHandle: WOLFO10-ARIN
+OrgTechName:   Wolford, David
+OrgTechPhone:  +1-205-807-3779
+OrgTechEmail:  dwolford@uab.edu
+OrgTechRef:    https://rdap.arin.net/registry/entity/WOLFO10-ARIN
+
+OrgTechHandle: CUMMI8-ARIN
+OrgTechName:   Cummings, Christian
+OrgTechPhone:  +1-205-975-5928
+OrgTechEmail:  ccummin@uab.edu
+OrgTechRef:    https://rdap.arin.net/registry/entity/CUMMI8-ARIN
+
+OrgTechHandle: WHITE2772-ARIN
+OrgTechName:   White, Charles
+OrgTechPhone:  +1-205-975-4588
+OrgTechEmail:  cewhite@uab.edu
+OrgTechRef:    https://rdap.arin.net/registry/entity/WHITE2772-ARIN
+
+OrgAbuseHandle: AAC22-ARIN
+OrgAbuseName:   Abuse and AUP Contact
+OrgAbusePhone:  +1-205-934-9245
+OrgAbuseEmail:  abuse@uab.edu
+OrgAbuseRef:    https://rdap.arin.net/registry/entity/AAC22-ARIN
+
+RTechHandle: CUMMI8-ARIN
+RTechName:   Cummings, Christian
+RTechPhone:  +1-205-975-5928
+RTechEmail:  ccummin@uab.edu
+RTechRef:    https://rdap.arin.net/registry/entity/CUMMI8-ARIN
+
+RTechHandle: WOLFO10-ARIN
+RTechName:   Wolford, David
+RTechPhone:  +1-205-807-3779
+RTechEmail:  dwolford@uab.edu
+RTechRef:    https://rdap.arin.net/registry/entity/WOLFO10-ARIN
+
+
+#
+# ARIN WHOIS data and services are subject to the Terms of Use
+# available at: https://www.arin.net/resources/registry/whois/tou/
+#
+# If you see inaccuracies in the results, please report at
+# https://www.arin.net/resources/registry/whois/inaccuracy_reporting/
+#
+# Copyright 1997-2026, American Registry for Internet Numbers, Ltd.
+#
