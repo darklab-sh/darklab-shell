@@ -14573,7 +14573,7 @@ class TestDiagRoute:
         actor_display_name: str = "Diag Operator",
         team_id: str = "",
         correlation_id: str = "",
-        created: str = "2026-06-06T12:00:00+00:00",
+        created: str | None = None,
     ) -> str:
         from services.audit.recorder import record_event
 
@@ -15668,9 +15668,9 @@ class TestDiagRoute:
         assert resp.status_code == 404
 
     def test_audit_html_lists_events_and_disabled_banner(self):
+        client = self._allowed_client()
         team_id = f"team_diag_html_{uuid.uuid4().hex}"
         target_id = self._record_audit_event(team_id=team_id)
-        client = self._allowed_client()
         with mock.patch.dict("config.CFG", {
             "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
             "audit_log_enabled": False,
@@ -15718,37 +15718,42 @@ class TestDiagRoute:
         assert "&#34;details&#34;" in body
 
     def test_audit_json_filters_by_human_actor_and_event(self):
+        client = self._allowed_client()
         actor_member_id = f"tmem_diag_actor_filter_{uuid.uuid4().hex}"
         actor_display_name = f"Filter Person {uuid.uuid4().hex}"
         team_id = f"team_diag_date_filter_{uuid.uuid4().hex}"
+        audit_date = datetime.now(timezone.utc).date()
+        audit_date_text = audit_date.isoformat()
+        next_date_text = (audit_date + timedelta(days=1)).isoformat()
+        wanted_created = f"{audit_date_text}T12:00:01+00:00"
         wanted_target = self._record_audit_event(
             event_type="project.link",
             actor_member_id=actor_member_id,
             actor_display_name=actor_display_name,
             team_id=team_id,
-            created="2026-06-06T12:00:01+00:00",
+            created=wanted_created,
         )
         self._record_audit_event(
             event_type="project.link",
             actor_member_id=actor_member_id,
             actor_display_name=actor_display_name,
             team_id=f"team_diag_other_{uuid.uuid4().hex}",
-            created="2026-06-06T12:00:02+00:00",
+            created=f"{audit_date_text}T12:00:02+00:00",
         )
         self._record_audit_event(
             event_type="project.link",
             actor_member_id=actor_member_id,
             actor_display_name=actor_display_name,
             team_id=team_id,
-            created="2026-06-07T00:00:00+00:00",
+            created=f"{next_date_text}T00:00:00+00:00",
         )
-        client = self._allowed_client()
         actor_display_fragment = actor_display_name[-12:].lower()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets.log, "info") as log_info:
                 resp = client.get(
                     "/diag/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
-                    f"&team_id={quote(team_id)}&target_type=project&date_from=2026-06-06&date_to=2026-06-06"
+                    f"&team_id={quote(team_id)}&target_type=project"
+                    f"&date_from={audit_date_text}&date_to={audit_date_text}"
                     "&actor=" + quote(actor_display_fragment)
                 )
         payload = resp.get_json()
@@ -15772,8 +15777,8 @@ class TestDiagRoute:
             "team_id",
         ]
         assert viewed_extra["filter_values"] == {
-            "date_from": "2026-06-06",
-            "date_to": "2026-06-06",
+            "date_from": audit_date_text,
+            "date_to": audit_date_text,
             "event_type": "project.link",
             "target_type": "project",
             "team_id": team_id,
@@ -15784,7 +15789,7 @@ class TestDiagRoute:
         assert payload["events"][0]["project_href"] == ""
         assert payload["events"][0]["details"]["source"] == "test"
         details_payload = json.loads(payload["events"][0]["details_json"])
-        assert details_payload["created"] == "2026-06-06T12:00:01+00:00"
+        assert details_payload["created"] == wanted_created
         assert details_payload["event_type"] == "project.link"
         assert details_payload["actor"]["display_name"] == actor_display_name
         assert details_payload["actor"]["member_id"] == actor_member_id
@@ -15797,7 +15802,8 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             member_resp = client.get(
                 "/diag/audit?format=json&event_type=project.link"
-                f"&team_id={quote(team_id)}&target_type=project&date_from=2026-06-06&date_to=2026-06-06"
+                f"&team_id={quote(team_id)}&target_type=project"
+                f"&date_from={audit_date_text}&date_to={audit_date_text}"
                 "&actor=" + quote(actor_member_id[-12:])
             )
         member_payload = member_resp.get_json()
@@ -15805,13 +15811,13 @@ class TestDiagRoute:
         assert [event["target_id"] for event in member_payload["events"]] == [wanted_target]
 
     def test_audit_json_keeps_run_permalink_target_links(self):
+        client = self._allowed_client()
         run_id = f"run_diag_audit_{uuid.uuid4().hex}"
         self._record_audit_event(
             event_type="history.delete",
             target_type="run",
             target_id=run_id,
         )
-        client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get(f"/diag/audit?format=json&target_id={run_id}")
         payload = resp.get_json()
@@ -15821,18 +15827,19 @@ class TestDiagRoute:
         assert payload["events"][0]["project_href"] == ""
 
     def test_audit_csv_export_marks_truncation(self):
+        client = self._allowed_client()
         correlation_id = f"corr-diag-audit-{uuid.uuid4().hex}"
+        audit_date_text = datetime.now(timezone.utc).date().isoformat()
         first_target = self._record_audit_event(
             target_id=f"proj-diag-audit-first-{uuid.uuid4().hex}",
             correlation_id=correlation_id,
-            created="2026-06-06T12:00:03+00:00",
+            created=f"{audit_date_text}T12:00:03+00:00",
         )
         self._record_audit_event(
             target_id=f"proj-diag-audit-second-{uuid.uuid4().hex}",
             correlation_id=correlation_id,
-            created="2026-06-06T12:00:04+00:00",
+            created=f"{audit_date_text}T12:00:04+00:00",
         )
-        client = self._allowed_client()
         with mock.patch.dict("config.CFG", {
             "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
             "audit_export_max_rows": 1,
@@ -15902,18 +15909,19 @@ class TestDiagRoute:
         assert exported_extra["filter_values"] == {"event_type": "project.link"}
 
     def test_audit_json_export_prompts_download(self):
+        client = self._allowed_client()
         correlation_id = f"corr-diag-audit-json-{uuid.uuid4().hex}"
+        audit_date_text = datetime.now(timezone.utc).date().isoformat()
         self._record_audit_event(
             target_id=f"proj-diag-audit-json-first-{uuid.uuid4().hex}",
             correlation_id=correlation_id,
-            created="2026-06-06T12:00:03+00:00",
+            created=f"{audit_date_text}T12:00:03+00:00",
         )
         newest_target_id = self._record_audit_event(
             target_id=f"proj-diag-audit-json-second-{uuid.uuid4().hex}",
             correlation_id=correlation_id,
-            created="2026-06-06T12:00:04+00:00",
+            created=f"{audit_date_text}T12:00:04+00:00",
         )
-        client = self._allowed_client()
         with mock.patch.dict("config.CFG", {
             "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
             "audit_export_max_rows": 1,
