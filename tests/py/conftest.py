@@ -66,11 +66,11 @@ def _sqlite_test_db_needs_init(db_path: str) -> bool:
     try:
         with sqlite3.connect(path) as conn:
             rows = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runs', 'schema_versions')"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runs', 'schema_migrations')"
             ).fetchall()
     except sqlite3.DatabaseError:
         return True
-    return {row[0] for row in rows} != {"runs", "schema_versions"}
+    return {row[0] for row in rows} != {"runs", "schema_migrations"}
 
 
 def make_test_app(*, init_db: bool = True):

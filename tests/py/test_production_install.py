@@ -1560,7 +1560,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG KATANA_PGX_VERSION=v5.9.0" in dockerfile
     assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
     assert "ARG GOSU_VERSION=1.19" in dockerfile
-    assert "ARG OPENSSL_VERSION=3.6.3" in dockerfile
+    assert "ARG OPENSSL_VERSION=3.6.4" in dockerfile
     assert "ARG SCHEMATHESIS_VERSION=4.25.0" in dockerfile
     dependency_pins = [
         line
