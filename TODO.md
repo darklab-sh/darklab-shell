@@ -13,7 +13,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Add a restricted token deployment profile](#add-a-restricted-token-deployment-profile)
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
 - [Known Issues](#known-issues)
-  - [Make WHOIS entity extraction target-aware](#make-whois-entity-extraction-target-aware)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
@@ -34,11 +33,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** The planned v3.0.0 release includes the shell-output entity menu, pseudonymous principal and credential model, restricted deployment profile, managed OpenID Connect sign-in, and the WHOIS parsing fix under Known Issues. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.0 delivery scope.** The planned v3.0.0 release includes the shell-output entity menu, pseudonymous principal and credential model, restricted deployment profile, and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
 
-Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Start with the target-aware WHOIS fix, then the shell-output entity menu. For authentication, land the production-realistic test-identity pre-work and final contract decisions before schema work; split the principal roadmap into its numbered phases and split Phase 3A further into bounded subsystem conversions. Additive foundations may merge early, but do not leave personal ownership partly resolved from session tokens and partly from principals between merge requests. Treat the semantic ownership switch, public interfaces, UI, and legacy removal as coordinated slices with explicit transition tests.
+Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Start with the shell-output entity menu. For authentication, land the production-realistic test-identity pre-work and final contract decisions before schema work; split the principal roadmap into its numbered phases and split Phase 3A further into bounded subsystem conversions. Additive foundations may merge early, but do not leave personal ownership partly resolved from session tokens and partly from principals between merge requests. Treat the semantic ownership switch, public interfaces, UI, and legacy removal as coordinated slices with explicit transition tests.
 
-After the restricted deployment profile merges, exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, the Known Issue is resolved, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
+After the restricted deployment profile merges, exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
@@ -432,15 +431,7 @@ Let operators point a deployment at an existing identity provider without darkla
 
 ## Known Issues
 
-### Make WHOIS entity extraction target-aware
-
-A basic WHOIS lookup currently passes most response lines through generic entity extraction. For `whois 164.111.15.52`, the queried IP is useful, but the ARIN response also adds allocation boundaries (`164.111.0.0` and `164.111.255.255`), registry hosts (`rdap.arin.net` and `www.arin.net`), RDAP entity and network references, and ARIN terms-of-use and inaccuracy-reporting URLs to Atlas. Those values describe the registry response; they are not assets discovered for the queried target.
-
-- [ ] Add a WHOIS-specific, command-aware entity extraction path instead of expanding the provider-specific exclusion regex one line at a time. Treat the parsed command target as the authoritative entity and treat the response as registration metadata unless a reviewed WHOIS field has an explicit entity meaning.
-- [ ] Keep the queried IP or domain while excluding allocation range endpoints, CIDR network/broadcast values, registrar or RIR infrastructure, referral and `Ref` URLs, contact/entity handles, nameserver/provider hosts, terms-of-use links, and inaccuracy-reporting links from saved entity metadata. Do not change the visible command output or useful WHOIS finding and summary classification as a side effect.
-- [ ] Pin the reported ARIN response as a full-transcript regression: the exact saved entity set for `whois 164.111.15.52` contains only the IP `164.111.15.52`, with no `164.111.0.0`, `164.111.255.255`, `rdap.arin.net`, `www.arin.net`, `/registry/entity/`, `/registry/ip/`, terms-of-use, or inaccuracy-reporting entities.
-- [ ] Add representative domain WHOIS and non-ARIN/RDAP fixtures so the rule follows field meaning rather than one provider's current wording. Cover command-target parsing, streamed line metadata, final Atlas materialization, Project linkage, and the SQLite/Postgres persistence paths that consume extracted entities.
-- [ ] When the fix ships, remove this Known Issue and update the relevant architecture/feature/test documentation, synchronized test counts and appendix, `CHANGELOG.md`, and any active release draft.
+No known issues currently tracked.
 
 ---
 

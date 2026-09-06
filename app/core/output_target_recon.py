@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from core.output_whois_target import whois_target
+
 
 _GAU_VALUE_FLAGS = frozenset({
     "--blacklist",
@@ -59,4 +61,6 @@ def passive_recon_target(root: str, tokens: list[str]) -> str | None:
         return _flag_value(tokens, frozenset({"-u", "-host"}))
     if root == "cdncheck":
         return _flag_value(tokens, frozenset({"-i", "-input"}))
+    if root == "whois":
+        return whois_target(tokens)
     return None
