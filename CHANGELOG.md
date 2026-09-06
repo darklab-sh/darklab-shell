@@ -16,6 +16,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 ### Fixed
 
 - **Diagnostic audit-route tests no longer expire as the calendar advances.** The test app now recognizes the real migration table instead of rerunning database maintenance for every client, and audit fixtures initialize their database first and use retention-safe timestamps.
+- **JavaScript dependency audits no longer flag known `fast-uri` request-parsing vulnerabilities.** The development-only dependency used through the Stylelint toolchain is now locked to version 3.1.7.
 
 ---
 
