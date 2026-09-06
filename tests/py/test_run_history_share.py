@@ -1670,6 +1670,69 @@ class TestRunStreaming:
         assert entity_link_row["source"] == "active_project"
         assert entity_link_row["canonical_value"] in {"darklab.sh", "https://darklab.sh/admin"}
 
+    def test_completed_whois_run_links_only_the_queried_target_to_active_project(self):
+        client = get_client()
+        session_id = "sess-active-project-whois"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "WHOIS Context"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        active_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert active_resp.status_code == 200
+
+        transcript = (
+            Path(__file__).parent / "fixtures" / "whois-arin-164.111.15.52.txt"
+        ).read_text(encoding="utf-8")
+        proc_lines = [f"{line}\n" for line in transcript.splitlines()] + [""]
+        fake_proc = _FakeProc(lines=proc_lines)
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True] * len(proc_lines)):
+            resp = _post_run(
+                client,
+                json={"command": "whois 164.111.15.52"},
+                headers={"X-Session-ID": session_id},
+            )
+            streamed = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "164.111.0.0 - 164.111.255.255" in streamed
+        assert "https://rdap.arin.net/registry/entity/UCC-21" in streamed
+        with db_connect() as conn:
+            run_row = conn.execute(
+                "SELECT id FROM runs WHERE session_id = ? AND command = ? ORDER BY started DESC LIMIT 1",
+                (session_id, "whois 164.111.15.52"),
+            ).fetchone()
+            assert run_row is not None
+            entity_rows = conn.execute(
+                "SELECT e.type, e.canonical_value FROM entities e "
+                "JOIN entity_run_links erl ON erl.entity_id = e.id "
+                "WHERE erl.run_id = ? ORDER BY e.type, e.canonical_value",
+                (run_row["id"],),
+            ).fetchall()
+            project_entity_rows = conn.execute(
+                "SELECT e.type, e.canonical_value, l.source FROM project_links l "
+                "JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.type, e.canonical_value",
+                (project["id"],),
+            ).fetchall()
+        assert [(row["type"], row["canonical_value"]) for row in entity_rows] == [
+            ("ip", "164.111.15.52"),
+        ]
+        assert [
+            (row["type"], row["canonical_value"], row["source"])
+            for row in project_entity_rows
+        ] == [("ip", "164.111.15.52", "auto_command")]
+
     def test_active_project_entity_link_failure_keeps_run_finalization(self):
         client = get_client()
         session_id = "sess-active-project-entity-link-fails"

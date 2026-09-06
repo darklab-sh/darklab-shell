@@ -1,0 +1,24 @@
+% This is the RIPE Database query service.
+% The objects are in RPSL format.
+% Terms and Conditions: https://apps.db.ripe.net/docs/HTML-Terms-And-Conditions
+
+inetnum:        193.0.0.0 - 193.0.7.255
+netname:        RIPE-NCC
+country:        NL
+org:            ORG-RIEN1-RIPE
+admin-c:        BRD-RIPE
+tech-c:         OPS4-RIPE
+status:         ASSIGNED PI
+mnt-by:         RIPE-NCC-MNT
+created:        2002-04-23T10:26:20Z
+last-modified:  2025-03-11T14:12:00Z
+source:         RIPE
+
+organisation:   ORG-RIEN1-RIPE
+org-name:       Reseaux IP Europeens Network Coordination Centre
+org-type:       RIR
+address:        P.O. Box 10096
+address:        1001 EB Amsterdam
+abuse-c:        OPS4-RIPE
+remarks:        See https://www.ripe.net/ for registry services.
+source:         RIPE

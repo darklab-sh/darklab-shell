@@ -3855,6 +3855,97 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
 
 
 @pytest.mark.postgres
+def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from core.output_signals import OutputSignalClassifier
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.atlas.materializer import materialize_run_entities
+    from services.projects.links import link_active_project_run_entities
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    session_id = str(uuid.uuid4())
+    run_id = "run-whois-" + uuid.uuid4().hex
+    project_id = "prj_" + uuid.uuid4().hex[:16]
+    timestamp = "2026-09-06T12:00:00Z"
+    transcript = (
+        REPO_ROOT / "tests" / "py" / "fixtures" / "whois-arin-164.111.15.52.txt"
+    ).read_text(encoding="utf-8")
+    classifier = OutputSignalClassifier("whois 164.111.15.52")
+    entries = []
+    for line_index, line in enumerate(transcript.splitlines()):
+        entries.append({
+            "text": line,
+            "line_index": line_index,
+            **classifier.classify_line(line),
+        })
+
+    conn.execute(
+        "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+        "VALUES (%s, %s, 'WHOIS Postgres', 'whois-postgres', '', 'active', %s, %s)",
+        (project_id, session_id, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        (
+            session_id,
+            Jsonb({"pref_project_auto_link_run_entities": "on"}),
+            timestamp,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview) "
+        "VALUES (%s, %s, %s, %s, %s, 0, '[]')",
+        (run_id, session_id, "whois 164.111.15.52", timestamp, timestamp),
+    )
+    compat_conn = PostgresSqliteCompatConnection(conn)
+    recorded = materialize_run_entities(
+        compat_conn,
+        session_id,
+        run_id,
+        entries,
+        seen_at=timestamp,
+        command="whois 164.111.15.52",
+    )
+    active_project_link = link_active_project_run_entities(
+        compat_conn,
+        session_id,
+        project_id,
+        run_id,
+    )
+    conn.commit()
+
+    entity_rows = conn.execute(
+        "SELECT e.type, e.canonical_value FROM entities e "
+        "JOIN entity_run_links erl ON erl.entity_id = e.id "
+        "WHERE erl.run_id = %s ORDER BY e.type, e.canonical_value",
+        (run_id,),
+    ).fetchall()
+    project_entity_rows = conn.execute(
+        "SELECT e.type, e.canonical_value, l.source FROM project_links l "
+        "JOIN entities e ON e.id = l.entity_id "
+        "WHERE l.project_id = %s AND l.entity_type = 'atlas_entity' "
+        "ORDER BY e.type, e.canonical_value",
+        (project_id,),
+    ).fetchall()
+
+    assert [(row["type"], row["canonical_value"]) for row in recorded] == [
+        ("ip", "164.111.15.52"),
+    ]
+    assert [(row["type"], row["canonical_value"]) for row in entity_rows] == [
+        ("ip", "164.111.15.52"),
+    ]
+    assert active_project_link is not None
+    assert active_project_link["available"] == 1
+    assert active_project_link["added"] == 1
+    assert [
+        (row["type"], row["canonical_value"], row["source"])
+        for row in project_entity_rows
+    ] == [("ip", "164.111.15.52", "active_project")]
+
+
+@pytest.mark.postgres
 def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch, postgres_schema):
     import blueprints.run as run_blueprint
     from core.migrations import MIGRATIONS
