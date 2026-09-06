@@ -1692,6 +1692,7 @@ class TestRunStreaming:
         proc_lines = [f"{line}\n" for line in transcript.splitlines()] + [""]
         fake_proc = _FakeProc(lines=proc_lines)
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
