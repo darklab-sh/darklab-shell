@@ -11,7 +11,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.9.3] - Unreleased
+## [3.0.0] - Unreleased
+
+### Changed
+
+- **The development roadmap now defines the v3.0 release scope and delivery gates.** The tracked work covers cleaner WHOIS entities, easier entity reuse, pseudonymous principals and credentials, restricted deployments, and managed sign-in. It keeps ARM64 runner autoscaling independent, requires reviewable changes to land on a working `main`, and puts a production-like restricted-profile soak before OpenID Connect and the `v3.0.0-rc.1` release cycle.
 
 ### Fixed
 
