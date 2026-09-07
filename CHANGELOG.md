@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Shell-output entities now open a compact action menu for investigation and reuse.**
+  - **Before:** Activating an entity opened Atlas immediately, while a separate long-press or right-click menu exposed a larger set of output-only actions. That made it easy to navigate away when the intent was to select or reuse the value.
+  - **After:** A deliberate click, tap, or keyboard activation offers **Open in Atlas**, **Copy to Clipboard**, and **Insert into command**. The menu uses the entity's canonical value, respects the desktop or mobile command selection without running anything, preserves normal text selection and native right-click behavior, and closes when its context changes.
+  - **Tests:** Vitest covers supported entity types, selection suppression, action wiring, keyboard navigation, viewport placement, clipboard outcomes, and every dismissal path. Playwright exercises live output in source and bundle modes, including mouse, keyboard, Atlas handoff, exact composer insertion, shell typing, and a narrow touch viewport.
 - **The development roadmap now defines the v3.0 release scope and delivery gates.** The remaining tracked work covers easier entity reuse, pseudonymous principals and credentials, restricted deployments, and managed sign-in. It keeps ARM64 runner autoscaling independent, requires reviewable changes to land on a working `main`, and puts a production-like restricted-profile soak before OpenID Connect and the `v3.0.0-rc.1` release cycle.
 
 ### Fixed

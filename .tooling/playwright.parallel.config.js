@@ -30,7 +30,7 @@ const specWeights = {
   'history.spec.js': 9,
   'interaction-contract.spec.js': 8,
   'tabs.spec.js': 7,
-  'output.spec.js': 6,
+  'output.spec.js': 7,
   'session-token.spec.js': 6,
   'share.spec.js': 6,
   'kill.spec.js': 4,

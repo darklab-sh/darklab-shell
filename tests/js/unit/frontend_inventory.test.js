@@ -76,7 +76,7 @@ describe('frontend browser global boundary inventory', () => {
     }),
     resolver_helper_calls_by_class: Object.freeze({
       bridge_dispatch: 96,
-      global_only: 547,
+      global_only: 555,
       import_first: 598,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
@@ -86,8 +86,8 @@ describe('frontend browser global boundary inventory', () => {
       fallback_imported_binding: 381,
       fallback_local_binding: 14,
       global_publish: 77,
-      guarded_compatibility_fallback: 508,
-      same_file_import_source: 87,
+      guarded_compatibility_fallback: 514,
+      same_file_import_source: 89,
       unresolved_report_only: 0,
     }),
     bridge_dispatch: Object.freeze({
