@@ -18,6 +18,7 @@ import pytest
 
 import config as app_config
 from conftest import build_test_config, make_test_app
+from identity_helpers import anonymous_session_id
 from core.database import db_connect, db_init
 from core.database_backend import DatabaseBackend
 from services.assessments import dalfox_parameter_options
@@ -167,7 +168,7 @@ def assessment_factory(monkeypatch: pytest.MonkeyPatch):
         profile: dict[str, object] | None = None,
         team_id: str = "",
     ) -> tuple[str, str, str]:
-        session_id = "assessment-evidence-" + uuid.uuid4().hex
+        session_id = anonymous_session_id("assessment-evidence-" + uuid.uuid4().hex)
         project = create_project(session_id, {"name": "Evidence " + uuid.uuid4().hex[:8]}, team_id=team_id)
         assert project is not None
         project_id = str(project["id"])

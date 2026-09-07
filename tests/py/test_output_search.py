@@ -13,12 +13,13 @@ from pathlib import Path
 import pytest
 
 from conftest import make_test_app as _test_app
+from identity_helpers import anonymous_session_id
 import core.database as shell_db
 import services.runs.output_store as run_output_store
 from core.database import db_connect
 
-SESSION_A = "test-session-fts-a"
-SESSION_B = "test-session-fts-b"
+SESSION_A = anonymous_session_id("test-session-fts-a")
+SESSION_B = anonymous_session_id("test-session-fts-b")
 
 
 def get_client(session_id=SESSION_A, *, init_db: bool = True):

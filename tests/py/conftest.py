@@ -32,6 +32,11 @@ os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
 
 import config as shell_config  # noqa: E402
+from identity_helpers import (  # noqa: E402
+    anonymous_identity,
+    durable_identity,
+    identity_client,
+)
 from services.metrics_environment import setup_prometheus_multiproc_dir  # noqa: E402
 
 
@@ -47,6 +52,7 @@ TEST_RATE_LIMIT_OVERRIDES = {
         "bootstrap_enabled": False,
     },
 }
+
 
 def build_test_config(overrides=None):
     return shell_config.CFG.with_overrides(overrides or {})
@@ -117,6 +123,24 @@ def _reset_reusable_test_app_config():
     reset_reusable_test_apps()
     yield
     reset_reusable_test_apps()
+
+
+@pytest.fixture
+def anonymous_identity_factory():
+    """Create valid anonymous identities for related server requests."""
+    return anonymous_identity
+
+
+@pytest.fixture
+def durable_identity_factory():
+    """Create issued durable identities through the production storage service."""
+    return durable_identity
+
+
+@pytest.fixture
+def identity_client_factory():
+    """Bind a valid identity to a Flask test client."""
+    return identity_client
 
 
 def _configured_postgres_dsn(config) -> str:

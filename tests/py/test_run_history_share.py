@@ -28,6 +28,7 @@ import app as shell_app_module
 import config as app_config
 from conftest import build_test_config
 from conftest import reusable_test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 import blueprints.run as run_routes
 import core.database as shell_db
 import services.secrets.storage as secrets_storage
@@ -139,7 +140,7 @@ class _BrokerRunResponse:
 def _post_run(client, *, json=None, headers=None, **kwargs):
     """Drive command execution through the brokered /runs start + stream flow."""
     headers = dict(headers or {})
-    headers.setdefault("X-Session-ID", "broker-test-session")
+    headers.setdefault("X-Session-ID", anonymous_session_id("broker-test-session"))
     with mock.patch("blueprints.run.broker_available", return_value=True):
         start_resp = client.post("/runs", json=json, headers=headers, **kwargs)
     if start_resp.status_code != 202:
@@ -181,7 +182,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh"},
-                headers={"X-Session-ID": "sess-pty-disabled"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-disabled')},
             )
 
         assert resp.status_code == 403
@@ -195,7 +196,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh"},
-                headers={"X-Session-ID": "sess-pty-workers"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-workers')},
             )
 
         assert resp.status_code == 503
@@ -208,7 +209,7 @@ class TestInteractivePtyRuns:
             run_id="pty-run-1",
             rows=24,
             cols=100,
-            session_id="sess-pty-start",
+            session_id=anonymous_session_id("sess-pty-start"),
             command="mtr --interactive darklab.sh",
             started=started,
         )
@@ -232,7 +233,7 @@ class TestInteractivePtyRuns:
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh", "rows": 30, "cols": 120},
                 headers={
-                    "X-Session-ID": "sess-pty-start",
+                    "X-Session-ID": anonymous_session_id('sess-pty-start'),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -301,7 +302,7 @@ class TestInteractivePtyRuns:
                     "command": "ffuf --interactive -w targets.txt -u https://example.test/FUZZ",
                     "workspace_cwd": "darklab",
                 },
-                headers={"X-Session-ID": "sess-pty-cwd"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-cwd')},
             )
 
         assert resp.status_code == 202
@@ -352,7 +353,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "watcher --live"},
-                headers={"X-Session-ID": "sess-pty-custom"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-custom')},
             )
 
         assert resp.status_code == 202
@@ -364,7 +365,7 @@ class TestInteractivePtyRuns:
         assert kwargs["max_runtime_seconds"] == 180
         fake_completed = SimpleNamespace(
             run_id="pty-run-custom",
-            session_id="sess-pty-custom",
+            session_id=anonymous_session_id("sess-pty-custom"),
             command="watcher --live",
             started="2026-05-06T00:00:00Z",
         )
@@ -415,7 +416,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive example.com"},
-                headers={"X-Session-ID": "sess-pty-active"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-active')},
             )
 
         assert resp.status_code == 202
@@ -452,7 +453,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive example.com"},
-                headers={"X-Session-ID": "sess-pty-active"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-active')},
             )
 
         assert resp.status_code == 429
@@ -469,14 +470,19 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": "sess-pty-owner",
+                    "X-Session-ID": anonymous_session_id('sess-pty-owner'),
                     "X-Client-ID": "client-1",
                 },
             )
 
         assert resp.status_code == 200
         assert b"heartbeat" in resp.data
-        claim_owner.assert_called_once_with("pty-run-owner", "sess-pty-owner", "client-1", "tab-1")
+        claim_owner.assert_called_once_with(
+            "pty-run-owner",
+            anonymous_session_id("sess-pty-owner"),
+            "client-1",
+            "tab-1",
+        )
         touch_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
 
         with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=False), \
@@ -485,7 +491,7 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-other/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": "sess-pty-owner",
+                    "X-Session-ID": anonymous_session_id('sess-pty-owner'),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -509,7 +515,7 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": "sess-pty-owner",
+                    "X-Session-ID": anonymous_session_id('sess-pty-owner'),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -539,7 +545,7 @@ class TestInteractivePtyRuns:
         })) as snapshot:
             resp = client.get(
                 "/pty/runs/pty-run-snapshot/snapshot",
-                headers={"X-Session-ID": "sess-pty-snapshot"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-snapshot')},
             )
 
         assert resp.status_code == 200
@@ -550,7 +556,10 @@ class TestInteractivePtyRuns:
         assert data["snapshot_format"] == "ansi"
         assert data["ansi_snapshot"].startswith("\x1b[0m\x1b[2J\x1b[H")
         assert data["snapshot_truncated"] is False
-        snapshot.assert_called_once_with("pty-run-snapshot", "sess-pty-snapshot")
+        snapshot.assert_called_once_with(
+            "pty-run-snapshot",
+            anonymous_session_id("sess-pty-snapshot"),
+        )
 
     def test_snapshot_interactive_pty_reports_worker_local_limit(self):
         client = get_client()
@@ -562,7 +571,7 @@ class TestInteractivePtyRuns:
         )):
             resp = client.get(
                 "/pty/runs/pty-run-other-worker/snapshot",
-                headers={"X-Session-ID": "sess-pty-snapshot-limit"},
+                headers={"X-Session-ID": anonymous_session_id('sess-pty-snapshot-limit')},
             )
 
         assert resp.status_code == 503
@@ -582,7 +591,7 @@ class TestInteractivePtyRuns:
             with mock.patch("blueprints.run.pty_run_snapshot", return_value=(False, message, None)):
                 resp = client.get(
                     "/pty/runs/pty-run-status/snapshot",
-                    headers={"X-Session-ID": "sess-pty-snapshot-status"},
+                    headers={"X-Session-ID": anonymous_session_id('sess-pty-snapshot-status')},
                 )
 
             assert resp.status_code == expected_status
@@ -604,7 +613,7 @@ class TestInteractivePtyRuns:
                 "/kill",
                 json={"run_id": "pty-run-kill", "tab_id": "tab-1"},
                 headers={
-                    "X-Session-ID": "sess-pty-kill",
+                    "X-Session-ID": anonymous_session_id('sess-pty-kill'),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -612,7 +621,7 @@ class TestInteractivePtyRuns:
         assert resp.status_code == 200
         notify_pty.assert_called_once_with(
             "pty-run-kill",
-            "sess-pty-kill",
+            anonymous_session_id("sess-pty-kill"),
             {"killer_client_id": "client-1", "killer_tab_id": "tab-1"},
         )
         publish_run.assert_not_called()
@@ -994,11 +1003,8 @@ class TestRunStreaming:
         session_id = "tok_run_complete_notification"
         channel_id = "ntc_run_complete_notification"
         now = datetime.now(timezone.utc).isoformat()
+        register_durable_session_token(session_id)
         with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, now, ""),
-            )
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
@@ -1063,7 +1069,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "host darklab.sh"},
-                headers={"X-Session-ID": "sess-signal-sse"},
+                headers={"X-Session-ID": anonymous_session_id('sess-signal-sse')},
             )
             body = resp.get_data(as_text=True)
 
@@ -1077,7 +1083,7 @@ class TestRunStreaming:
 
     def test_history_restore_json_preserves_signal_metadata(self):
         client = get_client()
-        session_id = "sess-signal-history"
+        session_id = anonymous_session_id("sess-signal-history")
         project_resp = client.post(
             "/projects",
             json={"name": "Signal Case"},
@@ -1152,7 +1158,7 @@ class TestRunStreaming:
         hidden_review = client.put(
             f"/findings/{finding['id']}/review",
             json={"review_state": "important"},
-            headers={"X-Session-ID": "other-session"},
+            headers={"X-Session-ID": anonymous_session_id('other-session')},
         )
         assert hidden_review.status_code == 404
         assert data["findings"][0]["id"] == finding["id"]
@@ -1167,7 +1173,7 @@ class TestRunStreaming:
 
     def test_project_findings_strip_ansi_codes_before_storage(self):
         client = get_client()
-        session_id = "sess-project-finding-ansi"
+        session_id = anonymous_session_id("sess-project-finding-ansi")
         project_resp = client.post(
             "/projects",
             json={"name": "ANSI Findings"},
@@ -1220,7 +1226,7 @@ class TestRunStreaming:
 
     def test_project_findings_prefer_classifier_target_metadata(self):
         client = get_client()
-        session_id = "sess-project-finding-target-metadata"
+        session_id = anonymous_session_id("sess-project-finding-target-metadata")
         project_resp = client.post(
             "/projects",
             json={"name": "Nmap File Targets"},
@@ -1272,7 +1278,7 @@ class TestRunStreaming:
 
     def test_project_targets_reject_cidr_targets(self):
         client = get_client()
-        session_id = "sess-project-finding-cidr-target"
+        session_id = anonymous_session_id("sess-project-finding-cidr-target")
         project_resp = client.post(
             "/projects",
             json={"name": "CIDR Targets"},
@@ -1290,7 +1296,7 @@ class TestRunStreaming:
 
     def test_project_targets_reject_port_set_targets(self):
         client = get_client()
-        session_id = "sess-project-finding-port-set-target"
+        session_id = anonymous_session_id("sess-project-finding-port-set-target")
         project_resp = client.post(
             "/projects",
             json={"name": "Port Set Targets"},
@@ -1314,7 +1320,7 @@ class TestRunStreaming:
 
     def test_active_project_auto_discovers_typed_command_targets(self):
         client = get_client()
-        session_id = "sess-project-auto-targets"
+        session_id = anonymous_session_id("sess-project-auto-targets")
         project_resp = client.post(
             "/projects",
             json={"name": "Auto Targets"},
@@ -1499,7 +1505,7 @@ class TestRunStreaming:
 
     def test_active_project_target_quota_skip_does_not_log_server_error(self):
         client = get_client()
-        session_id = "sess-project-target-quota-skip"
+        session_id = anonymous_session_id("sess-project-target-quota-skip")
         project_resp = client.post(
             "/projects",
             json={"name": "Target Quota Skip"},
@@ -1610,17 +1616,17 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "echo saved"}, headers={"X-Session-ID": "sess-save"})
+            resp = _post_run(client, json={"command": "echo saved"}, headers={"X-Session-ID": anonymous_session_id('sess-save')})
             _ = resp.get_data(as_text=True)
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-save"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-save')})
         data = json.loads(hist.data)
         cmds = [r["command"] for r in data["runs"]]
         assert "echo saved" in cmds
 
     def test_completed_run_links_to_active_project(self):
         client = get_client()
-        session_id = "sess-active-project-run"
+        session_id = anonymous_session_id("sess-active-project-run")
         project_resp = client.post(
             "/projects",
             json={"name": "Run Context"},
@@ -1672,7 +1678,7 @@ class TestRunStreaming:
 
     def test_completed_whois_run_links_only_the_queried_target_to_active_project(self):
         client = get_client()
-        session_id = "sess-active-project-whois"
+        session_id = anonymous_session_id("sess-active-project-whois")
         project_resp = client.post(
             "/projects",
             json={"name": "WHOIS Context"},
@@ -1736,7 +1742,7 @@ class TestRunStreaming:
 
     def test_active_project_entity_link_failure_keeps_run_finalization(self):
         client = get_client()
-        session_id = "sess-active-project-entity-link-fails"
+        session_id = anonymous_session_id("sess-active-project-entity-link-fails")
         project_resp = client.post(
             "/projects",
             json={"name": "Run Entity Link Failure"},
@@ -1839,7 +1845,7 @@ class TestRunStreaming:
 
     def test_completed_run_skips_active_project_when_auto_link_disabled(self):
         client = get_client()
-        session_id = "sess-active-project-auto-link-off"
+        session_id = anonymous_session_id("sess-active-project-auto-link-off")
         project_resp = client.post(
             "/projects",
             json={"name": "Manual Run Context"},
@@ -1893,7 +1899,11 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "ping darklab.sh | grep ttl"}, headers={"X-Session-ID": "sess-grep"})
+            resp = _post_run(
+                client,
+                json={"command": "ping darklab.sh | grep ttl"},
+                headers={"X-Session-ID": anonymous_session_id("sess-grep")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1901,11 +1911,14 @@ class TestRunStreaming:
         assert "ttl=55\\n" in body
         assert "time=12ms\\n" not in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-grep"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-grep')})
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "ping darklab.sh | grep ttl"
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-grep"})
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": anonymous_session_id("sess-grep")},
+        )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["ttl=54", "ttl=55"]
@@ -1945,7 +1958,11 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "ping darklab.sh | head -n 2"}, headers={"X-Session-ID": "sess-head"})
+            resp = _post_run(
+                client,
+                json={"command": "ping darklab.sh | head -n 2"},
+                headers={"X-Session-ID": anonymous_session_id("sess-head")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1953,10 +1970,13 @@ class TestRunStreaming:
         assert "two\\n" in body
         assert "three\\n" not in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-head"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-head')})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-head"})
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": anonymous_session_id("sess-head")},
+        )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["one", "two"]
@@ -1975,7 +1995,11 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "ping darklab.sh | tail -n 2"}, headers={"X-Session-ID": "sess-tail"})
+            resp = _post_run(
+                client,
+                json={"command": "ping darklab.sh | tail -n 2"},
+                headers={"X-Session-ID": anonymous_session_id("sess-tail")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1983,10 +2007,13 @@ class TestRunStreaming:
         assert "two\\n" in body
         assert "three\\n" in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-tail"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-tail')})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-tail"})
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": anonymous_session_id("sess-tail")},
+        )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["two", "three"]
@@ -2005,7 +2032,11 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "ping darklab.sh | wc -l"}, headers={"X-Session-ID": "sess-wc"})
+            resp = _post_run(
+                client,
+                json={"command": "ping darklab.sh | wc -l"},
+                headers={"X-Session-ID": anonymous_session_id("sess-wc")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2014,10 +2045,10 @@ class TestRunStreaming:
         assert "three\\n" not in body
         assert '"text": "3"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-wc"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-wc')})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-wc"})
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": anonymous_session_id('sess-wc')})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["3"]
@@ -2039,7 +2070,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | grep ttl | wc -l"},
-                headers={"X-Session-ID": "sess-chain"},
+                headers={"X-Session-ID": anonymous_session_id('sess-chain')},
             )
             body = resp.get_data(as_text=True)
 
@@ -2049,10 +2080,13 @@ class TestRunStreaming:
         assert "time=12ms\\n" not in body
         assert '"text": "2"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-chain"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-chain')})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-chain"})
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": anonymous_session_id("sess-chain")},
+        )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["2"]
@@ -2191,7 +2225,11 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }):
-            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-built-in-commands"})
+            resp = _post_run(
+                client,
+                json={"command": "commands"},
+                headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2204,14 +2242,14 @@ class TestRunStreaming:
         assert "dig   - Queries DNS records.\\n" in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-built-in-commands')})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
     def test_builtin_clear_emits_clear_event_and_persists_history(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "clear"}, headers={"X-Session-ID": "sess-clear"})
+        resp = _post_run(client, json={"command": "clear"}, headers={"X-Session-ID": anonymous_session_id('sess-clear')})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2219,19 +2257,19 @@ class TestRunStreaming:
         assert '"type": "clear"' in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-clear"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-clear')})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["clear"]
 
     def test_builtin_env_returns_web_environment(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
+        resp = _post_run(client, json={"command": "env"}, headers={"X-Session-ID": anonymous_session_id('sess-env')})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert f"APP_NAME={shell_app_module.CFG['app_name']}\\n" in body
-        assert "SESSION_ID=sess-env\\n" in body
+        assert f"SESSION_ID={anonymous_session_id('sess-env')}\\n" in body
         assert "SHELL=/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
@@ -2274,7 +2312,11 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }):
-            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-built-in-commands"})
+            resp = _post_run(
+                client,
+                json={"command": "commands"},
+                headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2288,7 +2330,7 @@ class TestRunStreaming:
         assert "dig +short\\n" not in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-built-in-commands')})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
@@ -2355,17 +2397,17 @@ class TestRunStreaming:
             listed = _post_run(
                 client,
                 json={"command": "wordlist list dns"},
-                headers={"X-Session-ID": "sess-wordlist"},
+                headers={"X-Session-ID": anonymous_session_id('sess-wordlist')},
             )
             searched = _post_run(
                 client,
                 json={"command": "wordlist search subdomains"},
-                headers={"X-Session-ID": "sess-wordlist"},
+                headers={"X-Session-ID": anonymous_session_id('sess-wordlist')},
             )
             path = _post_run(
                 client,
                 json={"command": "wordlist path subdomains-top1million-5000.txt"},
-                headers={"X-Session-ID": "sess-wordlist"},
+                headers={"X-Session-ID": anonymous_session_id('sess-wordlist')},
             )
 
         assert "Curated dns wordlists:\\n" in listed.get_data(as_text=True)
@@ -2383,7 +2425,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "wordlist"},
-                headers={"X-Session-ID": "sess-wordlist-missing"},
+                headers={"X-Session-ID": anonymous_session_id('sess-wordlist-missing')},
             )
 
         body = resp.get_data(as_text=True)
@@ -2392,7 +2434,7 @@ class TestRunStreaming:
 
     def test_builtin_workspace_lists_shows_and_removes_session_files(self, tmp_path):
         client = get_client()
-        session = "sess-workspace-command"
+        session = anonymous_session_id("sess-workspace-command")
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_backend": "tmpfs",
@@ -2488,7 +2530,7 @@ class TestRunStreaming:
 
     def test_builtin_workspace_aliases_list_and_show_session_files(self, tmp_path):
         client = get_client()
-        session = "sess-workspace-aliases"
+        session = anonymous_session_id("sess-workspace-aliases")
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_backend": "tmpfs",
@@ -2604,7 +2646,7 @@ class TestRunStreaming:
 
     def test_builtin_workspace_diff_and_alias_share_shell_formats(self, tmp_path):
         client = get_client()
-        session = "sess-workspace-diff"
+        session = anonymous_session_id("sess-workspace-diff")
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_backend": "tmpfs",
@@ -2648,7 +2690,7 @@ class TestRunStreaming:
 
     def test_builtin_diff_compares_completed_runs_and_last_two_tab_runs(self):
         client = get_client()
-        session = "sess-run-output-diff"
+        session = anonymous_session_id("sess-run-output-diff")
         tab_id = "tab-run-output-diff"
         run_ids = ("run-output-diff-old", "run-output-diff-new")
         with db_connect() as conn:
@@ -2695,7 +2737,7 @@ class TestRunStreaming:
 
     def test_builtin_workspace_show_reports_binary_files(self, tmp_path):
         client = get_client()
-        session = "sess-workspace-binary"
+        session = anonymous_session_id("sess-workspace-binary")
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_backend": "tmpfs",
@@ -2812,7 +2854,7 @@ class TestRunStreaming:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     "run-stats-ok",
-                    "sess-limits",
+                    anonymous_session_id("sess-limits"),
                     "nmap ip.darklab.sh",
                     "2026-01-01T00:00:00+00:00",
                     "2026-01-01T00:00:03+00:00",
@@ -2825,7 +2867,7 @@ class TestRunStreaming:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     "run-stats-fail",
-                    "sess-limits",
+                    anonymous_session_id("sess-limits"),
                     "curl https://ip.darklab.sh",
                     "2026-01-01T00:00:05+00:00",
                     "2026-01-01T00:00:07+00:00",
@@ -2845,11 +2887,23 @@ class TestRunStreaming:
             "workspace_inactivity_ttl_hours": 90,
             "workspace_root": str(tmp_path / "workspaces"),
         }):
-            limits_resp = _post_run(client, json={"command": "limits"}, headers={"X-Session-ID": "sess-limits"})
+            limits_resp = _post_run(
+                client,
+                json={"command": "limits"},
+                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+            )
             limits_body = limits_resp.get_data(as_text=True)
-            status_resp = _post_run(client, json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
+            status_resp = _post_run(
+                client,
+                json={"command": "status"},
+                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+            )
             status_body = status_resp.get_data(as_text=True)
-            stats_resp = _post_run(client, json={"command": "stats"}, headers={"X-Session-ID": "sess-limits"})
+            stats_resp = _post_run(
+                client,
+                json={"command": "stats"},
+                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+            )
             stats_body = stats_resp.get_data(as_text=True)
 
         assert limits_resp.status_code == 200
@@ -2863,8 +2917,9 @@ class TestRunStreaming:
         assert "90h (0 = disabled)\\n" in limits_body
         assert status_resp.status_code == 200
         assert "session" in status_body
-        assert "sess-lim" in status_body
-        assert "sess-limits\\n" not in status_body
+        session_id = anonymous_session_id("sess-limits")
+        assert session_id[:8] in status_body
+        assert f"{session_id}\\n" not in status_body
         assert "tab limit" in status_body
         assert "4\\n" in status_body
         assert "retention" in status_body
@@ -2891,19 +2946,27 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-last-1", "sess-last", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                (
+                    "run-last-1",
+                    anonymous_session_id("sess-last"),
+                    "ping darklab.sh",
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:03+00:00",
+                    0,
+                    "[]",
+                )
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "run-last-2", "sess-last", "dig darklab.sh A",
+                    "run-last-2", anonymous_session_id("sess-last"), "dig darklab.sh A",
                     "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 1, "[]",
                 )
             )
             conn.commit()
 
-        resp = _post_run(client, json={"command": "last"}, headers={"X-Session-ID": "sess-last"})
+        resp = _post_run(client, json={"command": "last"}, headers={"X-Session-ID": anonymous_session_id('sess-last')})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2922,7 +2985,7 @@ class TestRunStreaming:
 
         client = get_client()
 
-        who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
+        who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": anonymous_session_id('sess-who')})
         who_body = who_resp.get_data(as_text=True)
         tty_resp = _post_run(client, json={"command": "tty"})
         tty_body = tty_resp.get_data(as_text=True)
@@ -2932,7 +2995,10 @@ class TestRunStreaming:
         version_body = version_resp.get_data(as_text=True)
 
         assert who_resp.status_code == 200
-        assert f"{shell_app_module.CFG['app_name']}  pts/web  sess-who\\n" in who_body
+        assert (
+            f"{shell_app_module.CFG['app_name']}  pts/web  "
+            f"{anonymous_session_id('sess-who')}\\n"
+        ) in who_body
         assert tty_resp.status_code == 200
         assert "/dev/pts/web\\n" in tty_body
         assert groups_resp.status_code == 200
@@ -3179,7 +3245,7 @@ class TestRunStreaming:
                 "started": "2026-01-01T00:00:05+00:00",
             },
         ]):
-            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
+            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": anonymous_session_id('sess-jobs')})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3197,7 +3263,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
-            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
+            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": anonymous_session_id('sess-jobs')})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3223,11 +3289,23 @@ class TestRunStreaming:
                 "source": "memory",
             },
         ]):
-            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            resp = _post_run(
+                client,
+                json={"command": "runs"},
+                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+            )
             body = resp.get_data(as_text=True)
-            verbose_resp = _post_run(client, json={"command": "runs -v"}, headers={"X-Session-ID": "sess-runs"})
+            verbose_resp = _post_run(
+                client,
+                json={"command": "runs -v"},
+                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+            )
             verbose_body = verbose_resp.get_data(as_text=True)
-            json_resp = _post_run(client, json={"command": "runs --json"}, headers={"X-Session-ID": "sess-runs"})
+            json_resp = _post_run(
+                client,
+                json={"command": "runs --json"},
+                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+            )
             json_body = json_resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3265,7 +3343,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
-            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": anonymous_session_id('sess-runs')})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3365,16 +3443,32 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h1", "sess-history", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                (
+                    "run-h1",
+                    anonymous_session_id("sess-history"),
+                    "ping darklab.sh",
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:03+00:00",
+                    0,
+                    "[]",
+                )
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h2", "sess-history", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+                (
+                    "run-h2",
+                    anonymous_session_id("sess-history"),
+                    "dig darklab.sh A",
+                    "2026-01-01T00:00:05+00:00",
+                    "2026-01-01T00:00:06+00:00",
+                    0,
+                    "[]",
+                )
             )
             conn.commit()
 
-        resp = _post_run(client, json={"command": "history"}, headers={"X-Session-ID": "sess-history"})
+        resp = _post_run(client, json={"command": "history"}, headers={"X-Session-ID": anonymous_session_id('sess-history')})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3392,7 +3486,7 @@ class TestRunStreaming:
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         f"run-limit-{index}",
-                        "sess-history-limit",
+                        anonymous_session_id("sess-history-limit"),
                         f"cmd {index}",
                         f"2026-01-01T00:00:0{index}+00:00",
                         f"2026-01-01T00:00:1{index}+00:00",
@@ -3406,7 +3500,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "history"},
-                headers={"X-Session-ID": "sess-history-limit"},
+                headers={"X-Session-ID": anonymous_session_id('sess-history-limit')},
             )
         body = resp.get_data(as_text=True)
 
@@ -3425,10 +3519,10 @@ class TestRunStreaming:
         resp = _post_run(
             client,
             json={"command": f"secret set SHODAN_API_KEY {secret_value}"},
-            headers={"X-Session-ID": "sess-secret-sanitized"},
+            headers={"X-Session-ID": anonymous_session_id('sess-secret-sanitized')},
         )
         body = resp.get_data(as_text=True)
-        hist = client.get("/history", headers={"X-Session-ID": "sess-secret-sanitized"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-secret-sanitized')})
         data = json.loads(hist.data)
 
         assert resp.status_code == 200
@@ -3527,7 +3621,7 @@ class TestRunStreaming:
     def test_builtin_ps_lists_active_session_processes(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})
+        resp = _post_run(client, json={"command": "ps aux"}, headers={"X-Session-ID": anonymous_session_id('sess-ps')})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3543,7 +3637,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = _post_run(client, json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
+            resp = _post_run(
+                client,
+                json={"command": "nmap -sV darklab.sh"},
+                headers={"X-Session-ID": anonymous_session_id("sess-missing")},
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3552,7 +3650,7 @@ class TestRunStreaming:
         assert '"type": "exit"' in body
         popen.assert_not_called()
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-missing"})
+        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id('sess-missing')})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["nmap -sV darklab.sh"]
 
@@ -3574,7 +3672,7 @@ class TestRunStreaming:
 
     def test_run_rewrites_workspace_file_flags_and_emits_notices(self, tmp_path):
         client = get_client()
-        session_id = "sess-workspace-run"
+        session_id = anonymous_session_id("sess-workspace-run")
         fake_proc = _FakeProc(lines=["scan complete\n", ""])
         cfg = {
             "workspace_enabled": True,
@@ -3684,7 +3782,7 @@ class TestRunStreaming:
 
     def test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths(self, tmp_path):
         client = get_client()
-        session_id = "sess-projectdiscovery-run"
+        session_id = anonymous_session_id("sess-projectdiscovery-run")
         cfg = {
             "workspace_enabled": True,
             "workspace_backend": "tmpfs",
@@ -3744,7 +3842,7 @@ class TestRunStreaming:
 
     def test_run_injects_required_secrets_through_process_environment(self, monkeypatch, tmp_path):
         client = get_client()
-        session_id = "sess-secret-run"
+        session_id = anonymous_session_id("sess-secret-run")
         monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
         monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
         secrets_vault.reset_master_key_cache_for_tests()
@@ -3799,7 +3897,7 @@ class TestRunStreaming:
 
     def test_run_preserves_secret_environment_through_scanner_sudo_prefix(self, monkeypatch, tmp_path):
         client = get_client()
-        session_id = "sess-secret-scanner"
+        session_id = anonymous_session_id("sess-secret-scanner")
         monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
         monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
         secrets_vault.reset_master_key_cache_for_tests()
@@ -3847,7 +3945,7 @@ class TestRunStreaming:
 
     def test_run_injects_secret_under_vendor_env_name(self, monkeypatch, tmp_path):
         client = get_client()
-        session_id = "sess-secret-alias"
+        session_id = anonymous_session_id("sess-secret-alias")
         monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
         monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
         secrets_vault.reset_master_key_cache_for_tests()
@@ -3902,7 +4000,7 @@ class TestRunStreaming:
 
     def test_run_accepts_vendor_native_fallback_secret_name(self, monkeypatch, tmp_path):
         client = get_client()
-        session_id = "sess-secret-native-alias"
+        session_id = anonymous_session_id("sess-secret-native-alias")
         monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
         monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
         secrets_vault.reset_master_key_cache_for_tests()
@@ -3973,7 +4071,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "vt ip 8.8.8.8"},
-                headers={"X-Session-ID": "sess-missing-vt-secret"},
+                headers={"X-Session-ID": anonymous_session_id('sess-missing-vt-secret')},
             )
 
         assert resp.status_code == 403
@@ -3985,7 +4083,7 @@ class TestRunStreaming:
 
     def test_run_resolves_required_secrets_before_runtime_command_rewrites(self, monkeypatch, tmp_path):
         client = get_client()
-        session_id = "sess-secret-rewrite"
+        session_id = anonymous_session_id("sess-secret-rewrite")
         monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
         monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
         secrets_vault.reset_master_key_cache_for_tests()
@@ -4089,7 +4187,7 @@ class TestRunStreaming:
             help_resp = _post_run(
                 client,
                 json={"command": "shodan --help"},
-                headers={"X-Session-ID": "sess-missing-secret"},
+                headers={"X-Session-ID": anonymous_session_id('sess-missing-secret')},
             )
 
         assert help_resp.status_code == 200
@@ -4101,7 +4199,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": "sess-missing-secret"},
+                headers={"X-Session-ID": anonymous_session_id('sess-missing-secret')},
             )
 
         assert resp.status_code == 403
@@ -4136,7 +4234,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": "sess-optional-secret"},
+                headers={"X-Session-ID": anonymous_session_id('sess-optional-secret')},
             )
 
         assert resp.status_code == 200
@@ -4144,7 +4242,7 @@ class TestRunStreaming:
 
     def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
         client = get_client()
-        session_id = "sess-vars-run"
+        session_id = anonymous_session_id("sess-vars-run")
         set_resp = _post_run(
             client,
             json={"command": "var set HOST ip.darklab.sh"},
@@ -4180,7 +4278,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -sV $HOST"},
-                headers={"X-Session-ID": "sess-undefined-var"},
+                headers={"X-Session-ID": anonymous_session_id('sess-undefined-var')},
             )
 
         assert resp.status_code == 403
@@ -4189,7 +4287,7 @@ class TestRunStreaming:
 
     def test_session_variables_validate_policy_after_expansion(self):
         client = get_client()
-        session_id = "sess-vars-policy"
+        session_id = anonymous_session_id("sess-vars-policy")
         _post_run(
             client,
             json={"command": "var set HOST blocked.darklab.sh"},
@@ -4222,7 +4320,7 @@ class TestRunStreaming:
 class TestRunOutputArtifacts:
     def test_history_search_finds_entity_canonical_values_indexed_from_run_output(self):
         client = get_client()
-        session_id = "sess-output-search-entity"
+        session_id = anonymous_session_id("sess-output-search-entity")
         run_id = "run-output-search-entity"
 
         class FakeCapture:
@@ -4278,7 +4376,8 @@ class TestRunOutputArtifacts:
         assert data["total_count"] == 1
         assert data["runs"][0]["id"] == run_id
 
-    def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):
+    def _insert_run_with_artifact(self, run_id, session_id=None):
+        session_id = session_id or anonymous_session_id("sess-artifact")
         ensure_run_output_dir()
         artifact_path = Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz"
         with gzip.open(artifact_path, "wt", encoding="utf-8") as handle:
@@ -4341,7 +4440,7 @@ class TestRunOutputArtifacts:
         client = get_client()
         run_id = "artifact-delete-run"
         retained_run_id = "artifact-delete-retained"
-        session_id = "sess-delete-artifact"
+        session_id = anonymous_session_id("sess-delete-artifact")
         artifact_path = self._insert_run_with_artifact(run_id, session_id=session_id)
         shared_finding_id = f"fnd_shared_{run_id}"
         with db_connect() as conn:
@@ -4425,12 +4524,13 @@ class TestRunOutputArtifacts:
 
     def test_clear_history_removes_output_artifacts_for_session(self):
         client = get_client()
-        artifact_a = self._insert_run_with_artifact("artifact-clear-a", session_id="sess-clear-artifact")
-        artifact_b = self._insert_run_with_artifact("artifact-clear-b", session_id="sess-clear-artifact")
+        session_id = anonymous_session_id("sess-clear-artifact")
+        artifact_a = self._insert_run_with_artifact("artifact-clear-a", session_id=session_id)
+        artifact_b = self._insert_run_with_artifact("artifact-clear-b", session_id=session_id)
         assert os.path.exists(artifact_a)
         assert os.path.exists(artifact_b)
 
-        resp = client.delete("/history", headers={"X-Session-ID": "sess-clear-artifact"})
+        resp = client.delete("/history", headers={"X-Session-ID": anonymous_session_id('sess-clear-artifact')})
 
         assert resp.status_code == 200
         assert not os.path.exists(artifact_a)
@@ -4471,7 +4571,7 @@ class TestHistoryIsolation:
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?)",
-                    (run_a, "session-a", "echo A", 0, "[]")
+                    (run_a, anonymous_session_id("session-a"), "echo A", 0, "[]")
                 )
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
@@ -4480,7 +4580,7 @@ class TestHistoryIsolation:
                 )
                 conn.commit()
 
-            resp = client.get("/history", headers={"X-Session-ID": "session-a"})
+            resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id('session-a')})
             data = json.loads(resp.data)
             commands = [r["command"] for r in data["runs"]]
 
@@ -4500,12 +4600,12 @@ class TestHistoryIsolation:
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?)",
-                    (run_id, "owner-session", "echo owner", 0, "[]")
+                    (run_id, anonymous_session_id("owner-session"), "echo owner", 0, "[]")
                 )
                 conn.commit()
 
             # Wrong session should not delete
-            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": "other-session"})
+            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('other-session')})
             assert resp.status_code == 200
 
             with db_connect() as conn:
@@ -4513,7 +4613,7 @@ class TestHistoryIsolation:
             assert row is not None
 
             # Correct session should delete
-            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": "owner-session"})
+            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('owner-session')})
             assert resp.status_code == 200
 
             with db_connect() as conn:
@@ -4541,7 +4641,7 @@ class TestHistoryIsolation:
                     "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?)",
                     (
                         run_id,
-                        "owner-session",
+                        anonymous_session_id("owner-session"),
                         "intel ip 8.8.8.8",
                         0,
                         json.dumps(output_entries),
@@ -4551,7 +4651,10 @@ class TestHistoryIsolation:
                 )
                 conn.commit()
 
-            owner_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "owner-session"})
+            owner_resp = client.get(
+                f"/history/{run_id}?json&preview=1",
+                headers={"X-Session-ID": anonymous_session_id("owner-session")},
+            )
             owner_data = json.loads(owner_resp.data)
             assert [entry["text"] for entry in owner_data["output_entries"]] == [
                 "Shodan",
@@ -4559,7 +4662,10 @@ class TestHistoryIsolation:
                 "[process exited with code 0]",
             ]
 
-            public_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "other-session"})
+            public_resp = client.get(
+                f"/history/{run_id}?json&preview=1",
+                headers={"X-Session-ID": anonymous_session_id("other-session")},
+            )
             public_data = json.loads(public_resp.data)
             assert [entry["text"] for entry in public_data["output_entries"]] == [
                 "Intel data omitted from share",
@@ -4597,7 +4703,7 @@ class TestHistoryIsolation:
                     "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, 1, 0)",
                     (
                         run_id,
-                        "owner-session",
+                        anonymous_session_id("owner-session"),
                         "intel ip 8.8.8.8",
                         0,
                         json.dumps([{"text": "preview only", "cls": ""}]),
@@ -4612,7 +4718,7 @@ class TestHistoryIsolation:
                 )
                 conn.commit()
 
-            owner_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "owner-session"})
+            owner_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id('owner-session')})
             owner_data = json.loads(owner_resp.data)
             assert [entry["text"] for entry in owner_data["output_entries"]] == [
                 "Shodan",
@@ -4620,7 +4726,10 @@ class TestHistoryIsolation:
                 "[process exited with code 0]",
             ]
 
-            public_json_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "other-session"})
+            public_json_resp = client.get(
+                f"/history/{run_id}?json",
+                headers={"X-Session-ID": anonymous_session_id("other-session")},
+            )
             public_json = json.loads(public_json_resp.data)
             assert public_json_resp.status_code == 200
             assert [entry["text"] for entry in public_json["output_entries"]] == [
@@ -4629,7 +4738,10 @@ class TestHistoryIsolation:
             ]
             assert "ports: 53, 443" not in json.dumps(public_json)
 
-            public_html = client.get(f"/history/{run_id}", headers={"X-Session-ID": "other-session"}).get_data(as_text=True)
+            public_html = client.get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": anonymous_session_id("other-session")},
+            ).get_data(as_text=True)
             assert "Intel data omitted from share" in public_html
             assert "ports: 53, 443" not in public_html
         finally:
@@ -4667,7 +4779,7 @@ class TestShareRoundTrip:
         resp = client.post(
             "/share",
             json={**payload, "apply_redaction": False},
-            headers={"X-Session-ID": "share-session"},
+            headers={"X-Session-ID": anonymous_session_id('share-session')},
         )
         assert resp.status_code == 200
         created = json.loads(resp.data)
@@ -4679,7 +4791,7 @@ class TestShareRoundTrip:
 
         assert data["label"] == "test snapshot"
         assert data["content"] == payload["content"]
-        assert data["session_id"] == "share-session"
+        assert data["session_id"] == anonymous_session_id("share-session")
 
     def test_share_omits_intel_output_even_when_raw_requested(self):
         client = get_client()
@@ -4694,7 +4806,7 @@ class TestShareRoundTrip:
             ],
         }
 
-        resp = client.post("/share", json=payload, headers={"X-Session-ID": "share-session"})
+        resp = client.post("/share", json=payload, headers={"X-Session-ID": anonymous_session_id('share-session')})
         assert resp.status_code == 200
         created = json.loads(resp.data)
 

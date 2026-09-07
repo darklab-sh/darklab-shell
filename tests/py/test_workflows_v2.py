@@ -16,6 +16,7 @@ from typing import Any, Callable, cast
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 from core.database import delete_run_artifacts
 from core.database_access import get_db_connect
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
@@ -141,12 +142,9 @@ def _team_scope_fixture() -> dict[str, object]:
             session_token=viewer_token,
             role="viewer",
         )
-        created = datetime.now(timezone.utc).isoformat()
-        conn.executemany(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
-            [(owner_token, created), (operator_token, created), (viewer_token, created)],
-        )
         conn.commit()
+    for token in (owner_token, operator_token, viewer_token):
+        register_durable_session_token(token)
     return {
         "team": team,
         "owner_token": owner_token,
@@ -248,7 +246,7 @@ def test_v2_compiler_normalizes_and_rejects_duplicate_exact_exit_codes():
     response = make_test_app().test_client().post(
         "/session/workflows",
         json=invalid,
-        headers={"X-Session-ID": "workflow-exit-code-field-error"},
+        headers={"X-Session-ID": anonymous_session_id('workflow-exit-code-field-error')},
     )
     assert response.status_code == 400
     assert response.get_json()["errors"] == [{
@@ -601,7 +599,7 @@ def test_collection_fanout_checkpoint_persists_on_private_step_state(monkeypatch
     from services.workflows import executions
 
     make_test_app()
-    session_id = "workflow-checkpoint-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-checkpoint-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 3,
         "id": "checkpoint",
@@ -957,7 +955,7 @@ def test_execution_state_machine_advances_once_and_keeps_snapshot():
     from services.workflows.events import replay_execution_events
 
     make_test_app()
-    session_id = "workflow-v2-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-v2-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,
@@ -1015,7 +1013,7 @@ def test_execution_state_machine_routes_failures_and_skips_unvisited_branches(ca
 
     make_test_app()
     caplog.set_level(logging.INFO, logger="shell")
-    session_id = "workflow-branch-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-branch-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 2,
         "id": "fallback_branch",
@@ -1106,7 +1104,7 @@ def test_execution_state_machine_routes_failures_and_skips_unvisited_branches(ca
 
 def test_execution_cancel_marks_active_and_pending_steps_terminal():
     make_test_app()
-    session_id = "workflow-cancel-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-cancel-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,
@@ -1132,7 +1130,7 @@ def test_cancel_route_contains_missing_and_failed_process_signals(monkeypatch, c
     from blueprints import run as run_routes
 
     client = make_test_app().test_client()
-    session_id = "workflow-cancel-process-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-cancel-process-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     pid_by_run: dict[str, int | None] = {}
     validation_failures: set[str] = set()
@@ -1467,8 +1465,8 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     from blueprints import workflows as workflow_routes
 
     client = make_test_app().test_client()
-    session_id = "workflow-route-" + uuid.uuid4().hex
-    other_session = "workflow-route-other-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-route-" + uuid.uuid4().hex)
+    other_session = anonymous_session_id("workflow-route-other-" + uuid.uuid4().hex)
     created = client.post(
         "/session/workflows",
         json=_v2_definition(),
@@ -1685,7 +1683,7 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
 
 def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_projects():
     client = make_test_app().test_client()
-    session_id = "workflow-provenance-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-provenance-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,
@@ -1751,7 +1749,10 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
         "command",
     ):
         assert private_value not in serialized
-    hidden = client.get(f"/history/{first_run}?json=1", headers={"X-Session-ID": "other-session"}).get_json()
+    hidden = client.get(
+        f"/history/{first_run}?json=1",
+        headers={"X-Session-ID": anonymous_session_id("other-session")},
+    ).get_json()
     assert hidden["workflow_execution"] is None
     assert hidden["workflow_execution_id"] == ""
 
@@ -1829,7 +1830,7 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
         assert private_name not in fanout_serialized
     fanout_hidden = client.get(
         f"/history/{fanout_run}?json=1",
-        headers={"X-Session-ID": "other-session"},
+        headers={"X-Session-ID": anonymous_session_id('other-session')},
     ).get_json()
     assert fanout_hidden["workflow_execution"] is None
     assert fanout_hidden["workflow_execution_id"] == ""
@@ -1841,7 +1842,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     from services.workflows.executions import finalize_workflow_run, launch_execution_step
 
     client = make_test_app().test_client()
-    session_id = "workflow-engine-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-engine-" + uuid.uuid4().hex)
     source = _v2_definition()
     source["inputs"][0]["sensitive"] = True
     definition = compile_execution_definition(source)
@@ -2157,7 +2158,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
     from services.runs import finalization as run_finalization
 
     client = make_test_app().test_client()
-    session_id = "workflow-lifecycle-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-lifecycle-" + uuid.uuid4().hex)
     private_value = "workflow-private-" + uuid.uuid4().hex
     denied_value = "workflow-denied-" + uuid.uuid4().hex
     spawn_value = "workflow-spawn-" + uuid.uuid4().hex
@@ -2354,7 +2355,7 @@ def test_required_capture_failure_uses_failure_branch_without_leaking_values(mon
     from services.workflows.events import replay_execution_events
 
     make_test_app()
-    session_id = "workflow-required-capture-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-required-capture-" + uuid.uuid4().hex)
     private_value = "capture-private.example"
     definition = compile_execution_definition({
         "version": 2,
@@ -2515,7 +2516,7 @@ def test_server_orchestrator_rejects_interactive_pty_steps(monkeypatch):
     from services.workflows.executions import launch_execution_step
 
     make_test_app()
-    session_id = "workflow-interactive-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-interactive-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 2,
         "id": "interactive_monitor",
@@ -2560,7 +2561,7 @@ def test_server_orchestrator_records_broker_or_policy_launch_failures(monkeypatc
     from services.workflows.executions import launch_execution_step
 
     make_test_app()
-    session_id = "workflow-launch-failure-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-launch-failure-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 2,
         "id": "policy_recheck",
@@ -2668,7 +2669,7 @@ def test_server_orchestrator_records_broker_or_policy_launch_failures(monkeypatc
 
 def test_active_execution_limit_is_enforced_per_owner():
     make_test_app()
-    session_id = "workflow-limit-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-limit-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     create_execution(
         session_id=session_id,
@@ -2696,7 +2697,7 @@ def test_step_launch_fails_execution_after_wall_clock_limit(monkeypatch):
     from services.workflows import executions
 
     make_test_app()
-    session_id = "workflow-timeout-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-timeout-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,
@@ -2728,7 +2729,7 @@ def test_step_launch_rechecks_team_and_initiator_state():
     from services.teams.storage import add_team_member, create_team, soft_remove_team_member
 
     make_test_app()
-    session_id = "workflow-permission-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-permission-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,
@@ -2768,12 +2769,9 @@ def test_step_launch_rechecks_team_and_initiator_state():
             session_token=viewer_token,
             role="viewer",
         )
-        created = datetime.now(timezone.utc).isoformat()
-        conn.executemany(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
-            [(actor_token, created), (viewer_token, created)],
-        )
         conn.commit()
+    for durable_token in (owner_token, actor_token, viewer_token):
+        register_durable_session_token(durable_token)
 
     revoked_member_execution = create_execution(
         session_id=actor_token,
@@ -2814,11 +2812,8 @@ def test_step_launch_rechecks_team_and_initiator_state():
             session_token=token,
             role="operator",
         )
-        conn.execute(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
-            (token, datetime.now(timezone.utc).isoformat()),
-        )
         conn.commit()
+    register_durable_session_token(token)
     token_execution = create_execution(
         session_id=token,
         team_id=team["id"],
@@ -2837,12 +2832,7 @@ def test_step_launch_rechecks_team_and_initiator_state():
     assert revoked_token is not None and revoked_token["failure_code"] == "token_revoked"
 
     personal_token = "tok_" + uuid.uuid4().hex
-    with get_db_connect()() as conn:
-        conn.execute(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
-            (personal_token, datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
+    register_durable_session_token(personal_token)
     personal_execution = create_execution(
         session_id=personal_token,
         team_id="",
@@ -2864,7 +2854,7 @@ def test_recovery_replays_completed_runs_and_fails_vanished_runs(monkeypatch, ca
 
     make_test_app()
     caplog.set_level(logging.INFO, logger="shell")
-    session_id = "workflow-recovery-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-recovery-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 2,
         "id": "recover_echo",
@@ -2992,7 +2982,7 @@ def test_recovery_reclaims_stale_states_and_advances_completed_step_once(monkeyp
     from services.workflows import executions
 
     make_test_app()
-    session_id = "workflow-recovery-matrix-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-recovery-matrix-" + uuid.uuid4().hex)
     one_step = compile_execution_definition({
         "version": 2,
         "id": "recovery_matrix",
@@ -3444,8 +3434,8 @@ def test_completed_personal_execution_moves_with_session_migration(monkeypatch):
     from blueprints import session as session_routes
 
     client = make_test_app().test_client()
-    source_session = "workflow-migrate-source-" + uuid.uuid4().hex
-    destination_session = "workflow-migrate-destination-" + uuid.uuid4().hex
+    source_session = anonymous_session_id("workflow-migrate-source-" + uuid.uuid4().hex)
+    destination_session = anonymous_session_id("workflow-migrate-destination-" + uuid.uuid4().hex)
     definition = compile_execution_definition({
         "version": 2,
         "id": "migrated_execution",
@@ -3504,7 +3494,7 @@ def test_finalization_hook_failure_marks_workflow_failed_without_raising(monkeyp
     from services.workflows import hooks
 
     make_test_app()
-    session_id = "workflow-hook-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("workflow-hook-" + uuid.uuid4().hex)
     definition = compile_execution_definition(_v2_definition())
     execution = create_execution(
         session_id=session_id,

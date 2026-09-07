@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.cancellation import cancel_assessment_batch
@@ -530,7 +531,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
 
     hidden = client.get(
         f"/history/{run_id}?json=1",
-        headers={"X-Session-ID": "other-session"},
+        headers={"X-Session-ID": anonymous_session_id('other-session')},
     ).get_json()
     assert hidden["assessment_batch"] is None
     assert hidden["assessment_batch_id"] == ""
