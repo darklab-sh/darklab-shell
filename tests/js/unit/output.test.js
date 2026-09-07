@@ -28,6 +28,21 @@ function loadOutputFns({
     }
   }
 
+  const bindPressable = (el, { onActivate } = {}) => {
+    if (!el || typeof onActivate !== 'function') return null
+    const handler = event => onActivate(event)
+    el.addEventListener('click', handler)
+    return { dispose: () => el.removeEventListener('click', handler) }
+  }
+  const bindOutsideClickClose = (panel, { isOpen, onClose, triggers } = {}) => {
+    const handler = (event) => {
+      if (!isOpen?.() || panel?.contains(event.target) || triggers?.contains?.(event.target)) return
+      onClose?.()
+    }
+    document.addEventListener('click', handler)
+    return { dispose: () => document.removeEventListener('click', handler) }
+  }
+
   return fromDomScripts(
     ['app/static/js/core/run_output_model.js', 'app/static/js/core/output_core.js', 'app/static/js/output_bridge.js', 'app/static/js/output.js'],
     {
@@ -38,6 +53,8 @@ function loadOutputFns({
       APP_CONFIG: { max_output_lines: 2, ...appConfig },
       getOutput: () => document.getElementById('out'),
       shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+      bindOutsideClickClose,
+      bindPressable,
       ...extraGlobals,
     },
     `{
@@ -59,6 +76,11 @@ function loadOutputFns({
     isTabSessionRestoreInProgress,
     buildPromptLabel,
     currentPromptWorkspacePath,
+    _atlasTabForOutputEntity,
+    _closeOutputEntityMenu,
+    _hasOutputTextSelection,
+    _insertOutputEntityIntoComposer,
+    _positionOutputEntityMenu,
     _showOutputEntityMenu,
     _getTabs: () => tabs,
   }`,
@@ -103,6 +125,8 @@ describe('appendLine', () => {
     delete window.shellPromptWrap
     document.body.className = ''
     document.body.innerHTML = `
+      <input id="cmd" value="" />
+      <input id="mobile-cmd" value="" />
       <div id="out" class="output">
         <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
           <span class="prompt-prefix">anon@darklab:~$</span>
@@ -688,7 +712,7 @@ describe('appendLine', () => {
     expect(token?.textContent).not.toContain('\x1b')
   })
 
-  it('supports keyboard navigation and outside-click close in the entity context menu', () => {
+  it('supports ARIA state, keyboard navigation, and outside-click close in the entity action menu', () => {
     const { appendLine, _showOutputEntityMenu } = loadOutputFns()
 
     appendLine('scan ip.darklab.sh', '', 'tab-1', {
@@ -708,31 +732,247 @@ describe('appendLine', () => {
     const menu = document.querySelector('.atlas-output-entity-menu')
     const items = Array.from(menu?.querySelectorAll('[data-output-entity-action]') || [])
     expect(menu).not.toBeNull()
-    expect(items).toHaveLength(6)
+    expect(items).toHaveLength(3)
     expect(items.map(item => [item.textContent, item.dataset.outputEntityAction])).toEqual([
       ['Open in Atlas', 'open-atlas'],
-      ['Edit labels/notes', 'edit-metadata'],
-      ['Add to active project', 'promote'],
-      ['Refresh intel', 'lookup-intel'],
-      ['Copy value', 'copy-value'],
-      ['See in run', 'see-run'],
+      ['Copy to Clipboard', 'copy-value'],
+      ['Insert into command', 'insert-command'],
     ])
+    expect(token?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(token?.getAttribute('aria-expanded')).toBe('true')
+    expect(token?.getAttribute('aria-controls')).toBe(menu?.id)
     expect(document.activeElement?.dataset.outputEntityAction).toBe('open-atlas')
 
     items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
-    expect(document.activeElement?.dataset.outputEntityAction).toBe('edit-metadata')
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('copy-value')
 
     items[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-    expect(document.activeElement?.dataset.outputEntityAction).toBe('see-run')
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('insert-command')
 
-    items[5].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    items[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
     expect(document.activeElement?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.getAttribute('aria-expanded')).toBe('false')
+    expect(token?.hasAttribute('aria-controls')).toBe(false)
 
     _showOutputEntityMenu(token, 32, 32)
     expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
 
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+  })
+
+  it('uses canonical entity values for Atlas, clipboard, and command insertion actions', async () => {
+    const openAtlas = vi.fn()
+    const copyTextToClipboard = vi.fn(() => Promise.resolve())
+    const showToast = vi.fn()
+    const setComposerValue = vi.fn(value => value)
+    const focusComposerInput = vi.fn()
+    const cmd = document.getElementById('cmd')
+    const { appendLine, _showOutputEntityMenu } = loadOutputFns({
+      extraGlobals: {
+        tabs: [{ id: 'tab-1', st: 'idle', rawLines: [], runStart: 1000 }],
+        copyTextToClipboard,
+        focusComposerInput,
+        getComposerState: () => ({
+          value: 'ping TARGET now',
+          selectionStart: 5,
+          selectionEnd: 11,
+          activeInput: 'desktop',
+        }),
+        getVisibleComposerInput: () => cmd,
+        openAtlas,
+        setComposerValue,
+        showToast,
+      },
+    })
+
+    appendLine('scan display.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'display.darklab.sh',
+        canonical_value: 'canonical.darklab.sh',
+        start: 5,
+        end: 23,
+      }],
+    })
+    const token = document.querySelector('.atlas-entity-token')
+
+    _showOutputEntityMenu(token, 32, 32)
+    document.querySelector('[data-output-entity-action="open-atlas"]')?.click()
+    expect(openAtlas).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'domain',
+      entityValue: 'canonical.darklab.sh',
+      tab: 'domain',
+    }))
+
+    _showOutputEntityMenu(token, 32, 32)
+    document.querySelector('[data-output-entity-action="copy-value"]')?.click()
+    await Promise.resolve()
+    expect(copyTextToClipboard).toHaveBeenCalledWith('canonical.darklab.sh')
+    expect(showToast).toHaveBeenCalledWith('Entity copied')
+
+    copyTextToClipboard.mockRejectedValueOnce(new Error('clipboard denied'))
+    _showOutputEntityMenu(token, 32, 32)
+    document.querySelector('[data-output-entity-action="copy-value"]')?.click()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(showToast).toHaveBeenLastCalledWith('Failed to copy entity', 'error')
+
+    _showOutputEntityMenu(token, 32, 32)
+    document.querySelector('[data-output-entity-action="insert-command"]')?.click()
+    expect(setComposerValue).toHaveBeenCalledWith(
+      'ping canonical.darklab.sh now',
+      25,
+      25,
+    )
+    expect(focusComposerInput).toHaveBeenCalledWith(cmd, { preventScroll: true })
+  })
+
+  it('maps every supported entity type to its Atlas profile tab', () => {
+    const { _atlasTabForOutputEntity } = loadOutputFns()
+    expect([
+      ['ip', _atlasTabForOutputEntity('ip')],
+      ['host', _atlasTabForOutputEntity('host')],
+      ['domain', _atlasTabForOutputEntity('domain')],
+      ['url', _atlasTabForOutputEntity('url')],
+      ['hash', _atlasTabForOutputEntity('hash')],
+      ['cve', _atlasTabForOutputEntity('cve')],
+    ]).toEqual([
+      ['ip', 'ip'],
+      ['host', 'domain'],
+      ['domain', 'domain'],
+      ['url', 'url'],
+      ['hash', 'hash'],
+      ['cve', 'cve'],
+    ])
+  })
+
+  it('only suppresses the action menu when the current selection intersects the entity', () => {
+    const { appendLine, _showOutputEntityMenu } = loadOutputFns()
+
+    appendLine('scan ip.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
+    })
+    const token = document.querySelector('.atlas-entity-token')
+    const selection = window.getSelection()
+    const entityRange = document.createRange()
+    entityRange.selectNodeContents(token)
+    selection.removeAllRanges()
+    selection.addRange(entityRange)
+
+    token?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+
+    const unrelated = document.createElement('span')
+    unrelated.textContent = 'TARGET'
+    document.body.appendChild(unrelated)
+    const unrelatedRange = document.createRange()
+    unrelatedRange.selectNodeContents(unrelated)
+    selection.removeAllRanges()
+    selection.addRange(unrelatedRange)
+    token?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
+    const nativeContextAllowed = token?.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    }))
+    expect(nativeContextAllowed).toBe(true)
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+    selection.removeAllRanges()
+  })
+
+  it('clamps the entity action menu inside the viewport and prefers space above the token', () => {
+    const { appendLine, _positionOutputEntityMenu, _showOutputEntityMenu } = loadOutputFns()
+    appendLine('scan ip.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
+    })
+    const token = document.querySelector('.atlas-entity-token')
+    token.getBoundingClientRect = () => ({
+      top: 180,
+      right: 315,
+      bottom: 195,
+      left: 295,
+      width: 20,
+      height: 15,
+    })
+    _showOutputEntityMenu(token)
+    const menu = document.querySelector('.atlas-output-entity-menu')
+    menu.getBoundingClientRect = () => ({ width: 120, height: 90 })
+    const oldWidth = window.innerWidth
+    const oldHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 200 })
+
+    _positionOutputEntityMenu(menu, token)
+
+    expect(menu.style.left).toBe('192px')
+    expect(menu.style.top).toBe('84px')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: oldWidth })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: oldHeight })
+  })
+
+  it('closes the entity action menu for composer input, tab changes, page scrolling, and detached output', async () => {
+    const { appendLine, _showOutputEntityMenu } = loadOutputFns()
+    appendLine('scan ip.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
+    })
+    const token = document.querySelector('.atlas-entity-token')
+    const assertClose = (eventTarget, event) => {
+      _showOutputEntityMenu(token, 32, 32)
+      eventTarget.dispatchEvent(event)
+      expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+    }
+
+    assertClose(document.getElementById('cmd'), new Event('input', { bubbles: true }))
+    assertClose(document, new CustomEvent('app:tab-activated'))
+
+    _showOutputEntityMenu(token, 32, 32)
+    document.getElementById('cmd').dispatchEvent(new Event('scroll'))
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
+    assertClose(document, new Event('scroll', { bubbles: true }))
+    assertClose(window, new Event('resize'))
+
+    appendLine('then other.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'other.darklab.sh',
+        canonical_value: 'other.darklab.sh',
+        start: 5,
+        end: 21,
+      }],
+    })
+    const otherToken = document.querySelector('[data-atlas-entity-value="other.darklab.sh"]')
+    _showOutputEntityMenu(token, 32, 32)
+    _showOutputEntityMenu(otherToken, 48, 48)
+    expect(document.querySelectorAll('.atlas-output-entity-menu')).toHaveLength(1)
+    expect(token?.getAttribute('aria-expanded')).toBe('false')
+    expect(otherToken?.getAttribute('aria-expanded')).toBe('true')
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    _showOutputEntityMenu(token, 32, 32)
+    token.remove()
+    await Promise.resolve()
     expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
   })
 
