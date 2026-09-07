@@ -22,6 +22,7 @@ import pytest
 
 import config
 from conftest import build_test_config
+from identity_helpers import anonymous_session_id, register_durable_session_token
 import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
@@ -2682,7 +2683,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
 
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
     team_id = "team-exact-lookup"
-    session_id = "member-exact-lookup"
+    session_id = anonymous_session_id("member-exact-lookup")
     observed_at = "2026-08-03T00:00:00+00:00"
 
     run_entity_id = upsert_entity(
@@ -3111,12 +3112,6 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
     operator_token = "tok_pg_team_operator_" + uuid.uuid4().hex
     outsider_token = "tok_pg_team_outsider_" + uuid.uuid4().hex
     created = "2026-05-29T00:00:00+00:00"
-    for token in (owner_token, operator_token, outsider_token):
-        conn.execute(
-            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (%s, %s, %s)",
-            (token, created, ""),
-        )
-    conn.commit()
 
     @contextmanager
     def _postgres_db_connect():
@@ -3124,6 +3119,8 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    for token in (owner_token, operator_token, outsider_token):
+        register_durable_session_token(token)
 
     def api_headers(token: str, *, team_id: str = "") -> dict[str, str]:
         headers = {"Authorization": f"Bearer {token}"}

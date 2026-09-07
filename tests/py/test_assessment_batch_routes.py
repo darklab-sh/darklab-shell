@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from conftest import reusable_test_app
+from identity_helpers import register_durable_session_token
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
@@ -32,14 +33,7 @@ from services.projects.targets import add_project_target
 
 
 def _register_token(token: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    with get_db_connect()() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) "
-            "VALUES (?, ?, ?)",
-            (token, now, ""),
-        )
-        conn.commit()
+    register_durable_session_token(token)
 
 
 def _runtime() -> ProbePlanningRuntime:

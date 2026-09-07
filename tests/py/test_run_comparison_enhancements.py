@@ -26,6 +26,7 @@ from services.projects.findings import record_run_findings
 from services.teams.request_scope import RequestScope
 from services.teams.scope import personal_owner_context, team_owner_context
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 
 
 def _comparison_key(text: str) -> str:
@@ -327,7 +328,7 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
         [{"text": "new.darklab.sh"}],
     ) == []
 
-    session_id = f"compare-derived-{uuid.uuid4().hex[:8]}"
+    session_id = anonymous_session_id(f"compare-derived-{uuid.uuid4().hex[:8]}")
     left_id = f"run-derived-left-{uuid.uuid4().hex[:8]}"
     right_id = f"run-derived-right-{uuid.uuid4().hex[:8]}"
     client = make_test_app().test_client()
@@ -372,7 +373,7 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
 
 
 def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_provenance():
-    session_id = f"compare-enhancements-{uuid.uuid4().hex[:8]}"
+    session_id = anonymous_session_id(f"compare-enhancements-{uuid.uuid4().hex[:8]}")
     left_id = f"run-left-{uuid.uuid4().hex[:8]}"
     right_id = f"run-right-{uuid.uuid4().hex[:8]}"
     finding_ids = []
@@ -518,7 +519,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
 def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows():
     from services.teams.storage import add_team_member, create_team, soft_remove_team_member
 
-    personal_session = f"compare-personal-{uuid.uuid4().hex[:8]}"
+    personal_session = anonymous_session_id(f"compare-personal-{uuid.uuid4().hex[:8]}")
     owner_session = f"tok_compare-owner-{uuid.uuid4().hex[:8]}"
     team_session = f"tok_compare-operator-{uuid.uuid4().hex[:8]}"
     left_id = f"run-team-left-{uuid.uuid4().hex[:8]}"
@@ -534,6 +535,8 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
     operator_member_id = ""
     recorded_finding_ids: list[str] = []
     try:
+        register_durable_session_token(owner_session)
+        register_durable_session_token(team_session)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             team = create_team(
@@ -549,10 +552,6 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
                 role="operator",
             )
             operator_member_id = str(operator["id"])
-            conn.executemany(
-                "INSERT INTO session_tokens (token, created) VALUES (?, '2026-07-13T09:00:00Z')",
-                [(owner_session,), (team_session,)],
-            )
             conn.executemany(
                 "INSERT INTO runs "
                 "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
@@ -811,7 +810,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
 
 
 def test_compare_candidates_only_include_older_completed_external_runs():
-    session_id = f"compare-candidates-{uuid.uuid4().hex[:8]}"
+    session_id = anonymous_session_id(f"compare-candidates-{uuid.uuid4().hex[:8]}")
     source_id = f"run-source-{uuid.uuid4().hex[:8]}"
     eligible_id = f"run-eligible-{uuid.uuid4().hex[:8]}"
     excluded_ids = [f"run-excluded-{uuid.uuid4().hex[:8]}" for _index in range(3)]

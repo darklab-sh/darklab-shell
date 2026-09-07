@@ -16,7 +16,7 @@ import re
 import uuid
 from functools import lru_cache
 
-from flask import current_app, g, has_request_context, request
+from flask import g, has_request_context, request
 
 from config import THEME_REGISTRY_MAP, resolve_effective_cfg
 
@@ -59,16 +59,6 @@ def is_valid_anonymous_session_id(session_id):
     except (ValueError, AttributeError, TypeError):
         return False
     return str(parsed) == value.lower()
-
-
-def _allow_legacy_test_session_id(session_id):
-    """Keep older route fixtures working without relaxing production handling."""
-    try:
-        if not current_app.config.get("TESTING"):
-            return False
-        return current_app.config.get("ALLOW_LEGACY_TEST_SESSION_IDS", True)
-    except RuntimeError:
-        return False
 
 
 @lru_cache(maxsize=8)
@@ -175,8 +165,6 @@ def get_session_id():
     session_id = request.headers.get("X-Session-ID", "").strip()
     if not session_id.startswith("tok_"):
         if is_valid_anonymous_session_id(session_id):
-            return session_id
-        if _allow_legacy_test_session_id(session_id):
             return session_id
         return ""
     # Local import avoids a circular dependency at module load time.

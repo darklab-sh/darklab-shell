@@ -453,14 +453,18 @@ def test_team_management_route_capability_contracts_are_explicit():
             assert capability_token in source, route_name
 
 
-def test_api_v1_rejects_missing_and_anonymous_auth():
+def test_api_v1_rejects_missing_and_anonymous_auth(
+    anonymous_identity_factory,
+    identity_client_factory,
+):
     client = get_client()
+    anonymous_client = identity_client_factory(
+        client,
+        anonymous_identity_factory("api-v1-anonymous-rejected"),
+    )
 
     missing = client.get("/api/v1/whoami")
-    anonymous = client.get(
-        "/api/v1/whoami",
-        headers={"X-Session-ID": "a1b2c3d4-0000-4000-8000-000000000001"},
-    )
+    anonymous = anonymous_client.get("/api/v1/whoami")
 
     assert missing.status_code == 401
     assert json.loads(missing.data)["error"]["code"] == "missing_token"
