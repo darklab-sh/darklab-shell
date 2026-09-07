@@ -848,11 +848,7 @@ describe('appendLine', () => {
     ])
   })
 
-  it('does not open the action menu while entity text is selected or for a native context menu', () => {
-    const getSelection = vi.spyOn(window, 'getSelection').mockReturnValue({
-      isCollapsed: false,
-      toString: () => 'ip.darklab.sh',
-    })
+  it('only suppresses the action menu when the current selection intersects the entity', () => {
     const { appendLine, _showOutputEntityMenu } = loadOutputFns()
 
     appendLine('scan ip.darklab.sh', '', 'tab-1', {
@@ -865,16 +861,32 @@ describe('appendLine', () => {
       }],
     })
     const token = document.querySelector('.atlas-entity-token')
+    const selection = window.getSelection()
+    const entityRange = document.createRange()
+    entityRange.selectNodeContents(token)
+    selection.removeAllRanges()
+    selection.addRange(entityRange)
 
     token?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+
+    const unrelated = document.createElement('span')
+    unrelated.textContent = 'TARGET'
+    document.body.appendChild(unrelated)
+    const unrelatedRange = document.createRange()
+    unrelatedRange.selectNodeContents(unrelated)
+    selection.removeAllRanges()
+    selection.addRange(unrelatedRange)
+    token?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
     const nativeContextAllowed = token?.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
     }))
     expect(nativeContextAllowed).toBe(true)
     expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
-    getSelection.mockRestore()
+    selection.removeAllRanges()
   })
 
   it('clamps the entity action menu inside the viewport and prefers space above the token', () => {
@@ -913,7 +925,7 @@ describe('appendLine', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: oldHeight })
   })
 
-  it('closes the entity action menu for composer input, tab changes, scrolling, and detached output', async () => {
+  it('closes the entity action menu for composer input, tab changes, page scrolling, and detached output', async () => {
     const { appendLine, _showOutputEntityMenu } = loadOutputFns()
     appendLine('scan ip.darklab.sh', '', 'tab-1', {
       entities: [{
@@ -933,6 +945,11 @@ describe('appendLine', () => {
 
     assertClose(document.getElementById('cmd'), new Event('input', { bubbles: true }))
     assertClose(document, new CustomEvent('app:tab-activated'))
+
+    _showOutputEntityMenu(token, 32, 32)
+    document.getElementById('cmd').dispatchEvent(new Event('scroll'))
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
     assertClose(document, new Event('scroll', { bubbles: true }))
     assertClose(window, new Event('resize'))
 

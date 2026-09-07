@@ -860,9 +860,21 @@ let _outputEntityMenuSequence = 0;
 let _outputEntityMenuOutsideClickHandle = null;
 let _outputEntityMenuPressableHandles = [];
 
-function _hasOutputTextSelection() {
+function _hasOutputTextSelection(token = null) {
   const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
-  return !!(selection && !selection.isCollapsed && String(selection.toString() || '').length > 0);
+  if (!selection || selection.isCollapsed || !String(selection.toString() || '').length) return false;
+  if (!token) return true;
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    try {
+      if (range.intersectsNode(token)) return true;
+    } catch {
+      // A stale range can outlive transcript replacement. Fall through to the
+      // live selection endpoints instead of treating unrelated text as active.
+    }
+  }
+  const selectionNodes = [selection.anchorNode, selection.focusNode];
+  return selectionNodes.some(node => !!node && token.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node));
 }
 
 function _closeOutputEntityMenu(options = {}) {
@@ -1081,7 +1093,7 @@ function _bindOutputEntityTokenEvents() {
   document.addEventListener('click', (event) => {
     const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
     if (token) {
-      if (_hasOutputTextSelection()) return;
+      if (_hasOutputTextSelection(token)) return;
       event.preventDefault();
       event.stopPropagation();
       const rect = token.getBoundingClientRect();
@@ -1113,6 +1125,9 @@ function _bindOutputEntityTokenEvents() {
   document.addEventListener('app:tab-activated', () => _closeOutputEntityMenu());
   document.addEventListener('scroll', (event) => {
     if (_outputEntityMenu?.contains?.(event.target)) return;
+    // Moving the composer selection can update an input's internal horizontal
+    // scroll position. Typing and outside clicks already own dismissal there.
+    if (event.target?.matches?.('#cmd, #mobile-cmd')) return;
     _closeOutputEntityMenu();
   }, true);
   if (typeof window !== 'undefined') {

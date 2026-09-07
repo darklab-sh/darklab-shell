@@ -278,6 +278,7 @@ test.describe('output actions', () => {
 
     await page.evaluate(() => setComposerValue('ping TARGET now', 5, 11))
     await token.click()
+    await expect(menu).toBeVisible()
     // The insertion path itself is covered through a real tap below. Dispatch
     // here so Playwright's pre-click scroll-into-view step doesn't exercise the
     // separate scroll-to-dismiss contract before the fixed menu item activates.
