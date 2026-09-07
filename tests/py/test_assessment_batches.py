@@ -235,9 +235,12 @@ def test_assessment_batch_limits_chunking_and_progress_are_fixed():
 
 def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monkeypatch):
     make_test_app()
-    assert MIGRATIONS[-3] is COORDINATOR_MIGRATION
-    assert MIGRATIONS[-2] is ITEM_MIGRATION
-    assert MIGRATIONS[-1] is RETRY_PREVIEW_MIGRATION
+    coordinator_index = MIGRATIONS.index(COORDINATOR_MIGRATION)
+    assert MIGRATIONS[coordinator_index:coordinator_index + 3] == (
+        COORDINATOR_MIGRATION,
+        ITEM_MIGRATION,
+        RETRY_PREVIEW_MIGRATION,
+    )
     assert ITEM_MIGRATION.version == "0076"
     assert RETRY_PREVIEW_MIGRATION.version == "0077"
     assert any(

@@ -8189,6 +8189,7 @@ class TestPostgresMigrations:
             "0075",
             "0076",
             "0077",
+            "0078",
         ]
         for table_name in (
             "runs",
@@ -9571,7 +9572,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0077"
+        assert rows[-1]["version"] == "0078"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10039,6 +10040,7 @@ class TestPostgresMigrations:
             "0075",
             "0076",
             "0077",
+            "0078",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10080,7 +10082,8 @@ class TestPostgresMigrations:
         assert "0075" in conn.applied_versions
         assert "0076" in conn.applied_versions
         assert "0077" in conn.applied_versions
-        assert conn.commit_count == 39
+        assert "0078" in conn.applied_versions
+        assert conn.commit_count == 40
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -10410,6 +10413,7 @@ class TestPostgresMigrations:
         assert info_events[0] == "POST_SCHEMA_MAINTENANCE_STARTED"
         assert info_events[-1] == "POST_SCHEMA_MAINTENANCE_COMPLETED"
         assert step_events == [
+            "post_cutover_schema_guard",
             "sqlite_output_search_text_backfill",
             "sqlite_watcher_monitoring_backfill",
             "run_output_summary_backfill",

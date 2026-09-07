@@ -112,30 +112,6 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - Raw credential secrets are shown once, are never recoverable from the server, and never enter URLs, command arguments, prompt history, recents, saved transcripts, logs, audit details, diagnostics, exports, error responses, or telemetry.
 - The cutover invalidates existing `tok_` values, removes `/session/migrate`, and keeps no deprecated command, endpoint, header, or raw-owner compatibility alias.
 
-#### Phase 1 — Add the principal, workspace, and credential persistence model
-
-**Steps**
-
-- [ ] Add matching SQLite and Postgres records for principals, personal workspaces, and credentials. Keep exactly one personal workspace per principal, as required by the recorded authentication contract.
-- [ ] Give each personal workspace an immutable, server-generated, validated relative storage key or directory name instead of deriving its path from a principal, credential, or owner id. Never persist an absolute path. When an anonymous workspace is attached, store its existing validated `sess_<digest>` directory name so the ownership transaction does not rename or move files.
-- [ ] Use one storage-key validator and one workspace-root resolver for newly generated names and preserved anonymous `sess_<digest>` names. Do not keep a permissive legacy validation branch for attached workspaces; both provenances must satisfy the same character, length, prefix, traversal, symlink, containment, and uniqueness rules.
-- [ ] Store only safe credential metadata: non-secret id/prefix, principal id, type, label, verifier digest, verifier-root version, digest-algorithm version, created/last-used timestamps, optional expiry, revoked timestamp/reason, and safe creator/audit references.
-- [ ] Add the versioned authentication verifier-root keyring recorded in `DECISIONS.md`. Encrypt each root through the existing vault boundary, bind its purpose and version as associated data, derive separate credential/PAT verifier keys, reject deletion while credentials reference a version, and support master-key rewrapping without invalidating credentials.
-- [ ] Add an explicit principal state with active and disabled behavior, bounded reason metadata, created/updated timestamps, and constraints that prevent credentials or personal workspaces from referring to missing principals.
-- [ ] Build storage services for atomic principal creation, anonymous-workspace attachment, credential issuance, listing, labeling, expiry, rotation, revocation, and principal disable/enable. Keep SQL out of route and browser adapters.
-- [ ] Make last-used updates bounded so ordinary request volume does not turn every authenticated read into a database write.
-- [ ] Resolve durable personal workspace paths from the persisted workspace storage key. Keep explicit anonymous UUID path resolution only for not-yet-attached workspaces, and remove both the `migrate_session_workspace()` implementation in `workspace/maintenance.py` and its re-export in `workspace/files.py` with the legacy migration flow once no live path needs an owner-derived rename.
-- [ ] Add startup/schema guards that reject the old token schema after cutover and fail clearly when the database and application code do not agree.
-
-**Acceptance criteria**
-
-- [ ] SQLite and Postgres schema manifests, migrations, constraints, indexes, transaction behavior, backup/restore behavior, and storage-service results stay in parity.
-- [ ] No reusable raw credential can be recovered from a database dump, audit row, log record, or safe serializer.
-- [ ] Principal creation plus first workspace/credential attachment is atomic, and an injected failure leaves the anonymous workspace and all of its data unchanged.
-- [ ] Credential rotation or revocation changes no ownership key and requires no data migration.
-- [ ] Attaching, re-keying, rotating, revoking, or rolling back an identity leaves the persisted workspace directory name unchanged and performs no filesystem rename; path validation prevents traversal, absolute paths, and references outside the configured workspace root.
-- [ ] The shared storage-key validator rejects the existing `"../bad"` and `"../other-session"` regression seeds, malformed preserved names, symlinks, duplicates, and names that resolve outside the workspace root on both database backends.
-
 #### Phase 2 — Centralize authentication and credential lifecycle handling
 
 **Steps**

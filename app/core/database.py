@@ -349,6 +349,10 @@ def _run_post_schema_maintenance(conn):
             raise
         completed_steps.append(step_name)
 
+    from services.auth.schema_guard import validate_startup_schema  # noqa: PLC0415
+
+    run_step("post_cutover_schema_guard", lambda: validate_startup_schema(conn, DB_BACKEND))
+
     if DB_BACKEND == DatabaseBackend.SQLITE:
         def sqlite_output_search_backfill():
             if _populate_output_search_text(conn):

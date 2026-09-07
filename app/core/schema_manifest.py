@@ -83,6 +83,10 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "zap_connector_jobs",
     "oast_correlations",
     "oast_interactions",
+    "principals",
+    "credential_verifier_roots",
+    "personal_workspaces",
+    "credentials",
 )
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",
