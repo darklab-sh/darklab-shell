@@ -157,6 +157,102 @@ def _create_smoke_schema(conn: Any, *, backend: str) -> None:
         conn.execute(statement)
 
 
+@pytest.mark.postgres
+def test_principal_credential_persistence_matches_postgres_contract(
+    postgres_schema,
+    tmp_path,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import storage as principal_storage
+    from services.auth.contracts import WorkspaceAlreadyAttached
+    from services.auth.workspace_storage import anonymous_workspace_storage_key
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    settings = WorkspaceSettings(
+        enabled=True,
+        backend="volume",
+        root=tmp_path / "workspaces",
+        quota_bytes=1024,
+        max_file_bytes=1024,
+        max_files=10,
+        inactivity_ttl_hours=1,
+    )
+    settings.root.mkdir()
+    anonymous_id = str(uuid.uuid4())
+    preserved_key = anonymous_workspace_storage_key(anonymous_id)
+    preserved_path = settings.root / preserved_key
+    preserved_path.mkdir()
+    (preserved_path / "evidence.txt").write_text("postgres\n", encoding="utf-8")
+
+    bundle = principal_storage.create_principal_with_credential(
+        anonymous_id=anonymous_id,
+        credential_label="Postgres device",
+        settings=settings,
+        conn=conn,
+    )
+    replacement = principal_storage.rotate_credential(
+        bundle.principal.id,
+        bundle.credential.metadata.id,
+        conn=conn,
+    )
+    raw_conn.commit()
+
+    assert bundle.workspace.storage_key == preserved_key
+    assert replacement.metadata.principal_id == bundle.principal.id
+    assert principal_storage.get_personal_workspace_path(
+        bundle.principal.id,
+        settings=settings,
+        conn=conn,
+    ) == preserved_path
+    assert (preserved_path / "evidence.txt").read_text(encoding="utf-8") == "postgres\n"
+    stored = raw_conn.execute(
+        "SELECT id, public_prefix, octet_length(verifier_digest) AS digest_bytes "
+        "FROM credentials ORDER BY created_at"
+    ).fetchall()
+    assert [row["digest_bytes"] for row in stored] == [32, 32]
+    assert bundle.credential.secret not in json.dumps([dict(row) for row in stored])
+
+    with pytest.raises(WorkspaceAlreadyAttached):
+        principal_storage.create_principal_with_credential(
+            anonymous_id=anonymous_id,
+            settings=settings,
+            conn=conn,
+        )
+    assert raw_conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()["count"] == 1
+    assert raw_conn.execute("SELECT COUNT(*) AS count FROM personal_workspaces").fetchone()["count"] == 1
+
+    second_anonymous_id = str(uuid.uuid4())
+    second_path = settings.root / anonymous_workspace_storage_key(second_anonymous_id)
+    second_path.mkdir()
+    second_evidence = second_path / "evidence.txt"
+    second_evidence.write_text("untouched\n", encoding="utf-8")
+
+    def fail_credential_issue(*_args, **_kwargs):
+        raise RuntimeError("injected Postgres failure")
+
+    monkeypatch.setattr(principal_storage, "_insert_credential", fail_credential_issue)
+    with pytest.raises(RuntimeError, match="injected Postgres failure"):
+        principal_storage.create_principal_with_credential(
+            anonymous_id=second_anonymous_id,
+            settings=settings,
+            conn=conn,
+        )
+    assert raw_conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()["count"] == 1
+    assert raw_conn.execute("SELECT COUNT(*) AS count FROM personal_workspaces").fetchone()["count"] == 1
+    assert second_evidence.read_text(encoding="utf-8") == "untouched\n"
+    reset_master_key_cache_for_tests()
+
+
 def _json_payload(value: dict[str, Any], *, backend: str) -> Any:
     if backend == "postgres":
         from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -571,6 +667,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0075",
         "0076",
         "0077",
+        "0078",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -6794,6 +6891,8 @@ def test_postgres_fresh_schema_preflight_leaves_ledger_creation_to_locked_runner
 
 
 def _build_migration_sqlite_fixture(root: Path) -> Path:
+    from core.migrations import v0078_principal_credential_persistence
+
     db_path = root / "history.db"
     pointer = _write_body_pointer(root, "snapshot body for darklab.sh", "body-store/snapshots/snap-1.txt.gz")
     artifact = root / "run-output" / "run-1.txt.gz"
@@ -6882,6 +6981,10 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
             );
             """
         )
+        for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(
+            DatabaseBackend.SQLITE
+        ):
+            conn.execute(statement)
         conn.execute(
             "INSERT INTO schema_migrations VALUES (?, ?, ?)",
             ("0039", "unified_schema_baseline", "2026-05-16T00:00:00Z"),
@@ -6964,6 +7067,31 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
                 "2026-05-16T00:00:04Z",
                 "2026-05-16T00:00:04Z",
             ),
+        )
+        created = "2026-09-06T12:00:00+00:00"
+        principal_id = "prn_" + "1" * 32
+        credential_id = "crd_" + "3" * 32
+        conn.execute(
+            "INSERT INTO principals VALUES (?, 'active', '', ?, ?, NULL)",
+            (principal_id, created, created),
+        )
+        conn.execute(
+            "INSERT INTO personal_workspaces VALUES (?, ?, ?, ?)",
+            ("wsp_" + "2" * 32, principal_id, "sess_" + "4" * 32, created),
+        )
+        conn.execute(
+            "INSERT INTO credential_verifier_roots VALUES "
+            "(1, 'active', ?, ?, 'aes-gcm-v1', ?, NULL)",
+            (b"w" * 48, b"n" * 12, created),
+        )
+        conn.execute(
+            "INSERT INTO credentials "
+            "(id, public_prefix, principal_id, credential_type, label, verifier_digest, "
+            "verifier_root_version, digest_algorithm, created_by_credential_id, created_at, "
+            "updated_at, last_used_at, expires_at, revoked_at, revocation_reason) "
+            "VALUES (?, ?, ?, 'portable', 'Migrated device', ?, 1, 'hmac-sha256-v1', "
+            "NULL, ?, ?, NULL, NULL, NULL, '')",
+            (credential_id, credential_id[:12], principal_id, b"d" * 32, created, created),
         )
         conn.commit()
     finally:
@@ -7074,6 +7202,10 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
 
     assert report.copied_rows["runs"] == 1
     assert report.copied_rows["entity_intel_snapshots"] == 1
+    assert report.copied_rows["principals"] == 1
+    assert report.copied_rows["personal_workspaces"] == 1
+    assert report.copied_rows["credential_verifier_roots"] == 1
+    assert report.copied_rows["credentials"] == 1
     assert report.verified_files == 2
     assert "runs_fts" in report.skipped_tables
     assert "schema_migrations" in report.skipped_tables
@@ -7082,6 +7214,12 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     conn.execute(f"SET search_path TO {_quote_ident(postgres_schema.schema)}")
     assert conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"] == 1
     assert conn.execute("SELECT COUNT(*) AS count FROM secrets").fetchone()["count"] == 1
+    assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()["storage_key"] == (
+        "sess_" + "4" * 32
+    )
+    assert conn.execute(
+        "SELECT octet_length(verifier_digest) AS digest_bytes FROM credentials"
+    ).fetchone()["digest_bytes"] == 32
     assert conn.execute("SELECT preferences FROM session_preferences").fetchone()["preferences"] == {
         "theme": "dark",
         "atlas": {"enabled": True},

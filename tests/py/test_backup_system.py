@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,13 @@ assert SPEC is not None and SPEC.loader is not None
 backup_system = importlib.util.module_from_spec(SPEC)
 sys.modules["backup_system"] = backup_system
 SPEC.loader.exec_module(backup_system)
+
+RESTORE_SCRIPT_PATH = ROOT / "scripts" / "operations" / "restore_system.py"
+RESTORE_SPEC = importlib.util.spec_from_file_location("restore_system_for_backup_tests", RESTORE_SCRIPT_PATH)
+assert RESTORE_SPEC is not None and RESTORE_SPEC.loader is not None
+restore_system = importlib.util.module_from_spec(RESTORE_SPEC)
+sys.modules["restore_system_for_backup_tests"] = restore_system
+RESTORE_SPEC.loader.exec_module(restore_system)
 
 
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,10 +60,42 @@ def _write_config(conf_dir: Path, body: str) -> None:
 
 
 def _write_sqlite_database(path: Path) -> None:
+    from core.database_backend import DatabaseBackend
+    from core.migrations import v0078_principal_credential_persistence
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE runs (id INTEGER PRIMARY KEY, command TEXT)")
         conn.execute("INSERT INTO runs (command) VALUES ('ping -c 4 darklab.sh')")
+        for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(
+            DatabaseBackend.SQLITE
+        ):
+            conn.execute(statement)
+        created = "2026-09-06T12:00:00+00:00"
+        principal_id = "prn_" + "1" * 32
+        credential_id = "crd_" + "3" * 32
+        conn.execute(
+            "INSERT INTO principals VALUES (?, 'active', '', ?, ?, NULL)",
+            (principal_id, created, created),
+        )
+        conn.execute(
+            "INSERT INTO personal_workspaces VALUES (?, ?, ?, ?)",
+            ("wsp_" + "2" * 32, principal_id, "ws_" + "4" * 32, created),
+        )
+        conn.execute(
+            "INSERT INTO credential_verifier_roots VALUES "
+            "(1, 'active', ?, ?, 'aes-gcm-v1', ?, NULL)",
+            (b"w" * 48, b"n" * 12, created),
+        )
+        conn.execute(
+            "INSERT INTO credentials "
+            "(id, public_prefix, principal_id, credential_type, label, verifier_digest, "
+            "verifier_root_version, digest_algorithm, created_by_credential_id, created_at, "
+            "updated_at, last_used_at, expires_at, revoked_at, revocation_reason) "
+            "VALUES (?, ?, ?, 'portable', 'Backup device', ?, 1, 'hmac-sha256-v1', "
+            "NULL, ?, ?, NULL, NULL, NULL, '')",
+            (credential_id, credential_id[:12], principal_id, b"d" * 32, created, created),
+        )
 
 
 def _backup_dirs(output_dir: Path) -> list[Path]:
@@ -104,6 +144,13 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
     assert manifest["data_dir"]["source"] == str(data_dir)
     with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
         assert conn.execute("SELECT command FROM runs").fetchone()[0] == "ping -c 4 darklab.sh"
+        credential = conn.execute(
+            "SELECT principal_id, public_prefix, length(verifier_digest) FROM credentials"
+        ).fetchone()
+        assert credential == ("prn_" + "1" * 32, "crd_" + "3" * 8, 32)
+        assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()[0] == (
+            "ws_" + "4" * 32
+        )
 
 
 def test_extra_and_env_files_are_included_without_logging_secret_values(tmp_path, monkeypatch):
@@ -199,8 +246,51 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     assert (backup_dir / "release" / "release-manifest.json").is_file()
     assert (backup_dir / "release" / "managed-files.sha256").is_file()
     assert (backup_dir / "data" / ".secrets_master_key").is_file()
+    with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
+        assert conn.execute(
+            "SELECT version, length(wrapped_root), length(wrap_nonce) "
+            "FROM credential_verifier_roots"
+        ).fetchone() == (1, 48, 12)
+        assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 1
     manifest = _manifest(backup_dir)
     assert manifest["repository_free"] is True
+
+    archive_path = tmp_path / "principal-backup.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        archive.add(backup_dir, arcname=backup_dir.name)
+    restore_root = tmp_path / "restore"
+    restore_data = restore_root / "data"
+    restore_conf = restore_root / "conf"
+    restore_workspaces = restore_root / "workspaces"
+    for directory in (restore_data, restore_conf, restore_workspaces):
+        directory.mkdir(parents=True)
+    restore_env = restore_root / ".env"
+    restore_env.write_bytes(env_file.read_bytes())
+
+    restore_system.restore(SimpleNamespace(
+        archive=str(archive_path),
+        data_dir=str(restore_data),
+        local_conf_dir=str(restore_conf),
+        workspace_dir=str(restore_workspaces),
+        env_file=str(restore_env),
+        database_url="",
+        output_uid="",
+        output_gid="",
+    ))
+
+    assert (restore_data / ".secrets_master_key").read_bytes() == (
+        data_dir / ".secrets_master_key"
+    ).read_bytes()
+    with sqlite3.connect(restore_data / "history.db") as conn:
+        assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()[0] == (
+            "ws_" + "4" * 32
+        )
+        assert conn.execute(
+            "SELECT public_prefix, length(verifier_digest) FROM credentials"
+        ).fetchone() == ("crd_" + "3" * 8, 32)
+        assert conn.execute(
+            "SELECT length(wrapped_root), length(wrap_nonce) FROM credential_verifier_roots"
+        ).fetchone() == (48, 12)
 
 
 def test_missing_extra_file_fails_unless_operator_allows_it(tmp_path, monkeypatch):
