@@ -18,6 +18,7 @@ import {
   logClientError as importedLogClientError,
 } from '../../session.js';
 import {
+  _closeOutputEntityMenu as importedCloseOutputEntityMenu,
   _renderAnsiWithEntityTokens as importedRenderAnsiWithEntityTokens,
   createAnsiUpRenderer as importedCreateAnsiUpRenderer,
 } from '../../output.js';
@@ -372,6 +373,14 @@ function _historyRunRenderAnsiWithEntityTokens(content, text, entities, tabId) {
   if (typeof render !== 'function') return false;
   render(content, text, entities, tabId);
   return true;
+}
+
+function _historyRunCloseOutputEntityMenu() {
+  const close = (
+    typeof importedCloseOutputEntityMenu !== 'undefined'
+    && importedCloseOutputEntityMenu
+  ) || _historyRunGlobalFunction('_closeOutputEntityMenu');
+  if (typeof close === 'function') close();
 }
 
 function _historyRunSubmitComposerCommand(command, options) {
@@ -2119,6 +2128,7 @@ function _renderHistoryRunModal() {
   const body = overlay.querySelector('#history-run-body');
   if (!body) return;
   body.classList.toggle('history-run-body-entities', _historyRunModalState.activeTab === 'entities');
+  _historyRunCloseOutputEntityMenu();
   body.replaceChildren();
   if (_historyRunModalState.error) {
     const error = document.createElement('div');

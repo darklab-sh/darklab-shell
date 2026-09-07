@@ -887,6 +887,8 @@ describe('core ESM exports', () => {
 
       document.querySelector('.atlas-entity-token')
         .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      document.querySelector('[data-output-entity-action="open-atlas"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
       expect(openSpy).toHaveBeenCalledWith({
         source: 'output-entity',

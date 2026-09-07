@@ -2400,9 +2400,15 @@ body.mobile-terminal-mode .output-follow-btn {
   outline-offset: 1px;
 }
 .atlas-output-entity-menu {
+  display: block;
   position: fixed;
+  inset: auto;
   z-index: 650;
-  min-width: 150px;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  border-radius: 4px;
 }
 .line.command-outcome-summary-title {
   color: var(--blue);

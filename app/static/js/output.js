@@ -8,6 +8,7 @@ import { DarklabRunOutputModel as importedRunOutputModel } from './core/run_outp
 import {
   getActiveTabId as importedGetActiveTabId,
   getAppState as importedGetAppState,
+  getComposerState as importedGetComposerState,
   getTab as importedGetTab,
   getTabs as importedGetTabs,
 } from './core/state.js';
@@ -29,6 +30,14 @@ import {
   runSearch as importedRunSearch,
   scheduleSearchDiscoverabilityRefresh as importedScheduleSearchDiscoverabilityRefresh,
 } from './search.js';
+import {
+  focusComposerInput as importedFocusComposerInput,
+  getVisibleComposerInput as importedGetVisibleComposerInput,
+  setComposerValue as importedSetComposerValue,
+} from './ui/ui_helpers.js';
+import {
+  bindOutsideClickClose as importedBindOutsideClickClose,
+} from './ui/ui_outside_click.js';
 import {
   getOutput as importedGetOutput,
   mountShellPrompt as importedMountShellPrompt,
@@ -395,6 +404,9 @@ function _trimOutputToMaxLines(out) {
   for (let index = 0; index < removed; index += 1) {
     if (lines[index]) removedLines.push(lines[index]);
   }
+  if (_outputEntityMenuOpener && removedLines.some(line => line.contains(_outputEntityMenuOpener))) {
+    _closeOutputEntityMenu();
+  }
   removedLines.forEach(line => line.remove());
   return removed;
 }
@@ -561,6 +573,9 @@ function _coalescedReplacementLineNumber(out, entry) {
 
 function _updateRenderedOutputLineInPlace(current, next) {
   if (!current || !next) return;
+  if (_outputEntityMenuOpener && current.contains(_outputEntityMenuOpener)) {
+    _closeOutputEntityMenu();
+  }
   Array.from(current.attributes || []).forEach(attr => current.removeAttribute(attr.name));
   Array.from(next.attributes || []).forEach(attr => current.setAttribute(attr.name, attr.value));
   current.replaceChildren(...Array.from(next.childNodes || []));
@@ -777,8 +792,10 @@ function _entityTokenFromText(text, entity, tabId) {
   token.dataset.atlasEntityType = String(entity && entity.type || '');
   token.dataset.atlasEntityValue = _outputEntityValue(entity);
   token.dataset.atlasEntityTab = _atlasTabForOutputEntity(entity && entity.type);
-  token.title = `Open ${token.dataset.atlasEntityValue} in Atlas`;
+  token.title = `Actions for ${token.dataset.atlasEntityValue}`;
   token.setAttribute('aria-label', token.title);
+  token.setAttribute('aria-haspopup', 'menu');
+  token.setAttribute('aria-expanded', 'false');
   token.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
   return token;
 }
@@ -837,16 +854,11 @@ function _openAtlasForOutputEntity(token, options = {}) {
   });
 }
 
-function _focusOutputEntityLine(token) {
-  const line = token && token.closest ? token.closest('.line') : null;
-  if (!line) return;
-  line.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  line.classList.add('atlas-line-focus');
-  setTimeout(() => line.classList.remove('atlas-line-focus'), 1600);
-}
-
 let _outputEntityMenu = null;
 let _outputEntityMenuOpener = null;
+let _outputEntityMenuSequence = 0;
+let _outputEntityMenuOutsideClickHandle = null;
+let _outputEntityMenuPressableHandles = [];
 
 function _hasOutputTextSelection() {
   const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
@@ -855,11 +867,19 @@ function _hasOutputTextSelection() {
 
 function _closeOutputEntityMenu(options = {}) {
   const opener = _outputEntityMenuOpener;
+  _outputEntityMenuPressableHandles.forEach(handle => handle?.dispose?.());
+  _outputEntityMenuPressableHandles = [];
+  _outputEntityMenuOutsideClickHandle?.dispose?.();
+  _outputEntityMenuOutsideClickHandle = null;
   if (_outputEntityMenu) {
     _outputEntityMenu.remove();
     _outputEntityMenu = null;
   }
   _outputEntityMenuOpener = null;
+  if (opener) {
+    opener.setAttribute('aria-expanded', 'false');
+    opener.removeAttribute('aria-controls');
+  }
   if (options.restoreFocus && opener && document.contains(opener) && typeof opener.focus === 'function') {
     opener.focus({ preventScroll: true });
   }
@@ -875,44 +895,136 @@ function _outputEntityMenuButton(label, action) {
   return item;
 }
 
-function _showOutputEntityMenu(token, x, y) {
+function _outputEntityMenuViewport() {
+  const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+  if (viewport && Number.isFinite(viewport.width) && Number.isFinite(viewport.height)) {
+    return {
+      top: Number(viewport.offsetTop) || 0,
+      left: Number(viewport.offsetLeft) || 0,
+      width: Number(viewport.width),
+      height: Number(viewport.height),
+    };
+  }
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  return {
+    top: 0,
+    left: 0,
+    width: (typeof window !== 'undefined' && window.innerWidth) || root?.clientWidth || 0,
+    height: (typeof window !== 'undefined' && window.innerHeight) || root?.clientHeight || 0,
+  };
+}
+
+function _positionOutputEntityMenu(menu, token, x = null, y = null) {
+  if (!menu || !token) return;
+  const anchor = token.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const viewport = _outputEntityMenuViewport();
+  const margin = 8;
+  const gap = 6;
+  const viewportRight = viewport.left + viewport.width;
+  const viewportBottom = viewport.top + viewport.height;
+  const menuWidth = Math.min(menuRect.width, Math.max(0, viewport.width - (margin * 2)));
+  const menuHeight = Math.min(menuRect.height, Math.max(0, viewport.height - (margin * 2)));
+  const preferredLeft = Number.isFinite(x) ? Number(x) : anchor.left;
+  const preferredBelow = Number.isFinite(y) ? Number(y) : anchor.bottom + gap;
+  const below = anchor.bottom + gap;
+  const above = anchor.top - menuHeight - gap;
+  const canFitBelow = below + menuHeight <= viewportBottom - margin;
+  const canFitAbove = above >= viewport.top + margin;
+  const preferredTop = canFitBelow ? below : (canFitAbove ? above : preferredBelow);
+  const left = Math.max(viewport.left + margin, Math.min(preferredLeft, viewportRight - menuWidth - margin));
+  const top = Math.max(viewport.top + margin, Math.min(preferredTop, viewportBottom - menuHeight - margin));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function _outputEntityComposerValue() {
+  const readComposerState = (typeof importedGetComposerState === 'function' && importedGetComposerState)
+    || _outputGlobalFunction('getComposerState');
+  const input = (typeof importedGetVisibleComposerInput === 'function' && importedGetVisibleComposerInput())
+    || _outputGlobalFunction('getVisibleComposerInput')?.()
+    || null;
+  const state = typeof readComposerState === 'function' ? readComposerState() : null;
+  const value = typeof state?.value === 'string'
+    ? state.value
+    : String(input?.value || '');
+  const start = Number.isInteger(state?.selectionStart)
+    ? state.selectionStart
+    : Number(input?.selectionStart ?? value.length);
+  const end = Number.isInteger(state?.selectionEnd)
+    ? state.selectionEnd
+    : Number(input?.selectionEnd ?? start);
+  return {
+    input,
+    value,
+    start: Math.max(0, Math.min(start, value.length)),
+    end: Math.max(0, Math.min(end, value.length)),
+  };
+}
+
+function _insertOutputEntityIntoComposer(token) {
+  const entityValue = String(token?.dataset?.atlasEntityValue || '');
+  const setComposerValue = (typeof importedSetComposerValue === 'function' && importedSetComposerValue)
+    || _outputGlobalFunction('setComposerValue');
+  if (!entityValue || typeof setComposerValue !== 'function') return false;
+  const composer = _outputEntityComposerValue();
+  const selectionStart = Math.min(composer.start, composer.end);
+  const selectionEnd = Math.max(composer.start, composer.end);
+  const nextValue = `${composer.value.slice(0, selectionStart)}${entityValue}${composer.value.slice(selectionEnd)}`;
+  const nextCaret = selectionStart + entityValue.length;
+  const applied = setComposerValue(nextValue, nextCaret, nextCaret);
+  if (String(applied ?? '') !== nextValue) return false;
+  const visibleInput = (typeof importedGetVisibleComposerInput === 'function' && importedGetVisibleComposerInput())
+    || _outputGlobalFunction('getVisibleComposerInput')?.()
+    || composer.input;
+  const focusComposerInput = (typeof importedFocusComposerInput === 'function' && importedFocusComposerInput)
+    || _outputGlobalFunction('focusComposerInput');
+  if (typeof focusComposerInput === 'function') focusComposerInput(visibleInput, { preventScroll: true });
+  return true;
+}
+
+function _activateOutputEntityMenuAction(token, action) {
+  const showToast = (typeof importedShowToast === 'function' && importedShowToast)
+    || _outputGlobalFunction('showToast');
+  if (action === 'open-atlas') {
+    _openAtlasForOutputEntity(token);
+    return;
+  }
+  if (action === 'copy-value') {
+    const value = String(token?.dataset?.atlasEntityValue || '');
+    const copyTextToClipboard = (typeof importedCopyTextToClipboard === 'function' && importedCopyTextToClipboard)
+      || _outputGlobalFunction('copyTextToClipboard');
+    _closeOutputEntityMenu({ restoreFocus: true });
+    if (typeof copyTextToClipboard !== 'function') {
+      showToast?.('Failed to copy entity', 'error');
+      return;
+    }
+    copyTextToClipboard(value)
+      .then(() => showToast?.('Entity copied'))
+      .catch(() => showToast?.('Failed to copy entity', 'error'));
+    return;
+  }
+  if (action === 'insert-command') {
+    _closeOutputEntityMenu();
+    if (!_insertOutputEntityIntoComposer(token)) {
+      showToast?.('Could not insert entity while a command is running', 'error');
+    }
+  }
+}
+
+function _showOutputEntityMenu(token, x = null, y = null) {
+  if (!token) return;
   _closeOutputEntityMenu();
   const menu = document.createElement('div');
-  menu.className = 'atlas-output-entity-menu save-menu dropdown-surface';
+  menu.className = 'atlas-output-entity-menu save-menu dropdown-surface nice-scroll';
+  menu.id = `atlas-output-entity-menu-${++_outputEntityMenuSequence}`;
   menu.setAttribute('role', 'menu');
   menu.setAttribute('tabindex', '-1');
   menu.append(
     _outputEntityMenuButton('Open in Atlas', 'open-atlas'),
-    _outputEntityMenuButton('Edit labels/notes', 'edit-metadata'),
-    _outputEntityMenuButton('Add to active project', 'promote'),
-    _outputEntityMenuButton('Refresh intel', 'lookup-intel'),
-    _outputEntityMenuButton('Copy value', 'copy-value'),
-    _outputEntityMenuButton('See in run', 'see-run'),
+    _outputEntityMenuButton('Copy to Clipboard', 'copy-value'),
+    _outputEntityMenuButton('Insert into command', 'insert-command'),
   );
-  menu.addEventListener('click', (event) => {
-    const action = event.target && event.target.closest
-      ? event.target.closest('[data-output-entity-action]')?.dataset.outputEntityAction
-      : '';
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (action === 'open-atlas') _openAtlasForOutputEntity(token);
-    if (action === 'edit-metadata') _openAtlasForOutputEntity(token);
-    if (action === 'promote') _openAtlasForOutputEntity(token, { addActiveProject: true });
-    if (action === 'lookup-intel') _openAtlasForOutputEntity(token, { refreshIntel: true });
-    if (action === 'copy-value') {
-      const copyTextToClipboard = (typeof importedCopyTextToClipboard === 'function' && importedCopyTextToClipboard)
-        || _outputGlobalFunction('copyTextToClipboard');
-      const showToast = (typeof importedShowToast === 'function' && importedShowToast)
-        || _outputGlobalFunction('showToast');
-      if (typeof copyTextToClipboard !== 'function') return;
-      copyTextToClipboard(String(token.dataset.atlasEntityValue || ''))
-        .then(() => showToast?.('Entity copied'))
-        .catch(() => showToast?.('Failed to copy entity', 'error'));
-    }
-    if (action === 'see-run') _focusOutputEntityLine(token);
-    _closeOutputEntityMenu();
-  });
   menu.addEventListener('keydown', (event) => {
     const items = Array.from(menu.querySelectorAll('[data-output-entity-action]'));
     if (!items.length) return;
@@ -934,18 +1046,34 @@ function _showOutputEntityMenu(token, x, y) {
     items[nextIndex].focus({ preventScroll: true });
   });
   document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
-  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
   _outputEntityMenu = menu;
   _outputEntityMenuOpener = token;
+  token.setAttribute('aria-expanded', 'true');
+  token.setAttribute('aria-controls', menu.id);
+  _positionOutputEntityMenu(menu, token, x, y);
+  const bindPressable = (typeof importedBindPressable === 'function' && importedBindPressable)
+    || _outputGlobalFunction('bindPressable');
+  Array.from(menu.querySelectorAll('[data-output-entity-action]')).forEach(item => {
+    const handle = bindPressable?.(item, {
+      onActivate: event => {
+        event.preventDefault();
+        event.stopPropagation();
+        _activateOutputEntityMenuAction(token, item.dataset.outputEntityAction);
+      },
+      refocusComposer: false,
+    });
+    if (handle) _outputEntityMenuPressableHandles.push(handle);
+  });
+  const bindOutsideClickClose = (typeof importedBindOutsideClickClose === 'function' && importedBindOutsideClickClose)
+    || _outputGlobalFunction('bindOutsideClickClose');
+  _outputEntityMenuOutsideClickHandle = bindOutsideClickClose?.(menu, {
+    isOpen: () => _outputEntityMenu === menu,
+    onClose: () => _closeOutputEntityMenu(),
+    triggers: token,
+  }) || null;
   const firstItem = menu.querySelector('[data-output-entity-action]');
   if (firstItem) firstItem.focus({ preventScroll: true });
 }
-
-let _outputEntityLongPressTimer = null;
 
 function _bindOutputEntityTokenEvents() {
   if (typeof document === 'undefined' || document._darklabOutputEntityTokensBound) return;
@@ -956,36 +1084,18 @@ function _bindOutputEntityTokenEvents() {
       if (_hasOutputTextSelection()) return;
       event.preventDefault();
       event.stopPropagation();
-      _openAtlasForOutputEntity(token);
-    } else {
-      _closeOutputEntityMenu();
+      const rect = token.getBoundingClientRect();
+      _showOutputEntityMenu(token, rect.left, rect.bottom + 6);
     }
   });
-  document.addEventListener('contextmenu', (event) => {
-    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
-    if (!token) return;
-    event.preventDefault();
-    event.stopPropagation();
-    _showOutputEntityMenu(token, event.clientX, event.clientY);
-  });
-  document.addEventListener('touchstart', (event) => {
-    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
-    if (!token) return;
-    const touch = event.touches && event.touches[0];
-    clearTimeout(_outputEntityLongPressTimer);
-    _outputEntityLongPressTimer = setTimeout(() => {
-      _showOutputEntityMenu(token, touch ? touch.clientX : 12, touch ? touch.clientY : 12);
-    }, 550);
-  }, { passive: true });
-  ['touchend', 'touchmove', 'touchcancel'].forEach(name => {
-    document.addEventListener(name, () => clearTimeout(_outputEntityLongPressTimer), { passive: true });
-  });
+  document.addEventListener('contextmenu', () => _closeOutputEntityMenu());
   document.addEventListener('keydown', (event) => {
     const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
     if (token && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       event.stopPropagation();
-      _openAtlasForOutputEntity(token);
+      const rect = token.getBoundingClientRect();
+      _showOutputEntityMenu(token, rect.left, rect.bottom + 6);
       return;
     }
     if (token && (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) {
@@ -997,6 +1107,27 @@ function _bindOutputEntityTokenEvents() {
     }
     if (event.key === 'Escape') _closeOutputEntityMenu({ restoreFocus: true });
   });
+  document.addEventListener('input', (event) => {
+    if (event.target?.matches?.('#cmd, #mobile-cmd')) _closeOutputEntityMenu();
+  });
+  document.addEventListener('app:tab-activated', () => _closeOutputEntityMenu());
+  document.addEventListener('scroll', (event) => {
+    if (_outputEntityMenu?.contains?.(event.target)) return;
+    _closeOutputEntityMenu();
+  }, true);
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', () => _closeOutputEntityMenu());
+    window.visualViewport?.addEventListener?.('resize', () => _closeOutputEntityMenu());
+    window.visualViewport?.addEventListener?.('scroll', () => _closeOutputEntityMenu());
+  }
+  if (typeof MutationObserver === 'function' && document.body) {
+    const observer = new MutationObserver(() => {
+      if (_outputEntityMenuOpener && !document.contains(_outputEntityMenuOpener)) {
+        _closeOutputEntityMenu();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 }
 
 _bindOutputEntityTokenEvents();
@@ -1852,6 +1983,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
     target: String(line && line.target || ''),
     entities: _normalizeOutputEntities(line && line.entities),
   })) : [];
+  if (_outputEntityMenuOpener && out.contains(_outputEntityMenuOpener)) _closeOutputEntityMenu();
   out.innerHTML = '';
   resetAnsiRendererForTab(tabId);
   tab.rawLines = lines;
@@ -2129,6 +2261,7 @@ if (typeof window !== 'undefined') {
 
 export {
   _cancelPendingOutputBatch,
+  _closeOutputEntityMenu,
   _maybeMountDeferredPrompt,
   _refreshFollowingOutputsAfterLayout,
   _renderAnsiWithEntityTokens,

@@ -6,11 +6,37 @@ import { ensurePromptReady, runCommand } from './helpers.js'
 
 const CMD = 'hostname'
 
+async function appendEntityOutput(page, {
+  display = 'IP.DARKLAB.SH',
+  canonical = 'ip.darklab.sh',
+} = {}) {
+  await page.evaluate(({ displayValue, canonicalValue }) => {
+    clearTab(activeTabId)
+    const prefix = 'scan '
+    appendLine(`${prefix}${displayValue}`, '', activeTabId, {
+      command_root: 'nmap',
+      target: canonicalValue,
+      entities: [{
+        type: 'domain',
+        value: displayValue,
+        canonical_value: canonicalValue,
+        start: prefix.length,
+        end: prefix.length + displayValue.length,
+      }],
+    })
+  }, { displayValue: display, canonicalValue: canonical })
+}
+
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: () => Promise.resolve() },
+        value: {
+          writeText: (value) => {
+            window.__copiedEntity = value
+            return Promise.resolve()
+          },
+        },
         configurable: true,
       })
     })
@@ -183,6 +209,130 @@ test.describe('output actions', () => {
     })
 
     await expect(page.locator('#search-summary-btn')).toBeDisabled()
+  })
+
+  test('entity text stays selectable and deliberate activation opens the accessible action menu', async ({ page }) => {
+    await appendEntityOutput(page)
+    const token = page.locator('.tab-panel.active .atlas-entity-token')
+    const menu = page.locator('.atlas-output-entity-menu')
+
+    const selectedText = await token.evaluate((node) => {
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      return selection.toString()
+    })
+    expect(selectedText).toBe('IP.DARKLAB.SH')
+    await expect(menu).toHaveCount(0)
+
+    await token.click({ button: 'right' })
+    await expect(menu).toHaveCount(0)
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
+
+    await token.click()
+    await expect(menu).toBeVisible()
+    await expect(menu.locator('[role="menuitem"]')).toHaveText([
+      'Open in Atlas',
+      'Copy to Clipboard',
+      'Insert into command',
+    ])
+    await expect(token).toHaveAttribute('aria-expanded', 'true')
+    await expect(token).toHaveAttribute('aria-controls', /atlas-output-entity-menu-/)
+    const positions = await Promise.all([token.boundingBox(), menu.boundingBox()])
+    expect(positions[0]).not.toBeNull()
+    expect(positions[1]).not.toBeNull()
+    expect(positions[1].x).toBeGreaterThanOrEqual(8)
+    expect(positions[1].y).toBeGreaterThanOrEqual(8)
+
+    await menu.locator('[data-output-entity-action="copy-value"]').click()
+    await expect(menu).toHaveCount(0)
+    await expect(page.locator('#permalink-toast')).toContainText('Entity copied')
+    await expect(page.evaluate(() => window.__copiedEntity)).resolves.toBe('ip.darklab.sh')
+
+    await token.focus()
+    await token.press('Enter')
+    await expect(menu).toBeVisible()
+    await expect(menu.locator('[data-output-entity-action="open-atlas"]')).toBeFocused()
+    await page.keyboard.press('End')
+    await expect(menu.locator('[data-output-entity-action="insert-command"]')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(token).toBeFocused()
+    await expect(token).toHaveAttribute('aria-expanded', 'false')
+
+    await token.click()
+    await menu.locator('[data-output-entity-action="open-atlas"]').click()
+    await expect(menu).toHaveCount(0)
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  })
+
+  test('entity actions insert at the command selection without running it and close on shell typing', async ({ page }) => {
+    await appendEntityOutput(page)
+    const token = page.locator('.tab-panel.active .atlas-entity-token')
+    const menu = page.locator('.atlas-output-entity-menu')
+    const input = page.locator('#cmd')
+    const lineCount = await page.locator('.tab-panel.active .output .line').count()
+
+    await page.evaluate(() => setComposerValue('ping TARGET now', 5, 11))
+    await token.click()
+    // The insertion path itself is covered through a real tap below. Dispatch
+    // here so Playwright's pre-click scroll-into-view step doesn't exercise the
+    // separate scroll-to-dismiss contract before the fixed menu item activates.
+    await menu.locator('[data-output-entity-action="insert-command"]').dispatchEvent('click')
+    await expect(input).toHaveValue('ping ip.darklab.sh now')
+    await expect(input).toBeFocused()
+    await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(lineCount)
+
+    await token.click()
+    await expect(menu).toBeVisible()
+    await input.focus()
+    await input.press('x')
+    await expect(menu).toHaveCount(0)
+  })
+})
+
+test.describe('mobile output entity actions', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  })
+
+  test('tap opens a viewport-safe menu and inserts into the mobile composer', async ({ page }) => {
+    await page.goto('/')
+    await ensurePromptReady(page, { cancelWelcome: true })
+    await expect.poll(
+      () => page.evaluate(() => document.body.classList.contains('mobile-terminal-mode')),
+    ).toBe(true)
+    await appendEntityOutput(page)
+
+    const token = page.locator('.tab-panel.active .atlas-entity-token')
+    const menu = page.locator('.atlas-output-entity-menu')
+    const input = page.locator('#mobile-cmd')
+    await page.evaluate(() => setComposerValue('curl TARGET/path', 5, 11))
+
+    await token.tap()
+    await expect(menu).toBeVisible()
+    const box = await menu.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box.x).toBeGreaterThanOrEqual(8)
+    expect(box.x + box.width).toBeLessThanOrEqual(382)
+    expect(box.y).toBeGreaterThanOrEqual(8)
+    expect(box.y + box.height).toBeLessThanOrEqual(836)
+
+    await menu.locator('[data-output-entity-action="insert-command"]').tap()
+    await expect(input).toHaveValue('curl ip.darklab.sh/path')
+    await expect(input).toBeFocused()
+    await expect(menu).toHaveCount(0)
+
+    await token.tap()
+    await expect(menu).toBeVisible()
+    await input.tap()
+    await input.press('x')
+    await expect(menu).toHaveCount(0)
   })
 })
 

@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Make shell-output entities easier to select and reuse](#make-shell-output-entities-easier-to-select-and-reuse)
   - [Establish pseudonymous principals and hardened credentials](#establish-pseudonymous-principals-and-hardened-credentials)
   - [Add a restricted token deployment profile](#add-a-restricted-token-deployment-profile)
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
@@ -33,9 +32,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** The planned v3.0.0 release includes the shell-output entity menu, pseudonymous principal and credential model, restricted deployment profile, and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.0 delivery scope.** The remaining planned work for v3.0.0 covers the pseudonymous principal and credential model, restricted deployment profile, and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
 
-Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Start with the shell-output entity menu. For authentication, land the production-realistic test-identity pre-work and final contract decisions before schema work; split the principal roadmap into its numbered phases and split Phase 3A further into bounded subsystem conversions. Additive foundations may merge early, but do not leave personal ownership partly resolved from session tokens and partly from principals between merge requests. Treat the semantic ownership switch, public interfaces, UI, and legacy removal as coordinated slices with explicit transition tests.
+Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. For authentication, land the production-realistic test-identity pre-work and final contract decisions before schema work; split the principal roadmap into its numbered phases and split Phase 3A further into bounded subsystem conversions. Additive foundations may merge early, but do not leave personal ownership partly resolved from session tokens and partly from principals between merge requests. Treat the semantic ownership switch, public interfaces, UI, and legacy removal as coordinated slices with explicit transition tests.
 
 After the restricted deployment profile merges, exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
 
@@ -91,28 +90,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-### Make shell-output entities easier to select and reuse
-
-Discovered entities in shell output are visually useful, but their normal click action opens Atlas immediately. That makes it easy to leave the shell by accident when the intent was to select an IP, domain, URL, or other value for the next command. Keep entity tokens interactive, but make their first action a small, nearby menu that supports both investigation and reuse.
-
-- [ ] Replace direct click, tap, `Enter`, and `Space` navigation with a compact menu anchored next to the entity token. Keep the primary menu deliberately small:
-  - **Open in Atlas** opens the entity's Atlas profile.
-  - **Copy to Clipboard** copies the canonical entity value and confirms success without exposing a second prompt.
-  - **Insert into command** is the recommended third action. Insert the value at the current selection or caret in the visible desktop or mobile composer through shared `composerState`, restore focus, and never submit the command automatically.
-- [ ] Reconcile the existing six-action right-click, keyboard-context-menu, and long-press menu with the new primary menu. Keep deeper work such as editing metadata, adding the entity to a Project, and refreshing intelligence in Atlas instead of crowding this small reuse menu; remove redundant output-only actions unless testing shows a clear need for them.
-- [ ] Preserve normal text interaction. Dragging across an entity or finishing a text selection must not open the menu, and right-click or touch selection must retain the browser's normal copy and selection affordances rather than being captured only for app actions.
-- [ ] Close the menu when the user clicks or taps outside it, types into either shell composer, presses `Escape`, chooses an action, opens another entity menu, changes tabs, or removes or rerenders the output that owns the token. Clicking inside the menu must not close it before the selected action runs.
-- [ ] Reuse the app's dropdown surface, pressable, focus, clipboard, and outside-click helpers. Keep one menu open at a time, clamp it to the visible viewport without covering the entity when space allows, and use the existing mobile action-sheet pattern only when an anchored menu cannot remain usable on a narrow screen.
-- [ ] Keep the interaction accessible: expose the token's menu state with the appropriate ARIA relationship, support arrow keys plus `Home` and `End`, return focus predictably after `Escape`, and announce copy failures and successes through the existing toast/status path. Pointer activation should not steal focus from someone who is selecting text.
-- [ ] Apply the same contract wherever the shared interactive entity renderer is used in the live transcript and History Run Details. Keep static HTML/PDF exports and permalink output selectable and non-interactive.
-
-**Acceptance criteria**
-
-- [ ] Mouse, touch, and keyboard users can select entity text without an accidental Atlas navigation or menu opening, while a deliberate activation always opens the compact menu next to the entity.
-- [ ] Open, copy, and insert actions use the canonical value and work for every supported entity type. Insert respects the active composer selection, adds no surprising whitespace, works on desktop and mobile, and does not execute or save a command by itself.
-- [ ] Outside interaction and shell typing close the menu in both desktop and mobile composer modes, and no detached menu remains after tab changes, transcript trimming, History Run Details rerenders, scrolling, or viewport changes.
-- [ ] Unit coverage pins selection suppression, action wiring, keyboard navigation, positioning, and every close path. Playwright covers the real live-output flow in source and bundle modes, including mobile behavior, and maintained documentation, test counts, generated assets, and `CHANGELOG.md` are updated when the feature ships.
 
 ### Establish pseudonymous principals and hardened credentials
 
