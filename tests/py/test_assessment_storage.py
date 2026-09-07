@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from conftest import build_test_config, make_test_app
+from identity_helpers import anonymous_session_id
 from core.database import db_connect, db_init
 from services.assessments.contracts import (
     AssessmentConflict,
@@ -95,7 +96,7 @@ def project_factory(monkeypatch: pytest.MonkeyPatch):
     )
 
     def factory(*, session_id: str = "", team_id: str = "") -> tuple[str, dict[str, object]]:
-        session = session_id or "assessment-storage-" + uuid.uuid4().hex
+        session = session_id or anonymous_session_id("assessment-storage-" + uuid.uuid4().hex)
         project = create_project(session, {"name": "Assessment " + uuid.uuid4().hex[:8]}, team_id=team_id)
         assert project is not None
         created.append((session, str(project["id"]), team_id))
@@ -321,7 +322,7 @@ def test_create_cycle_enforces_cycle_and_check_quotas_in_the_insert_transaction(
             "max_project_assessment_checks_per_project": 10,
         }),
     )
-    owner_session = "assessment-owner-quota-" + uuid.uuid4().hex
+    owner_session = anonymous_session_id("assessment-owner-quota-" + uuid.uuid4().hex)
     _, first_project = project_factory(session_id=owner_session)
     _, second_project = project_factory(session_id=owner_session)
     _add_target(owner_session, str(first_project["id"]), "domain", "one.example")

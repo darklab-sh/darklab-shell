@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import uuid
@@ -15,6 +14,7 @@ from unittest import mock
 import pytest
 
 from conftest import reusable_test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 from core.database import db_connect
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.storage import create_assessment_cycle
@@ -95,13 +95,7 @@ def _table_counts() -> tuple[int, int, int]:
 
 
 def _register_token(token: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-            (token, now, ""),
-        )
-        conn.commit()
+    register_durable_session_token(token)
 
 
 def _create_protected_http_profile(
@@ -241,7 +235,7 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
 
 
 def test_probe_routes_fail_closed_for_foreign_archived_and_value_only_plans(client):
-    session_id = "probe-owner-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("probe-owner-" + uuid.uuid4().hex)
     foreign_id = "probe-foreign-" + uuid.uuid4().hex
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
@@ -503,7 +497,7 @@ def _probe_plan(client, session_id: str, project_id: str, entity_id: str) -> dic
 def test_probe_launch_revalidates_and_binds_the_requested_project_and_tab(
     client, monkeypatch
 ):
-    session_id = "probe-launch-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("probe-launch-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     plan = _probe_plan(client, session_id, project["id"], target["id"])
@@ -677,7 +671,7 @@ def test_probe_launch_itself_writes_no_cycle_evidence_but_finalized_run_can_cove
     client,
     monkeypatch,
 ):
-    session_id = "probe-coverage-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("probe-coverage-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     profile = {
@@ -781,7 +775,7 @@ def test_probe_launch_itself_writes_no_cycle_evidence_but_finalized_run_can_cove
 def test_probe_launch_rejects_stale_targets_unknown_fields_and_unavailable_broker(
     client, monkeypatch
 ):
-    session_id = "probe-launch-errors-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("probe-launch-errors-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     plan = _probe_plan(client, session_id, project["id"], target["id"])

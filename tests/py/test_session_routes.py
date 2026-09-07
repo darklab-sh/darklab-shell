@@ -10,6 +10,7 @@ import uuid
 
 import config as app_config
 from conftest import reusable_test_app
+from identity_helpers import anonymous_session_id
 from core.database import DB_PATH
 from services.teams.storage import token_hash
 import services.workspace.files as workspace
@@ -113,7 +114,7 @@ class TestSessionTokenVerify:
     def test_verify_returns_true_for_uuid(self):
         """UUID anonymous sessions are never in session_tokens but are always valid."""
         client = get_client()
-        session_id = "a1b2c3d4-0000-4000-8000-000000000001"
+        session_id = anonymous_session_id("a1b2c3d4-0000-4000-8000-000000000001")
         resp = client.post("/session/token/verify", json={"token": session_id})
         assert resp.status_code == 200
         assert json.loads(resp.data)["exists"] is True
@@ -349,7 +350,7 @@ class TestSessionMigrate:
 
     def test_returns_200_with_valid_request(self):
         client = get_client()
-        from_id = "migrate-from-valid-test"
+        from_id = anonymous_session_id("migrate-from-valid-test")
         to_id = str(__import__("uuid").uuid4())
         resp = client.post(
             "/session/migrate",
@@ -365,7 +366,7 @@ class TestSessionMigrate:
         resp = client.post(
             "/session/migrate",
             json={"from_session_id": "some-other-session", "to_session_id": "tok_abc"},
-            headers={"X-Session-ID": "actual-current-session"},
+            headers={"X-Session-ID": anonymous_session_id('actual-current-session')},
         )
         assert resp.status_code == 403
 
@@ -374,32 +375,34 @@ class TestSessionMigrate:
         resp = client.post(
             "/session/migrate",
             json={"to_session_id": "tok_abc"},
-            headers={"X-Session-ID": "s"},
+            headers={"X-Session-ID": anonymous_session_id('s')},
         )
         assert resp.status_code == 400
 
     def test_rejects_missing_to_field(self):
         client = get_client()
+        session_id = anonymous_session_id("s")
         resp = client.post(
             "/session/migrate",
-            json={"from_session_id": "s"},
-            headers={"X-Session-ID": "s"},
+            json={"from_session_id": session_id},
+            headers={"X-Session-ID": session_id},
         )
         assert resp.status_code == 400
 
     def test_rejects_equal_session_ids(self):
         client = get_client()
+        session_id = anonymous_session_id("same-id")
         resp = client.post(
             "/session/migrate",
-            json={"from_session_id": "same-id", "to_session_id": "same-id"},
-            headers={"X-Session-ID": "same-id"},
+            json={"from_session_id": session_id, "to_session_id": session_id},
+            headers={"X-Session-ID": session_id},
         )
         assert resp.status_code == 400
 
     def test_rejects_unissued_tok_destination(self):
         """Migrating to a tok_ token that is not in session_tokens must be rejected."""
         client = get_client()
-        from_id = "migrate-tok-check-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-tok-check-" + __import__("uuid").uuid4().hex[:8])
         fake_tok = "tok_" + "f" * 32
         resp = client.post(
             "/session/migrate",
@@ -412,7 +415,7 @@ class TestSessionMigrate:
     def test_allows_uuid_destination(self):
         """Migrating to a UUID (anonymous session) must still be accepted."""
         client = get_client()
-        from_id = "migrate-uuid-dst-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-uuid-dst-" + __import__("uuid").uuid4().hex[:8])
         uuid_dst = str(__import__("uuid").uuid4())
         resp = client.post(
             "/session/migrate",
@@ -423,7 +426,7 @@ class TestSessionMigrate:
 
     def test_migrates_runs(self):
         client = get_client()
-        from_id = "migrate-runs-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-runs-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_runs(from_id, count=3)
 
@@ -438,7 +441,7 @@ class TestSessionMigrate:
 
     def test_migrates_snapshots(self):
         client = get_client()
-        from_id = "migrate-snaps-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-snaps-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_snapshots(from_id, count=2)
 
@@ -453,7 +456,7 @@ class TestSessionMigrate:
 
     def test_returns_correct_counts(self):
         client = get_client()
-        from_id = "migrate-counts-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-counts-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_runs(from_id, count=2)
         self._seed_snapshots(from_id, count=1)
@@ -495,8 +498,8 @@ class TestSessionMigrate:
 
     def test_does_not_migrate_other_sessions(self):
         client = get_client()
-        from_id = "migrate-own-" + __import__("uuid").uuid4().hex[:8]
-        bystander_id = "bystander-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-own-" + __import__("uuid").uuid4().hex[:8])
+        bystander_id = anonymous_session_id("bystander-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_runs(from_id, count=2)
         self._seed_runs(bystander_id, count=3)
@@ -519,7 +522,7 @@ class TestSessionMigrate:
 
     def test_migrates_starred_commands(self):
         client = get_client()
-        from_id = "migrate-stars-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-stars-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_stars(from_id, ["nmap target", "dig example.com"])
 
@@ -534,7 +537,7 @@ class TestSessionMigrate:
 
     def test_migrate_returns_migrated_stars_count(self):
         client = get_client()
-        from_id = "migrate-stars-count-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-stars-count-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_stars(from_id, ["cmd1", "cmd2", "cmd3"])
 
@@ -548,7 +551,7 @@ class TestSessionMigrate:
 
     def test_migrate_stars_no_duplicates_in_destination(self):
         client = get_client()
-        from_id = "migrate-stars-dedup-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-stars-dedup-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_stars(from_id, ["shared-cmd", "from-only"])
         self._seed_stars(to_id, ["shared-cmd", "dest-only"])
@@ -570,7 +573,7 @@ class TestSessionMigrate:
         from the source.
         """
         client = get_client()
-        from_id = "migrate-stars-insert-ct-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-stars-insert-ct-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         # source has 3, destination already has 1 overlap
         self._seed_stars(from_id, ["shared", "from-only-1", "from-only-2"])
@@ -587,7 +590,7 @@ class TestSessionMigrate:
 
     def test_migrates_session_preferences_when_destination_has_none(self):
         client = get_client()
-        from_id = "migrate-prefs-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-prefs-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
         self._seed_preferences(from_id, prefs)
@@ -612,7 +615,7 @@ class TestSessionMigrate:
 
     def test_migrates_session_variables(self):
         client = get_client()
-        from_id = "migrate-vars-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-vars-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_variable(from_id, "HOST", "ip.darklab.sh")
 
@@ -632,7 +635,7 @@ class TestSessionMigrate:
 
     def test_migrates_user_workflows(self):
         client = get_client()
-        from_id = "migrate-workflows-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-workflows-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_workflow(from_id, "usr_migrate_test")
 
@@ -650,7 +653,7 @@ class TestSessionMigrate:
 
     def test_migrates_project_workspace_records(self):
         client = get_client()
-        from_id = "migrate-projects-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-projects-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_project_workspace_records(from_id)
         with sqlite3.connect(DB_PATH) as conn:
@@ -762,7 +765,7 @@ class TestSessionMigrate:
 
     def test_migrates_recent_values_and_merges_destination(self):
         client = get_client()
-        from_id = "migrate-recents-from-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-recents-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         self._seed_recent_values(from_id, [
             ("domain", "alpha.example.com", "2026-05-01 10:00:00.000001", 2),
@@ -800,7 +803,7 @@ class TestSessionMigrate:
 
     def test_migrate_keeps_existing_destination_session_preferences(self):
         client = get_client()
-        from_id = "migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         src_prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
         dst_prefs = {"pref_theme_name": "darklab_obsidian.yaml", "pref_timestamps": "off"}
@@ -822,7 +825,7 @@ class TestSessionMigrate:
 
     def test_migrate_merges_active_project_preference_into_existing_destination_preferences(self):
         client = get_client()
-        from_id = "migrate-active-project-src-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-active-project-src-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         project_id = "prj_active_pref_migrate"
         self._seed_project_workspace_records(from_id, project_id=project_id, slug="active-pref")
@@ -857,7 +860,7 @@ class TestSessionMigrate:
     def test_migrate_workspace_returns_zero_without_source_workspace(self, tmp_path, monkeypatch):
         client = get_client()
         self._enable_workspace(monkeypatch, tmp_path)
-        from_id = "migrate-ws-none-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-ws-none-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
 
         resp = client.post(
@@ -874,7 +877,7 @@ class TestSessionMigrate:
     def test_migrates_source_workspace_files_to_destination(self, tmp_path, monkeypatch):
         client = get_client()
         cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = "migrate-ws-src-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-ws-src-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         workspace.write_workspace_text_file(from_id, "targets.txt", "darklab.sh\n", cfg)
         workspace.create_workspace_directory(from_id, "reports/empty", cfg)
@@ -897,7 +900,7 @@ class TestSessionMigrate:
     def test_migrate_workspace_keeps_destination_only_files(self, tmp_path, monkeypatch):
         client = get_client()
         cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = "migrate-ws-dst-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-ws-dst-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         workspace.write_workspace_text_file(to_id, "existing.txt", "keep\n", cfg)
 
@@ -916,7 +919,7 @@ class TestSessionMigrate:
     def test_migrate_workspace_skips_conflicting_files_without_overwrite(self, tmp_path, monkeypatch):
         client = get_client()
         cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = "migrate-ws-conflict-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-ws-conflict-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
         workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
@@ -939,7 +942,7 @@ class TestSessionMigrate:
     def test_migrate_workspace_file_metadata_only_for_moved_files(self, tmp_path, monkeypatch):
         client = get_client()
         cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = "migrate-ws-meta-src-" + __import__("uuid").uuid4().hex[:8]
+        from_id = anonymous_session_id("migrate-ws-meta-src-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
         workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
         workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
@@ -1026,7 +1029,7 @@ class TestSessionWorkflows:
 
     def test_create_lists_and_returns_normalized_workflow(self, monkeypatch):
         client = get_client()
-        session_id = "workflow-create-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("workflow-create-" + __import__("uuid").uuid4().hex[:8])
         launched: list[str] = []
         monkeypatch.setattr(
             "blueprints.workflows.launch_execution_step",
@@ -1099,7 +1102,7 @@ class TestSessionWorkflows:
 
     def test_rejects_undeclared_workflow_variables(self):
         client = get_client()
-        session_id = "workflow-invalid-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("workflow-invalid-" + __import__("uuid").uuid4().hex[:8])
         payload = self._payload()
         payload["inputs"] = []
 
@@ -1114,7 +1117,7 @@ class TestSessionWorkflows:
 
     def test_create_and_update_return_field_level_definition_errors(self):
         client = get_client()
-        session_id = "workflow-fields-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("workflow-fields-" + __import__("uuid").uuid4().hex[:8])
         invalid_create = {
             **self._payload(),
             "version": 2,
@@ -1213,8 +1216,8 @@ class TestSessionWorkflows:
 
     def test_update_and_delete_are_session_scoped(self):
         client = get_client()
-        session_id = "workflow-update-" + __import__("uuid").uuid4().hex[:8]
-        other_session_id = "workflow-other-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("workflow-update-" + __import__("uuid").uuid4().hex[:8])
+        other_session_id = anonymous_session_id("workflow-other-" + __import__("uuid").uuid4().hex[:8])
         created = json.loads(client.post(
             "/session/workflows",
             json=self._payload(),
@@ -1260,7 +1263,7 @@ class TestSessionRecentValues:
 
     def test_get_returns_empty_list_for_new_session(self):
         client = get_client()
-        session_id = "recent-empty-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("recent-empty-" + __import__("uuid").uuid4().hex[:8])
         resp = client.get("/session/recent-values", headers={"X-Session-ID": session_id})
 
         assert resp.status_code == 200
@@ -1273,7 +1276,7 @@ class TestSessionRecentValues:
 
     def test_post_normalizes_filters_and_caps_values_per_kind(self):
         client = get_client()
-        session_id = "recent-save-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("recent-save-" + __import__("uuid").uuid4().hex[:8])
         valid = [f"d{i}.example.com" for i in range(12)]
         resp = client.post(
             "/session/recent-values",
@@ -1321,8 +1324,8 @@ class TestSessionRecentValues:
 
     def test_post_is_session_scoped(self):
         client = get_client()
-        session_a = "recent-scope-a-" + __import__("uuid").uuid4().hex[:8]
-        session_b = "recent-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        session_a = anonymous_session_id("recent-scope-a-" + __import__("uuid").uuid4().hex[:8])
+        session_b = anonymous_session_id("recent-scope-b-" + __import__("uuid").uuid4().hex[:8])
 
         client.post(
             "/session/recent-values",
@@ -1335,7 +1338,7 @@ class TestSessionRecentValues:
 
     def test_post_updates_existing_value_count_and_recency(self):
         client = get_client()
-        session_id = "recent-upsert-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("recent-upsert-" + __import__("uuid").uuid4().hex[:8])
 
         client.post(
             "/session/recent-values",
@@ -1364,7 +1367,7 @@ class TestSessionRecentValues:
 
     def test_post_rejects_non_list_payload(self):
         client = get_client()
-        session_id = "recent-invalid-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("recent-invalid-" + __import__("uuid").uuid4().hex[:8])
         resp = client.post(
             "/session/recent-values",
             json={"values": "alpha.example.com"},
@@ -1375,7 +1378,7 @@ class TestSessionRecentValues:
 
     def test_get_rejects_unknown_kind(self):
         client = get_client()
-        session_id = "recent-invalid-kind-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("recent-invalid-kind-" + __import__("uuid").uuid4().hex[:8])
 
         resp = client.get("/session/recent-values?kind=cve", headers={"X-Session-ID": session_id})
 
@@ -1400,7 +1403,7 @@ class TestSessionRunCount:
 
     def test_returns_zero_for_empty_session(self):
         client = get_client()
-        session_id = "run-count-empty-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("run-count-empty-" + __import__("uuid").uuid4().hex[:8])
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
         assert resp.status_code == 200
         assert json.loads(resp.data)["count"] == 0
@@ -1408,7 +1411,7 @@ class TestSessionRunCount:
 
     def test_returns_true_count(self):
         client = get_client()
-        session_id = "run-count-seeded-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("run-count-seeded-" + __import__("uuid").uuid4().hex[:8])
         self._seed_runs(session_id, count=7)
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
         assert json.loads(resp.data)["count"] == 7
@@ -1416,15 +1419,15 @@ class TestSessionRunCount:
     def test_is_uncapped_beyond_history_panel_limit(self):
         """The count must not be capped by history_panel_limit (default 50)."""
         client = get_client()
-        session_id = "run-count-uncapped-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("run-count-uncapped-" + __import__("uuid").uuid4().hex[:8])
         self._seed_runs(session_id, count=75)
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
         assert json.loads(resp.data)["count"] == 75
 
     def test_is_scoped_to_session(self):
         client = get_client()
-        session_a = "run-count-scope-a-" + __import__("uuid").uuid4().hex[:8]
-        session_b = "run-count-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        session_a = anonymous_session_id("run-count-scope-a-" + __import__("uuid").uuid4().hex[:8])
+        session_b = anonymous_session_id("run-count-scope-b-" + __import__("uuid").uuid4().hex[:8])
         self._seed_runs(session_a, count=3)
         self._seed_runs(session_b, count=5)
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_a})
@@ -1432,7 +1435,7 @@ class TestSessionRunCount:
 
     def test_returns_user_workflow_count(self):
         client = get_client()
-        session_id = "run-count-workflows-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("run-count-workflows-" + __import__("uuid").uuid4().hex[:8])
         client.post(
             "/session/workflows",
             headers={"X-Session-ID": session_id},
@@ -1445,7 +1448,7 @@ class TestSessionRunCount:
 
     def test_returns_recent_value_count(self):
         client = get_client()
-        session_id = "run-count-recents-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("run-count-recents-" + __import__("uuid").uuid4().hex[:8])
         client.post(
             "/session/recent-values",
             headers={"X-Session-ID": session_id},
@@ -1482,7 +1485,7 @@ class TestSessionStarred:
 
     def test_get_returns_empty_list_for_new_session(self):
         client = get_client()
-        session_id = "get-stars-new-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("get-stars-new-" + __import__("uuid").uuid4().hex[:8])
         resp = client.get("/session/starred", headers={"X-Session-ID": session_id})
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -1490,7 +1493,7 @@ class TestSessionStarred:
 
     def test_get_returns_starred_commands(self):
         client = get_client()
-        session_id = "get-stars-existing-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("get-stars-existing-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
@@ -1503,8 +1506,8 @@ class TestSessionStarred:
 
     def test_get_is_scoped_to_session(self):
         client = get_client()
-        session_a = "get-stars-scope-a-" + __import__("uuid").uuid4().hex[:8]
-        session_b = "get-stars-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        session_a = anonymous_session_id("get-stars-scope-a-" + __import__("uuid").uuid4().hex[:8])
+        session_b = anonymous_session_id("get-stars-scope-b-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
@@ -1519,7 +1522,7 @@ class TestSessionStarred:
 
     def test_post_adds_starred_command(self):
         client = get_client()
-        session_id = "post-stars-add-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("post-stars-add-" + __import__("uuid").uuid4().hex[:8])
         resp = client.post(
             "/session/starred",
             json={"command": "dig example.com"},
@@ -1531,7 +1534,7 @@ class TestSessionStarred:
 
     def test_post_is_idempotent(self):
         client = get_client()
-        session_id = "post-stars-idem-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("post-stars-idem-" + __import__("uuid").uuid4().hex[:8])
         client.post(
             "/session/starred",
             json={"command": "ping target"},
@@ -1549,7 +1552,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={},
-            headers={"X-Session-ID": "post-stars-no-cmd"},
+            headers={"X-Session-ID": anonymous_session_id('post-stars-no-cmd')},
         )
         assert resp.status_code == 400
 
@@ -1558,7 +1561,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={"command": ""},
-            headers={"X-Session-ID": "post-stars-empty-cmd"},
+            headers={"X-Session-ID": anonymous_session_id('post-stars-empty-cmd')},
         )
         assert resp.status_code == 400
 
@@ -1566,7 +1569,7 @@ class TestSessionStarred:
 
     def test_delete_removes_one_command(self):
         client = get_client()
-        session_id = "del-stars-one-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("del-stars-one-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             for cmd in ["keep", "remove"]:
                 conn.execute(
@@ -1585,7 +1588,7 @@ class TestSessionStarred:
 
     def test_delete_one_is_idempotent(self):
         client = get_client()
-        session_id = "del-stars-idem-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("del-stars-idem-" + __import__("uuid").uuid4().hex[:8])
         resp = client.delete(
             "/session/starred",
             json={"command": "nonexistent"},
@@ -1596,8 +1599,8 @@ class TestSessionStarred:
 
     def test_delete_one_only_affects_own_session(self):
         client = get_client()
-        session_a = "del-stars-scope-a-" + __import__("uuid").uuid4().hex[:8]
-        session_b = "del-stars-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        session_a = anonymous_session_id("del-stars-scope-a-" + __import__("uuid").uuid4().hex[:8])
+        session_b = anonymous_session_id("del-stars-scope-b-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             for sid in [session_a, session_b]:
                 conn.execute(
@@ -1617,7 +1620,7 @@ class TestSessionStarred:
 
     def test_delete_all_clears_session_stars(self):
         client = get_client()
-        session_id = "del-stars-all-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("del-stars-all-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             for cmd in ["cmd1", "cmd2", "cmd3"]:
                 conn.execute(
@@ -1635,8 +1638,8 @@ class TestSessionStarred:
 
     def test_delete_all_does_not_affect_other_sessions(self):
         client = get_client()
-        session_a = "del-all-scope-a-" + __import__("uuid").uuid4().hex[:8]
-        session_b = "del-all-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        session_a = anonymous_session_id("del-all-scope-a-" + __import__("uuid").uuid4().hex[:8])
+        session_b = anonymous_session_id("del-all-scope-b-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             for sid in [session_a, session_b]:
                 conn.execute(
@@ -1659,16 +1662,16 @@ class TestSessionTokenInfo:
         client = get_client()
         resp = client.get(
             "/session/token/info",
-            headers={"X-Session-ID": "a1b2c3d4-0000-0000-0000-000000000001"},
+            headers={"X-Session-ID": anonymous_session_id("session-token-info-anonymous")},
         )
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["token"] is None
         assert data["created"] is None
 
-    def test_returns_token_for_tok_session(self):
+    def test_returns_token_for_tok_session(self, durable_identity_factory):
         client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        token = durable_identity_factory("session-token-info").value
         resp = client.get("/session/token/info", headers={"X-Session-ID": token})
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -1704,7 +1707,7 @@ class TestSessionTokenInfo:
 class TestSessionPreferences:
     def test_returns_empty_preferences_when_none_saved(self):
         client = get_client()
-        session_id = "prefs-empty-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("prefs-empty-" + __import__("uuid").uuid4().hex[:8])
         resp = client.get("/session/preferences", headers={"X-Session-ID": session_id})
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -1713,7 +1716,7 @@ class TestSessionPreferences:
 
     def test_persists_and_returns_current_session_preferences(self):
         client = get_client()
-        session_id = "prefs-save-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("prefs-save-" + __import__("uuid").uuid4().hex[:8])
         payload = {
             "preferences": {
                 "pref_theme_name": "theme_light_blue",
@@ -1738,7 +1741,7 @@ class TestSessionPreferences:
 
     def test_ignores_unknown_session_preference_keys(self):
         client = get_client()
-        session_id = "prefs-filter-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("prefs-filter-" + __import__("uuid").uuid4().hex[:8])
         resp = client.post(
             "/session/preferences",
             json={

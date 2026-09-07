@@ -13,6 +13,7 @@ from typing import Any
 
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
 from services.teams import storage as team_storage
@@ -47,12 +48,7 @@ def _schedule_client(monkeypatch, tmp_path):
 
 
 def _register_token(token: str):
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-            (token, datetime.now(timezone.utc).isoformat(), ""),
-        )
-        conn.commit()
+    register_durable_session_token(token)
 
 
 def _create_schedule(client, token: str, **payload):
@@ -308,7 +304,10 @@ class TestSchedulesRoutes:
     def test_schedule_preview_requires_durable_session_token(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
 
-        resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={"X-Session-ID": "anon"})
+        resp = client.get(
+            "/schedules/preview?cadence_preset=hourly&tz=UTC",
+            headers={"X-Session-ID": anonymous_session_id("anon")},
+        )
 
         assert resp.status_code == 401
         assert resp.get_json()["error"] == "session_token_required"

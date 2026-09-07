@@ -39,6 +39,7 @@ import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
 from conftest import reusable_test_app
+from identity_helpers import anonymous_session_id, register_durable_session_token
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -647,7 +648,7 @@ class TestSecretsRoutes:
     def test_session_secrets_crud_never_returns_value(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": "secrets-route-session"}
+            headers = {"X-Session-ID": anonymous_session_id('secrets-route-session')}
             create = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -703,7 +704,7 @@ class TestSecretsRoutes:
         try:
             resp = client.post(
                 "/session/secrets",
-                headers={"X-Session-ID": "secrets-invalid-name-session"},
+                headers={"X-Session-ID": anonymous_session_id('secrets-invalid-name-session')},
                 json={"name": "../token", "value": "secret"},
             )
             assert resp.status_code == 400
@@ -719,40 +720,39 @@ class TestSecretsRoutes:
             assert listed.status_code == 401
             assert listed.get_json()["error"] == "session_required"
 
-            with mock.patch.dict(client.application.config, {"ALLOW_LEGACY_TEST_SESSION_IDS": False}):
-                created = client.post(
-                    "/session/secrets",
+            created = client.post(
+                "/session/secrets",
+                headers={"X-Session-ID": "../bad"},
+                json={"name": "SHODAN_API_KEY", "value": "secret"},
+            )
+            guarded_writes = [
+                client.post("/projects", headers={"X-Session-ID": "../bad"}, json={"name": "Invalid"}),
+                client.post(
+                    "/session/preferences",
                     headers={"X-Session-ID": "../bad"},
-                    json={"name": "SHODAN_API_KEY", "value": "secret"},
-                )
-                guarded_writes = [
-                    client.post("/projects", headers={"X-Session-ID": "../bad"}, json={"name": "Invalid"}),
-                    client.post(
-                        "/session/preferences",
-                        headers={"X-Session-ID": "../bad"},
-                        json={"preferences": {"pref_timestamps": True}},
-                    ),
-                    client.post(
-                        "/session/recent-values",
-                        headers={"X-Session-ID": "../bad"},
-                        json={"values": [{"kind": "domain", "value": "darklab.sh"}]},
-                    ),
-                    client.post(
-                        "/session/starred",
-                        headers={"X-Session-ID": "../bad"},
-                        json={"command": "nmap darklab.sh"},
-                    ),
-                    client.post(
-                        "/share",
-                        headers={"X-Session-ID": "../bad"},
-                        json={"run_id": "run-missing"},
-                    ),
-                    client.post(
-                        "/history/bulk-delete",
-                        headers={"X-Session-ID": "../bad"},
-                        json={"run_ids": ["run-missing"]},
-                    ),
-                ]
+                    json={"preferences": {"pref_timestamps": True}},
+                ),
+                client.post(
+                    "/session/recent-values",
+                    headers={"X-Session-ID": "../bad"},
+                    json={"values": [{"kind": "domain", "value": "darklab.sh"}]},
+                ),
+                client.post(
+                    "/session/starred",
+                    headers={"X-Session-ID": "../bad"},
+                    json={"command": "nmap darklab.sh"},
+                ),
+                client.post(
+                    "/share",
+                    headers={"X-Session-ID": "../bad"},
+                    json={"run_id": "run-missing"},
+                ),
+                client.post(
+                    "/history/bulk-delete",
+                    headers={"X-Session-ID": "../bad"},
+                    json={"run_ids": ["run-missing"]},
+                ),
+            ]
             assert created.status_code == 401
             assert created.get_json()["error"] == "session_required"
             for response in guarded_writes:
@@ -765,7 +765,7 @@ class TestSecretsRoutes:
     def test_session_secrets_reject_duplicate_consumer_env_binding(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": "secrets-consumer-env-session"}
+            headers = {"X-Session-ID": anonymous_session_id('secrets-consumer-env-session')}
             first = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -810,12 +810,7 @@ class TestAtlasImportRoutes:
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, datetime.now(timezone.utc).isoformat(), ""),
-            )
-            conn.commit()
+        register_durable_session_token(session_id)
 
     def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(
         self, tmp_path
@@ -2554,12 +2549,7 @@ class TestTeamRoutes:
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, datetime.now(timezone.utc).isoformat(), ""),
-            )
-            conn.commit()
+        register_durable_session_token(session_id)
 
     def _create_team(self, client, session_id, name="Darklab Operators"):
         self._register_session_token(session_id)
@@ -6013,18 +6003,19 @@ class TestNotificationChannelRoutes:
         )
 
     def _register_session_token(self, session_id):
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, datetime.now(timezone.utc).isoformat(), ""),
-            )
-            conn.commit()
+        register_durable_session_token(session_id)
 
     def test_notification_channels_require_durable_session_tokens(self, monkeypatch, tmp_path):
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
-            resp = client.get("/session/notification-channels", headers={"X-Session-ID": "sess-anonymous"})
-            kind_contract = client.get("/session/notification-channel-kinds", headers={"X-Session-ID": "sess-anonymous"})
+            anonymous_headers = {
+                "X-Session-ID": anonymous_session_id("sess-anonymous"),
+            }
+            resp = client.get("/session/notification-channels", headers=anonymous_headers)
+            kind_contract = client.get(
+                "/session/notification-channel-kinds",
+                headers=anonymous_headers,
+            )
             assert resp.status_code == 401
             assert resp.get_json()["error"] == "session_token_required"
             assert kind_contract.status_code == 401
@@ -6535,7 +6526,7 @@ class TestNotificationChannelRoutes:
 
 class TestProjectRoutes:
     def _session_id(self, prefix="projects"):
-        return f"{prefix}-" + uuid.uuid4().hex[:8]
+        return anonymous_session_id(f"{prefix}-{uuid.uuid4().hex[:8]}")
 
     def setup_method(self):
         package_presets.clear_package_preset_catalog_cache()
@@ -6544,12 +6535,7 @@ class TestProjectRoutes:
         package_presets.clear_package_preset_catalog_cache()
 
     def _register_session_token(self, session_id):
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, datetime.now(timezone.utc).isoformat(), ""),
-            )
-            conn.commit()
+        register_durable_session_token(session_id)
 
     def _create_team(self, client, session_id, name="Project Activity Team"):
         self._register_session_token(session_id)
@@ -7309,15 +7295,15 @@ class TestProjectRoutes:
         assert window_summary_viewed.kwargs["extra"]["window_top_change_count"] == 1
         assert window_summary_viewed.kwargs["extra"]["window_fire_count"] == 1
 
-        anonymous_session_id = "anon_project_monitoring_" + uuid.uuid4().hex[:8]
+        anonymous_id = anonymous_session_id("anon_project_monitoring_" + uuid.uuid4().hex[:8])
         anonymous_project = self._create_project(
             client,
-            anonymous_session_id,
+            anonymous_id,
             name="Anonymous Monitoring",
         )
         anonymous_resp = client.get(
             f"/projects/{anonymous_project['id']}/monitoring",
-            headers={"X-Session-ID": anonymous_session_id},
+            headers={"X-Session-ID": anonymous_id},
         )
 
         assert anonymous_resp.status_code == 200
@@ -7910,7 +7896,11 @@ class TestProjectRoutes:
             name="Team Scoped Activity",
             headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
         )
-        foreign = self._create_project(client, "foreign-activity-owner", name="Foreign Activity Case")
+        foreign = self._create_project(
+            client,
+            anonymous_session_id("foreign-activity-owner"),
+            name="Foreign Activity Case",
+        )
 
         with db_connect() as conn:
             record_event(
@@ -8427,7 +8417,7 @@ class TestProjectRoutes:
             conn.commit()
         hidden_targets = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": "other-session"},
+            headers={"X-Session-ID": anonymous_session_id('other-session')},
         )
         assert hidden_targets.status_code == 404
         delete_target_resp = client.delete(
@@ -10187,7 +10177,10 @@ class TestProjectRoutes:
         assert summary_after_package["counts"]["notes"] == 7
         assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
 
-        hidden_label = client.get(f"/entities/run/{run_id}/labels", headers={"X-Session-ID": "other-session"})
+        hidden_label = client.get(
+            f"/entities/run/{run_id}/labels",
+            headers={"X-Session-ID": anonymous_session_id("other-session")},
+        )
         assert hidden_label.status_code == 404
 
         delete_note = client.delete(
@@ -10652,29 +10645,29 @@ class TestProjectRoutes:
             preview_default_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview",
                 json=payload,
-                headers={"X-Session-ID": f"{session_id}-preview-default-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-default-limit")},
             )
             preview_lower_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview?limit=3",
                 json=payload,
-                headers={"X-Session-ID": f"{session_id}-preview-lower-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-lower-limit")},
             )
             preview_capped_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview?limit=99",
                 json=payload,
-                headers={"X-Session-ID": f"{session_id}-preview-capped-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-capped-limit")},
             )
             apply_default_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply",
-                headers={"X-Session-ID": f"{session_id}-apply-default-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-default-limit")},
             )
             apply_lower_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=4",
-                headers={"X-Session-ID": f"{session_id}-apply-lower-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-lower-limit")},
             )
             apply_capped_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=99",
-                headers={"X-Session-ID": f"{session_id}-apply-capped-limit"},
+                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-capped-limit")},
             )
 
         assert preview_default_limit.status_code == 200
@@ -16372,7 +16365,7 @@ class TestWorkflowsRoute:
 
     def test_user_workflows_are_returned_before_builtins(self):
         client = get_client()
-        session_id = "workflow-route-" + __import__("uuid").uuid4().hex[:8]
+        session_id = anonymous_session_id("workflow-route-" + __import__("uuid").uuid4().hex[:8])
         resp = client.post(
             "/session/workflows",
             headers={"X-Session-ID": session_id},
@@ -16407,7 +16400,7 @@ class TestWorkflowsRoute:
 class TestSessionPreferencesRoute:
     def test_tour_seen_version_round_trips_unset_current_and_stale_values(self):
         client = get_client()
-        session = "tour-pref-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("tour-pref-" + uuid.uuid4().hex[:8])
         try:
             empty = json.loads(client.get(
                 "/session/preferences",
@@ -16445,7 +16438,7 @@ class TestSessionPreferencesRoute:
 
     def test_tour_seen_route_records_current_tour_version_without_losing_preferences(self):
         client = get_client()
-        session = "tour-seen-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("tour-seen-" + uuid.uuid4().hex[:8])
         try:
             client.post(
                 "/session/preferences",
@@ -16469,14 +16462,11 @@ class TestSessionPreferencesRoute:
 
     def test_tour_seen_version_migrates_with_session_token(self):
         client = get_client()
-        from_session = "anon-tour-" + uuid.uuid4().hex[:8]
+        from_session = anonymous_session_id("anon-tour-" + uuid.uuid4().hex[:8])
         token = "tok_" + uuid.uuid4().hex
         try:
+            register_durable_session_token(token)
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute(
-                    "INSERT INTO session_tokens (token, created) VALUES (?, datetime('now'))",
-                    (token,),
-                )
                 conn.execute(
                     "INSERT INTO session_preferences (session_id, preferences, updated) "
                     "VALUES (?, ?, datetime('now'))",
@@ -16640,15 +16630,10 @@ class TestMobileWelcomeHintsRoute:
 
 class TestAtlasRoutes:
     def _session_id(self):
-        return "atlas-" + uuid.uuid4().hex[:8]
+        return anonymous_session_id("atlas-" + uuid.uuid4().hex[:8])
 
     def _register_session_token(self, session_id):
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (session_id, datetime.now(timezone.utc).isoformat(), ""),
-            )
-            conn.commit()
+        register_durable_session_token(session_id)
 
     def _seed_entity_run(self, session_id, *, team_id=""):
         run_id = "run-" + uuid.uuid4().hex
@@ -16717,8 +16702,6 @@ class TestAtlasRoutes:
         client = get_client()
         session_id = self._session_id()
         other_session_id = self._session_id()
-        self._register_session_token(session_id)
-        self._register_session_token(other_session_id)
         _run_id, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
         headers = {"X-Session-ID": session_id}
@@ -19104,8 +19087,6 @@ class TestAtlasRoutes:
         client = get_client()
         session_id = self._session_id()
         other_session_id = self._session_id()
-        self._register_session_token(session_id)
-        self._register_session_token(other_session_id)
         run_id, _recorded = self._seed_entity_run(session_id)
         source_finding = client.get(
             "/atlas/findings",
@@ -20082,13 +20063,13 @@ class TestWorkspaceRoutes:
             config.CFG,
             self._cfg(tmp, workspace_enabled=False),
         ):
-            resp = client.get("/workspace/files", headers={"X-Session-ID": "workspace-disabled"})
+            resp = client.get("/workspace/files", headers={"X-Session-ID": anonymous_session_id('workspace-disabled')})
         assert resp.status_code == 403
         assert json.loads(resp.data)["error"] == "Files are disabled on this instance"
 
     def test_write_list_read_delete_lifecycle(self):
         client = get_client()
-        session = "workspace-lifecycle-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-lifecycle-" + uuid.uuid4().hex[:8])
         file_path = f"{session}.txt"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
@@ -20241,7 +20222,7 @@ class TestWorkspaceRoutes:
         from services.audit.recorder import AuditRecordError
 
         client = get_client()
-        session = "workspace-delete-audit-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-delete-audit-" + uuid.uuid4().hex[:8])
         file_path = f"{session}.txt"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
@@ -20273,20 +20254,20 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             resp = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": "workspace-owner"},
+                headers={"X-Session-ID": anonymous_session_id('workspace-owner')},
                 json={"path": "targets.txt", "text": "owned\n"},
             )
             assert resp.status_code == 200
 
             other = client.get(
                 "/workspace/files/read?path=targets.txt",
-                headers={"X-Session-ID": "workspace-other"},
+                headers={"X-Session-ID": anonymous_session_id('workspace-other')},
             )
             assert other.status_code == 404
 
     def test_workspace_diff_supports_shell_output_modes(self):
         client = get_client()
-        session = "workspace-diff-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-diff-" + uuid.uuid4().hex[:8])
         headers = {"X-Session-ID": session}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for path, text in (
@@ -20363,7 +20344,7 @@ class TestWorkspaceRoutes:
 
     def test_workspace_diff_rejects_file_sources_above_line_and_byte_limits(self):
         client = get_client()
-        session = "workspace-diff-limits-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-diff-limits-" + uuid.uuid4().hex[:8])
         headers = {"X-Session-ID": session}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for path, text in (
@@ -20400,8 +20381,8 @@ class TestWorkspaceRoutes:
 
     def test_workspace_diff_compares_files_runs_and_the_last_two_tab_runs(self):
         client = get_client()
-        session = "workspace-run-diff-" + uuid.uuid4().hex[:8]
-        other_session = session + "-other"
+        session = anonymous_session_id("workspace-run-diff-" + uuid.uuid4().hex[:8])
+        other_session = anonymous_session_id(session + "-other")
         headers = {"X-Session-ID": session}
         tab_id = "tab-run-diff"
         run_ids = [f"{session}-old", f"{session}-new", f"{session}-other"]
@@ -20483,7 +20464,7 @@ class TestWorkspaceRoutes:
 
     def test_workspace_file_routes_include_and_maintain_generic_metadata(self):
         client = get_client()
-        session = "workspace-metadata-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-metadata-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
@@ -20565,7 +20546,7 @@ class TestWorkspaceRoutes:
 
     def test_create_directory_lists_empty_folder(self):
         client = get_client()
-        session = "workspace-dir-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-dir-" + uuid.uuid4().hex[:8])
         directory_path = f"reports/{session}/empty"
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
@@ -20596,7 +20577,7 @@ class TestWorkspaceRoutes:
 
     def test_info_and_delete_folder_recursively(self):
         client = get_client()
-        session = "workspace-delete-dir-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-delete-dir-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
@@ -20628,7 +20609,7 @@ class TestWorkspaceRoutes:
 
     def test_move_file_and_folder_paths(self):
         client = get_client()
-        session = "workspace-move-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-move-" + uuid.uuid4().hex[:8])
         archive_path = f"archive-{session}"
         reports_path = f"reports-{session}"
         one_path = f"{reports_path}/one.txt"
@@ -20720,7 +20701,7 @@ class TestWorkspaceRoutes:
 
     def test_copy_and_touch_file_routes(self):
         client = get_client()
-        session = "workspace-copy-touch-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-copy-touch-" + uuid.uuid4().hex[:8])
         headers = {"X-Session-ID": session}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             assert client.post(
@@ -20781,7 +20762,7 @@ class TestWorkspaceRoutes:
 
     def test_move_rejects_invalid_paths_and_recursive_folder_moves(self):
         client = get_client()
-        session = "workspace-move-invalid-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-move-invalid-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
@@ -20814,7 +20795,7 @@ class TestWorkspaceRoutes:
 
     def test_rejects_unsafe_paths(self):
         client = get_client()
-        session = "workspace-paths-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-paths-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for bad_path in (
                 "../escape.txt",
@@ -20839,7 +20820,7 @@ class TestWorkspaceRoutes:
 
     def test_rejects_unsafe_paths_on_read_delete_and_download(self):
         client = get_client()
-        session = "workspace-route-paths-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-route-paths-" + uuid.uuid4().hex[:8])
         bad_paths = ("../escape.txt", "/tmp/escape.txt", "a\\b.txt")
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for bad_path in bad_paths:
@@ -20863,7 +20844,7 @@ class TestWorkspaceRoutes:
 
     def test_allows_hidden_workspace_paths_when_listed(self):
         client = get_client()
-        session = "workspace-hidden-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-hidden-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
@@ -20884,7 +20865,7 @@ class TestWorkspaceRoutes:
 
     def test_enforces_quota_and_type_checks(self):
         client = get_client()
-        session = "workspace-quota-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-quota-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
             config.CFG,
             self._cfg(tmp, workspace_quota_mb=0, workspace_max_file_mb=0, workspace_max_files=1),
@@ -20914,7 +20895,7 @@ class TestWorkspaceRoutes:
 
     def test_download_streams_session_owned_file(self):
         client = get_client()
-        session = "workspace-download-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-download-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
@@ -20943,7 +20924,7 @@ class TestWorkspaceRoutes:
 
     def test_file_list_includes_project_artifact_metadata(self):
         client = get_client()
-        session = "workspace-artifacts-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("workspace-artifacts-" + uuid.uuid4().hex[:8])
         run_id = "run-" + uuid.uuid4().hex[:8]
         project_id = "prj_" + uuid.uuid4().hex[:16]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
@@ -21008,13 +20989,15 @@ class TestWorkspaceRoutes:
             shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
-                current_root = ensure_session_workspace("active-session", config.CFG)
-                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                current_session = anonymous_session_id("active-session")
+                expired_session = anonymous_session_id("expired-session")
+                current_root = ensure_session_workspace(current_session, config.CFG)
+                expired_root = ensure_session_workspace(expired_session, config.CFG)
                 os.utime(current_root, (1000, 1000))
                 os.utime(expired_root, (1000, 1000))
 
                 with mock.patch("app.time.monotonic", return_value=1000):
-                    resp = client.get("/health", headers={"X-Session-ID": "active-session"})
+                    resp = client.get("/health", headers={"X-Session-ID": current_session})
 
                 assert resp.status_code == 200
                 assert current_root.exists()
@@ -21057,7 +21040,7 @@ class TestRunRoute:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = TestWorkspaceRoutes()._cfg(tmp)
-            session = "workspace-filter-" + uuid.uuid4().hex[:8]
+            session = anonymous_session_id("workspace-filter-" + uuid.uuid4().hex[:8])
             workspace_path = workspace_files.session_workspace_dir(session, cfg)
             output_filter = _WorkspacePathOutputFilter(session, cfg)
 
@@ -21142,7 +21125,7 @@ class TestRunRoute:
             resp = client.post(
                 "/runs",
                 json={"command": "nmap -sV darklab.sh"},
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
         assert resp.status_code == 202
         assert json.loads(resp.data) == {
@@ -21245,7 +21228,7 @@ class TestRunRoute:
             resp = client.post(
                 "/runs",
                 json={"command": "ping darklab.sh", "tab_id": "tab-1"},
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
             )
             workflow_handlers = replace(
                 run_routes._run_start_handlers(),
@@ -21269,7 +21252,7 @@ class TestRunRoute:
             workflow_started = run_routes._start_brokered_run_service(
                 original_command=raw_workflow_command,
                 display_command=display_workflow_command,
-                session_id="session-1",
+                session_id=anonymous_session_id("session-1"),
                 client_ip="127.0.0.1",
                 handlers=workflow_handlers,
                 owner_client_id="client-workflow",
@@ -21293,7 +21276,7 @@ class TestRunRoute:
         assert active_register.call_args_list[0].args[:4] == (
             "run-real",
             8765,
-            "session-1",
+            anonymous_session_id("session-1"),
             "ping darklab.sh",
         )
         assert active_register.call_args_list[0].kwargs == {
@@ -21303,7 +21286,7 @@ class TestRunRoute:
         assert active_register.call_args_list[1].args[:4] == (
             "run-real",
             8765,
-            "session-1",
+            anonymous_session_id("session-1"),
             display_workflow_command,
         )
         assert active_register.call_args_list[1].kwargs == {
@@ -21320,7 +21303,7 @@ class TestRunRoute:
         assert thread.name == "run-broker-run-real"
         assert thread.kwargs["run_id"] == "run-real"
         assert thread.kwargs["proc"] is fake_proc
-        assert thread.kwargs["session_id"] == "session-1"
+        assert thread.kwargs["session_id"] == anonymous_session_id("session-1")
         assert thread.kwargs["original_command"] == "ping darklab.sh"
         assert thread.kwargs["rewrite_notice"] == "rewritten"
         workflow_thread = _CapturedThread.instances[1]
@@ -21359,13 +21342,13 @@ class TestRunRoute:
              mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start:
             resp = client.post(
                 "/pty/runs",
-                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id('member-session'), "X-Team-ID": "team-1"},
                 json={"command": "mtr --interactive darklab.sh", "tab_id": "tab-1"},
             )
 
         assert resp.status_code == 202
         assert json.loads(resp.data)["run_id"] == "pty-team-run"
-        assert start.call_args.kwargs["session_id"] == "member-session"
+        assert start.call_args.kwargs["session_id"] == anonymous_session_id("member-session")
         assert start.call_args.kwargs["team_id"] == "team-1"
 
     def test_brokered_run_events_returns_session_scoped_backfill(self):
@@ -21376,7 +21359,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events:
             resp = client.get(
                 "/runs/run-1/events?after=9-0&limit=25",
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {
@@ -21392,7 +21375,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as team_get_events:
             team_resp = client.get(
                 "/runs/run-team/events?after=9-0&limit=25",
-                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id('member-session'), "X-Team-ID": "team-1"},
             )
 
         assert team_resp.status_code == 200
@@ -21405,7 +21388,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.get_run_events") as get_events:
             resp = client.get(
                 "/runs/run-other/events",
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
 
         assert resp.status_code == 404
@@ -21419,7 +21402,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.active_run_touch_owner") as touch:
             resp = client.get(
                 "/runs/run-1/stream?after=9-0&tab_id=tab-1",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -21434,7 +21417,11 @@ class TestRunRoute:
              mock.patch("blueprints.run.active_run_touch_owner") as team_touch:
             team_resp = client.get(
                 "/runs/run-team/stream?after=9-0&tab_id=tab-1",
-                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1", "X-Client-ID": "client-1"},
+                headers={
+                    "X-Session-ID": anonymous_session_id("member-session"),
+                    "X-Team-ID": "team-1",
+                    "X-Client-ID": "client-1",
+                },
             )
             team_body = team_resp.get_data(as_text=True)
 
@@ -21451,7 +21438,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.active_run_touch_owner") as touch:
             resp = client.get(
                 "/runs/run-1/stream?tab_id=tab-1",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
 
@@ -21469,7 +21456,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: fast-exit\n\n"])):
             resp = client.get(
                 "/runs/run-fast/stream",
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
             body = resp.get_data(as_text=True)
 
@@ -21484,7 +21471,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.log.warning") as warn:
             resp = client.get(
                 "/runs/run-other/stream",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
             )
 
         assert resp.status_code == 404
@@ -21511,11 +21498,11 @@ class TestRunRoute:
              mock.patch("blueprints.run.log.warning") as warn:
             events_resp = client.get(
                 "/runs/run-team-scope/events",
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
             stream_resp = client.get(
                 "/runs/run-team-scope/stream",
-                headers={"X-Session-ID": "session-1"},
+                headers={"X-Session-ID": anonymous_session_id('session-1')},
             )
 
         expected = {
@@ -21538,7 +21525,7 @@ class TestRunRoute:
         client = get_client()
         resp = client.post(
             "/runs/run-1/owner",
-            headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+            headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
             json={"tab_id": "tab-2"},
         )
         assert resp.status_code == 404
@@ -21551,12 +21538,12 @@ class TestRunRoute:
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1", "tab_id": "tab-2"},
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"killed": True}
-        pid_lookup.assert_called_once_with("run-1", "session-1")
+        pid_lookup.assert_called_once_with("run-1", anonymous_session_id("session-1"))
         publish.assert_called_once_with("run-1", "killed", {
             "killer_client_id": "client-2",
             "killer_tab_id": "tab-2",
@@ -21573,7 +21560,11 @@ class TestRunRoute:
              mock.patch.object(shell_app_module.log, "info") as team_info:
             team_resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": "member-session", "X-Team-ID": "team-1", "X-Client-ID": "client-2"},
+                headers={
+                    "X-Session-ID": anonymous_session_id("member-session"),
+                    "X-Team-ID": "team-1",
+                    "X-Client-ID": "client-2",
+                },
                 json={"run_id": "run-team", "tab_id": "tab-2"},
             )
         assert team_resp.status_code == 200
@@ -21594,12 +21585,12 @@ class TestRunRoute:
              mock.patch("blueprints.run.publish_run_event") as publish:
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1"},
             )
         assert resp.status_code == 404
         assert json.loads(resp.data) == {"error": "No such process"}
-        pid_lookup.assert_called_once_with("run-1", "session-1")
+        pid_lookup.assert_called_once_with("run-1", anonymous_session_id("session-1"))
         publish.assert_not_called()
 
         viewer_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
@@ -21607,7 +21598,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.pid_for_team") as team_pid_lookup:
             viewer_resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": "viewer-session", "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id('viewer-session'), "X-Team-ID": "team-1"},
                 json={"run_id": "run-team"},
             )
 
@@ -21640,7 +21631,7 @@ class TestRunRoute:
 
     def test_client_side_run_persists_terminal_native_builtin(self):
         client = get_client()
-        session = "client-run-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-run-" + uuid.uuid4().hex[:8])
         try:
             resp = client.post(
                 "/run/client",
@@ -21710,7 +21701,7 @@ class TestRunRoute:
 
     def test_client_side_run_redacts_output_before_search_and_entity_capture(self):
         client = get_client()
-        session = "client-run-redaction-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-run-redaction-" + uuid.uuid4().hex[:8])
         fake_classifier = mock.Mock()
         fake_classifier.classify_line.return_value = {
             "command_root": "theme",
@@ -21778,7 +21769,7 @@ class TestRunRoute:
         from services.storage import body_store
 
         client = get_client()
-        session = "client-run-offload-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-run-offload-" + uuid.uuid4().hex[:8])
         with tempfile.TemporaryDirectory() as tmp, \
              mock.patch.object(body_store, "DATA_DIR", tmp), \
              mock.patch.dict("config.CFG", {"runs_search_text_inline_max_bytes": 1}):
@@ -21826,7 +21817,7 @@ class TestRunRoute:
 
     def test_client_side_run_applies_preview_byte_cap(self):
         client = get_client()
-        session = "client-run-preview-cap-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-run-preview-cap-" + uuid.uuid4().hex[:8])
         huge_line = "Current theme: " + ("x" * 1000)
         run_cfg = dict(config.CFG)
         run_cfg.update({"max_output_lines": 50, "output_preview_max_bytes": 140})
@@ -21864,7 +21855,7 @@ class TestRunRoute:
 
     def test_client_side_run_persists_tour_builtin(self):
         client = get_client()
-        session = "client-tour-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-tour-" + uuid.uuid4().hex[:8])
         try:
             resp = client.post(
                 "/run/client",
@@ -21898,7 +21889,7 @@ class TestRunRoute:
 
     def test_client_side_run_does_not_link_to_active_project(self):
         client = get_client()
-        session = "client-run-project-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("client-run-project-" + uuid.uuid4().hex[:8])
         project_resp = client.post(
             "/projects",
             headers={"X-Session-ID": session},
@@ -21957,13 +21948,13 @@ class TestRunRoute:
 class TestHistoryRoute:
     def test_get_returns_200(self):
         client = get_client()
-        resp = client.get("/history", headers={"X-Session-ID": "test-session"})
+        resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id('test-session')})
         assert resp.status_code == 200
 
     def test_get_returns_runs_list(self):
         client = get_client()
         data = json.loads(
-            client.get("/history", headers={"X-Session-ID": "test-session"}).data
+            client.get("/history", headers={"X-Session-ID": anonymous_session_id('test-session')}).data
         )
         assert "items" in data
         assert isinstance(data["items"], list)
@@ -21974,7 +21965,7 @@ class TestHistoryRoute:
 
     def test_stats_returns_compact_session_counters(self):
         client = get_client()
-        session = "history-stats-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-stats-" + uuid.uuid4().hex[:8])
         run_ids = [f"{session}-ok", f"{session}-fail", f"{session}-terminated", f"{session}-active"]
         snapshot_id = f"{session}-snapshot"
         try:
@@ -22029,7 +22020,7 @@ class TestHistoryRoute:
 
     def test_stats_tolerates_missing_optional_counter_tables(self):
         client = get_client()
-        session = "history-stats-missing-tables-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-stats-missing-tables-" + uuid.uuid4().hex[:8])
         run_id = f"{session}-ok"
         try:
             with sqlite3.connect(DB_PATH) as conn:
@@ -22072,7 +22063,7 @@ class TestHistoryRoute:
 
     def test_insights_empty_session_and_explicit_day_clamps(self):
         client = get_client()
-        session = "history-insights-empty-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-insights-empty-" + uuid.uuid4().hex[:8])
 
         auto = json.loads(client.get("/history/insights?days=auto", headers={"X-Session-ID": session}).data)
         assert auto["days"] == 28
@@ -22094,7 +22085,7 @@ class TestHistoryRoute:
 
     def test_insights_returns_visual_history_payloads(self):
         client = get_client()
-        session = "history-insights-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-insights-" + uuid.uuid4().hex[:8])
         run_ids = [
             f"{session}-nmap",
             f"{session}-curl",
@@ -22180,7 +22171,7 @@ class TestHistoryRoute:
 
     def test_insights_falls_back_to_other_when_command_registry_fails(self):
         client = get_client()
-        session = "history-insights-category-fallback-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-insights-category-fallback-" + uuid.uuid4().hex[:8])
         run_id = f"{session}-nmap"
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
         try:
@@ -22214,8 +22205,8 @@ class TestHistoryRoute:
 
     def test_insights_adaptive_windows_switch_at_command_and_constellation_thresholds(self):
         client = get_client()
-        session_25 = "history-insights-window-25-" + uuid.uuid4().hex[:8]
-        session_40 = "history-insights-window-40-" + uuid.uuid4().hex[:8]
+        session_25 = anonymous_session_id("history-insights-window-25-" + uuid.uuid4().hex[:8])
+        session_40 = anonymous_session_id("history-insights-window-40-" + uuid.uuid4().hex[:8])
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
         def insert_runs(conn, session, count):
@@ -22266,7 +22257,7 @@ class TestHistoryRoute:
         # max_day_count must all exclude synthetic app built-ins (pwd, whoami,
         # help, ...) so the visualizations reflect real recon work only.
         client = get_client()
-        session = "history-insights-builtin-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-insights-builtin-" + uuid.uuid4().hex[:8])
         run_ids = [
             f"{session}-nmap",
             f"{session}-pwd",
@@ -22330,7 +22321,7 @@ class TestHistoryRoute:
 
     def test_delete_all_returns_ok(self):
         client = get_client()
-        session_id = "history-filtered-delete-" + uuid.uuid4().hex[:8]
+        session_id = anonymous_session_id("history-filtered-delete-" + uuid.uuid4().hex[:8])
         run_ids = [f"run-{uuid.uuid4().hex}" for _ in range(57)]
         try:
             with sqlite3.connect(DB_PATH) as conn:
@@ -22392,7 +22383,7 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.delete(
             "/history/nonexistent-run-id",
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
@@ -22407,7 +22398,7 @@ class TestHistoryRoute:
         )
 
         client = get_client()
-        session_id = "bulk-delete-session"
+        session_id = anonymous_session_id("bulk-delete-session")
         owned_run_id = "run-" + uuid.uuid4().hex
         full_run_id = "run-" + uuid.uuid4().hex
         fallback_run_id = "run-" + uuid.uuid4().hex
@@ -22641,7 +22632,7 @@ class TestHistoryRoute:
 
     def test_bulk_delete_history_rejects_malformed_ids(self):
         client = get_client()
-        session_id = "bulk-delete-malformed"
+        session_id = anonymous_session_id("bulk-delete-malformed")
         overlong_id = "r" * 513
 
         non_string_resp = client.post(
@@ -22696,7 +22687,7 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.get(
             "/history/nonexistent-run-id",
-            headers={"X-Session-ID": "history-missing-run-session"},
+            headers={"X-Session-ID": anonymous_session_id('history-missing-run-session')},
         )
         assert resp.status_code == 404
 
@@ -22704,8 +22695,8 @@ class TestHistoryRoute:
         from services.ai import assists as ai_assists
 
         client = get_client()
-        session = "ai-route-session"
-        other_session = "ai-route-other"
+        session = anonymous_session_id("ai-route-session")
+        other_session = anonymous_session_id("ai-route-other")
         run_id = "run-ai-route"
         active_run_id = "run-ai-active"
         no_context_run_id = "run-ai-no-context"
@@ -22976,7 +22967,7 @@ class TestHistoryRoute:
 
     def test_history_respects_panel_limit_and_sorts_newest_first(self):
         client = get_client()
-        session = "limit-test-session"
+        session = anonymous_session_id("limit-test-session")
         run_ids = ["limit-run-1", "limit-run-2", "limit-run-3"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23012,7 +23003,7 @@ class TestHistoryRoute:
 
     def test_history_commands_returns_distinct_recent_commands_without_exit_filter(self):
         client = get_client()
-        session = "commands-distinct-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("commands-distinct-" + uuid.uuid4().hex[:8])
         run_ids = [f"{session}-{i}" for i in range(5)]
         rows = [
             (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", 0),
@@ -23053,7 +23044,7 @@ class TestHistoryRoute:
 
     def test_history_reports_totals_and_keeps_roots_complete_across_pages(self):
         client = get_client()
-        session = "pagination-test-session"
+        session = anonymous_session_id("pagination-test-session")
         run_ids = ["page-run-1", "page-run-2"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23092,7 +23083,7 @@ class TestHistoryRoute:
 
     def test_history_applies_starred_only_server_side(self):
         client = get_client()
-        session = "starred-filter-session"
+        session = anonymous_session_id("starred-filter-session")
         run_ids = ["star-run-1", "star-run-2"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23135,7 +23126,7 @@ class TestHistoryRoute:
 
     def test_history_can_return_snapshot_items(self):
         client = get_client()
-        session = "snapshot-history-session"
+        session = anonymous_session_id("snapshot-history-session")
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
@@ -23187,7 +23178,7 @@ class TestHistoryRoute:
 
     def test_history_filters_run_subtypes(self):
         client = get_client()
-        session = "history-run-subtypes-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("history-run-subtypes-" + uuid.uuid4().hex[:8])
         run_ids = [f"{session}-builtin", f"{session}-external"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23243,7 +23234,7 @@ class TestHistoryRoute:
 
     def test_history_filters_runs_by_project_and_ignores_legacy_snapshot_links(self):
         client = get_client()
-        session = "project-history-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("project-history-" + uuid.uuid4().hex[:8])
         project_resp = client.post(
             "/projects",
             json={"name": "History Project"},
@@ -23317,7 +23308,7 @@ class TestHistoryRoute:
 
     def test_history_search_filters_by_command_text(self):
         client = get_client()
-        session = "history-search-session"
+        session = anonymous_session_id("history-search-session")
         run_ids = ["search-run-1", "search-run-2"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23402,7 +23393,7 @@ class TestHistoryRoute:
 
     def test_history_command_scope_excludes_output_matches(self):
         client = get_client()
-        session = "history-command-scope-session"
+        session = anonymous_session_id("history-command-scope-session")
         run_ids = ["command-scope-1", "command-scope-2"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23448,7 +23439,7 @@ class TestHistoryRoute:
 
     def test_history_filters_by_command_root(self):
         client = get_client()
-        session = "history-root-session"
+        session = anonymous_session_id("history-root-session")
         run_ids = ["root-run-1", "root-run-2", "root-run-3"]
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -23482,7 +23473,7 @@ class TestHistoryRoute:
 
     def test_history_filters_by_exit_code_and_recent_date_range(self):
         client = get_client()
-        session = "history-date-session"
+        session = anonymous_session_id("history-date-session")
         run_ids = ["date-run-1", "date-run-2", "date-run-3", "date-run-4"]
         recent = datetime.now().replace(microsecond=0)
         try:
@@ -23555,7 +23546,7 @@ class TestHistoryRoute:
 
     def test_active_history_returns_running_runs_for_this_session(self):
         client = get_client()
-        session = f"session-{uuid.uuid4()}"
+        session = anonymous_session_id(f"session-{uuid.uuid4()}")
         active_runs = [
             {
                 "run_id": "run-1",
@@ -23588,7 +23579,7 @@ class TestHistoryRoute:
 
     def test_active_history_can_include_durable_assessment_plan_progress(self):
         client = get_client()
-        session = f"session-{uuid.uuid4()}"
+        session = anonymous_session_id(f"session-{uuid.uuid4()}")
         assessment_state = {
             "batches": [{
                 "batch_id": "abx-monitor",
@@ -23628,7 +23619,7 @@ class TestHistoryRoute:
 
     def test_compare_candidates_rank_exact_command_before_same_target(self):
         client = get_client()
-        session = "compare-candidates-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-candidates-" + uuid.uuid4().hex[:8])
         rows = [
             (
                 "cmp-source",
@@ -23798,7 +23789,7 @@ class TestHistoryRoute:
         from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
         client = get_client()
-        session = "compare-corrupt-artifact-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-corrupt-artifact-" + uuid.uuid4().hex[:8])
         left_id = "cmp-corrupt-left"
         right_id = "cmp-corrupt-right"
         rel_path = f"{left_id}.txt.gz"
@@ -24037,7 +24028,7 @@ class TestHistoryRoute:
 
     def test_compare_history_lines_returns_filtered_output_slices(self):
         client = get_client()
-        session = "compare-lines-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-lines-" + uuid.uuid4().hex[:8])
         output = json.dumps([
             {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
             {"text": "alpha", "cls": "", "line_index": 0},
@@ -24095,8 +24086,8 @@ class TestHistoryRoute:
 
     def test_compare_history_lines_rejects_invalid_ranges_and_clamps_stale_ranges(self):
         client = get_client()
-        session = "compare-lines-invalid-" + uuid.uuid4().hex[:8]
-        other_session = "compare-lines-other-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-lines-invalid-" + uuid.uuid4().hex[:8])
+        other_session = anonymous_session_id("compare-lines-other-" + uuid.uuid4().hex[:8])
         output = json.dumps([{"text": "alpha", "cls": "", "line_index": 0}])
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -24157,7 +24148,7 @@ class TestHistoryRoute:
 
     def test_compare_history_lines_paginates_by_line_and_byte_limits(self):
         client = get_client()
-        session = "compare-lines-limit-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-lines-limit-" + uuid.uuid4().hex[:8])
         output = json.dumps([
             {"text": "aaaa", "cls": "", "line_index": 0},
             {"text": "bbbb", "cls": "", "line_index": 1},
@@ -24222,7 +24213,7 @@ class TestHistoryRoute:
 
     def test_compare_history_runs_returns_metadata_and_changed_lines(self):
         client = get_client()
-        session = "compare-runs-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-runs-" + uuid.uuid4().hex[:8])
         left_output = json.dumps([
             {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
             {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:22 UTC", "cls": ""},
@@ -24558,7 +24549,7 @@ class TestHistoryRoute:
 
     def test_compare_history_runs_handles_invalid_requests_and_identical_runs(self):
         client = get_client()
-        session = "compare-errors-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-errors-" + uuid.uuid4().hex[:8])
         output = json.dumps([
             {"text": "same header", "cls": "", "line_index": 0},
             {"text": "80/tcp open http", "cls": "", "line_index": 1},
@@ -24626,7 +24617,7 @@ class TestHistoryRoute:
 
     def test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint(self):
         client = get_client()
-        session = "compare-findings-order-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-findings-order-" + uuid.uuid4().hex[:8])
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
@@ -24702,7 +24693,7 @@ class TestHistoryRoute:
 
     def test_compare_history_runs_leaves_very_long_lines_unpaired(self):
         client = get_client()
-        session = "compare-long-lines-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("compare-long-lines-" + uuid.uuid4().hex[:8])
         left_line = "scanner output " + ("a" * 4500) + " old"
         right_line = "scanner output " + ("a" * 4500) + " new"
         try:
@@ -24774,14 +24765,14 @@ class TestShareRoute:
             resp = client.post(
                 "/share",
                 json={"label": "test snapshot", "content": ["line1", "line2"], "apply_redaction": True},
-                headers={"X-Session-ID": "test-session"}
+                headers={"X-Session-ID": anonymous_session_id('test-session')}
             )
             assert resp.status_code == 200
             data = json.loads(resp.data)
             assert "id" in data
             assert "url" in data
 
-            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": "test-session"})
+            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert delete.status_code == 200
 
         audit_rows = _audit_event_rows(target_id=data["id"])
@@ -24796,7 +24787,7 @@ class TestShareRoute:
         from services.storage import body_store
 
         client = get_client()
-        session_id = "share-offload-" + uuid.uuid4().hex[:8]
+        session_id = anonymous_session_id("share-offload-" + uuid.uuid4().hex[:8])
         content = [{"text": "line " + ("x" * 64), "cls": "notice"}]
         with tempfile.TemporaryDirectory() as tmp, \
              mock.patch.object(body_store, "DATA_DIR", tmp), \
@@ -24827,7 +24818,7 @@ class TestShareRoute:
 
     def test_post_does_not_link_snapshot_to_source_run_project(self):
         client = get_client()
-        session = "share-project-" + uuid.uuid4().hex[:8]
+        session = anonymous_session_id("share-project-" + uuid.uuid4().hex[:8])
         run_id = "run-" + uuid.uuid4().hex
         project_resp = client.post(
             "/projects",
@@ -24880,7 +24871,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": 123, "content": []},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Label must be a string"
@@ -24890,7 +24881,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": {"text": "line"}},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content must be a list"
@@ -24900,7 +24891,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": ["ok", 123]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content items must be strings or objects"
@@ -24910,7 +24901,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"cls": "notice"}]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -24920,7 +24911,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": 123, "cls": "notice"}]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -24930,7 +24921,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": "hello", "cls": 123}]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must use string cls values"
@@ -24946,7 +24937,7 @@ class TestShareRoute:
                     {"text": "hi", "cls": "notice"},
                 ],
             },
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -24968,7 +24959,7 @@ class TestShareRoute:
                         {"text": "Authorization: Bearer abc123", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25008,7 +24999,7 @@ class TestShareRoute:
                         {"text": "after historical finding", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25040,7 +25031,7 @@ class TestShareRoute:
                         {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25056,7 +25047,7 @@ class TestShareRoute:
                 "apply_redaction": "yes",
                 "content": [{"text": "line 1", "cls": ""}],
             },
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         assert resp.status_code == 400
         data = json.loads(resp.data)
@@ -25067,7 +25058,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json=["bad", "payload"],
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
@@ -25087,25 +25078,25 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "delete-me", "content": ["line"]},
-            headers={"X-Session-ID": "delete-share-session"},
+            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
         label_resp = client.post(
             f"/entities/snapshot/{share_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": "delete-share-session"},
+            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
         )
         note_resp = client.put(
             f"/entities/snapshot/{share_id}/note",
             json={"body": "Snapshot context"},
-            headers={"X-Session-ID": "delete-share-session"},
+            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
         )
         assert label_resp.status_code == 201
         assert note_resp.status_code == 200
 
         resp = client.delete(
             f"/share/{share_id}",
-            headers={"X-Session-ID": "delete-share-session"},
+            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
         )
 
         assert resp.status_code == 200
@@ -25125,8 +25116,8 @@ class TestShareRoute:
 
     def test_bulk_delete_shares_reports_partial_results_and_removes_metadata(self):
         client = get_client()
-        session_id = "bulk-delete-share-session"
-        other_session_id = "bulk-delete-share-other"
+        session_id = anonymous_session_id("bulk-delete-share-session")
+        other_session_id = anonymous_session_id("bulk-delete-share-other")
 
         create_resp = client.post(
             "/share",
@@ -25189,7 +25180,7 @@ class TestShareRoute:
 
     def test_bulk_delete_shares_rejects_malformed_ids(self):
         client = get_client()
-        session_id = "bulk-delete-share-malformed"
+        session_id = anonymous_session_id("bulk-delete-share-malformed")
         overlong_id = "s" * 513
 
         non_string_resp = client.post(
@@ -25222,7 +25213,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "my label", "content": ["hello", "world"]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25238,7 +25229,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "html test", "content": ["line"]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25250,7 +25241,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "theme selector test", "content": ["line"]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
         client.set_cookie("pref_theme_name", "apricot_sand")
@@ -25294,7 +25285,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "bundle mode test", "content": ["line"]},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
@@ -25318,7 +25309,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "unique-label-xyz", "content": []},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25336,7 +25327,7 @@ class TestShareRoute:
                     {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
                 ],
             },
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25358,7 +25349,7 @@ class TestShareRoute:
                     {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
                 ],
             },
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25376,7 +25367,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "ct-test", "content": []},
-            headers={"X-Session-ID": "test-session"}
+            headers={"X-Session-ID": anonymous_session_id('test-session')}
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25392,7 +25383,7 @@ class TestShareRoute:
                     {"text": "line 1", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
                 ],
             },
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25407,7 +25398,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "meta-lines-test", "content": ["a", "b", "c"]},
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -25420,7 +25411,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "no-exit-test", "content": ["output line"]},
-            headers={"X-Session-ID": "test-session"},
+            headers={"X-Session-ID": anonymous_session_id('test-session')},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -25507,13 +25498,13 @@ class TestHistorySessionIsolation:
     def test_empty_history_for_fresh_session(self):
         client = get_client()
         data = json.loads(client.get(
-            "/history", headers={"X-Session-ID": "fresh-session-no-runs-xyz"}
+            "/history", headers={"X-Session-ID": anonymous_session_id('fresh-session-no-runs-xyz')}
         ).data)
         assert data["runs"] == []
 
     def test_history_scoped_to_session(self):
-        session_a = "isolation-test-session-A"
-        session_b = "isolation-test-session-B"
+        session_a = anonymous_session_id("isolation-test-session-A")
+        session_b = anonymous_session_id("isolation-test-session-B")
         run_id = "isolation-test-run-id-001"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
@@ -25540,8 +25531,8 @@ class TestHistorySessionIsolation:
             conn.close()
 
     def test_delete_only_affects_own_session(self):
-        session_a = "delete-test-session-A"
-        session_b = "delete-test-session-B"
+        session_a = anonymous_session_id("delete-test-session-A")
+        session_b = anonymous_session_id("delete-test-session-B")
         run_a = "delete-test-run-A"
         run_b = "delete-test-run-B"
         conn = sqlite3.connect(DB_PATH)
@@ -25586,9 +25577,10 @@ class TestRunPermalinkRoute:
         full_output_truncated=0,
         full_output_lines=None,
         artifacts=None,
-        session_id="test-session",
+        session_id=None,
         team_id="",
     ):
+        session_id = session_id or anonymous_session_id("test-session")
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "INSERT INTO runs (id, session_id, team_id, command, started, output_preview, preview_truncated, "
@@ -25664,7 +25656,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-html-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert resp.status_code == 200
             assert b"<html" in resp.data.lower()
         finally:
@@ -25687,7 +25679,7 @@ class TestRunPermalinkRoute:
         with db_connect() as conn:
             materialize_run_entities(
                 conn,
-                "test-session",
+                anonymous_session_id("test-session"),
                 run_id,
                 [{"text": "darklab.sh", "entities": [{"type": "domain", "value": "darklab.sh"}]}],
                 seen_at="2026-05-17T00:00:01+00:00",
@@ -25695,12 +25687,17 @@ class TestRunPermalinkRoute:
             conn.execute(
                 "INSERT INTO findings "
                 "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-                "VALUES (?, 'test-session', ?, 'finding', 'open service', 'open service', 0, ?, datetime('now'))",
-                ("permalink-html-atlas-finding", run_id, "fp-permalink-html-atlas"),
+                "VALUES (?, ?, ?, 'finding', 'open service', 'open service', 0, ?, datetime('now'))",
+                (
+                    "permalink-html-atlas-finding",
+                    anonymous_session_id("test-session"),
+                    run_id,
+                    "fp-permalink-html-atlas",
+                ),
             )
             conn.commit()
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert b"nmap -sV 10.0.0.1" in resp.data
             assert b"1 artifact" in resp.data
             assert b"1 Atlas entity" in resp.data
@@ -25727,20 +25724,25 @@ class TestRunPermalinkRoute:
         conn.execute(
             "INSERT INTO findings "
             "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-            "VALUES (?, 'test-session', ?, 'finding', 'answer found', 'answer section', 0, ?, datetime('now'))",
-            ("permalink-json-finding", run_id, "fp-permalink-json"),
+            "VALUES (?, ?, ?, 'finding', 'answer found', 'answer section', 0, ?, datetime('now'))",
+            (
+                "permalink-json-finding",
+                anonymous_session_id("test-session"),
+                run_id,
+                "fp-permalink-json",
+            ),
         )
         conn.execute(
             "INSERT INTO entity_labels "
             "(id, session_id, entity_type, entity_id, label, created) "
-            "VALUES (?, 'test-session', 'run', ?, 'baseline', datetime('now'))",
-            ("permalink-json-label", run_id),
+            "VALUES (?, ?, 'run', ?, 'baseline', datetime('now'))",
+            ("permalink-json-label", anonymous_session_id("test-session"), run_id),
         )
         conn.execute(
             "INSERT INTO entity_notes "
             "(id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES (?, 'test-session', 'run', ?, 'review note', datetime('now'), datetime('now'))",
-            ("permalink-json-note", run_id),
+            "VALUES (?, ?, 'run', ?, 'review note', datetime('now'), datetime('now'))",
+            ("permalink-json-note", anonymous_session_id("test-session"), run_id),
         )
         conn.commit()
         conn.close()
@@ -25748,7 +25750,7 @@ class TestRunPermalinkRoute:
             data = json.loads(
                 get_client().get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": "test-session"},
+                    headers={"X-Session-ID": anonymous_session_id('test-session')},
                 ).data
             )
             assert data["command"] == "dig google.com"
@@ -25768,7 +25770,7 @@ class TestRunPermalinkRoute:
             data = json.loads(
                 get_client().get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": "other-session"},
+                    headers={"X-Session-ID": anonymous_session_id('other-session')},
                 ).data
             )
             assert data["command"] == "dig google.com"
@@ -25784,11 +25786,8 @@ class TestRunPermalinkRoute:
         member_id = f"tmem_permalink_{uuid.uuid4().hex[:12]}"
         created = datetime.now(timezone.utc).isoformat()
         from services.teams.storage import token_hash
+        register_durable_session_token(owner_token)
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                (owner_token, created, ""),
-            )
             conn.execute(
                 "INSERT INTO teams "
                 "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_at, updated_at) "
@@ -25868,7 +25867,7 @@ class TestRunPermalinkRoute:
             data = json.loads(
                 get_client().get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": "test-session"},
+                    headers={"X-Session-ID": anonymous_session_id('test-session')},
                 ).data
             )
             assert data["command"] == "man curl"
@@ -25890,7 +25889,7 @@ class TestRunPermalinkRoute:
         try:
             resp = get_client().get(
                 f"/history/{run_id}?json",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             )
             data = json.loads(resp.data)
             assert resp.status_code == 200
@@ -25914,7 +25913,7 @@ class TestRunPermalinkRoute:
             data = json.loads(
                 get_client().get(
                     f"/history/{run_id}?json&preview=1",
-                    headers={"X-Session-ID": "test-session"},
+                    headers={"X-Session-ID": anonymous_session_id('test-session')},
                 ).data
             )
             assert data["command"] == "man curl"
@@ -25934,7 +25933,7 @@ class TestRunPermalinkRoute:
         metadata = OutputSignalClassifier(command).classify_line(line)
         self._insert_run(run_id, command, [{"text": line, **metadata}])
         try:
-            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id('test-session')})
             data = json.loads(resp.data)
             assert resp.status_code == 200
             source_detail = data["output_entries"][0]["source_detail"]
@@ -25949,7 +25948,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
@@ -25964,7 +25963,7 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert b"full line 1" in resp.data
             assert b"preview line" not in resp.data
         finally:
@@ -25974,7 +25973,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-preview-truncated-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             assert b"preview truncated" in resp.data
         finally:
             self._delete_run(run_id)
@@ -25983,7 +25982,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-toggle-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             body = resp.get_data(as_text=True)
             assert 'id="toggle-ln"' in body
             assert 'id="toggle-ts" disabled' in body
@@ -25998,7 +25997,7 @@ class TestRunPermalinkRoute:
         ]
         self._insert_run(run_id, "ping google.com", structured_preview)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
             body = resp.get_data(as_text=True)
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
@@ -26011,9 +26010,9 @@ class TestRunPermalinkRoute:
         conn.execute(
             "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-            "VALUES (?, 'test-session', ?, ?, ?, ?, ?, 0, ?, 0, 0)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)",
             (
-                run_id, command, started, finished, exit_code,
+                run_id, anonymous_session_id("test-session"), command, started, finished, exit_code,
                 json.dumps(output or []), len(output or []),
             )
         )
@@ -26030,7 +26029,7 @@ class TestRunPermalinkRoute:
         try:
             body = get_client().get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             ).get_data(as_text=True)
             assert "exit 0" in body
             assert "meta-badge-ok" in body
@@ -26047,7 +26046,7 @@ class TestRunPermalinkRoute:
         try:
             body = get_client().get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             ).get_data(as_text=True)
             assert "exit 6" in body
             assert "meta-badge-fail" in body
@@ -26064,7 +26063,7 @@ class TestRunPermalinkRoute:
         try:
             body = get_client().get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             ).get_data(as_text=True)
             assert "1m 30s" in body
         finally:
@@ -26080,7 +26079,7 @@ class TestRunPermalinkRoute:
         try:
             body = get_client().get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             ).get_data(as_text=True)
             # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
             assert "lines" in body
@@ -26097,7 +26096,7 @@ class TestRunPermalinkRoute:
         try:
             body = get_client().get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": "test-session"},
+                headers={"X-Session-ID": anonymous_session_id('test-session')},
             ).get_data(as_text=True)
             assert f"v{APP_VERSION}" in body
         finally:

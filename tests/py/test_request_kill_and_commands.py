@@ -17,6 +17,7 @@ import pytest
 import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
+from identity_helpers import anonymous_session_id
 from blueprints.run import KILL_BIN, SUDO_BIN
 from core.helpers import get_session_id
 import services.commands.registry as commands
@@ -188,22 +189,18 @@ class TestRequestHelpers:
             # Flask test client context usually falls back to 127.0.0.1
             assert shell_app_module.get_client_ip() == "127.0.0.1"
 
-    def test_get_session_id_strips_whitespace(self):
-        session_id = str(uuid.uuid4())
+    def test_get_session_id_strips_whitespace(self, anonymous_identity_factory):
+        session_id = anonymous_identity_factory("resolver-whitespace").value
         with _test_app().test_request_context("/", headers={"X-Session-ID": f"  {session_id}  "}):
             assert get_session_id() == session_id
 
     def test_get_session_id_rejects_invalid_anonymous_session_id(self):
         flask_app = _test_app()
-        previous = flask_app.config.get("TESTING")
-        flask_app.config["TESTING"] = False
-        try:
-            with flask_app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
-                assert get_session_id() == ""
-            with flask_app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
-                assert get_session_id() == ""
-        finally:
-            flask_app.config["TESTING"] = previous
+        assert flask_app.config["TESTING"] is True
+        with flask_app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
+            assert get_session_id() == ""
+        with flask_app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
+            assert get_session_id() == ""
 
 
 # ── /kill ─────────────────────────────────────────────────────────────────────
@@ -221,16 +218,17 @@ class TestKillRoute:
 
     def test_kill_scopes_pid_lookup_to_request_session(self):
         client = get_client()
+        session_id = anonymous_session_id("owner-session")
 
         with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup:
             resp = client.post(
                 "/kill",
                 json={"run_id": "run-123"},
-                headers={"X-Session-ID": "owner-session"},
+                headers={"X-Session-ID": session_id},
             )
 
         assert resp.status_code == 404
-        pid_lookup.assert_called_once_with("run-123", "owner-session")
+        pid_lookup.assert_called_once_with("run-123", session_id)
 
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()

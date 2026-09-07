@@ -15,6 +15,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Server-side tests now use the same identity-validation path as production.** Shared fixtures provide canonical anonymous UUIDs, issue durable tokens through the real session storage service, and keep one identity stable across related requests. Literal malformed, unknown, and revoked values remain only where a test deliberately verifies rejection; request-construction-only JavaScript fixtures remain isolated, and Playwright continues to obtain live identities from the running application.
 - **Shell-output entities now open a compact action menu for investigation and reuse.**
   - **Before:** Activating an entity opened Atlas immediately, while a separate long-press or right-click menu exposed a larger set of output-only actions. That made it easy to navigate away when the intent was to select or reuse the value.
   - **After:** A deliberate click, tap, or keyboard activation offers **Open in Atlas**, **Copy to Clipboard**, and **Insert into command**. The menu uses the entity's canonical value, respects the desktop or mobile command selection without running anything, preserves normal text selection and native right-click behavior, and closes when its context changes.
