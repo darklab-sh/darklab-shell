@@ -23,6 +23,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
   - [Workspace Shell Conveniences Stay App-Mediated](#workspace-shell-conveniences-stay-app-mediated)
   - [Loopback Address Blocking](#loopback-address-blocking)
+  - [Pseudonymous Principals and Access Credentials](#pseudonymous-principals-and-access-credentials)
   - [Session Token Security](#session-token-security)
   - [Team Ownership: Session Tokens Stay Actors](#team-ownership-session-tokens-stay-actors)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
@@ -480,7 +481,157 @@ Three complementary layers enforce the restriction:
 
 The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
 
+### Pseudonymous Principals and Access Credentials
+
+**Accepted for v3.0 on 2026-09-06. This is the final contract for the principal schema and authentication work; this documentation-only decision does not change the current runtime.**
+
+The stable identity is a pseudonymous principal, not a username and not a bearer secret. Each principal has exactly one personal workspace and may have several independently labeled access credentials. Credentials prove access to the principal, while the personal workspace owns runs, files, projects, preferences, workflows, secrets, and background definitions. Team records remain team-owned, and team access comes from the principal's current membership and capabilities.
+
+This replaces the earlier token-as-actor model. In that model, rotating a token meant changing database ownership keys and moving an owner-derived workspace directory. It also made narrow device revocation conflict with schedules and other durable work. A stable principal and workspace let credentials rotate or disappear without moving data, while the credential id remains available as bounded historical attribution.
+
+#### Deployment gate and clean cutover
+
+The clean cutover is intentional, not a general migration promise. A production recheck on 2026-09-06 found two issued `tok_` values: one operator-owned token with authenticated activity and one never-seen test token. Only one distinct token hash appears in token-authenticated audit events, and no external user has been identified. The database cannot identify people by design, so this conclusion combines the bounded database audit with the operator's knowledge of the unadvertised deployment.
+
+The same check verified `darklab-backup-20260906-150003.238063Z.tar.gz`: the 38,321,913-byte archive had a readable 1,947-member listing and every entry in its internal checksum tree passed. The scheduled backup log also recorded successful synchronization to the off-host backup destination.
+
+The production default is therefore a fresh application-data set, with the verified old database and workspace tree retained for rollback. A one-off conversion may attach only the operator data selected during the rehearsal; it is not an automatic legacy-token migrator. Existing `tok_` values become invalid. Immediately before the cutover, the preflight must repeat the token and usage audit and verify a fresh backup. Any new or unexplained token use, or any known external user, stops the reset and requires an approved compatibility or migration design.
+
+#### Names, identifiers, and secrets
+
+The user-facing term is **access credential**. Browser and shell help may shorten that to **credential** where the meaning is clear, and the built-in command root is `credential`. **Recovery credential** is not used as a synonym because ordinary access credentials are also valid day-to-day authenticators.
+
+Identifiers are opaque, lowercase, server-generated values:
+
+| Object | Format | Notes |
+| ------ | ------ | ----- |
+| Principal | `prn_` plus 32 hexadecimal characters | Stable actor id; never shown as the user's identity in normal UI |
+| Personal workspace | `wsp_` plus 32 hexadecimal characters | Stable personal owner id; exactly one per principal |
+| Workspace storage key | `ws_` plus 32 hexadecimal characters | Immutable relative directory name; attached anonymous workspaces may retain a validated existing `sess_<32 hex>` name |
+| Access credential id | `crd_` plus 32 hexadecimal characters | Non-secret lookup and audit id |
+| Personal access token id | `pat_` plus 32 hexadecimal characters | Non-secret lookup and audit id |
+
+Each newly generated identifier and `ws_` storage key carries 128 random bits from the operating system CSPRNG; a preserved `sess_` storage key remains the validated digest-derived value from the attached anonymous workspace. A database uniqueness conflict is retried up to three times and then fails the operation without partial state. Credential lists and routine logs use only the type and first eight hexadecimal characters, such as `crd_a1b2c3d4`. Full non-secret ids appear only in structured lifecycle or operator responses that need a stable reference, and logs never use a raw secret as a correlation id.
+
+Portable access secrets use `dlc_v1_crd_<32 hex>_<43 base64url>` and PATs use `dlp_v1_pat_<32 hex>_<43 base64url>`. The final component is 32 random bytes encoded without padding. Parsers reject non-ASCII input, whitespace, wrong case, missing components, unknown versions, and input longer than 128 bytes before doing a database lookup. Secret formats are exact rather than permissive aliases, which keeps future versions distinguishable and makes accidental token-shaped text less likely to authenticate.
+
+#### Verifier and key contract
+
+Reusable secrets are never stored. The public credential or PAT id selects one row, and application code verifies the submitted secret with a constant-time comparison against a versioned HMAC-SHA-256 digest. The canonical HMAC input is the ASCII credential type, a NUL separator, the public id, another NUL separator, and the exact secret bytes. Digest calculation never happens in SQL.
+
+The verifier root is a separate 32-byte random value stored as a versioned encrypted keyring in application data. Versions are positive, monotonically increasing integers. The existing vault master key wraps each root with AES-GCM using the ASCII associated data `darklab_shell/auth/verifier-root/v1/<version>`. HKDF-SHA-256 expands the root to 32 bytes with salt `darklab_shell/auth/v1/verifier` and info `access-credential` or `personal-access-token`. Neither derived verifier key is the vault wrapping key, and a digest from one credential type is useless for the other. This reuses the vault's environment override, `0600` key-file handling, process cache, backup, restore, and rewrapping boundary instead of creating another plaintext root-secret file.
+
+Each credential row stores its verifier-root version and the digest-algorithm value `hmac-sha256-v1`. Vault-master-key rotation rewraps the unchanged verifier roots while the old master key is available, so it does not revoke credentials. Verifier-root rotation creates a new active version for newly issued credentials and keeps a retired encrypted root only while rows still reference it; deleting a referenced version is rejected. Existing credentials are replaced or revoked before the old root is removed. Restore requires both the encrypted keyring and its matching backed-up vault master key and fails closed rather than silently generating either beside an existing credential database. Losing both usable copies of a verifier root makes its credentials unrecoverable and sends affected principals through the recorded recovery path.
+
+#### Authentication and anonymous contexts
+
+One immutable, transport-independent authenticated context is the source for browser, API, CLI, operator, and worker authorization. It contains:
+
+- `principal_id` and `personal_workspace_id`
+- `credential_id` and `credential_type`
+- `authentication_method`
+- optional `selected_team_id`
+- optional resolved team role
+- the final capability set
+
+For a live authenticated request, `credential_id` is required and `credential_type` is `portable`, `pat`, or `browser_session`. Authentication methods are `portable_header`, `pat_bearer`, `browser_cookie`, or `oidc_session`; an OIDC-authenticated browser request carries the id of its local `browser_session`, while the provider identity remains linkage metadata rather than a reusable app credential. Operator tooling uses an explicit `operator` method. Background workers use `background`, carry no reusable credential, and keep an optional originating credential id only for audit and incident response. Before work starts, they rebuild authorization from the stable principal, workspace or team owner, current principal state, current membership, and required capabilities.
+
+Anonymous access uses a separate `AnonymousContext`. It accepts only a canonical lowercase UUIDv4 generated by the browser, never an empty value or the literal `anonymous`, and it cannot select a team. A missing or malformed anonymous id does not create an owner context. Supplying an invalid, unknown, expired, or revoked credential produces a typed authentication failure and never falls through to the anonymous context.
+
+In the `open` profile, the browser temporarily keeps a portable access credential in `localStorage` and sends exactly one identity header per request: `X-Darklab-Credential` while authenticated or `X-Darklab-Anonymous-ID` while anonymous. `X-Team-ID` continues to express a requested team, but the server derives role and capabilities. Browser credential routes remain same-origin and do not emit permissive credential CORS headers. A supplied credential always wins over anonymous state and fails closed if it is invalid.
+
+This script-readable browser secret is an accepted interim boundary for the anonymous-first profile, where portability without an account is the product goal. It remains exposed to a successful same-origin XSS attack. The restricted-profile work replaces it after redemption with a shorter-lived `Secure`, `HttpOnly` cookie and adds the CSRF controls required by cookie authentication. The `browser_sessions` table is deferred to that work; the principal schema does not add unused browser-session rows.
+
+#### Authorization, revocation, and recovery
+
+Authentication answers who is acting. Ownership and capabilities answer what that actor may do:
+
+- Personal reads and writes resolve through `personal_workspace_id`; a credential value is never an owner key.
+- Team reads and writes resolve through `team_id`, current principal membership, current role, and the capability required by the operation. A requested team header is never trusted as authorization.
+- An expired or revoked credential cannot start another request. A disabled principal cannot authenticate through any credential and cannot start personal or team work assigned to that principal.
+- Background work rechecks principal state and, for team work, membership and capability immediately before each launch or mutation.
+
+The request that revokes its own credential may complete, but no later request with that secret succeeds. Revoking a portable credential also revokes every browser session redeemed from it; revoking one browser session does not revoke its parent portable credential or another device's session. Long-lived run streams revalidate at an authorization heartbeat no slower than 15 seconds and disconnect a revoked credential. A noninteractive run that was already accepted continues as principal-owned work and can be observed or stopped through another credential. An interactive PTY is terminated when its authenticated connection is revoked because leaving an unattended interactive process running is not a safe detached state.
+
+Schedules, watchers, workflow continuations, notification channels, and other durable definitions continue by default when one originating credential is revoked; the principal or team owns them. Each definition keeps safe `created_by_credential_id` and, when later edits affect execution, `last_changed_by_credential_id` metadata. Credential revocation offers an explicit **also pause related work** action, and the API/operator equivalent can pause definitions whose creation or latest execution-affecting change came through that credential. This is the narrow stolen-device response: revoke the credential, review the attributed definitions, and pause only the suspicious work.
+
+Disabling a principal is the global stop. It rejects every credential, disconnects streams, terminates PTYs and active runs assigned to that principal, cancels queued launches, suppresses notification delivery and retries, and suspends that principal's personal or team-assigned durable definitions. Re-enabling the principal does not silently replay missed work or resume suspended definitions; an operator reviews and resumes them explicitly.
+
+Recovery stays pseudonymous and possession-based. Any remaining active portable credential may create another after recent-authentication confirmation. A linked managed sign-in may do the same when its access profile permits portable credentials. If neither path remains, there is no email, security-question, principal-id-only, or public self-service recovery. A deployment operator may run a local in-container recovery command, name the principal id, confirm the destructive action, revoke every prior credential and browser session, and receive one replacement secret exactly once. The action is audited. The UI protects the last credential from casual revocation but permits an explicit, warned lockout because the operator path is the final recovery boundary.
+
+#### Personal access tokens and public shares
+
+PATs are separate credentials for the API and `darklab` CLI. They use `Authorization: Bearer`; browser portable credentials never use that header. A PAT's scopes are an upper bound, and team membership and role capabilities can only narrow them further.
+
+The initial scope vocabulary is:
+
+- `identity:read`
+- `history:read`
+- `runs:execute`
+- `projects:read` and `projects:write`
+- `atlas:read` and `atlas:write`
+- `automation:read` and `automation:write`
+- `notifications:read` and `notifications:write`
+- `secrets:manage`
+- `teams:read` and `teams:write`
+
+Unrecognized scopes fail issuance and authentication. PATs cannot create, rotate, revoke, or recover access credentials, cannot create another PAT, and can never read stored secret values. A PAT may revoke only itself through a dedicated endpoint; managing any other PAT requires a portable credential, browser session, or operator action. Scopes are immutable; changing them or rotating a PAT means issuing a replacement, saving it, and then revoking the old PAT. The default lifetime is 90 days, the minimum is one day, and the maximum is 365 days; deployments may lower but not raise that maximum, and there is no non-expiring PAT. Issuance starts with `identity:read`, `history:read`, and `runs:execute` unless the user deliberately adds scopes. Failed authentication is limited by client IP and public lookup id, while authenticated API limits use the PAT id and client IP.
+
+An `oidc_required` deployment may issue PATs after an OIDC-authenticated browser session completes recent authentication within ten minutes. Operators may disable PAT issuance for that profile, but enabling it does not enable portable browser credentials or local password accounts.
+
+Public share URLs remain capability links, not identities. They do not create either authentication context and do not grant access to the owner, Atlas, team, or API. `open` and `mixed` profiles enable public shares by default. `token_required` and `oidc_required` profiles disable share creation and return `404` for share reads by default; an operator may explicitly enable unauthenticated public shares when that exception is intended. Authenticated share deletion follows the principal/team owner context in every profile.
+
+#### Legacy identity inventory and replacement map
+
+The 2026-09-06 inventory covers both current schema heads and all 77 recorded migrations. The generated schema manifest contains 59 `session`-named ownership or attribution columns across 45 application tables, plus the raw `session_tokens` identity table, 36 session-named indexes, and token/session constraints and foreign keys. `schedules` and `schedule_fires` also use `owner_kind`/`owner_id` alongside token ownership. The affected tables are:
+
+- Identity and personal state: `session_tokens`, `session_preferences`, `session_variables`, `recent_values`, `starred_commands`, and `secrets`.
+- Runs and Atlas: `runs`, `run_file_artifacts`, `snapshots`, `ai_run_assists`, `entities`, `entity_intel_snapshots`, `entity_labels`, `entity_notes`, `findings`, `finding_triage_details`, `scan_target_observations`, `nmap_service_observations`, and `schemathesis_run_evidence`.
+- Projects and assessments: `projects`, `project_reports`, `evidence_packages`, `project_digest_settings`, `project_auto_promote_rules`, `project_assessments`, `project_assessment_checks`, `project_http_profiles`, `finding_remediation_dispositions`, `finding_remediation_merge_members`, `finding_evidence_links`, `risk_escalation_states`, `risk_escalations`, and `assessment_batch_previews`.
+- Durable work: `user_workflows`, `workflow_executions`, `schedules`, `watchers`, `notification_channels`, `notification_events`, `oast_correlations`, and `zap_connector_jobs`.
+- Teams, imports, and audit: `teams`, `team_members`, `atlas_import_batches`, `atlas_import_drafts`, and `audit_events`.
+
+Every personal `session_id` or `session_token` owner becomes `personal_workspace_id`; team alternatives keep `team_id`. Actor, creator, updater, and audit session fields become `principal_id` plus a nullable safe credential id where attribution is useful. The raw `session_tokens` table is replaced by digest-only credential and PAT stores. Token-keyed team membership becomes principal membership. Scheduler `owner_kind`/`owner_id` remains a relationship to the owning automation object, while its token field is replaced by workspace/team ownership and an execution principal. Composite keys, partial unique indexes, foreign keys, cleanup queries, and both backend baselines follow the same mapping.
+
+Runtime searches found 238 exact `session_id = ?` and 23 exact `session_token = ?` SQL fragments across 74 service modules. The request boundary has 105 `get_session_id()` definitions or calls across 26 application files, and `X-Session-ID` appears 23 times across 12 live application, CLI, and support-script files. `OwnerContext` is present as a type and path abstraction, but `personal_scope_predicate()` has no production caller and `shared_owner_predicate()` has five. Those 261 direct predicates are the starting classification set: equivalent conversions may adopt the shared query seam directly, while any conversion that adds or removes a personal/team filter is a separately tested behavior change.
+
+The non-schema surfaces are also explicit:
+
+| Surface | Legacy dependency | Replacement |
+| ------- | ----------------- | ----------- |
+| Browser and ordinary routes | `session_id`/`session_token` in `localStorage`, global `SESSION_ID`, `X-Session-ID`, per-token team selection, session-token Options controls | Separate anonymous/access storage, the dedicated open-profile headers, authenticated/anonymous contexts, per-principal team selection, and the Access UI |
+| Session routes and built-ins | `/session/token/generate`, `/info`, `/verify`, `/revoke`, `/session/migrate`, `session-token`, masking and client-side interception | Principal summary plus credential issue/use/list/label/rotate/revoke routes and the `credential` command root; no category migration |
+| API and CLI | Bearer-or-`X-Session-ID` fallback, `--token`, `DARKLAB_TOKEN`, `token` in `~/.config/darklab/config.toml`, token-oriented `whoami` and scope help | Scoped PAT bearer only, PAT-specific option/environment/config names, credential-safe identity output, and principal membership authorization |
+| Runs, streams, PTYs, and process control | Request `session_id` copied into broker payloads, active-run metadata, download tickets, Redis keys, stream/kill checks, workflow child runs, and log fields | Stable owner context plus principal/credential attribution; heartbeat revocation for connections and no reusable secret in worker payloads |
+| Schedules, watchers, workflows, notifications, and workers | Durable `session_token` ownership, `require_durable_session_token()`, token-derived worker authorization and secret lookup | Workspace/team ownership, execution principal, originating credential metadata, and current-state capability checks at execution time |
+| Workspace paths | `session_workspace_name(session_id)`, the `sess_<sha256(owner)>` convention, and both `migrate_session_workspace()` entry points | Persisted immutable storage key, one validator/resolver, preserved valid anonymous directory names, and no identity-driven filesystem rename |
+| Audit and diagnostics | `owner_session_hash`, `actor_session_hash`, masked token labels, `actor_session_id`, token-shaped filters, and session wording | Principal/workspace ownership hashes or ids, safe credential id/type attribution, principal/team role fields, and no submitted secret fingerprint |
+| Docs, scripts, and tests | User docs, API/OpenAPI output, demo and seed helpers, release probes, Python fixtures, Vitest header checks, and Playwright identity setup | Final principal/credential terms, PAT examples, updated helpers, intentional legacy-rejection cases, production-valid server fixtures, and live app-issued browser identities |
+
+The server-side test bypass has already been removed. Positive Python and Postgres tests use canonical anonymous UUIDs or tokens issued through the real storage path; malformed values remain labeled negative cases. Vitest values that only test request construction are not treated as server identities, and Playwright obtains identity from the running application. This keeps the implementation work measurable without mixing a test-only authentication path back into the resolver.
+
+The supported SQLite-to-Postgres operation changes the database backend; it does not move workspace files. The destination application must declare the same workspace root, and every persisted storage key must resolve to the same existing relative directory before the database cutover is accepted. For a cross-host move, the operator copies or restores the workspace tree separately before running the database migration. Missing, mismatched, unsafe, or out-of-root storage keys stop the migration with actionable details rather than producing a database that points at unavailable files.
+
+#### Threat model
+
+| Threat | Required control and accepted boundary |
+| ------ | -------------------------------------- |
+| Database disclosure | The database contains public ids and keyed verifier digests, not reusable secrets. The key stays in the deployment secret boundary. Metadata, relationships, and activity times still become visible, so database access remains sensitive. |
+| Credential guessing or stuffing | Secrets carry 256 random bits, parsers are bounded, lookup ids avoid scans, failures are rate-limited by IP and lookup id, and failures are audited without the submitted value. User-chosen passwords are not accepted. |
+| XSS | Existing credentials are never returned and one-time reveals leave the DOM. CSP, output escaping, and redaction remain required. The open profile knowingly leaves the active portable credential script-readable until cookie exchange ships; XSS can steal or use it during that window. |
+| Replay and credential theft | TLS, no URL/query transport, no logging, expiry, independent device labels, rotation, revocation, and active-connection revalidation limit exposure. Portable credentials and PATs remain bearer secrets and are replayable until revoked or expired. |
+| Cross-principal or cross-team access | Supplied invalid credentials fail before owner resolution. Personal ownership uses workspace ids, team authorization comes from current server-side membership and capabilities, and direct predicates move behind the shared owner seam. |
+| Worker execution and stale roles | Worker payloads carry stable ids, never reusable credentials. Principal state, team membership, and capabilities are rechecked before later execution or mutation; disabled or removed actors fail closed. |
+| Recovery abuse | Public recovery and principal-id-only recovery do not exist. The local operator command requires host access, explicit confirmation, revoke-all behavior, one-time output, and an audit event. Host administrators remain trusted. |
+| Unauthenticated issuance | Only `open` and `mixed` may upgrade the caller's validated anonymous workspace. Issuance cannot name another owner, is rate-limited, and is disabled in restricted profiles. Resource exhaustion remains an operator sizing and abuse-monitoring concern. |
+| Backup or master-key disclosure | Complete backups contain the encrypted verifier roots, vault master key, and owned data, so owner-only storage and off-host protection remain mandatory. Possession of a readable complete backup is equivalent to control of the restored deployment; a database dump alone still exposes sensitive metadata but not reusable credential secrets. |
+| Public share leakage | Shares are explicit bearer capabilities with a narrow read surface. Restricted profiles disable them by default; enabling them is an operator decision, and invalid or disabled links return `404`. |
+
+No schema-changing choice remains in this decision. Restricted browser sessions, CSRF mechanics, and OIDC protocol details keep their own later implementation gates, but they must preserve these principal, credential, PAT, recovery, share, and authorization contracts.
+
 ### Session Token Security
+
+**Superseded for v3.0 on 2026-09-06 by [Pseudonymous Principals and Access Credentials](#pseudonymous-principals-and-access-credentials).** The v2.9 runtime still follows the historical constraints below until the coordinated cutover; they are not compatibility requirements for the new schema.
 
 **Five non-obvious constraints in the session token design:**
 
@@ -510,6 +661,8 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 ### Team Ownership: Session Tokens Stay Actors
 
+**Superseded for v3.0 on 2026-09-06 by [Pseudonymous Principals and Access Credentials](#pseudonymous-principals-and-access-credentials).** This section remains as the rationale for the released v2.9 design, not as the ownership model for new work.
+
 **Team mode uses hybrid ownership instead of replacing session identity.**
 
 The app already has durable `tok_` session tokens that own personal history, workspaces, preferences, secrets, and command attribution. Team mode keeps that identity model: a token still represents the operator taking an action, while `team_id` marks records that belong to a shared team scope.
@@ -530,9 +683,9 @@ Only one scheduler worker should fire due rows for a deployment. Postgres uses t
 
 Normal schedules and watcher-owned schedules share the physical `schedules` table. The ownership fields (`owner_kind`, `owner_id`, and `session_token`) keep the behavior explicit: browser/API/CLI schedule lists expose only normal user-owned schedules, while watcher-owned cadence rows stay tied to watcher state and cannot be edited as ordinary command schedules.
 
-The firing policy is deliberately conservative:
+The firing policy is deliberately conservative. The token-specific first rule was superseded for v3.0; the released v2.9 runtime continues to enforce it until the coordinated principal cutover:
 
-- schedules require durable `tok_` sessions so revocation can stop later fires
+- schedules belong to a personal workspace or team and execute as a captured principal; revoking one credential leaves them running by default, the revoke flow can also pause work attributed to that credential, and disabling the principal is the global stop
 - strict five-field cron and a five-minute minimum custom interval prevent accidental rapid loops
 - missed fires are coalesced on worker startup instead of replaying every skipped interval
 - overlap policy is stored as `skip` and enforced by recording an audit row instead of starting another copy while the previous scheduled run is still active

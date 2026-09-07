@@ -15,6 +15,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The v3 authentication design is now fixed before schema work begins.** The accepted contract defines pseudonymous principals, personal workspaces, access credentials, scoped PATs, request and anonymous contexts, recovery, revocation, durable work, restricted-profile public shares, verifier keys, the clean production cutover, and its threat model. A 2026-09-06 production check still found only the known operator and unused test tokens, and the latest backup passed a complete checksum verification; this decision-only change does not alter the schema or runtime.
 - **Server-side tests now use the same identity-validation path as production.** Shared fixtures provide canonical anonymous UUIDs, issue durable tokens through the real session storage service, and keep one identity stable across related requests. Literal malformed, unknown, and revoked values remain only where a test deliberately verifies rejection; request-construction-only JavaScript fixtures remain isolated, and Playwright continues to obtain live identities from the running application.
 - **Shell-output entities now open a compact action menu for investigation and reuse.**
   - **Before:** Activating an entity opened Atlas immediately, while a separate long-press or right-click menu exposed a larger set of output-only actions. That made it easy to navigate away when the intent was to select or reuse the value.
