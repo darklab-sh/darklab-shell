@@ -19,7 +19,7 @@ from conftest import build_test_config
 from conftest import make_test_app as _test_app
 from identity_helpers import anonymous_session_id
 from blueprints.run import KILL_BIN, SUDO_BIN
-from core.helpers import get_session_id
+from core.helpers import AuthenticationRejected, get_session_id
 import services.commands.registry as commands
 import services.commands.builtins_discovery as builtins_discovery
 from services.commands.builtins import (
@@ -189,18 +189,21 @@ class TestRequestHelpers:
             # Flask test client context usually falls back to 127.0.0.1
             assert shell_app_module.get_client_ip() == "127.0.0.1"
 
-    def test_get_session_id_strips_whitespace(self, anonymous_identity_factory):
+    def test_get_session_id_rejects_whitespace_wrapped_identity(self, anonymous_identity_factory):
         session_id = anonymous_identity_factory("resolver-whitespace").value
         with _test_app().test_request_context("/", headers={"X-Session-ID": f"  {session_id}  "}):
-            assert get_session_id() == session_id
+            with pytest.raises(AuthenticationRejected):
+                get_session_id()
 
     def test_get_session_id_rejects_invalid_anonymous_session_id(self):
         flask_app = _test_app()
         assert flask_app.config["TESTING"] is True
         with flask_app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
-            assert get_session_id() == ""
+            with pytest.raises(AuthenticationRejected):
+                get_session_id()
         with flask_app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
-            assert get_session_id() == ""
+            with pytest.raises(AuthenticationRejected):
+                get_session_id()
 
 
 # ── /kill ─────────────────────────────────────────────────────────────────────
@@ -232,11 +235,12 @@ class TestKillRoute:
 
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("kill-sigterm")}
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=1234), \
              mock.patch("blueprints.run.os.killpg") as killpg:
-            resp = client.post("/kill", json={"run_id": "run-123"})
+            resp = client.post("/kill", json={"run_id": "run-123"}, headers=headers)
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -245,10 +249,11 @@ class TestKillRoute:
 
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("kill-race")}
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
-            resp = client.post("/kill", json={"run_id": "run-404"})
+            resp = client.post("/kill", json={"run_id": "run-404"}, headers=headers)
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -256,13 +261,14 @@ class TestKillRoute:
 
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("kill-scanner")}
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
              mock.patch("blueprints.run.active_run_pid_start_matches", return_value=True), \
              mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=0)) as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:
-            resp = client.post("/kill", json={"run_id": "run-scan"})
+            resp = client.post("/kill", json={"run_id": "run-scan"}, headers=headers)
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -276,13 +282,14 @@ class TestKillRoute:
 
     def test_kill_skips_scanner_sudo_path_when_pid_start_time_changed(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("kill-pid-reuse")}
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
              mock.patch("blueprints.run.active_run_pid_start_matches", return_value=False), \
              mock.patch("blueprints.run.subprocess.run") as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:
-            resp = client.post("/kill", json={"run_id": "run-scan-reused"})
+            resp = client.post("/kill", json={"run_id": "run-scan-reused"}, headers=headers)
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -292,6 +299,7 @@ class TestKillRoute:
 
     def test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("kill-sudo-race")}
 
         with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
@@ -299,7 +307,7 @@ class TestKillRoute:
              mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=1)), \
              mock.patch("blueprints.run.time.sleep"), \
              mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
-            resp = client.post("/kill", json={"run_id": "run-scan-race"})
+            resp = client.post("/kill", json={"run_id": "run-scan-race"}, headers=headers)
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -416,23 +424,23 @@ class TestIsCommandAllowedEdges:
             }
             with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 from services.workspace.files import session_workspace_name, write_workspace_text_file
-                write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
+                write_workspace_text_file("tok_session-1", "targets.txt", "ip.darklab.sh\n", cfg)
                 target_path = os.path.join(
                     tmp,
-                    session_workspace_name("session-1"),
+                    session_workspace_name("tok_session-1"),
                     "targets.txt",
                 )
                 os.chmod(target_path, 0o600)
 
                 result = validate_command(
                     "nmap -iL targets.txt -oN scan.txt -dir tool-db",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
                 target_mode = os.stat(target_path).st_mode & 0o777
                 db_dir = os.path.join(
                     tmp,
-                    session_workspace_name("session-1"),
+                    session_workspace_name("tok_session-1"),
                     "tool-db",
                 )
                 db_mode = os.stat(db_dir).st_mode & 0o777
@@ -669,16 +677,16 @@ class TestIsCommandAllowedEdges:
             }
             with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 from services.workspace.files import resolve_workspace_path, write_workspace_text_file
-                write_workspace_text_file("session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
+                write_workspace_text_file("tok_session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
                     "nmap -iL targets.txt -oN findings.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                     workspace_cwd="darklab",
                 )
-                expected_read = str(resolve_workspace_path("session-1", "darklab/targets.txt", cfg))
-                expected_write = str(resolve_workspace_path("session-1", "darklab/findings.txt", cfg))
+                expected_read = str(resolve_workspace_path("tok_session-1", "darklab/targets.txt", cfg))
+                expected_write = str(resolve_workspace_path("tok_session-1", "darklab/findings.txt", cfg))
 
             assert result.allowed, result.reason
             assert result.workspace_reads == ["darklab/targets.txt"]
@@ -713,23 +721,23 @@ class TestIsCommandAllowedEdges:
             }
             with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 from services.workspace.files import write_workspace_text_file
-                write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
+                write_workspace_text_file("tok_session-1", "targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
                     "nmap -iL ../targets.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                     workspace_cwd="darklab",
                 )
                 denied = validate_command(
                     "nmap -iL ../../targets.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                     workspace_cwd="darklab",
                 )
                 absolute_denied = validate_command(
                     "nmap -iL ../targets.txt -oN /../../scan.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                     workspace_cwd="darklab",
                 )
@@ -754,15 +762,15 @@ class TestIsCommandAllowedEdges:
                 "workspace_inactivity_ttl_hours": 1,
             }
             from services.workspace.files import resolve_workspace_path, write_workspace_text_file
-            write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
+            write_workspace_text_file("tok_session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
 
             result = validate_command(
                 "katana -list /urls.txt -d 1 -silent -o /katana-urls.txt",
-                session_id="session-1",
+                session_id="tok_session-1",
                 cfg=cfg,
             )
-            expected_read = str(resolve_workspace_path("session-1", "urls.txt", cfg))
-            expected_write = str(resolve_workspace_path("session-1", "katana-urls.txt", cfg))
+            expected_read = str(resolve_workspace_path("tok_session-1", "urls.txt", cfg))
+            expected_write = str(resolve_workspace_path("tok_session-1", "katana-urls.txt", cfg))
 
         assert result.allowed, result.reason
         assert result.workspace_reads == ["urls.txt"]
@@ -786,7 +794,7 @@ class TestIsCommandAllowedEdges:
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             result = validate_command(
                 "nmap -iL targets.txt",
-                session_id="session-1",
+                session_id="tok_session-1",
                 cfg={"workspace_enabled": False},
             )
 
@@ -820,17 +828,17 @@ class TestIsCommandAllowedEdges:
             }
             with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 from services.workspace.files import write_workspace_text_file
-                write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
+                write_workspace_text_file("tok_session-1", "words.txt", "admin\nlogin\n", cfg)
 
                 workspace_result = validate_command(
                     "ffuf -u https://ip.darklab.sh/FUZZ -w words.txt -o ffuf.json",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
                 packaged_result = validate_command(
                     "ffuf -u https://ip.darklab.sh/FUZZ "
                     "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
 
@@ -845,7 +853,7 @@ class TestIsCommandAllowedEdges:
     def test_workspace_write_flags_keep_dev_null_exception(self):
         result = validate_command(
             'curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh',
-            session_id="session-1",
+            session_id="tok_session-1",
             cfg={"workspace_enabled": True},
         )
 
@@ -866,10 +874,10 @@ class TestIsCommandAllowedEdges:
                 "workspace_inactivity_ttl_hours": 1,
             }
             from services.workspace.files import write_workspace_text_file
-            write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
-            write_workspace_text_file("session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
-            write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
-            write_workspace_text_file("session-1", "domains.txt", "darklab.sh\n", cfg)
+            write_workspace_text_file("tok_session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
+            write_workspace_text_file("tok_session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
+            write_workspace_text_file("tok_session-1", "words.txt", "admin\nlogin\n", cfg)
+            write_workspace_text_file("tok_session-1", "domains.txt", "darklab.sh\n", cfg)
 
             cases = [
                 (
@@ -941,13 +949,13 @@ class TestIsCommandAllowedEdges:
                  mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
                  mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
                 results = [
-                    (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
+                    (validate_command(command, session_id="tok_session-1", cfg=cfg), reads, writes)
                     for command, reads, writes in cases
                 ]
 
                 denied = validate_command(
                     "amass subs -d darklab.sh -names -dir custom-amass-db",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
                 assert not denied.allowed
@@ -955,7 +963,7 @@ class TestIsCommandAllowedEdges:
 
                 denied = validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
                 assert not denied.allowed
@@ -980,7 +988,7 @@ class TestIsCommandAllowedEdges:
             ],
         )
 
-        artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+        artifacts = _workspace_artifacts_from_validation(validation, "tok_session-1")
 
         assert [(item["workspace_path"], item["kind"]) for item in artifacts] == [
             ("domains.txt", "input"),
@@ -1016,7 +1024,7 @@ class TestIsCommandAllowedEdges:
             workspace_writes=["reports/scan.xml", "reports/plain.xml"],
         )
 
-        artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+        artifacts = _workspace_artifacts_from_validation(validation, "tok_session-1")
 
         assert artifacts == [
             {
@@ -1067,7 +1075,7 @@ class TestIsCommandAllowedEdges:
         ]
 
         for validation in cases:
-            artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+            artifacts = _workspace_artifacts_from_validation(validation, "tok_session-1")
             assert all("structured_output" not in artifact for artifact in artifacts)
 
     def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
@@ -1182,12 +1190,12 @@ class TestIsCommandAllowedEdges:
                 "pipe_helpers": [],
             }
             from services.workspace.files import write_workspace_text_file
-            write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n10.9.8.7\n", cfg)
+            write_workspace_text_file("tok_session-1", "targets.txt", "darklab.sh\n10.9.8.7\n", cfg)
 
             with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 result = validate_command(
                     "scan -iL targets.txt",
-                    session_id="session-1",
+                    session_id="tok_session-1",
                     cfg=cfg,
                 )
 
@@ -1342,7 +1350,7 @@ class TestBuiltinCommandRegistry:
             handler=self._handler,
         ))
         registry.freeze()
-        owner = OwnerContext(scope="personal", owner_id="session-one")
+        owner = OwnerContext(scope="personal", owner_id="tok_" + "1" * 32)
 
         def resolve_owner(*args, **kwargs):
             calls["owner"] += 1

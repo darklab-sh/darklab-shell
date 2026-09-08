@@ -23,9 +23,17 @@ from app_factory import create_app as _create_flask_app
 from config import APP_VERSION, CFG
 from runtime_bootstrap import bootstrap_runtime
 from extensions import limiter
-from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from core.helpers import (
+    AuthenticationRejected,
+    LegacyIdentityAdapterUnavailable,
+    get_authentication_result,
+    get_client_ip,
+    get_log_session_id,
+    get_session_id,
+)
 import core.process as process_state
 from blueprints.assets import assets_bp
+from blueprints.auth import auth_bp
 from blueprints.api_v1 import api_v1_bp
 from blueprints.atlas import atlas_bp
 from blueprints.content import content_bp
@@ -48,6 +56,10 @@ from core.process import redis_storage_uri
 from services.workspace.files import cleanup_inactive_workspaces
 from services.metrics_lazy import app_metrics
 from services.api_v1.serialization import json_error
+from services.audit.context import request_audit_fields
+from services.auth.lifecycle import record_authentication_failure
+from services.auth.rate_limit import check_failed_redemption
+from services.auth.resolver import public_lookup_id_from_headers
 
 log = logging.getLogger("shell")
 
@@ -378,6 +390,39 @@ def _enforce_dynamic_route_rate_limit():
     return jsonify({"error": "rate_limited", "retry_after": result.retry_after}), 429
 
 
+def _authentication_rejected_handler(exc):
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error(exc.code, exc.message)), 401
+    return jsonify({"error": exc.code, "message": exc.message}), 401
+
+
+def _legacy_identity_adapter_handler(_exc):
+    message = "This route still uses the v2 session owner adapter and cannot accept a v3 credential yet."
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("principal_cutover_pending", message)), 409
+    return jsonify({"error": "principal_cutover_pending", "message": message}), 409
+
+
+def _enforce_authentication_resolution():
+    result = get_authentication_result()
+    if not result.failed:
+        return None
+    limited = check_failed_redemption(
+        get_client_ip(),
+        public_lookup_id_from_headers(request.headers),
+        redis_client=process_state.redis_client,
+        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", CFG.get("rate_limit_enabled", True))),
+    )
+    if limited.allowed:
+        record_authentication_failure(result, request_fields=request_audit_fields(request))
+    if not limited.allowed:
+        return jsonify({
+            "error": "credential_authentication_rate_limited",
+            "retry_after": limited.retry_after,
+        }), 429
+    raise AuthenticationRejected(result.error_code, result.message)
+
+
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
     try:
@@ -518,6 +563,7 @@ def create_app(config=None):
         },
         blueprints=(
             assets_bp,
+            auth_bp,
             api_v1_bp,
             atlas_bp,
             content_bp,
@@ -537,11 +583,14 @@ def create_app(config=None):
         error_handlers={
             429: _rate_limit_handler,
             500: _server_error_handler,
+            AuthenticationRejected: _authentication_rejected_handler,
+            LegacyIdentityAdapterUnavailable: _legacy_identity_adapter_handler,
         },
         before_request_handlers=(
-            _enforce_dynamic_route_rate_limit,
-            _run_periodic_workspace_cleanup,
             _log_request,
+            _enforce_dynamic_route_rate_limit,
+            _enforce_authentication_resolution,
+            _run_periodic_workspace_cleanup,
         ),
         after_request_handlers=(
             _log_response,

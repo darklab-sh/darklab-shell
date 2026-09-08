@@ -236,7 +236,7 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
 
 def test_probe_routes_fail_closed_for_foreign_archived_and_value_only_plans(client):
     session_id = anonymous_session_id("probe-owner-" + uuid.uuid4().hex)
-    foreign_id = "probe-foreign-" + uuid.uuid4().hex
+    foreign_id = anonymous_session_id("probe-foreign-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     route = f"/projects/{project['id']}/probes"

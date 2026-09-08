@@ -497,6 +497,7 @@ Practical note:
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
 - Use the shared helpers in `tests/py/identity_helpers.py` for server-side requests that need an identity. `anonymous_session_id()` creates a valid anonymous UUID, `durable_session_token()` stores a real token through the application service, and `identity_client_factory` keeps the same identity across related client requests.
 - Keep malformed, empty, unknown, and revoked identity values as readable literals only in tests that intentionally verify rejection. JavaScript tests that only check header construction don't need database-backed identities, while Playwright should continue reading its identity from the running application.
+- Keep principal-authentication coverage backend-complete. The SQLite and Postgres cases should exercise every typed resolver state, portable credentials and scoped PATs, one-time secret responses, rate limits, redacted audit details, and concurrent last-credential protection through the same production services.
 - When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
 - For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
 - Python and Playwright harnesses raise app rate limits by default so unrelated tests should not carry per-test limiter workarounds.

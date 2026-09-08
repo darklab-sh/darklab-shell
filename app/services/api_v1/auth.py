@@ -8,11 +8,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
+import hashlib
 from typing import Any, Callable
 
-from flask import g, request
+from flask import g
 
-from core.database_access import get_db_connect
+from core.helpers import get_authentication_result, get_client_ip
+from services.auth.resolver import (
+    AnonymousContext,
+    AuthenticatedContext,
+    LegacySessionContext,
+)
 
 
 @dataclass(frozen=True)
@@ -34,46 +40,49 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _bearer_token() -> str:
-    header = str(request.headers.get("Authorization") or "").strip()
-    if not header:
-        return ""
-    prefix = "Bearer "
-    if not header.lower().startswith(prefix.lower()):
-        raise ApiAuthError("invalid_authorization_header", "Authorization must use Bearer token syntax.")
-    return header[len(prefix):].strip()
-
-
 def token_from_request() -> str:
-    token = _bearer_token()
-    if token:
-        return token
-    return str(request.headers.get("X-Session-ID") or "").strip()
+    """Return the still-supported v2 token from the central authentication result."""
+    context = get_authentication_result().context
+    return context.session_id if isinstance(context, LegacySessionContext) else ""
+
+
+def api_rate_limit_key() -> str:
+    """Key API limits from the typed result without retaining a bearer secret."""
+    context = get_authentication_result().context
+    client_ip = get_client_ip()
+    if isinstance(context, AuthenticatedContext):
+        return f"{context.credential_id}:{client_ip}"
+    if isinstance(context, LegacySessionContext):
+        # Remove this deployment-local compatibility key with the v2 token
+        # adapter. The token itself must not become a Flask-Limiter/Redis key.
+        digest = hashlib.sha256(context.session_id.encode("utf-8")).hexdigest()
+        return f"legacy:{digest}:{client_ip}"
+    return client_ip
 
 
 def authenticate_api_session() -> ApiSession:
-    token = token_from_request()
-    if not token:
+    result = get_authentication_result()
+    if result.failed:
+        raise ApiAuthError(
+            result.error_code or "invalid_token",
+            result.message or "API token is invalid.",
+        )
+    context = result.context
+    if context is None:
         raise ApiAuthError("missing_token", "API token is required.")
-    if not token.startswith("tok_"):
+    if isinstance(context, AnonymousContext):
         raise ApiAuthError("invalid_token", "API v1 requires a durable tok_ session token.")
+    if not isinstance(context, LegacySessionContext):
+        raise ApiAuthError(
+            "principal_cutover_pending",
+            "API v1 will accept scoped PATs after the principal ownership cutover.",
+            status_code=409,
+        )
+    token = context.session_id
     last_seen_at = _now()
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT token, created FROM session_tokens WHERE token = ?",
-            (token,),
-        ).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE session_tokens SET last_seen_at = ? WHERE token = ?",
-                (last_seen_at, token),
-            )
-            conn.commit()
-    if not row:
-        raise ApiAuthError("revoked_token", "API token was not found or has been revoked.")
     session = ApiSession(
-        token=str(row["token"] or token),
-        created=str(row["created"] or "") or None,
+        token=token,
+        created=context.created_at,
         last_seen_at=last_seen_at,
     )
     g.api_v1_session = session

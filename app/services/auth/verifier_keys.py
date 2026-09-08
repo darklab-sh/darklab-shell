@@ -105,6 +105,32 @@ def ensure_active_verifier_root(conn: Any) -> tuple[int, bytes]:
     return version, _decode_root(plaintext)
 
 
+def load_verifier_root(conn: Any, version: int) -> bytes:
+    """Load one active or retained verifier root by version."""
+    parsed = int(version)
+    if parsed <= 0:
+        raise VerifierKeyError("verifier-root version must be positive")
+    row = conn.execute(
+        "SELECT wrapped_root, wrap_nonce, wrap_algorithm "
+        "FROM credential_verifier_roots WHERE version = ?",
+        (parsed,),
+    ).fetchone()
+    if row is None:
+        raise VerifierKeyError("credential verifier root was not found")
+    algorithm = str(_row_value(row, "wrap_algorithm", 2))
+    if algorithm != CREDENTIAL_WRAP_ALGORITHM:
+        raise VerifierKeyError("stored verifier root uses an unsupported wrapping algorithm")
+    try:
+        plaintext = decrypt_secret(
+            bytes(_row_value(row, "wrapped_root", 0)),
+            bytes(_row_value(row, "wrap_nonce", 1)),
+            associated_data=verifier_root_associated_data(parsed),
+        )
+    except Exception as exc:
+        raise VerifierKeyError("credential verifier root cannot be decrypted") from exc
+    return _decode_root(plaintext)
+
+
 def derive_verifier_key(root: bytes, credential_type: str) -> bytes:
     try:
         info = _VERIFIER_INFO[credential_type]

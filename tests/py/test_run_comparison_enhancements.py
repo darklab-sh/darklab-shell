@@ -206,8 +206,9 @@ def test_finding_compare_loader_applies_owner_scope_to_run_and_finding():
     _legacy_finding_schema(conn)
     ensure_migration_table(conn, backend=DatabaseBackend.SQLITE)
     apply_migration(conn, MIGRATION, backend=DatabaseBackend.SQLITE)
+    personal_id = "tok_" + "9" * 32
     for run_id, session_id, team_id in (
-        ("personal-run", "session-a", ""),
+        ("personal-run", personal_id, ""),
         ("team-run", "session-b", "team-a"),
     ):
         conn.execute(
@@ -222,7 +223,7 @@ def test_finding_compare_loader_applies_owner_scope_to_run_and_finding():
             (f"finding-{run_id}", session_id, team_id, run_id),
         )
 
-    personal_scope = RequestScope(personal_owner_context("session-a"))
+    personal_scope = RequestScope(personal_owner_context(personal_id))
     team_scope = RequestScope(
         team_owner_context("team-a", actor_session_id="session-b"),
         team_id="team-a",

@@ -23,14 +23,13 @@ def kill_command():
     if not isinstance(run_id, str):
         return jsonify({"error": "run_id must be a string"}), 400
     session_id = run_routes.get_session_id()
-    if session_id or run_routes.requested_team_id(request):
-        try:
-            owner_scope = run_routes.current_request_scope(session_id, request)
-        except run_routes.RequestScopeError as exc:
-            payload, status = run_routes.scope_error_payload(exc)
-            return jsonify(payload), status
-    else:
-        owner_scope = run_routes.RequestScope(run_routes.OwnerContext(scope="personal", owner_id="", actor_session_id=""))
+    if not session_id and not run_routes.requested_team_id(request):
+        return jsonify({"error": "No such process"}), 404
+    try:
+        owner_scope = run_routes.current_request_scope(session_id, request)
+    except run_routes.RequestScopeError as exc:
+        payload, status = run_routes.scope_error_payload(exc)
+        return jsonify(payload), status
     capability_response = run_routes._require_team_capability(owner_scope, run_routes.Capability.RUN_COMMANDS)
     if capability_response:
         return capability_response

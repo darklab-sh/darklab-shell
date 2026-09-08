@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Literal
+
+from services.auth.contracts import InvalidIdentityValue, validate_anonymous_uuid, validate_identifier
 
 from .contracts import TeamError
 
@@ -20,20 +23,51 @@ class OwnerContext:
     actor_session_id: str = ""
     actor_member_id: str = ""
 
+    def __post_init__(self) -> None:
+        if self.scope not in {"personal", "team"}:
+            raise TeamError("Owner context requires a valid scope")
+        normalized = str(self.owner_id or "").strip()
+        if not normalized or normalized == "anonymous":
+            raise TeamError("Owner context requires an explicit owner id")
+        if self.scope == "personal":
+            _validate_personal_owner_id(normalized)
+        object.__setattr__(self, "owner_id", normalized)
+
     @property
     def is_team(self) -> bool:
         return self.scope == "team"
 
 
-def personal_owner_context(session_id: str) -> OwnerContext:
-    session_id = session_id.strip()
-    if not session_id:
-        raise TeamError("Personal owner context requires a session id")
-    return OwnerContext(scope="personal", owner_id=session_id, actor_session_id=session_id)
+_LEGACY_TOKEN_RE = re.compile(r"\Atok_[A-Za-z0-9_-]{1,124}\Z")
 
 
-def anonymous_owner_context() -> OwnerContext:
-    return OwnerContext(scope="personal", owner_id="anonymous", actor_session_id="")
+def _validate_personal_owner_id(owner_id: str) -> None:
+    if _LEGACY_TOKEN_RE.fullmatch(owner_id):
+        return
+    if owner_id.startswith("wsp_"):
+        try:
+            validate_identifier(owner_id, "workspace")
+            return
+        except InvalidIdentityValue as exc:
+            raise TeamError("Personal owner context requires a valid workspace id") from exc
+    try:
+        validate_anonymous_uuid(owner_id)
+    except InvalidIdentityValue as exc:
+        raise TeamError("Personal owner context requires a valid anonymous or workspace id") from exc
+
+
+def personal_owner_context(owner_id: str) -> OwnerContext:
+    normalized = str(owner_id or "").strip()
+    _validate_personal_owner_id(normalized)
+    return OwnerContext(scope="personal", owner_id=normalized, actor_session_id=normalized)
+
+
+def anonymous_owner_context(anonymous_id: str) -> OwnerContext:
+    try:
+        normalized = validate_anonymous_uuid(str(anonymous_id or ""))
+    except InvalidIdentityValue as exc:
+        raise TeamError("Anonymous owner context requires a canonical UUIDv4") from exc
+    return OwnerContext(scope="personal", owner_id=normalized, actor_session_id=normalized)
 
 
 def team_owner_context(team_id: str, *, actor_member_id: str = "", actor_session_id: str = "") -> OwnerContext:
@@ -63,9 +97,33 @@ def owner_context_for_scope(
             actor_member_id=actor_member_id,
             actor_session_id=normalized_session_id,
         )
-    if normalized_session_id:
-        return personal_owner_context(normalized_session_id)
-    return anonymous_owner_context()
+    if not normalized_session_id:
+        raise TeamError("Personal owner context requires an explicit identity")
+    return personal_owner_context(normalized_session_id)
+
+
+def owner_context_from_authentication(result) -> OwnerContext:
+    """Build an owner only from an accepted typed authentication result."""
+    from services.auth.resolver import (  # noqa: PLC0415
+        AnonymousContext,
+        AuthenticatedContext,
+        AuthenticationState,
+        LegacySessionContext,
+    )
+
+    if result.state not in {AuthenticationState.NO_CREDENTIAL, AuthenticationState.VALID}:
+        raise TeamError("Failed authentication cannot construct an owner context")
+    if isinstance(result.context, AnonymousContext):
+        return anonymous_owner_context(result.context.anonymous_id)
+    if isinstance(result.context, AuthenticatedContext):
+        return OwnerContext(
+            scope="personal",
+            owner_id=result.context.personal_workspace_id,
+            actor_session_id=result.context.credential_id,
+        )
+    if isinstance(result.context, LegacySessionContext):
+        return personal_owner_context(result.context.session_id)
+    raise TeamError("Missing authentication cannot construct an owner context")
 
 
 def personal_scope_predicate(

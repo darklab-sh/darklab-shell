@@ -46,6 +46,8 @@ class AuditTargetType(str, Enum):
     ASSESSMENT_CHECK = "assessment_check"
     ASSESSMENT_BATCH = "assessment_batch"
     HTTP_PROFILE = "http_profile"
+    PRINCIPAL = "principal"
+    CREDENTIAL = "credential"
 
 
 class AuditEventType(str, Enum):
@@ -141,6 +143,16 @@ class AuditEventType(str, Enum):
     HTTP_PROFILE_CREATE = "http_profile.create"
     HTTP_PROFILE_UPDATE = "http_profile.update"
     HTTP_PROFILE_DELETE = "http_profile.delete"
+    PRINCIPAL_CREATE = "principal.create"
+    PRINCIPAL_DISABLE = "principal.disable"
+    PRINCIPAL_ENABLE = "principal.enable"
+    CREDENTIAL_CREATE = "credential.create"
+    CREDENTIAL_REDEEM = "credential.redeem"
+    CREDENTIAL_LABEL = "credential.label"
+    CREDENTIAL_EXPIRY = "credential.expiry"
+    CREDENTIAL_ROTATE = "credential.rotate"
+    CREDENTIAL_REVOKE = "credential.revoke"
+    CREDENTIAL_AUTHENTICATION_FAILURE = "credential.authentication_failure"
 
 
 COMMON_DETAIL_KEYS = frozenset({
@@ -260,6 +272,11 @@ COMMON_DETAIL_KEYS = frozenset({
     "profile_key",
     "profile_version",
     "profile_id",
+    "authentication_method",
+    "authentication_state",
+    "credential_type",
+    "expires_at",
+    "scope_count",
 })
 
 HISTORY_DELETE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
@@ -326,6 +343,38 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.PRINCIPAL_CREATE.value: _spec(
+        AuditEventType.PRINCIPAL_CREATE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.PRINCIPAL_DISABLE.value: _spec(
+        AuditEventType.PRINCIPAL_DISABLE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.PRINCIPAL_ENABLE.value: _spec(
+        AuditEventType.PRINCIPAL_ENABLE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_CREATE.value: _spec(
+        AuditEventType.CREDENTIAL_CREATE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_REDEEM.value: _spec(
+        AuditEventType.CREDENTIAL_REDEEM, AuditTargetType.CREDENTIAL, RecordingMode.BEST_EFFORT
+    ),
+    AuditEventType.CREDENTIAL_LABEL.value: _spec(
+        AuditEventType.CREDENTIAL_LABEL, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_EXPIRY.value: _spec(
+        AuditEventType.CREDENTIAL_EXPIRY, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_ROTATE.value: _spec(
+        AuditEventType.CREDENTIAL_ROTATE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_REVOKE.value: _spec(
+        AuditEventType.CREDENTIAL_REVOKE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.CREDENTIAL_AUTHENTICATION_FAILURE.value: _spec(
+        AuditEventType.CREDENTIAL_AUTHENTICATION_FAILURE,
+        AuditTargetType.CREDENTIAL,
+        RecordingMode.BEST_EFFORT,
+    ),
     AuditEventType.FINDING_MANUAL_CREATE.value: _spec(
         AuditEventType.FINDING_MANUAL_CREATE,
         AuditTargetType.FINDING,
