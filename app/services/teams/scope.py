@@ -12,6 +12,7 @@ from typing import Literal
 from services.auth.contracts import InvalidIdentityValue, validate_anonymous_uuid, validate_identifier
 
 from .contracts import TeamError
+from .ownership_queries import PersonalTeamRows, personal_only_owner_predicate, team_capable_owner_predicate
 
 OwnerScope = Literal["personal", "team"]
 
@@ -132,9 +133,8 @@ def personal_scope_predicate(
     session_column: str = "session_id",
 ) -> tuple[str, tuple[str]]:
     """Return a predicate for current tables that are still personal-session scoped."""
-    if context.scope != "personal":
-        raise TeamError("Personal-only table cannot be queried with a team owner context")
-    return f"{session_column} = ?", (context.owner_id,)
+    predicate = personal_only_owner_predicate(context, owner_column=session_column)
+    return predicate.sql, predicate.params
 
 
 def shared_owner_predicate(
@@ -144,6 +144,10 @@ def shared_owner_predicate(
     session_column: str = "session_id",
 ) -> tuple[str, tuple[str]]:
     """Return a future-ready predicate for tables with nullable team ownership."""
-    if context.scope == "team":
-        return f"{team_column} = ?", (context.owner_id,)
-    return f"({team_column} IS NULL OR {team_column} = '') AND {session_column} = ?", (context.owner_id,)
+    predicate = team_capable_owner_predicate(
+        context,
+        owner_column=session_column,
+        team_column=team_column,
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return predicate.sql, predicate.params
