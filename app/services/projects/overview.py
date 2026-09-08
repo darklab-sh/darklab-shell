@@ -54,7 +54,7 @@ from services.projects.overview_app import (
     _overview_url_host_entity_ids,
 )
 from services.projects.queries import _project_atlas_entity_select_sql, _project_entity_owner_clause
-from services.projects.scope import project_select_columns, shared_owner_where
+from services.projects.scope import personal_owner_where, project_select_columns, shared_owner_where
 from services.projects.targets import _canonical_target_payload
 from services.projects.utils import now as _now
 from services.teams.storage import token_hash
@@ -368,8 +368,12 @@ def _overview_findings_by_entity(
     if not target_ids:
         return {}
     placeholders = ",".join("?" for _ in target_ids)
-    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
-    finding_owner_params = (team_id,) if team_id else (session_id,)
+    finding_owner_sql, finding_owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="f",
+    )
+    finding_owner_sql = f"AND {finding_owner_sql} "
     triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
     rows = conn.execute(
         "SELECT f.id, COALESCE(f.entity_id, f.target_id) AS entity_id, f.target_id, "
@@ -408,10 +412,7 @@ def _overview_findings_by_entity(
 
 
 def _run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tuple[str, tuple[Any, ...]]:
-    prefix = f"{alias}." if alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", (team_id,)
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''", (session_id,)
+    return shared_owner_where(session_id, team_id=team_id, table_alias=alias)
 
 
 def _project_run_ids(conn, session_id: str, team_id: str, project_id: str) -> list[str]:
@@ -473,8 +474,12 @@ def _overview_operational_tempo(
 
     if target_ids:
         placeholders = ",".join("?" for _ in target_ids)
-        finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
-        finding_owner_params = (team_id,) if team_id else (session_id,)
+        finding_owner_sql, finding_owner_params = shared_owner_where(
+            session_id,
+            team_id=team_id,
+            table_alias="f",
+        )
+        finding_owner_sql = f"AND {finding_owner_sql} "
         triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
         triage_row = conn.execute(
             "SELECT f.id, ftd.updated "
@@ -602,8 +607,9 @@ def _overview_latest_package(conn, session_id: str, team_id: str, project_id: st
     package_where = "project_id = ?"
     package_params: list[Any] = [project_id]
     if not team_id:
-        package_where += " AND session_id = ?"
-        package_params.append(session_id)
+        owner_sql, owner_params = personal_owner_where(session_id)
+        package_where += f" AND {owner_sql}"
+        package_params.extend(owner_params)
     row = conn.execute(
         "SELECT id, name, status, updated, created "
         "FROM evidence_packages WHERE " + package_where + " "  # nosec
@@ -621,12 +627,9 @@ def _overview_latest_package(conn, session_id: str, team_id: str, project_id: st
 
 
 def _overview_latest_report(conn, session_id: str, team_id: str, project_id: str) -> dict[str, str]:
-    if team_id:
-        report_where = "team_id = ? AND project_id = ?"
-        report_params: tuple[Any, ...] = (team_id, project_id)
-    else:
-        report_where = "session_id = ? AND team_id = '' AND project_id = ?"
-        report_params = (session_id, project_id)
+    report_owner_sql, report_owner_params = shared_owner_where(session_id, team_id=team_id)
+    report_where = f"{report_owner_sql} AND project_id = ?"
+    report_params: tuple[Any, ...] = (*report_owner_params, project_id)
     row = conn.execute(
         "SELECT id, updated, created FROM project_reports WHERE " + report_where + " "  # nosec
         "ORDER BY updated DESC, created DESC, id DESC LIMIT 1",
@@ -649,8 +652,12 @@ def _overview_latest_finding_activity_at(
     if not target_ids:
         return ""
     placeholders = ",".join("?" for _ in target_ids)
-    finding_owner_sql = "AND f.team_id = ? " if team_id else "AND f.session_id = ? AND f.team_id = '' "
-    finding_owner_params = (team_id,) if team_id else (session_id,)
+    finding_owner_sql, finding_owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="f",
+    )
+    finding_owner_sql = f"AND {finding_owner_sql} "
     triage_owner_sql, triage_owner_params = _metadata_owner_where(session_id, team_id, table_alias="ftd")
     rows = conn.execute(
         "SELECT f.last_seen_at, f.created, ftd.updated AS triage_updated "

@@ -37,8 +37,7 @@ def scan_observations_by_entity(
     if not ids:
         return {}
     placeholders = ",".join("?" for _ in ids)
-    owner_sql = "team_id = ?" if team_id else "session_id = ? AND team_id = ''"
-    owner_params = (team_id,) if team_id else (session_id,)
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     rows = conn.execute(
         "SELECT entity_id, run_id, command_root, observed_at, port_entity_count "
         "FROM scan_target_observations "
@@ -92,8 +91,11 @@ def app_ports_by_host(
     event_extra = dict(log_context or {})
     event_namespace = str(log_event_namespace or "ATLAS_ENTITY_PROFILE").strip().upper()
     placeholders = ",".join("?" for _ in ids)
-    owner_sql = "e.team_id = ?" if team_id else "e.session_id = ? AND e.team_id = ''"
-    owner_params = (team_id,) if team_id else (session_id,)
+    owner_sql, owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="e",
+    )
     rows = conn.execute(
         "SELECT e.id, e.host_entity_id, e.canonical_value, e.attributes_json, "
         "e.last_seen_at, e.occurrence_count, "

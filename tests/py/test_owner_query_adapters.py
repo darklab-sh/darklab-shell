@@ -110,6 +110,10 @@ def _assert_mixed_owner_results(conn):
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         ),
     ) == ["owner-a-empty", "owner-a-null"]
+    assert _selected_ids(
+        conn,
+        token_keyed_owner_predicate(team, token_column="team_id"),
+    ) == ["team-row"]
 
 
 def test_owner_query_adapters_preserve_mixed_sqlite_result_sets():

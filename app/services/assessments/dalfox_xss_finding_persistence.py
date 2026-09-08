@@ -15,6 +15,8 @@ from services.atlas.recalculation import recalculate_atlas_findings
 from services.projects.finding_evidence import link_finding_evidence_on_conn
 from services.projects.findings import row_to_finding
 from services.projects.utils import now
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 
 _RESULT_PRESENTATION = {
@@ -137,10 +139,15 @@ def _upsert_finding(
     created = max(0, int(getattr(result, "rowcount", 0) or 0)) > 0
     if created:
         return finding_id, True
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("signature_hash", signature),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
     row = conn.execute(
-        "SELECT id FROM findings WHERE ((? != '' AND team_id = ?) OR "
-        "(? = '' AND session_id = ? AND team_id = '')) AND signature_hash = ?",
-        (team_id, team_id, team_id, session_id, signature),
+        f"SELECT id FROM findings WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
     if not row:
         raise RuntimeError("reviewed Dalfox finding identity conflict")

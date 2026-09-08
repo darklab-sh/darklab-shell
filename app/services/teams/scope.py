@@ -149,5 +149,6 @@ def shared_owner_predicate(
         owner_column=session_column,
         team_column=team_column,
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
     )
     return predicate.sql, predicate.params

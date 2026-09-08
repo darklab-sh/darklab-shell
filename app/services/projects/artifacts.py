@@ -13,6 +13,7 @@ import re
 from services.projects.contracts import MAX_ENTITY_ID_LEN, ProjectWorkspaceError
 from services.projects.utils import new_run_file_artifact_id, now, trim_text as _trim_text
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
+from services.teams.ownership_queries import composite_owner_predicate
 from services.teams.scope import OwnerContext, personal_owner_context, team_owner_context
 from services.workspace.files import (
     WorkspaceDisabled,
@@ -172,9 +173,13 @@ def artifact_snapshot_mismatch_reason(artifact, resolved):
 
 def record_run_file_artifacts(conn, session_id, run_id, artifacts, *, owner_context: OwnerContext | None = None):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        key_values=(("id", run_id),),
+    )
     run = conn.execute(
-        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
-        (session_id, run_id),
+        f"SELECT command, run_kind FROM runs WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
     if not run:
         return []

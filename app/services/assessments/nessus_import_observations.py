@@ -13,6 +13,7 @@ from services.assessments.cpe_applicability import normalize_observed_cpe
 from services.assessments.versioned_cpe import normalize_versioned_cpe
 from services.atlas.nessus_versions import NESSUS_XML_CPE_PARSER_VERSION
 from services.intel.canonical import entity_signature
+from services.projects.scope import shared_owner_where
 
 
 NESSUS_IMPORT_OBSERVATION_LIMIT = 256
@@ -33,17 +34,16 @@ def load_nessus_import_version_observations(
     evidence_id = _text(observation_id, 128)
     if not source_id or not (owner_session or owner_team) or (observation_id and not evidence_id):
         return _empty(source_id)
+    owner_sql, owner_params = shared_owner_where(owner_session, team_id=owner_team, table_alias="b")
     rows = conn.execute(
         "SELECT e.id, e.batch_id, e.subject_key, e.external_id, e.observed_at, "
         "e.source_detail_json FROM atlas_import_evidence e "
         "JOIN atlas_import_batches b ON b.id = e.batch_id "
-        "WHERE ((? != '' AND b.team_id = ?) OR "
-        "(? = '' AND b.session_id = ? AND b.team_id = '')) "
-        "AND b.id = ? AND b.status = 'applied' AND b.format_id = 'nessus_xml' "
+        f"WHERE {owner_sql} AND b.id = ? AND b.status = 'applied' AND b.format_id = 'nessus_xml' "  # nosec
         "AND e.evidence_type = 'nessus_service_version' AND (? = '' OR e.id = ?) "
         "ORDER BY e.row_number, e.id LIMIT ?",
         (
-            owner_team, owner_team, owner_team, owner_session, source_id,
+            *owner_params, source_id,
             evidence_id, evidence_id, NESSUS_IMPORT_OBSERVATION_LIMIT + 1,
         ),
     ).fetchall()

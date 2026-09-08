@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id
 from core.database_access import get_db_connect
 from services.assessments.action_plan_payload import digest_plan
 from services.assessments.batch.contracts import AssessmentBatchError, BatchConcurrency
@@ -26,6 +27,8 @@ from services.assessments.batch.preview_storage import (
     store_batch_preview,
 )
 from services.assessments.probe_plan_digest import probe_plan_digest
+
+_PREVIEW_STORAGE_OWNER = anonymous_session_id("preview-storage-owner")
 
 
 def _preview_item(index: int) -> BatchPreviewItem:
@@ -104,7 +107,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
             "(id, session_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 "prj-preview-storage",
-                "preview-storage-owner",
+                _PREVIEW_STORAGE_OWNER,
                 "Preview storage",
                 "preview-storage",
                 timestamp,
@@ -118,7 +121,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
             "VALUES (?, ?, ?, ?, 'network', '1.0', 'active', ?, ?, ?)",
             (
                 "asm-preview-storage",
-                "preview-storage-owner",
+                _PREVIEW_STORAGE_OWNER,
                 "prj-preview-storage",
                 "Preview storage",
                 timestamp,
@@ -130,7 +133,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
 
     items = tuple(_preview_item(index) for index in range(101))
     draft = BatchPreviewDraft(
-        session_id="preview-storage-owner",
+        session_id=_PREVIEW_STORAGE_OWNER,
         team_id="",
         project_id="prj-preview-storage",
         assessment_id="asm-preview-storage",
@@ -156,7 +159,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     first = cast(
         dict[str, Any],
         get_batch_preview_items(
-            "preview-storage-owner",
+            _PREVIEW_STORAGE_OWNER,
             str(preview["preview_id"]),
             current_time=created_at,
         ),
@@ -167,7 +170,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     second = cast(
         dict[str, Any],
         get_batch_preview_items(
-            "preview-storage-owner",
+            _PREVIEW_STORAGE_OWNER,
             str(preview["preview_id"]),
             cursor=int(first["next_cursor"]),
             current_time=created_at,
@@ -211,12 +214,14 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
 
     with pytest.raises(AssessmentBatchError) as out_of_scope:
         get_batch_preview_items(
-            "another-owner", str(preview["preview_id"]), current_time=created_at
+            anonymous_session_id("another-owner"),
+            str(preview["preview_id"]),
+            current_time=created_at,
         )
     assert out_of_scope.value.code == "preview_not_found"
     with pytest.raises(AssessmentBatchError) as expired:
         get_batch_preview_items(
-            "preview-storage-owner",
+            _PREVIEW_STORAGE_OWNER,
             str(preview["preview_id"]),
             current_time=created_at + timedelta(seconds=15 * 60 + 1),
         )
@@ -229,7 +234,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     assert replacement["preview_id"] != preview["preview_id"]
     with pytest.raises(AssessmentBatchError) as cleaned:
         get_batch_preview_items(
-            "preview-storage-owner",
+            _PREVIEW_STORAGE_OWNER,
             str(preview["preview_id"]),
             current_time=created_at + timedelta(seconds=15 * 60 + 1),
         )

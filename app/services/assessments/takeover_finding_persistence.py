@@ -13,6 +13,8 @@ from services.atlas.recalculation import recalculate_atlas_findings
 from services.projects.finding_evidence import link_finding_evidence_on_conn
 from services.projects.findings import row_to_finding
 from services.projects.utils import now
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 
 def persist_takeover_confirmation(
@@ -57,20 +59,22 @@ def _owned_domain_entity(
     run_id: str,
     hostname: str,
 ) -> Any | None:
-    if team_id:
-        return conn.execute(
-            "SELECT e.id, e.type, e.canonical_value FROM entities e "
-            "JOIN entity_run_links link ON link.entity_id = e.id "
-            "WHERE e.team_id = ? AND e.team_id != '' AND e.type = 'domain' "
-            "AND e.canonical_value = ? AND link.run_id = ?",
-            (team_id, hostname, run_id),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(
+            ("e.type", "domain"),
+            ("e.canonical_value", hostname),
+            ("link.run_id", run_id),
+        ),
+        owner_column="e.session_id",
+        team_column="e.team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
     return conn.execute(
         "SELECT e.id, e.type, e.canonical_value FROM entities e "
         "JOIN entity_run_links link ON link.entity_id = e.id "
-        "WHERE e.session_id = ? AND e.team_id = '' AND e.type = 'domain' "
-        "AND e.canonical_value = ? AND link.run_id = ?",
-        (session_id, hostname, run_id),
+        f"WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
 
 

@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 import json
 from typing import Any
 
+from services.projects.scope import shared_owner_where
+
 TAKEOVER_EVIDENCE_MAX_RUNS = 256
 TAKEOVER_EVIDENCE_MAX_EVENTS = 1_000
 TAKEOVER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
@@ -74,22 +76,16 @@ def _project_dns_rows(
         "JOIN runs r ON r.id = link.entity_id "
         "WHERE link.project_id = ? AND link.entity_type = 'run' AND "
     )
-    if team_id:
-        return conn.execute(
-            prefix + "r.team_id = ? AND r.team_id != ''" + tail,
-            (
-                project_id,
-                team_id,
-                current_run_id,
-                "dnsx %",
-                TAKEOVER_EVIDENCE_MAX_RUNS + 1,
-            ),
-        ).fetchall()
+    owner_sql, owner_params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias="r",
+    )
     return conn.execute(
-        prefix + "r.session_id = ? AND r.team_id = ''" + tail,
+        prefix + owner_sql + tail,  # nosec
         (
             project_id,
-            session_id,
+            *owner_params,
             current_run_id,
             "dnsx %",
             TAKEOVER_EVIDENCE_MAX_RUNS + 1,

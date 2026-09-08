@@ -16,6 +16,7 @@ from services.assessments.evidence_matching import (
     matching_run_rule,
 )
 from services.metrics_lazy import app_metrics
+from services.projects.scope import shared_owner_where
 from services.projects.utils import cfg_int, now, raise_quota
 
 
@@ -69,21 +70,18 @@ def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None
         DEFAULT_MAX_ASSESSMENT_EVIDENCE_PER_PROJECT,
     )
     for (session_id, team_id), added in owner_additions.items():
-        if team_id:
-            current = _count(
-                conn,
-                "SELECT COUNT(*) AS count FROM project_assessment_evidence e "
-                "JOIN project_assessments a ON a.id = e.assessment_id WHERE a.team_id = ?",
-                (team_id,),
-            )
-        else:
-            current = _count(
-                conn,
-                "SELECT COUNT(*) AS count FROM project_assessment_evidence e "
-                "JOIN project_assessments a ON a.id = e.assessment_id "
-                "WHERE a.session_id = ? AND a.team_id = ''",
-                (session_id,),
-            )
+        owner_sql, owner_params = shared_owner_where(
+            session_id,
+            team_id=team_id,
+            table_alias="a",
+        )
+        current = _count(
+            conn,
+            "SELECT COUNT(*) AS count FROM project_assessment_evidence e "
+            "JOIN project_assessments a ON a.id = e.assessment_id "
+            f"WHERE {owner_sql}",  # nosec
+            owner_params,
+        )
         if owner_limit > 0 and current + added > owner_limit:
             raise_quota(
                 "assessment evidence quota exceeded for this owner",

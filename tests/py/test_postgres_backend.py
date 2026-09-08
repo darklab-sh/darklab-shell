@@ -251,6 +251,62 @@ def test_history_owner_clauses_preserve_mixed_postgres_result_sets(postgres_sche
 
 
 @pytest.mark.postgres
+def test_project_and_atlas_owner_clauses_preserve_mixed_postgres_result_sets(postgres_schema):
+    from services.atlas.scope import metadata_owner_params, metadata_owner_sql
+    from services.projects.overview import _run_owner_clause
+    from services.projects.scope import personal_owner_where, shared_owner_where
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        "CREATE TABLE owner_project_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+    )
+    owner_a = anonymous_session_id("postgres-project-owner-a")
+    owner_b = anonymous_session_id("postgres-project-owner-b")
+    conn.executemany(
+        "INSERT INTO owner_project_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        (
+            ("owner-a-null", owner_a, None),
+            ("owner-a-empty", owner_a, ""),
+            ("owner-b-empty", owner_b, ""),
+            ("team-red", owner_b, "team-red"),
+            ("team-blue", owner_a, "team-blue"),
+            ("team-red-metadata-null", "team-red", None),
+            ("team-red-metadata-empty", "team-red", ""),
+        ),
+    )
+
+    def selected_ids(clause, params):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM owner_project_rows WHERE {clause} ORDER BY id",  # nosec B608
+                params,
+            ).fetchall()
+        ]
+
+    personal_sql, personal_params = shared_owner_where(owner_a)
+    assert selected_ids(personal_sql, personal_params) == ["owner-a-empty"]
+    team_sql, team_params = shared_owner_where(owner_a, team_id="team-red")
+    assert selected_ids(team_sql, team_params) == ["team-red"]
+    run_sql, run_params = _run_owner_clause(owner_a, "", alias="")
+    assert selected_ids(run_sql, run_params) == ["owner-a-empty"]
+    unfiltered_sql, unfiltered_params = personal_owner_where(owner_a)
+    assert selected_ids(unfiltered_sql, unfiltered_params) == [
+        "owner-a-empty",
+        "owner-a-null",
+        "team-blue",
+    ]
+    assert selected_ids(
+        metadata_owner_sql("", "team-red"),
+        metadata_owner_params(owner_a, "team-red"),
+    ) == [
+        "team-red",
+        "team-red-metadata-empty",
+        "team-red-metadata-null",
+    ]
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,
@@ -1527,7 +1583,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "VALUES (?, ?, ?, ?, ?, 0)",
         (
             "run-postgres-nmap-1",
-            "version-postgres-owner",
+            "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
             "nmap -sV 2001:db8::10",
             "2026-08-08T10:00:00+00:00",
             "2026-08-08T11:00:00+00:00",
@@ -1539,7 +1595,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "VALUES (?, ?, 'port', ?, ?, ?, ?, 1, ?)",
         (
             "entity-postgres-version-port",
-            "version-postgres-owner",
+            "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
             "[2001:db8::10]:5432/tcp",
             "signature-postgres-version-port",
             "2026-08-08T11:00:00+00:00",
@@ -1561,12 +1617,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     postgres_candidate = postgres_nmap_candidates["observations"][0]["candidates"][0]
     postgres_inference = persist_version_inference_candidate(
         compat,
-        "version-postgres-owner",
+        "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
         postgres_candidate,
     )
     repeated_postgres_inference = persist_version_inference_candidate(
         compat,
-        "version-postgres-owner",
+        "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
         postgres_candidate,
     )
     assert postgres_inference is not None
@@ -1596,7 +1652,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "VALUES (?, ?, ?, ?, ?, 0)",
         (
             "run-postgres-httpx-1",
-            "version-postgres-owner",
+            "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
             "httpx -u https://db.example.test -json",
             "2026-08-08T10:00:00+00:00",
             "2026-08-08T11:00:00+00:00",
@@ -1608,7 +1664,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, ?)",
         (
             "entity-postgres-version-url",
-            "version-postgres-owner",
+            "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
             "https://db.example.test",
             "signature-postgres-version-url",
             "2026-08-08T11:00:00+00:00",
@@ -1629,7 +1685,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     postgres_httpx_inference = materialize_httpx_json_version_inferences(
         compat,
-        "version-postgres-owner",
+        "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
         {
             "url": "https://db.example.test",
             "timestamp": "2026-08-08T11:00:00Z",
@@ -1655,14 +1711,14 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     compat.execute(
         "INSERT INTO atlas_import_batches "
         "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
-        "VALUES ('import-postgres-nessus-1', 'version-postgres-owner', 'Nessus', "
+        "VALUES ('import-postgres-nessus-1', '12a65b68-a08f-4b2b-bad5-3af70833e2fd', 'Nessus', "
         "'nessus_xml', 'Postgres Nessus', ?, ?, 'applied')",
         ("2026-08-08T11:00:00+00:00", "2026-08-08T11:00:00+00:00"),
     )
     compat.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) "
-        "VALUES ('entity-postgres-nessus', 'version-postgres-owner', 'domain', ?, ?, ?, ?, 1, ?)",
+        "VALUES ('entity-postgres-nessus', '12a65b68-a08f-4b2b-bad5-3af70833e2fd', 'domain', ?, ?, ?, ?, 1, ?)",
         (
             nessus_target,
             "signature-postgres-nessus",
@@ -1702,7 +1758,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     postgres_nessus_candidates = correlate_nessus_import_with_stored_nvd(
         compat,
-        "version-postgres-owner",
+        "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
         source_batch_id="import-postgres-nessus-1",
         now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
     )
@@ -1712,7 +1768,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     )
     postgres_nessus_inference = materialize_nessus_import_version_inferences(
         compat,
-        "version-postgres-owner",
+        "12a65b68-a08f-4b2b-bad5-3af70833e2fd",
         source_batch_id="import-postgres-nessus-1",
         now=datetime.fromisoformat("2026-08-08T12:00:00+00:00"),
     )
@@ -1796,14 +1852,14 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     conn.execute(
         "INSERT INTO projects "
         "(id, session_id, team_id, name, slug, status, created, updated) "
-        "VALUES ('prj-dalfox-parameter-pg', 'dalfox-parameter-pg', '', "
+        "VALUES ('prj-dalfox-parameter-pg', 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'Dalfox parameter', 'dalfox-parameter', 'active', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO runs "
         "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
-        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "output_preview, output_line_count) VALUES (?, 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'external', ?, ?, ?, 0, ?, 2)",
         (run_id, command, timestamp, timestamp, preview),
     )
@@ -1816,7 +1872,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
 
     evidence = resolve_project_dalfox_parameter_evidence(
         conn,
-        "dalfox-parameter-pg",
+        "c50bde9b-0dc5-4698-8d4e-964eca020f87",
         "",
         "prj-dalfox-parameter-pg",
         run_id,
@@ -1829,7 +1885,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     assert evidence.location == "Query"
     assert resolve_project_dalfox_parameter_evidence(
         conn,
-        "another-owner",
+        "d86fb989-2617-4b9e-b27b-1a9f7d876beb",
         "",
         "prj-dalfox-parameter-pg",
         run_id,
@@ -1874,7 +1930,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     conn.execute(
         "INSERT INTO runs "
         "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
-        "output_preview, output_line_count) VALUES (?, 'dalfox-parameter-pg', '', "
+        "output_preview, output_line_count) VALUES (?, 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'external', ?, ?, ?, 0, ?, 2)",
         (active_run_id, plan.command, timestamp, timestamp, json.dumps(xss_entries)),
     )
@@ -1888,7 +1944,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
         "INSERT INTO entities "
         "(id, session_id, team_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('ent-dalfox-xss-pg', 'dalfox-parameter-pg', '', 'url', ?, "
+        "('ent-dalfox-xss-pg', 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', 'url', ?, "
         "'sig-dalfox-xss-pg', ?, ?, 1, ?)",
         (target, timestamp, timestamp, timestamp),
     )
@@ -1901,7 +1957,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
 
     findings = materialize_dalfox_xss_findings(
         conn,
-        "dalfox-parameter-pg",
+        "c50bde9b-0dc5-4698-8d4e-964eca020f87",
         "",
         "prj-dalfox-parameter-pg",
         active_run_id,
@@ -2000,7 +2056,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     conn.execute(
         "INSERT INTO projects "
         "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
-        "VALUES ('prj-assessment-lifecycle', 'assessment-lifecycle', '', 'Lifecycle', "
+        "VALUES ('prj-assessment-lifecycle', 'f7ed510e-c04f-4fb3-9a93-03eb1704b961', '', 'Lifecycle', "
         "'lifecycle', '', 'active', '', ?, ?)",
         (timestamp, timestamp),
     )
@@ -2008,7 +2064,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         "INSERT INTO project_assessments "
         "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
-        "VALUES ('asm-lifecycle', 'assessment-lifecycle', '', "
+        "VALUES ('asm-lifecycle', 'f7ed510e-c04f-4fb3-9a93-03eb1704b961', '', "
         "'prj-assessment-lifecycle', 'Lifecycle', 'network', '1.0', ?, "
         "'active', ?, ?, ?)",
         (Jsonb({}), timestamp, timestamp, timestamp),
@@ -2027,7 +2083,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         "schema_artifact_id, schema_sha256, schema_version, profile_key, profile_version, "
         "tool_version, seed, stop_reason, running_time_seconds, expected_operation_count, "
         "observed_operation_count, case_count, failure_count, missing_operations_json, "
-        "observed_at, created_at) VALUES ('str-lifecycle', 'assessment-lifecycle', "
+        "observed_at, created_at) VALUES ('str-lifecycle', 'f7ed510e-c04f-4fb3-9a93-03eb1704b961', "
         "'prj-assessment-lifecycle', 'asm-lifecycle', 'chk-lifecycle', 'run-lifecycle', "
         "'rfa_0123456789abcdef', ?, '3.1.0', 'api', '1.0', '4.24.3', 1, 'completed', "
         "2.5, 1, 1, 2, 1, ?, ?, ?)",
@@ -2043,7 +2099,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     )
 
     completed = update_assessment_cycle(
-        "assessment-lifecycle",
+        "f7ed510e-c04f-4fb3-9a93-03eb1704b961",
         "prj-assessment-lifecycle",
         "asm-lifecycle",
         {"status": "completed"},
@@ -2052,14 +2108,14 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     assert isinstance(completed, dict)
     assert completed["assessment"]["completed_at"] is not None
     update_assessment_cycle(
-        "assessment-lifecycle",
+        "f7ed510e-c04f-4fb3-9a93-03eb1704b961",
         "prj-assessment-lifecycle",
         "asm-lifecycle",
         {"status": "archived"},
         conn=conn,
     )
     preview = preview_assessment_deletion(
-        "assessment-lifecycle",
+        "f7ed510e-c04f-4fb3-9a93-03eb1704b961",
         "prj-assessment-lifecycle",
         "asm-lifecycle",
         conn=conn,
@@ -2069,7 +2125,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     assert preview["will_delete"]["schemathesis_reports"] == 1
     assert preview["will_delete"]["schemathesis_operations"] == 1
     deleted = delete_assessment_cycle(
-        "assessment-lifecycle",
+        "f7ed510e-c04f-4fb3-9a93-03eb1704b961",
         "prj-assessment-lifecycle",
         "asm-lifecycle",
         conn=conn,
@@ -2106,7 +2162,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     conn.execute(
         "INSERT INTO projects "
         "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
-        "VALUES ('prj-assessment-state', 'assessment-state', '', 'State', "
+        "VALUES ('prj-assessment-state', '85d41ca2-5b5c-4db6-a651-b2b25a18aa4b', '', 'State', "
         "'state', '', 'active', '', ?, ?)",
         (timestamp, timestamp),
     )
@@ -2114,7 +2170,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "INSERT INTO project_assessments "
         "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
-        "VALUES ('asm-state', 'assessment-state', '', 'prj-assessment-state', "
+        "VALUES ('asm-state', '85d41ca2-5b5c-4db6-a651-b2b25a18aa4b', '', 'prj-assessment-state', "
         "'State', 'network', '1.0', ?, 'active', ?, ?, ?)",
         (Jsonb({"checks": [{"key": "open_ports", "evidence_rules": []}]}), timestamp, timestamp, timestamp),
     )
@@ -2138,7 +2194,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
 
     changed = update_manual_check_state_on_conn(
         conn,
-        "assessment-state",
+        "85d41ca2-5b5c-4db6-a651-b2b25a18aa4b",
         "prj-assessment-state",
         "asm-state",
         "chk-state",
@@ -2161,7 +2217,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
         "kind": "team_member",
         "member_id": "member-state",
     }
-    assert actor["state_changed_by_session_id"] == "assessment-state"
+    assert actor["state_changed_by_session_id"] == "85d41ca2-5b5c-4db6-a651-b2b25a18aa4b"
     assert actor["state_changed_by_member_id"] == "member-state"
     assert actor["state_changed_at"] is not None
     assert checks[0]["manual_evidence"] == {
@@ -2709,7 +2765,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             "VALUES (?, ?, '', ?, ?, '', ?, '', ?, ?)",
             (
                 project_id,
-                "scope-session",
+                "52057f5a-094d-4cdf-b078-398dc07ab75d",
                 f"Project {index:02}",
                 slug,
                 status,
@@ -2722,7 +2778,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         "INSERT INTO project_assessments "
         "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, completed_at, archived_at, created_at, updated_at) "
-        "VALUES (?, 'scope-session', '', 'project-one-id', ?, 'network', '1.0', ?, "
+        "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', 'project-one-id', ?, 'network', '1.0', ?, "
         "?, ?, ?, ?, ?, ?)",
         [
             (
@@ -2743,7 +2799,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         "INSERT INTO project_assessments "
         "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, completed_at, created_at, updated_at) "
-        "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', ?, "
+        "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'network', '1.0', ?, "
         "'completed', ?, ?, ?, ?)",
         [
             (
@@ -2782,7 +2838,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         "INSERT INTO risk_escalations "
         "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
         "transition_kind, feed_version, created_at, updated_at) "
-        "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+        "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
         [
             (
                 f"risk-plan-{index:03}",
@@ -2802,7 +2858,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
     )
     compat.executemany(
         "INSERT INTO findings (id, session_id, target_id, title, created) "
-        "VALUES (?, 'scope-session', ?, 'Plan finding', ?)",
+        "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', ?, 'Plan finding', ?)",
         [
             (f"finding-plan-{index:03}", f"target-plan-{index:03}", timestamp)
             for index in range(220)
@@ -2848,10 +2904,10 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE "
             + entity_scope_sql("e")
             + " AND e.type = ? ORDER BY e.last_seen_at DESC LIMIT ?",
-            (*entity_scope_params("scope-session"), "domain", 10),
+            (*entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), "domain", 10),
         ).fetchall())
         exact_lookup_sql, exact_lookup_params = exact_lookup_candidate_query(
-            "scope-session",
+            "52057f5a-094d-4cdf-b078-398dc07ab75d",
             "domain",
             "exact.example",
             team_id="scope-team",
@@ -2865,10 +2921,10 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             "EXPLAIN (COSTS OFF) SELECT f.id FROM findings f WHERE "
             + finding_source_scope_sql("f")
             + " AND f.run_id = ? ORDER BY f.last_seen_at DESC LIMIT ?",
-            (*finding_source_scope_params("scope-session"), "run-1", 10),
+            (*finding_source_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), "run-1", 10),
         ).fetchall())
 
-        project_owner_sql, project_owner_params = shared_owner_where("scope-session")
+        project_owner_sql, project_owner_params = shared_owner_where("52057f5a-094d-4cdf-b078-398dc07ab75d")
         project_slug_plan = _postgres_plan_text(compat.execute(
             "EXPLAIN (COSTS OFF) SELECT id FROM projects WHERE "
             + project_owner_sql
@@ -2876,7 +2932,9 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             (*project_owner_params, "project-one"),
         ).fetchall())
 
-        project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause("scope-session")
+        project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause(
+            "52057f5a-094d-4cdf-b078-398dc07ab75d"
+        )
         project_entity_plan = _postgres_plan_text(compat.execute(
             "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE 1 = 1 "
             + project_entity_owner_sql
@@ -2884,7 +2942,9 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             (*project_entity_owner_params, "domain", 10),
         ).fetchall())
 
-        project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause("scope-session")
+        project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause(
+            "52057f5a-094d-4cdf-b078-398dc07ab75d"
+        )
         project_finding_plan = _postgres_plan_text(compat.execute(
             "EXPLAIN (COSTS OFF) SELECT f.id FROM findings f WHERE 1 = 1 "
             + project_finding_owner_sql
@@ -2896,7 +2956,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             "EXPLAIN (COSTS OFF) SELECT e.id FROM entities e WHERE "
             + entity_scope_sql("e")
             + " ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
-            (*entity_scope_params("scope-session"), 10),
+            (*entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), 10),
         ).fetchall())
 
         project_visible_sort_plan = _postgres_plan_text(compat.execute(
@@ -2923,7 +2983,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
             "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
             "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
             "f.last_seen_at DESC, f.created DESC LIMIT ?",
-            (*finding_source_scope_params("scope-session"), 10),
+            (*finding_source_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), 10),
         ).fetchall())
 
         team_first_run_finding_plan = _postgres_plan_text(compat.execute(
@@ -3124,7 +3184,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     ambiguous_entity_ids = [
         upsert_entity(
             compat,
-            f"compat-member-{index}",
+            anonymous_session_id(f"compat-member-{index}"),
             "domain",
             "ambiguous.lookup.example",
             seen_at=observed_at,
@@ -7402,7 +7462,7 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
     conn.execute(
         "INSERT INTO runs "
         "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview) "
-        "VALUES ('run-nmap-service-pg', 'nmap-owner-pg', '', 'external', "
+        "VALUES ('run-nmap-service-pg', '26dd5570-e408-487e-81ef-a6234db644d9', '', 'external', "
         "'nmap -sV -oX scan.xml 192.0.2.10', ?, ?, 0, '[]')",
         (observed_at, observed_at),
     )
@@ -7414,14 +7474,14 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
 
     first = persist_nmap_xml_service_observations(
         conn,
-        "nmap-owner-pg",
+        "26dd5570-e408-487e-81ef-a6234db644d9",
         payload,
         source_run_id="run-nmap-service-pg",
         observed_at=observed_at,
     )
     repeated = persist_nmap_xml_service_observations(
         conn,
-        "nmap-owner-pg",
+        "26dd5570-e408-487e-81ef-a6234db644d9",
         payload,
         source_run_id="run-nmap-service-pg",
         observed_at=observed_at,
@@ -7441,7 +7501,7 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
     }
     page = nmap_service_evidence_for_run_on_conn(
         conn,
-        "nmap-owner-pg",
+        "26dd5570-e408-487e-81ef-a6234db644d9",
         "run-nmap-service-pg",
         limit=1,
     )
@@ -7451,7 +7511,7 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
         {"path": ["message_signing"], "value": "disabled"},
     ]
     assert nmap_service_evidence_for_run_on_conn(
-        conn, "other-owner-pg", "run-nmap-service-pg",
+        conn, "00bc1d91-522b-4337-8bad-0424fa523cde", "run-nmap-service-pg",
     ) is None
     conn.execute("DELETE FROM runs WHERE id = ?", ("run-nmap-service-pg",))
     assert raw_conn.execute(

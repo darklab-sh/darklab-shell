@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
@@ -37,7 +38,7 @@ from services.projects.targets import add_project_target
 @pytest.fixture
 def batch_cycle(monkeypatch: pytest.MonkeyPatch):
     make_test_app()
-    session_id = "batch-compiler-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("batch-compiler-" + uuid.uuid4().hex)
     project = create_project(session_id, {"name": "Batch compiler"})
     assert project is not None
     project_id = str(project["id"])

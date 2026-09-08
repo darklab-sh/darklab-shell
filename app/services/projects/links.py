@@ -43,7 +43,7 @@ from services.projects.preferences import (
     project_auto_link_run_entities_enabled as _project_auto_link_run_entities_enabled,
     save_session_preferences as _save_session_preferences,
 )
-from services.projects.scope import shared_owner_where
+from services.projects.scope import personal_owner_where, shared_owner_where
 from services.projects.utils import (
     new_project_link_id as _new_project_link_id,
     now as _now,
@@ -329,6 +329,7 @@ def _run_entity_ids_for_project_link(conn, session_id, run_ids, *, team_id=""):
         return []
     placeholders = ",".join("?" for _ in normalized_run_ids)
     run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
+    entity_owner_sql, entity_owner_params = personal_owner_where(session_id, table_alias="e")
     rows = conn.execute(
         "SELECT linked.id "
         "FROM ("
@@ -336,12 +337,12 @@ def _run_entity_ids_for_project_link(conn, session_id, run_ids, *, team_id=""):
         "  FROM entity_run_links erl "
         "  JOIN entities e ON e.id = erl.entity_id "
         "  JOIN runs r ON r.id = erl.run_id "
-        "  WHERE " + run_owner_sql + " AND e.session_id = ? "  # nosec
+        "  WHERE " + run_owner_sql + " AND " + entity_owner_sql + " "  # nosec
         f"  AND erl.run_id IN ({placeholders}) "
         "  GROUP BY e.id"
         ") linked "
         "ORDER BY linked.sort_seen_at DESC, linked.sort_value ASC",
-        [*run_owner_params, session_id, *normalized_run_ids],
+        [*run_owner_params, *entity_owner_params, *normalized_run_ids],
     ).fetchall()
     return [str(row["id"]) for row in rows if row["id"]]
 
@@ -1006,43 +1007,23 @@ def _workspace_file_belongs_to_session(session_id, entity_id):
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     if entity_type == "workspace_file":
         return _workspace_file_belongs_to_session(session_id, entity_id)
-    if entity_type in {"atlas_entity", "target"}:
-        row = conn.execute(
-            "SELECT 1 FROM entities WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "project":
-        row = conn.execute(
-            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "run":
-        row = conn.execute(
-            "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "snapshot":
-        row = conn.execute(
-            "SELECT 1 FROM snapshots WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "run_file_artifact":
-        row = conn.execute(
-            "SELECT 1 FROM run_file_artifacts WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "finding":
-        row = conn.execute(
-            "SELECT 1 FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "package":
-        row = conn.execute(
-            "SELECT 1 FROM evidence_packages WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    else:
+    table = {
+        "atlas_entity": "entities",
+        "target": "entities",
+        "project": "projects",
+        "run": "runs",
+        "snapshot": "snapshots",
+        "run_file_artifact": "run_file_artifacts",
+        "finding": "findings",
+        "package": "evidence_packages",
+    }.get(entity_type)
+    if not table:
         return False
+    owner_sql, owner_params = personal_owner_where(session_id)
+    row = conn.execute(
+        f"SELECT 1 FROM {table} WHERE {owner_sql} AND id = ?",  # nosec
+        (*owner_params, entity_id),
+    ).fetchone()
     return row is not None
 
 
@@ -1195,9 +1176,10 @@ def _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids, *, team
     if entity_type != "atlas_entity":
         return {"owned": set(), "linkable": set()}
     placeholders = ",".join("?" for _ in entity_ids)
+    owner_sql, owner_params = personal_owner_where(session_id)
     rows = conn.execute(
-        f"SELECT id FROM entities WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-        [session_id, *entity_ids],
+        f"SELECT id FROM entities WHERE {owner_sql} AND id IN ({placeholders})",  # nosec
+        [*owner_params, *entity_ids],
     ).fetchall()
     owned = {str(row["id"]) for row in rows}
     return {

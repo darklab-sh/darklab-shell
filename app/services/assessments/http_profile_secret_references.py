@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
+from services.teams.ownership_queries import token_keyed_owner_predicate
+
+if TYPE_CHECKING:
+    from services.teams.scope import OwnerContext
 
 
 def referenced_secret_names(profile: Mapping[str, Any]) -> set[str]:
@@ -25,19 +29,15 @@ def referenced_secret_names(profile: Mapping[str, Any]) -> set[str]:
     return names
 
 
-def available_secret_names(conn: Any, owner_id: str) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM secrets WHERE session_token = ? ORDER BY name",
-        (owner_id,),
-    ).fetchall()
+def available_secret_names(conn: Any, context: OwnerContext) -> set[str]:
+    owner = token_keyed_owner_predicate(context)
+    rows = conn.execute(f"SELECT name FROM secrets WHERE {owner.sql} ORDER BY name", owner.params).fetchall()  # nosec
     return {str(row["name"] or "") for row in rows}
 
 
-def secret_reference_lookup(conn: Any, owner_id: str) -> dict[str, str]:
-    rows = conn.execute(
-        "SELECT name, consumer_envs FROM secrets WHERE session_token = ? ORDER BY name",
-        (owner_id,),
-    ).fetchall()
+def secret_reference_lookup(conn: Any, context: OwnerContext) -> dict[str, str]:
+    owner = token_keyed_owner_predicate(context)
+    rows = conn.execute(f"SELECT name, consumer_envs FROM secrets WHERE {owner.sql} ORDER BY name", owner.params).fetchall()  # nosec
     names = {str(row["name"] or ""): str(row["name"] or "") for row in rows}
     aliases: dict[str, str] = {}
     decode_list = dialect_for_backend(get_db_backend()).decode_json_list

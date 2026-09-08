@@ -47,6 +47,7 @@ from services.projects.metadata import (
     attach_finding_triage_details,
     finding_triage_verification_status_filter_sql_and_params,
 )
+from services.projects.owner_clauses import project_finding_owner_clause
 from services.projects.scope import shared_owner_where
 from services.projects.targets import _canonical_target_payload, _target_payload_from_candidate
 from services.projects.utils import (
@@ -58,6 +59,11 @@ from services.projects.utils import (
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
 from services.runs.comparison_findings import severity_neutral_signal_key
 from services.cve_risk.ranking import attach_risk_to_findings, cve_risk_order_sql
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    composite_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 
 
 def row_to_finding(row):
@@ -220,8 +226,12 @@ log = logging.getLogger("shell")
 def _project_finding_owner_clause(session_id, team_id="", *, table_alias="f"):
     if team_id:
         return "1 = 1", ()
-    prefix = f"{table_alias}." if table_alias else ""
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''", (session_id,)
+    clause, params = project_finding_owner_clause(
+        session_id,
+        team_id,
+        table_alias=table_alias,
+    )
+    return clause.removeprefix("AND ").strip(), params
 
 
 def _project_finding_source_exists_sql():
@@ -1262,16 +1272,16 @@ def _entry_primary_entity(conn, session_id, entry, seen_at, *, team_id=""):
 def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     team_id = str(team_id or "").strip()
-    if team_id:
-        run = conn.execute(
-            "SELECT command, run_kind FROM runs WHERE team_id = ? AND id = ?",
-            (team_id, run_id),
-        ).fetchone()
-    else:
-        run = conn.execute(
-            "SELECT command, run_kind FROM runs WHERE session_id = ? AND team_id = '' AND id = ?",
-            (session_id, run_id),
-        ).fetchone()
+    run_owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("id", run_id),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    run = conn.execute(
+        f"SELECT command, run_kind FROM runs WHERE {run_owner.sql}",  # nosec
+        run_owner.params,
+    ).fetchone()
     if not run:
         return []
     run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
@@ -1330,16 +1340,16 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{comparison_signal_key}"
         signature_hash = _finding_signature(tool_root, "finding", severity, signal_key, subject_key)
         comparison_key = "raw:" + "\x1f".join((tool_root, "finding", subject_key, raw_line))
-        if team_id:
-            row = conn.execute(
-                "SELECT id FROM findings WHERE team_id = ? AND signature_hash = ?",
-                (team_id, signature_hash),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND team_id = '' AND signature_hash = ?",
-                (session_id, signature_hash),
-            ).fetchone()
+        finding_owner = composite_owner_predicate(
+            owner_context_for_scope(session_id, team_id=team_id),
+            key_values=(("signature_hash", signature_hash),),
+            team_column="team_id",
+            personal_team_rows=PersonalTeamRows.EMPTY,
+        )
+        row = conn.execute(
+            f"SELECT id FROM findings WHERE {finding_owner.sql}",  # nosec
+            finding_owner.params,
+        ).fetchone()
         if row:
             finding_id = str(row["id"])
             conn.execute(
