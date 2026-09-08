@@ -21,15 +21,22 @@ from services.workspace.settings import workspace_settings
 from .contracts import (
     CREDENTIAL_DIGEST_ALGORITHM,
     CREDENTIAL_SECRET_MAX_LENGTH,
+    CredentialExpired,
     CredentialMetadata,
     CredentialNotFound,
     CredentialRevoked,
+    DEFAULT_PAT_SCOPES,
     GENERATED_ID_ATTEMPTS,
     IdentityStorageError,
     IssuedCredential,
     LAST_USED_WRITE_INTERVAL_SECONDS,
+    LastCredentialLockout,
     MAX_CREDENTIAL_LABEL_LENGTH,
     MAX_REASON_LENGTH,
+    PAT_DEFAULT_EXPIRY_DAYS,
+    PAT_MAX_EXPIRY_DAYS,
+    PAT_MIN_EXPIRY_DAYS,
+    PAT_SCOPES,
     PersonalWorkspaceRecord,
     PrincipalBundle,
     PrincipalDisabled,
@@ -37,6 +44,7 @@ from .contracts import (
     PrincipalRecord,
     WorkspaceAlreadyAttached,
     WorkspaceStorageError,
+    InvalidCredentialScope,
     bounded_text,
     new_identifier,
     parse_timestamp,
@@ -57,6 +65,51 @@ _CREDENTIAL_SECRET_PREFIX = {
     "portable": "dlc_v1_",
     "pat": "dlp_v1_",
 }
+
+
+def _normalize_credential_scopes(
+    credential_type: str,
+    scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None,
+) -> tuple[str, ...]:
+    if scopes is not None and not isinstance(scopes, (tuple, list, set, frozenset)):
+        raise InvalidCredentialScope("PAT scopes must be a collection of supported scope names")
+    if credential_type == "portable":
+        if scopes:
+            raise InvalidCredentialScope("portable credentials do not accept API scopes")
+        return ()
+    supplied = DEFAULT_PAT_SCOPES if scopes is None else frozenset(str(scope or "").strip() for scope in scopes)
+    if not supplied or "" in supplied or not supplied.issubset(PAT_SCOPES):
+        raise InvalidCredentialScope("PAT scopes must be non-empty supported scope names")
+    return tuple(sorted(supplied))
+
+
+def _normalize_credential_expiry(
+    credential_type: str,
+    expires_at: str | datetime | None,
+    *,
+    now: datetime,
+    use_pat_default: bool = True,
+) -> str | None:
+    if credential_type == "portable":
+        return parse_timestamp(expires_at, field_name="credential expiry")
+    if expires_at is None and not use_pat_default:
+        raise InvalidCredentialScope("PATs must have an expiry")
+    parsed_value = (
+        now + timedelta(days=PAT_DEFAULT_EXPIRY_DAYS)
+        if expires_at is None
+        else expires_at
+    )
+    normalized = parse_timestamp(parsed_value, field_name="credential expiry")
+    if normalized is None:
+        raise InvalidCredentialScope("PATs must have an expiry")
+    parsed = datetime.fromisoformat(normalized)
+    minimum = now + timedelta(days=PAT_MIN_EXPIRY_DAYS)
+    maximum = now + timedelta(days=PAT_MAX_EXPIRY_DAYS)
+    if parsed < minimum or parsed > maximum:
+        raise InvalidCredentialScope(
+            f"PAT expiry must be between {PAT_MIN_EXPIRY_DAYS} and {PAT_MAX_EXPIRY_DAYS} days"
+        )
+    return normalized
 
 
 def _run_read(callback: Callable[[Any], _T], *, conn: Any | None, connect: Callable[[], Any] | None) -> _T:
@@ -142,7 +195,22 @@ def _credential_metadata(row: Any) -> CredentialMetadata:
         expires_at=_stored_timestamp(data.get("expires_at")),
         revoked_at=_stored_timestamp(data.get("revoked_at")),
         revocation_reason=str(data.get("revocation_reason") or ""),
+        scopes=tuple(data.get("scopes") or ()),
     )
+
+
+def _credential_scopes(conn: Any, credential_id: str) -> tuple[str, ...]:
+    rows = conn.execute(
+        "SELECT scope FROM credential_scopes WHERE credential_id = ? ORDER BY scope",
+        (credential_id,),
+    ).fetchall()
+    return tuple(str(_row_dict(row).get("scope") or "") for row in rows)
+
+
+def _credential_metadata_from_row(conn: Any, row: Any) -> CredentialMetadata:
+    data = _row_dict(row)
+    data["scopes"] = _credential_scopes(conn, str(data["id"]))
+    return _credential_metadata(data)
 
 
 def _database_backend(conn: Any) -> DatabaseBackend:
@@ -184,6 +252,29 @@ def _active_principal_row(conn: Any, principal_id: str) -> Any:
     return row
 
 
+def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
+    validated = validate_identifier(principal_id, "principal")
+    if _database_backend(conn) == DatabaseBackend.POSTGRES:
+        row = conn.execute(
+            "SELECT * FROM principals WHERE id = ? FOR UPDATE",
+            (validated,),
+        ).fetchone()
+    else:
+        # SQLite has no row-level lock. This no-op write takes the database write
+        # lock before a lifecycle decision so two writers cannot both pass a
+        # last-credential check against stale state.
+        conn.execute(
+            "UPDATE principals SET updated_at = updated_at WHERE id = ?",
+            (validated,),
+        )
+        row = conn.execute("SELECT * FROM principals WHERE id = ?", (validated,)).fetchone()
+    if row is None:
+        raise PrincipalNotFound("principal was not found")
+    if str(_row_dict(row).get("status")) != "active":
+        raise PrincipalDisabled("principal is disabled")
+    return row
+
+
 def _credential_row(conn: Any, principal_id: str, credential_id: str) -> Any:
     validated_principal = validate_identifier(principal_id, "principal")
     kind = "pat" if str(credential_id).startswith("pat_") else "portable"
@@ -195,6 +286,27 @@ def _credential_row(conn: Any, principal_id: str, credential_id: str) -> Any:
     if row is None:
         raise CredentialNotFound("credential was not found")
     return row
+
+
+def _is_usable_credential(data: dict[str, Any], checked_at: datetime) -> bool:
+    if data.get("revoked_at") is not None:
+        return False
+    expiry = _stored_timestamp(data.get("expires_at"))
+    return expiry is None or datetime.fromisoformat(expiry) > checked_at
+
+
+def _usable_portable_credential_count(
+    conn: Any,
+    principal_id: str,
+    checked_at: datetime,
+) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM credentials "
+        "WHERE principal_id = ? AND credential_type = 'portable' "
+        "AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+        (principal_id, timestamp(checked_at)),
+    ).fetchone()
+    return int(_row_dict(row).get("count") or 0)
 
 
 def _savepoint(conn: Any, name: str) -> None:
@@ -221,6 +333,7 @@ def _insert_credential(
     created_at: str,
     verifier_root_version: int,
     verifier_root: bytes,
+    scopes: tuple[str, ...] = (),
 ) -> IssuedCredential:
     last_error: BaseException | None = None
     for _attempt in range(GENERATED_ID_ATTEMPTS):
@@ -255,6 +368,11 @@ def _insert_credential(
                     expires_at,
                 ),
             )
+            for scope in scopes:
+                conn.execute(
+                    "INSERT INTO credential_scopes (credential_id, scope) VALUES (?, ?)",
+                    (credential_id, scope),
+                )
         except BaseException as exc:
             _rollback_savepoint(conn, "credential_issue")
             if not _is_integrity_error(conn, exc):
@@ -263,7 +381,7 @@ def _insert_credential(
             continue
         _release_savepoint(conn, "credential_issue")
         row = conn.execute("SELECT * FROM credentials WHERE id = ?", (credential_id,)).fetchone()
-        return IssuedCredential(metadata=_credential_metadata(row), secret=secret)
+        return IssuedCredential(metadata=_credential_metadata_from_row(conn, row), secret=secret)
     raise IdentityStorageError("could not allocate a unique credential id") from last_error
 
 
@@ -370,6 +488,8 @@ def issue_credential(
     label: str = "",
     expires_at: str | datetime | None = None,
     created_by_credential_id: str | None = None,
+    scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
+    now: datetime | None = None,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
@@ -377,14 +497,28 @@ def issue_credential(
     if kind not in _CREDENTIAL_SECRET_PREFIX:
         raise IdentityStorageError("unsupported credential type")
     normalized_label = bounded_text(label, field_name="credential label", maximum=MAX_CREDENTIAL_LABEL_LENGTH)
-    normalized_expiry = parse_timestamp(expires_at, field_name="credential expiry")
+    active_now = now or datetime.now(timezone.utc)
+    if active_now.tzinfo is None:
+        active_now = active_now.replace(tzinfo=timezone.utc)
+    active_now = active_now.astimezone(timezone.utc)
+    normalized_scopes = _normalize_credential_scopes(kind, scopes)
+    normalized_expiry = _normalize_credential_expiry(kind, expires_at, now=active_now)
 
     def operation(active_conn: Any) -> IssuedCredential:
-        _active_principal_row(active_conn, principal_id)
+        _lock_active_principal_row(active_conn, principal_id)
         if created_by_credential_id:
             creator = _credential_row(active_conn, principal_id, created_by_credential_id)
-            if _row_dict(creator).get("revoked_at") is not None:
+            creator_data = _row_dict(creator)
+            if creator_data.get("revoked_at") is not None:
                 raise CredentialRevoked("creator credential is revoked")
+            creator_expiry = parse_timestamp(
+                creator_data.get("expires_at"),
+                field_name="creator credential expiry",
+            )
+            if creator_expiry is not None and datetime.fromisoformat(creator_expiry) <= active_now:
+                raise CredentialExpired("creator credential is expired")
+            if str(creator_data.get("credential_type")) == "pat":
+                raise IdentityStorageError("PATs cannot issue credentials")
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
         return _insert_credential(
             active_conn,
@@ -393,9 +527,10 @@ def issue_credential(
             label=normalized_label,
             expires_at=normalized_expiry,
             created_by_credential_id=created_by_credential_id,
-            created_at=timestamp(),
+            created_at=timestamp(active_now),
             verifier_root_version=verifier_version,
             verifier_root=verifier_root,
+            scopes=normalized_scopes,
         )
 
     return _run_transaction(operation, conn=conn, connect=connect)
@@ -414,7 +549,22 @@ def list_credentials(
             "ORDER BY created_at DESC, id DESC",
             (principal_id,),
         ).fetchall()
-        return tuple(_credential_metadata(row) for row in rows)
+        scope_rows = active_conn.execute(
+            "SELECT credential_id, scope FROM credential_scopes "
+            "WHERE credential_id IN (SELECT id FROM credentials WHERE principal_id = ?) "
+            "ORDER BY credential_id, scope",
+            (principal_id,),
+        ).fetchall()
+        scopes_by_id: dict[str, list[str]] = {}
+        for scope_row in scope_rows:
+            scope_data = _row_dict(scope_row)
+            scopes_by_id.setdefault(str(scope_data["credential_id"]), []).append(str(scope_data["scope"]))
+        metadata = []
+        for row in rows:
+            data = _row_dict(row)
+            data["scopes"] = tuple(scopes_by_id.get(str(data["id"]), ()))
+            metadata.append(_credential_metadata(data))
+        return tuple(metadata)
 
     return _run_read(operation, conn=conn, connect=connect)
 
@@ -430,13 +580,16 @@ def rename_credential(
     normalized = bounded_text(label, field_name="credential label", maximum=MAX_CREDENTIAL_LABEL_LENGTH)
 
     def operation(active_conn: Any) -> CredentialMetadata:
-        _active_principal_row(active_conn, principal_id)
+        _lock_active_principal_row(active_conn, principal_id)
         _credential_row(active_conn, principal_id, credential_id)
         active_conn.execute(
             "UPDATE credentials SET label = ?, updated_at = ? WHERE id = ? AND principal_id = ?",
             (normalized, timestamp(), credential_id, principal_id),
         )
-        return _credential_metadata(_credential_row(active_conn, principal_id, credential_id))
+        return _credential_metadata_from_row(
+            active_conn,
+            _credential_row(active_conn, principal_id, credential_id),
+        )
 
     return _run_transaction(operation, conn=conn, connect=connect)
 
@@ -448,17 +601,41 @@ def set_credential_expiry(
     *,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
+    now: datetime | None = None,
 ) -> CredentialMetadata:
-    normalized = parse_timestamp(expires_at, field_name="credential expiry")
+    active_now = now or datetime.now(timezone.utc)
+    if active_now.tzinfo is None:
+        active_now = active_now.replace(tzinfo=timezone.utc)
+    active_now = active_now.astimezone(timezone.utc)
 
     def operation(active_conn: Any) -> CredentialMetadata:
-        _active_principal_row(active_conn, principal_id)
-        _credential_row(active_conn, principal_id, credential_id)
+        _lock_active_principal_row(active_conn, principal_id)
+        current_row = _credential_row(active_conn, principal_id, credential_id)
+        current = _credential_metadata_from_row(active_conn, current_row)
+        normalized = _normalize_credential_expiry(
+            current.credential_type,
+            expires_at,
+            now=active_now,
+            use_pat_default=False,
+        )
+        if (
+            current.credential_type == "portable"
+            and _is_usable_credential(_row_dict(current_row), active_now)
+            and normalized is not None
+            and datetime.fromisoformat(normalized) <= active_now
+            and _usable_portable_credential_count(active_conn, principal_id, active_now) <= 1
+        ):
+            raise LastCredentialLockout(
+                "expiring the final portable credential would lock out the principal"
+            )
         active_conn.execute(
             "UPDATE credentials SET expires_at = ?, updated_at = ? WHERE id = ? AND principal_id = ?",
             (normalized, timestamp(), credential_id, principal_id),
         )
-        return _credential_metadata(_credential_row(active_conn, principal_id, credential_id))
+        return _credential_metadata_from_row(
+            active_conn,
+            _credential_row(active_conn, principal_id, credential_id),
+        )
 
     return _run_transaction(operation, conn=conn, connect=connect)
 
@@ -468,22 +645,41 @@ def revoke_credential(
     credential_id: str,
     *,
     reason: str = "",
+    allow_lockout: bool = False,
+    now: datetime | None = None,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> CredentialMetadata:
     normalized_reason = bounded_text(reason, field_name="revocation reason", maximum=MAX_REASON_LENGTH)
 
     def operation(active_conn: Any) -> CredentialMetadata:
-        _principal_row(active_conn, principal_id)
+        _lock_active_principal_row(active_conn, principal_id)
         row = _credential_row(active_conn, principal_id, credential_id)
-        if _row_dict(row).get("revoked_at") is None:
-            now = timestamp()
+        row_data = _row_dict(row)
+        if row_data.get("revoked_at") is None:
+            checked_at = now or datetime.now(timezone.utc)
+            if checked_at.tzinfo is None:
+                checked_at = checked_at.replace(tzinfo=timezone.utc)
+            checked_at = checked_at.astimezone(timezone.utc)
+            if (
+                str(row_data.get("credential_type")) == "portable"
+                and not allow_lockout
+                and _is_usable_credential(row_data, checked_at)
+            ):
+                if _usable_portable_credential_count(active_conn, principal_id, checked_at) <= 1:
+                    raise LastCredentialLockout(
+                        "revoking the final portable credential requires explicit lockout confirmation"
+                    )
+            revoked_at = timestamp(checked_at)
             active_conn.execute(
                 "UPDATE credentials SET revoked_at = ?, revocation_reason = ?, updated_at = ? "
                 "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",
-                (now, normalized_reason, now, credential_id, principal_id),
+                (revoked_at, normalized_reason, revoked_at, credential_id, principal_id),
             )
-        return _credential_metadata(_credential_row(active_conn, principal_id, credential_id))
+        return _credential_metadata_from_row(
+            active_conn,
+            _credential_row(active_conn, principal_id, credential_id),
+        )
 
     return _run_transaction(operation, conn=conn, connect=connect)
 
@@ -501,8 +697,11 @@ def rotate_credential(
     normalized_reason = bounded_text(reason, field_name="revocation reason", maximum=MAX_REASON_LENGTH)
 
     def operation(active_conn: Any) -> IssuedCredential:
-        _active_principal_row(active_conn, principal_id)
-        current = _credential_metadata(_credential_row(active_conn, principal_id, credential_id))
+        _lock_active_principal_row(active_conn, principal_id)
+        current = _credential_metadata_from_row(
+            active_conn,
+            _credential_row(active_conn, principal_id, credential_id),
+        )
         if current.revoked_at is not None:
             raise CredentialRevoked("credential is already revoked")
         replacement_label = current.label if label is None else bounded_text(
@@ -510,10 +709,18 @@ def rotate_credential(
             field_name="credential label",
             maximum=MAX_CREDENTIAL_LABEL_LENGTH,
         )
-        replacement_expiry = current.expires_at if expires_at is None else parse_timestamp(
-            expires_at,
-            field_name="credential expiry",
-        )
+        active_now = datetime.now(timezone.utc)
+        if current.credential_type == "pat":
+            replacement_expiry = _normalize_credential_expiry(
+                "pat",
+                expires_at,
+                now=active_now,
+            )
+        else:
+            replacement_expiry = current.expires_at if expires_at is None else parse_timestamp(
+                expires_at,
+                field_name="credential expiry",
+            )
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
         replacement = _insert_credential(
             active_conn,
@@ -522,11 +729,12 @@ def rotate_credential(
             label=replacement_label,
             expires_at=replacement_expiry,
             created_by_credential_id=current.id,
-            created_at=timestamp(),
+            created_at=timestamp(active_now),
             verifier_root_version=verifier_version,
             verifier_root=verifier_root,
+            scopes=current.scopes,
         )
-        now = timestamp()
+        now = timestamp(active_now)
         active_conn.execute(
             "UPDATE credentials SET revoked_at = ?, revocation_reason = ?, updated_at = ? "
             "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",

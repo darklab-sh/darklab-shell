@@ -20,6 +20,26 @@ CREDENTIAL_DIGEST_ALGORITHM = "hmac-sha256-v1"
 CREDENTIAL_WRAP_ALGORITHM = "aes-gcm-v1"
 CREDENTIAL_SECRET_MAX_LENGTH = 128
 GENERATED_ID_ATTEMPTS = 3
+PAT_DEFAULT_EXPIRY_DAYS = 90
+PAT_MIN_EXPIRY_DAYS = 1
+PAT_MAX_EXPIRY_DAYS = 365
+PAT_SCOPES = frozenset({
+    "identity:read",
+    "history:read",
+    "runs:execute",
+    "projects:read",
+    "projects:write",
+    "atlas:read",
+    "atlas:write",
+    "automation:read",
+    "automation:write",
+    "notifications:read",
+    "notifications:write",
+    "secrets:manage",
+    "teams:read",
+    "teams:write",
+})
+DEFAULT_PAT_SCOPES = frozenset({"identity:read", "history:read", "runs:execute"})
 
 _IDENTIFIER_PATTERNS = {
     "principal": re.compile(r"\Aprn_[0-9a-f]{32}\Z"),
@@ -51,6 +71,18 @@ class CredentialNotFound(IdentityStorageError):
 
 class CredentialRevoked(IdentityStorageError):
     """Raised when a lifecycle operation requires a live credential."""
+
+
+class CredentialExpired(IdentityStorageError):
+    """Raised when a lifecycle operation requires a credential that has not expired."""
+
+
+class LastCredentialLockout(IdentityStorageError):
+    """Raised when an ordinary action would revoke the final portable credential."""
+
+
+class InvalidCredentialScope(IdentityStorageError):
+    """Raised when a PAT contains an unsupported or invalid scope."""
 
 
 class WorkspaceStorageError(IdentityStorageError):
@@ -183,6 +215,7 @@ class CredentialMetadata:
     expires_at: str | None
     revoked_at: str | None
     revocation_reason: str
+    scopes: tuple[str, ...] = ()
 
     def to_safe_dict(self) -> dict[str, Any]:
         return {
@@ -200,6 +233,7 @@ class CredentialMetadata:
             "expires_at": self.expires_at,
             "revoked_at": self.revoked_at,
             "revocation_reason": self.revocation_reason,
+            "scopes": list(self.scopes),
         }
 
 

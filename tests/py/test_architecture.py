@@ -261,6 +261,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/commands/registry_validate.py", 178, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_validation.py", 239, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/registry_workspace.py", 466, "split-package-ratchet"),
+    ModuleSizeBudget(
+        "app/services/commands/registry_workspace_policy.py", 45, "split-package-ratchet"
+    ),
     ModuleSizeBudget("app/blueprints/run.py", 799, "split-target-phase2"),
     ModuleSizeBudget("app/blueprints/run_broker.py", 149, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),

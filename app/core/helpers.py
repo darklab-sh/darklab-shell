@@ -13,7 +13,6 @@ circular dependencies through app.py.
 import ipaddress
 import logging
 import re
-import uuid
 from functools import lru_cache
 
 from flask import g, has_request_context, request
@@ -26,6 +25,21 @@ _IP_RE = re.compile(r"^((\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$")
 _UNTRUSTED_PROXY_LOGGED_FLAG = "_untrusted_proxy_logged"
 GRACEFUL_TERMINATION_EXIT_CODE = -15
 GRACEFUL_TERMINATION_EXIT_CODES = frozenset({GRACEFUL_TERMINATION_EXIT_CODE})
+_AUTH_RESULT_KEY = "darklab_authentication_result"
+LEGACY_SESSION_ADAPTER_REMOVAL_ITEM = 11
+
+
+class AuthenticationRejected(RuntimeError):
+    """Raised when a request supplied an identity that failed authentication."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class LegacyIdentityAdapterUnavailable(RuntimeError):
+    """Raised until principal ownership replaces the v2 session owner seam."""
 
 
 def _coerce_exit_code(exit_code):
@@ -51,14 +65,13 @@ def is_failed_exit_code(exit_code):
 
 def is_valid_anonymous_session_id(session_id):
     """Return whether ``session_id`` is a browser-generated anonymous UUID."""
-    value = str(session_id or "").strip()
-    if not value or value.startswith("tok_"):
-        return False
     try:
-        parsed = uuid.UUID(value)
+        from services.auth.contracts import validate_anonymous_uuid  # noqa: PLC0415
+
+        validate_anonymous_uuid(str(session_id or ""))
     except (ValueError, AttributeError, TypeError):
         return False
-    return str(parsed) == value.lower()
+    return True
 
 
 @lru_cache(maxsize=8)
@@ -152,29 +165,55 @@ def get_client_ip():
     return peer_ip
 
 
-def get_session_id():
-    """Extract and validate the session ID from the X-Session-ID request header.
+def get_authentication_result():
+    """Return the request's cached, typed authentication result."""
+    from services.auth.resolver import resolve_authentication  # noqa: PLC0415
 
-    For ``tok_`` prefixed tokens the token must be present in ``session_tokens``
-    to be considered valid.  A revoked or never-issued ``tok_`` value is treated
-    as an anonymous session (returns ``""``) so callers cannot access data under
-    an invalidated identity.  UUID-format anonymous session IDs are returned
-    as-is without a DB lookup. Invalid anonymous IDs are treated as missing so
-    callers cannot select an arbitrary namespace with a made-up bearer string.
+    existing = getattr(g, _AUTH_RESULT_KEY, None)
+    if existing is not None:
+        return existing
+    result = resolve_authentication(request.headers)
+    setattr(g, _AUTH_RESULT_KEY, result)
+    return result
+
+
+def get_session_id():
+    """Return a v2 owner id through the temporary, fail-closed adapter.
+
+    New principal credentials deliberately do not become owner ids here. This
+    adapter remains only until the principal/workspace ownership cutover.
     """
-    session_id = request.headers.get("X-Session-ID", "").strip()
-    if not session_id.startswith("tok_"):
-        if is_valid_anonymous_session_id(session_id):
-            return session_id
-        return ""
-    # Local import avoids a circular dependency at module load time.
-    from core.database_access import get_db_connect  # noqa: PLC0415
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM session_tokens WHERE token = ?",
-            [session_id],
-        ).fetchone()
-    return session_id if row else ""
+    from services.auth.resolver import (  # noqa: PLC0415
+        AnonymousContext,
+        AuthenticatedContext,
+        LegacySessionContext,
+    )
+
+    result = get_authentication_result()
+    if result.failed:
+        raise AuthenticationRejected(result.error_code, result.message)
+    context = result.context
+    if isinstance(context, LegacySessionContext):
+        return context.session_id
+    if isinstance(context, AnonymousContext):
+        return context.anonymous_id
+    if isinstance(context, AuthenticatedContext):
+        raise LegacyIdentityAdapterUnavailable(
+            "principal credentials cannot use session-owned routes before the ownership cutover"
+        )
+    return ""
+
+
+def require_authenticated_context():
+    """Return an authenticated principal context or raise a typed rejection."""
+    from services.auth.resolver import AuthenticatedContext  # noqa: PLC0415
+
+    result = get_authentication_result()
+    if result.failed:
+        raise AuthenticationRejected(result.error_code, result.message)
+    if not isinstance(result.context, AuthenticatedContext):
+        raise AuthenticationRejected("credential_required", "An access credential is required.")
+    return result.context
 
 
 def get_log_session_id(session_id=None):
@@ -184,9 +223,31 @@ def get_log_session_id(session_id=None):
     ``tok_`` sessions are bearer credentials, so logs keep only the visible
     prefix needed for correlation and mask the secret suffix.
     """
-    value = get_session_id() if session_id is None else str(session_id or "")
+    if session_id is None:
+        try:
+            from services.auth.resolver import (  # noqa: PLC0415
+                AnonymousContext,
+                AuthenticatedContext,
+                LegacySessionContext,
+            )
+
+            context = get_authentication_result().context
+            if isinstance(context, LegacySessionContext):
+                value = context.session_id
+            elif isinstance(context, AnonymousContext):
+                value = context.anonymous_id
+            elif isinstance(context, AuthenticatedContext):
+                value = context.credential_id
+            else:
+                value = ""
+        except (AuthenticationRejected, RuntimeError):
+            value = ""
+    else:
+        value = str(session_id or "")
     if value.startswith("tok_"):
         return f"{value[:8]}********"
+    if value.startswith(("crd_", "pat_")):
+        return f"{value[:12]}********"
     return value
 
 

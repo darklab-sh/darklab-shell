@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 from core.database_backend import DatabaseBackend
-from core.migrations import v0078_principal_credential_persistence
+from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
 from services.auth import storage
 from services.auth.contracts import (
     IdentityStorageError,
@@ -44,6 +44,8 @@ def principal_db(tmp_path, monkeypatch):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+        conn.execute(statement)
+    for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
         conn.execute(statement)
     yield conn
     conn.close()
@@ -198,6 +200,7 @@ def test_credential_lifecycle_keeps_principal_workspace_and_path_stable(principa
         bundle.principal.id,
         replacement.metadata.id,
         reason="device lost",
+        allow_lockout=True,
         conn=principal_db,
     )
     assert revoked.revocation_reason == "device lost"
@@ -269,6 +272,8 @@ def test_injected_creation_failure_rolls_back_database_and_leaves_anonymous_data
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+            conn.execute(statement)
+        for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
 
     def connect():

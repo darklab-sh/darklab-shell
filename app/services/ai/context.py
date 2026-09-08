@@ -24,7 +24,7 @@ from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal
 from services.runs.output_store import load_run_output_events_for_run
 from services.projects.metadata import _full_finding_triage_by_id
 from services.secrets.storage import list_secret_metadata
-from services.workspace.files import WorkspaceDisabled, session_workspace_dir
+from services.workspace.settings import workspace_settings
 
 _SECRET_NAME_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9_]{0,63}\b")
 _NMAP_VULNERS_TRANSCRIPT_RE = re.compile(r"^\|_?\s+\S+\s+(?:10(?:\.0)?|[0-9](?:\.\d)?)\s+https://vulners\.com/\S+", re.I)
@@ -810,8 +810,8 @@ def _strip_workspace_paths(text: str, cfg: Mapping[str, Any]) -> str:
     if not cfg.get("workspace_enabled"):
         return text
     try:
-        prefix = str(session_workspace_dir("", cfg).parent.resolve(strict=False)).rstrip("/")
-    except (WorkspaceDisabled, OSError):
+        prefix = str(workspace_settings(cfg).root.resolve(strict=False)).rstrip("/")
+    except OSError:
         return text
     if not prefix:
         return text

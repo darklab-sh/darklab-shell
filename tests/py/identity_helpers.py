@@ -11,6 +11,7 @@ identifiers should remain literal at the call site so their intent stays clear.
 from __future__ import annotations
 
 import secrets
+import hashlib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -25,7 +26,8 @@ def anonymous_session_id(label: str | None = None) -> str:
     """Return a canonical anonymous UUID, stable when ``label`` is supplied."""
     if label is None:
         return str(uuid.uuid4())
-    return str(uuid.uuid5(_TEST_IDENTITY_NAMESPACE, str(label)))
+    digest = hashlib.sha256(_TEST_IDENTITY_NAMESPACE.bytes + str(label).encode("utf-8")).digest()
+    return str(uuid.UUID(bytes=digest[:16], version=4))
 
 
 def identity_headers(identity: str) -> dict[str, str]:

@@ -87,6 +87,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "credential_verifier_roots",
     "personal_workspaces",
     "credentials",
+    "credential_scopes",
 )
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",
@@ -97,7 +98,6 @@ SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_ai",
     "runs_ad",
 )
-
 POSTGRES_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "schema_migrations",
     "pg_trgm",

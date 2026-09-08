@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from flask import Response, jsonify, request
-
 from blueprints import run as run_routes
 
 
@@ -20,6 +19,8 @@ def start_brokered_run():
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     session_id = run_routes.get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
     original_command = data.get("command", "")
     client_ip = run_routes.get_client_ip()
     owner_client_id = run_routes._active_run_owner_value(request.headers.get("X-Client-ID", ""))
@@ -43,7 +44,6 @@ def start_brokered_run():
             return capability_response
         team_id = owner_scope.team_id
         team_role = str((owner_scope.member or {}).get("role") or "")
-
     if not run_routes.broker_available():
         reason = run_routes.broker_unavailable_reason()
         log_method = (

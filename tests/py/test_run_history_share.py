@@ -660,7 +660,7 @@ class TestRunStreaming:
              mock.patch("blueprints.run.uuid.uuid4", return_value="run-broker-synthetic"):
             run_id = run_routes._brokered_synthetic_run(
                 "help",
-                "session-synthetic",
+                anonymous_session_id("session-synthetic"),
                 "203.0.113.10",
                 [
                     {"type": "output", "text": "first line", "cls": "notice"},
@@ -4158,7 +4158,7 @@ class TestRunStreaming:
             )
 
         assert resp.status_code == 401
-        assert resp.get_json()["error"] == "A valid session is required before commands can use encrypted secrets."
+        assert resp.get_json()["error"] == "malformed_credential"
         popen.assert_not_called()
 
     def test_run_blocks_when_required_secret_is_missing(self):

@@ -253,6 +253,196 @@ def test_principal_credential_persistence_matches_postgres_contract(
     reset_master_key_cache_for_tests()
 
 
+@pytest.mark.postgres
+def test_principal_authentication_states_and_pat_contract_match_postgres(
+    postgres_schema,
+    postgres_dsn,
+    tmp_path,
+    monkeypatch,
+):
+    import base64
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.audit import recorder as audit_recorder
+    from services.auth import lifecycle as auth_lifecycle
+    from services.auth import storage as principal_storage
+    from services.auth.contracts import LastCredentialLockout
+    from services.auth.resolver import (
+        AuthenticatedContext,
+        AuthenticationState,
+        resolve_authentication,
+    )
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+
+    data_dir = tmp_path / "auth-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    settings = WorkspaceSettings(
+        enabled=True,
+        backend="volume",
+        root=tmp_path / "auth-workspaces",
+        quota_bytes=1024,
+        max_file_bytes=1024,
+        max_files=10,
+        inactivity_ttl_hours=1,
+    )
+    settings.root.mkdir()
+    now = datetime.now(timezone.utc)
+    bundle = principal_storage.create_principal_with_credential(settings=settings, conn=conn)
+
+    assert resolve_authentication({}, conn=conn, now=now).state == AuthenticationState.NO_CREDENTIAL
+    assert resolve_authentication(
+        {"X-Darklab-Credential": "dlc_v1_bad"}, conn=conn, now=now
+    ).state == AuthenticationState.MALFORMED_CREDENTIAL
+    unknown_tail = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=").decode("ascii")
+    unknown = resolve_authentication(
+        {"X-Darklab-Credential": f"dlc_v1_crd_{'f' * 32}_{unknown_tail}"},
+        conn=conn,
+        now=now,
+    )
+    assert unknown.state == AuthenticationState.UNKNOWN_CREDENTIAL
+
+    valid = resolve_authentication(
+        {"X-Darklab-Credential": bundle.credential.secret},
+        conn=conn,
+        now=now,
+    )
+    assert valid.state == AuthenticationState.VALID
+    assert isinstance(valid.context, AuthenticatedContext)
+
+    expired = principal_storage.issue_credential(
+        bundle.principal.id,
+        expires_at=now - timedelta(seconds=1),
+        created_by_credential_id=bundle.credential.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    assert resolve_authentication(
+        {"X-Darklab-Credential": expired.secret}, conn=conn, now=now
+    ).state == AuthenticationState.EXPIRED_CREDENTIAL
+
+    revoked = principal_storage.issue_credential(
+        bundle.principal.id,
+        created_by_credential_id=bundle.credential.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    principal_storage.revoke_credential(
+        bundle.principal.id,
+        revoked.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    assert resolve_authentication(
+        {"X-Darklab-Credential": revoked.secret}, conn=conn, now=now
+    ).state == AuthenticationState.REVOKED_CREDENTIAL
+
+    pat = principal_storage.issue_credential(
+        bundle.principal.id,
+        credential_type="pat",
+        scopes={"identity:read", "projects:read"},
+        created_by_credential_id=bundle.credential.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    pat_result = resolve_authentication(
+        {"Authorization": f"Bearer {pat.secret}"}, conn=conn, now=now
+    )
+    assert pat_result.state == AuthenticationState.VALID
+    assert isinstance(pat_result.context, AuthenticatedContext)
+    assert pat_result.context.credential_type == "pat"
+    assert pat_result.context.capabilities == frozenset({"identity:read", "projects:read"})
+    principal_storage.revoke_credential(
+        bundle.principal.id,
+        pat.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    assert resolve_authentication(
+        {"Authorization": f"Bearer {pat.secret}"}, conn=conn, now=now
+    ).state == AuthenticationState.REVOKED_CREDENTIAL
+    assert resolve_authentication(
+        {"X-Darklab-Credential": bundle.credential.secret}, conn=conn, now=now
+    ).state == AuthenticationState.VALID
+    principal_storage.disable_principal(bundle.principal.id, reason="test", conn=conn)
+    assert resolve_authentication(
+        {"X-Darklab-Credential": bundle.credential.secret}, conn=conn, now=now
+    ).state == AuthenticationState.DISABLED_PRINCIPAL
+    principal_storage.enable_principal(bundle.principal.id, conn=conn)
+
+    second_portable = principal_storage.issue_credential(
+        bundle.principal.id,
+        created_by_credential_id=bundle.credential.metadata.id,
+        now=now,
+        conn=conn,
+    )
+    raw_conn.commit()
+    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    psycopg_connect = cast(Any, psycopg.connect)
+
+    @contextmanager
+    def concurrent_connect():
+        with psycopg_connect(schema_dsn, row_factory=dict_row) as concurrent_raw:
+            yield PostgresSqliteCompatConnection(concurrent_raw)
+
+    barrier = Barrier(2)
+
+    def revoke_concurrently(credential_id: str) -> str:
+        barrier.wait()
+        try:
+            principal_storage.revoke_credential(
+                bundle.principal.id,
+                credential_id,
+                now=now,
+                connect=concurrent_connect,
+            )
+        except LastCredentialLockout:
+            return "protected"
+        return "revoked"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = sorted(pool.map(
+            revoke_concurrently,
+            (bundle.credential.metadata.id, second_portable.metadata.id),
+        ))
+    assert outcomes == ["protected", "revoked"]
+    usable = raw_conn.execute(
+        "SELECT COUNT(*) AS count FROM credentials "
+        "WHERE principal_id = %s AND credential_type = 'portable' "
+        "AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > %s)",
+        (bundle.principal.id, now),
+    ).fetchone()
+    assert usable["count"] == 1
+
+    monkeypatch.setattr(audit_recorder, "get_db_backend", lambda: DatabaseBackend.POSTGRES)
+    auth_lifecycle.record_authentication_failure(
+        unknown,
+        request_fields={"client_ip": "192.0.2.9", "request_id": "pg-auth-failure"},
+        conn=conn,
+    )
+    failure = raw_conn.execute(
+        "SELECT target_id, details FROM audit_events "
+        "WHERE event_type = 'credential.authentication_failure'"
+    ).fetchone()
+    assert failure["target_id"] == ""
+    assert failure["details"] == {"authentication_state": "unknown_credential"}
+    assert unknown_tail not in json.dumps(dict(failure))
+
+    raw_conn.commit()
+    reset_master_key_cache_for_tests()
+
+
 def _json_payload(value: dict[str, Any], *, backend: str) -> Any:
     if backend == "postgres":
         from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -668,6 +858,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0076",
         "0077",
         "0078",
+        "0079",
     ]
     assert applied_again == []
     table_rows = conn.execute(
