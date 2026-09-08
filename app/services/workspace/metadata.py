@@ -30,10 +30,7 @@ def _workspace_metadata_owner_where(scope: Any, table_alias: str = "") -> tuple[
             f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))",
             (team_id, team_id),
         )
-    return (
-        f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?",
-        (str(getattr(scope, "owner_id", "") or ""),),
-    )
+    return scope.predicate(table_alias=table_alias)
 
 
 def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, dict[str, Any]]:
@@ -172,4 +169,3 @@ def move_workspace_file_metadata(scope: Any, path_map: dict[str, str]) -> None:
                 (destination, *metadata_owner_params, source),
             )
         conn.commit()
-

@@ -34051,43 +34051,48 @@ class TestBodyStore:
 
 class TestSessionVariables:
     def test_set_list_unset_and_expand_variables(self):
+        session_id = anonymous_session_id("session-variables")
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
-                session_variables.set_session_variable("sess-vars", "HOST", "ip.darklab.sh")
-                session_variables.set_session_variable("sess-vars", "PORT", "443")
+                session_variables.set_session_variable(session_id, "HOST", "ip.darklab.sh")
+                session_variables.set_session_variable(session_id, "PORT", "443")
                 expansion = session_variables.expand_session_variables(
                     "openssl s_client -connect ${HOST}:$PORT",
-                    "sess-vars",
+                    session_id,
                 )
                 assert expansion.command == "openssl s_client -connect ip.darklab.sh:443"
                 assert expansion.used_names == ("HOST", "PORT")
                 quoted = session_variables.expand_session_variables(
                     "curl 'https://$HOST'",
-                    "sess-vars",
+                    session_id,
                 )
                 assert quoted.command == "curl 'https://ip.darklab.sh'"
-                assert session_variables.list_session_variables("sess-vars") == {
+                assert session_variables.list_session_variables(session_id) == {
                     "HOST": "ip.darklab.sh",
                     "PORT": "443",
                 }
-                assert session_variables.unset_session_variable("sess-vars", "PORT") is True
-                assert session_variables.unset_session_variable("sess-vars", "PORT") is False
+                assert session_variables.unset_session_variable(session_id, "PORT") is True
+                assert session_variables.unset_session_variable(session_id, "PORT") is False
 
     def test_rejects_invalid_names_and_undefined_references(self):
+        session_id = anonymous_session_id("session-variable-errors")
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
                 with pytest.raises(session_variables.InvalidSessionVariableName):
-                    session_variables.set_session_variable("sess-vars", "host", "ip.darklab.sh")
+                    session_variables.set_session_variable(session_id, "host", "ip.darklab.sh")
                 with pytest.raises(session_variables.UndefinedSessionVariable):
-                    session_variables.expand_session_variables("curl https://$HOST", "sess-vars")
+                    session_variables.expand_session_variables("curl https://$HOST", session_id)
                 with pytest.raises(session_variables.InvalidSessionVariableReference):
-                    session_variables.expand_session_variables("curl https://${HOST:-darklab.sh}", "sess-vars")
+                    session_variables.expand_session_variables(
+                        "curl https://${HOST:-darklab.sh}",
+                        session_id,
+                    )
 
 
 class TestBuiltinConfigAccess:

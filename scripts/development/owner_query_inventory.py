@@ -95,6 +95,8 @@ NAMED_RELATIONAL_EXCEPTIONS = {
     ),
 }
 NAMED_SOURCE_HASH_EXCEPTIONS = {
+    ("app/services/workspace/metadata.py", "_workspace_metadata_owner_where", "73d6422a2d"):
+        "team workspace metadata preserves direct and legacy flattened-owner representations",
     ("app/services/assessments/coverage_candidates.py", "candidate_checks_for_run", "c7fd2fc2d9"):
         "assessment candidates preserve cross-table project, run, and owner correlations",
     ("app/services/assessments/reconciliation_read.py", "_finding_summaries", "eb843d375d"):

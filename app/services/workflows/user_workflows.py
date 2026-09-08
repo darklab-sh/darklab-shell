@@ -12,15 +12,22 @@ from datetime import datetime, timezone
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.teams.scope import personal_owner_context, shared_owner_predicate
+
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 from services.workflows.captures import MAX_CAPTURES_PER_STEP
 from services.workflows.catalog import (
     WORKFLOW_CAPTURE_SOURCES,
     WORKFLOW_INPUT_ID_RE,
     WORKFLOW_INPUT_TYPES,
 )
-from services.workflows.compiler import WorkflowDefinitionError, compile_workflow_definition
-
+from services.workflows.compiler import (
+    WorkflowDefinitionError,
+    compile_workflow_definition,
+)
 
 MAX_WORKFLOW_TITLE_LEN = 120
 MAX_WORKFLOW_DESCRIPTION_LEN = 1000
@@ -241,13 +248,14 @@ def _clean_payload(data):
 
 def _workflow_owner_where(session_id, *, team_id="", table_alias=""):
     prefix = f"{table_alias}." if table_alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", (team_id,)
-    return shared_owner_predicate(
-        personal_owner_context(session_id),
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column=f"{prefix}session_id",
         team_column=f"{prefix}team_id",
-        session_column=f"{prefix}session_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
     )
+    return owner.as_tuple()
 
 
 def list_user_workflows(session_id, *, team_id=""):
