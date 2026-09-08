@@ -29,6 +29,13 @@ from services.scheduler.models import (
     ScheduleFire,
 )
 from services.storage.transactions import run_transaction
+from services.teams.ownership_queries import (
+    OwnerKeyShape,
+    PersonalTeamRows,
+    composite_owner_predicate,
+    token_keyed_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, team_owner_context
 
 log = logging.getLogger("shell")
 _T = TypeVar("_T")
@@ -157,10 +164,13 @@ def _max_schedules_per_session() -> int:
 
 def _owner_schedule_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    normalized_team_id = str(team_id or "").strip()
-    if normalized_team_id:
-        return f"{prefix}team_id = ?", (normalized_team_id,)
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_token = ?", (session_token,)
+    owner = token_keyed_owner_predicate(
+        owner_context_for_scope(session_token, team_id=team_id),
+        token_column=f"{prefix}session_token",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return owner.as_tuple()
 
 
 def _normal_schedule_count(conn, session_token: str, *, team_id: str = "") -> int:
@@ -593,13 +603,17 @@ def pause_team_schedules(conn, team_id: str, *, reason: str = "team_archived") -
     normalized_team_id = str(team_id or "").strip()
     if not normalized_team_id:
         return 0
+    owner = composite_owner_predicate(
+        team_owner_context(normalized_team_id),
+        owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        key_values=(("enabled", _bool_param(True)),),
+    )
     result = conn.execute(
-        """
-        UPDATE schedules
-        SET enabled = ?, paused_reason = ?, updated = ?
-        WHERE team_id = ? AND enabled = ?
-        """,
-        (_bool_param(False), reason, _utc_now(), normalized_team_id, _bool_param(True)),
+        "UPDATE schedules SET enabled = ?, paused_reason = ?, updated = ? WHERE "  # nosec B608
+        + owner.sql,
+        (_bool_param(False), reason, _utc_now(), *owner.params),
     )
     return int(getattr(result, "rowcount", 0) or 0)
 

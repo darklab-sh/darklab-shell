@@ -30,6 +30,13 @@ from services.notifications.models import (
     NotificationChannel,
     NotificationEvent,
 )
+from services.teams.ownership_queries import (
+    OwnerKeyShape,
+    PersonalTeamRows,
+    composite_owner_predicate,
+    token_keyed_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, personal_owner_context
 
 log = logging.getLogger("shell")
 
@@ -130,12 +137,12 @@ def _channel_rows_for_trigger(
     require_trigger_match: bool = True,
 ) -> list[Any]:
     selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
-    if team_id:
-        owner_sql = "team_id = ?"
-        owner_params = (team_id,)
-    else:
-        owner_sql = "(team_id IS NULL OR team_id = '') AND session_token = ?"
-        owner_params = (session_token,)
+    owner = token_keyed_owner_predicate(
+        owner_context_for_scope(session_token, team_id=team_id),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    owner_sql, owner_params = owner.as_tuple()
     rows = conn.execute(
         "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
         "muted, created, updated "
@@ -157,11 +164,21 @@ def _channel_rows_for_trigger(
 def _existing_event_id(conn, *, session_token: str, team_id: str, channel_id: str, trigger: str, run_id: str) -> str:
     if not run_id:
         return ""
+    owner = composite_owner_predicate(
+        personal_owner_context(session_token),
+        owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        key_values=(
+            ("team_id", team_id),
+            ("channel_id", channel_id),
+            ("trigger", trigger),
+            ("run_id", run_id),
+        ),
+    )
     row = conn.execute(
-        "SELECT id FROM notification_events "
-        "WHERE session_token = ? AND team_id = ? AND channel_id = ? AND trigger = ? AND run_id = ? "
-        "ORDER BY created ASC, id ASC LIMIT 1",
-        (session_token, team_id, channel_id, trigger, run_id),
+        "SELECT id FROM notification_events WHERE "  # nosec B608
+        + owner.sql
+        + " ORDER BY created ASC, id ASC LIMIT 1",
+        owner.params,
     ).fetchone()
     return str(row["id"] or "") if row is not None else ""
 

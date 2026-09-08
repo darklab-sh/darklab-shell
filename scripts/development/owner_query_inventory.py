@@ -177,6 +177,8 @@ NAMED_SOURCE_HASH_EXCEPTIONS = {
         "target snapshot counts use the legacy flattened metadata-owner key",
     ("app/services/projects/targets.py", "list_project_targets", "d2f4109545"):
         "target snapshot summaries use the legacy flattened metadata-owner key",
+    ("app/services/connectors/zap_jobs.py", "create_zap_job", "1c67e9f4df"):
+        "ZAP creation preserves its cross-table assessment, profile, and owner correlations",
 }
 OWNER_COLUMN_RE = re.compile(
     r"(?i)\b(?:[a-z_][a-z0-9_]*\.)?"
