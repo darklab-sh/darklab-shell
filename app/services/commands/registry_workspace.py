@@ -11,8 +11,13 @@ from typing import Any, Callable, Mapping
 
 import config as app_config
 from services.commands import registry_targets
+from services.commands.registry_workspace_policy import (
+    policy_workspace_exempt_flags,
+    workspace_flag_absolute_passthrough,
+    workspace_owner_context,
+)
 from services.commands.registry_validation import split_command_argv
-from services.teams.scope import OwnerContext, owner_context_for_scope
+from services.teams.scope import OwnerContext
 from services.workspace.files import (
     ensure_owner_workspace,
     InvalidWorkspacePath,
@@ -187,21 +192,6 @@ def absolute_workspace_flag_path_error(value: str) -> str:
     return ""
 
 
-def workspace_owner_context(session_id: str, owner_context: OwnerContext | None = None) -> OwnerContext:
-    if owner_context is not None:
-        return owner_context
-    return owner_context_for_scope(session_id)
-
-
-def workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
-    raw = str(value or "").strip()
-    if not os.path.isabs(raw):
-        return False
-    if raw == "/dev/null" and mode in {"write", "read_write"}:
-        return True
-    return mode in {"read", "read_write"} and raw.startswith("/usr/share/wordlists/")
-
-
 def wget_default_directory_prefix(
     session_id: str,
     cfg: Mapping[str, Any] | None,
@@ -339,6 +329,10 @@ def rewrite_workspace_file_flags(
                 )
             index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
+
+    if not session_id and owner_context is None:
+        flags = policy_workspace_exempt_flags(tokens, specs, matches_token=workspace_flag_matches_token)
+        return command, flags, [], [], [], ""
 
     owner = workspace_owner_context(session_id, owner_context)
     root = tokens[0].lower()

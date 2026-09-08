@@ -736,6 +736,25 @@ def test_api_v1_team_routes_use_team_rate_limit_per_token(monkeypatch):
     assert other.status_code == 200
 
 
+def test_api_v1_rate_limit_key_does_not_expose_legacy_bearer_secret():
+    from services.api_v1.auth import api_rate_limit_key
+
+    flask_app = _test_app()
+    client = flask_app.test_client()
+    token = _token(client)
+    remote_addr = "198.51.100.73"
+    with flask_app.test_request_context(
+        "/api/v1/teams",
+        headers=_headers(token),
+        environ_base={"REMOTE_ADDR": remote_addr},
+    ):
+        key = api_rate_limit_key()
+
+    assert token not in key
+    assert key.startswith("legacy:")
+    assert key.endswith(f":{remote_addr}")
+
+
 def test_api_v1_team_write_routes_use_separate_team_rate_limit(monkeypatch):
     client = get_client()
     token = _token(client)
@@ -8235,7 +8254,7 @@ def test_api_v1_openapi_contract_describes_manual_finding_mutations():
     assert "manual_updated_by_session_id" not in manual_contract
 
 
-def test_api_v1_whoami_last_seen_is_current_auth_timestamp(monkeypatch):
+def test_api_v1_whoami_reports_request_time_without_repeating_database_write(monkeypatch):
     import services.api_v1.auth as api_auth
 
     client = get_client()
@@ -8243,14 +8262,23 @@ def test_api_v1_whoami_last_seen_is_current_auth_timestamp(monkeypatch):
 
     monkeypatch.setattr(api_auth, "_now", lambda: "2026-05-19 01:00:00")
     first = json.loads(client.get("/api/v1/whoami", headers=_headers(token)).data)
+    with sqlite3.connect(DB_PATH) as conn:
+        first_stored = conn.execute(
+            "SELECT last_seen_at FROM session_tokens WHERE token = ?",
+            (token,),
+        ).fetchone()[0]
     monkeypatch.setattr(api_auth, "_now", lambda: "2026-05-19 01:00:01")
     second = json.loads(client.get("/api/v1/whoami", headers=_headers(token)).data)
+    with sqlite3.connect(DB_PATH) as conn:
+        second_stored = conn.execute(
+            "SELECT last_seen_at FROM session_tokens WHERE token = ?",
+            (token,),
+        ).fetchone()[0]
 
     assert first["last_seen_at"] == "2026-05-19 01:00:00"
     assert second["last_seen_at"] == "2026-05-19 01:00:01"
-    with sqlite3.connect(DB_PATH) as conn:
-        stored = conn.execute("SELECT last_seen_at FROM session_tokens WHERE token = ?", (token,)).fetchone()
-    assert stored[0] == "2026-05-19 01:00:01"
+    assert first_stored
+    assert second_stored == first_stored
 
 
 def test_darklab_cli_sse_parser_reads_events():

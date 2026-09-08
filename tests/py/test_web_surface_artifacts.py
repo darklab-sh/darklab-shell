@@ -64,7 +64,7 @@ def test_httpx_screenshot_directory_metadata_requires_one_validated_output():
 
 def test_httpx_screenshot_artifacts_are_bounded_to_verified_image_children(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("web-surface-artifacts")
+    owner = personal_owner_context("tok_" + "1" * 32)
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -131,7 +131,7 @@ def test_httpx_screenshot_artifacts_are_bounded_to_verified_image_children(tmp_p
 
 def test_httpx_screenshot_artifacts_keep_earlier_files_and_clean_new_byte_overage(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("web-surface-byte-quota")
+    owner = personal_owner_context("tok_" + "2" * 32)
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -160,7 +160,7 @@ def test_httpx_screenshot_artifacts_keep_earlier_files_and_clean_new_byte_overag
             owner,
             cfg=cfg,
             run_id="run-quota",
-            session_id="web-surface-byte-quota",
+            session_id=owner.owner_id,
         )
 
     assert [item["workspace_path"] for item in artifacts] == ["shots", "shots/first.png"]
@@ -172,7 +172,7 @@ def test_httpx_screenshot_artifacts_keep_earlier_files_and_clean_new_byte_overag
 
 def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner_run(tmp_path):
     cfg = {**_cfg(tmp_path), "workspace_max_files": 1}
-    owner = personal_owner_context("web-surface-protected")
+    owner = personal_owner_context("tok_" + "3" * 32)
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -191,7 +191,8 @@ def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner
     conn.execute("INSERT INTO runs (id, team_id) VALUES ('run-prior', '')")
     conn.execute(
         "INSERT INTO run_file_artifacts (id, session_id, run_id, workspace_path) "
-        "VALUES ('artifact-prior', 'web-surface-protected', 'run-prior', 'shots/prior.png')"
+        "VALUES ('artifact-prior', ?, 'run-prior', 'shots/prior.png')",
+        (owner.owner_id,),
     )
 
     artifacts = append_httpx_screenshot_artifacts(
@@ -200,7 +201,7 @@ def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner
         owner,
         cfg=cfg,
         run_id="run-current",
-        session_id="web-surface-protected",
+        session_id=owner.owner_id,
         conn=conn,
     )
     failed_artifacts = append_httpx_screenshot_artifacts(
@@ -210,7 +211,7 @@ def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner
         cfg=cfg,
         retain=False,
         run_id="run-current",
-        session_id="web-surface-protected",
+        session_id=owner.owner_id,
         conn=conn,
     )
 
@@ -269,7 +270,7 @@ def test_protected_screenshot_paths_follow_personal_and_team_ownership():
 
 def test_httpx_screenshot_cleanup_fails_safe_when_protected_path_lookup_fails(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("web-surface-protected-failure")
+    owner = personal_owner_context("tok_" + "4" * 32)
     root = ensure_owner_workspace(owner, cfg)
     (root / "shots").mkdir()
     (root / "shots" / "capture.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
@@ -289,7 +290,7 @@ def test_httpx_screenshot_cleanup_fails_safe_when_protected_path_lookup_fails(tm
             owner,
             cfg=cfg,
             run_id="run-current",
-            session_id="web-surface-protected-failure",
+            session_id=owner.owner_id,
             conn=failing_conn,
         )
 
@@ -305,7 +306,7 @@ def test_httpx_screenshot_cleanup_fails_safe_when_protected_path_lookup_fails(tm
 
 def test_httpx_screenshot_artifacts_reject_ambiguous_output_directories(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("web-surface-ambiguous")
+    owner = personal_owner_context("tok_" + "5" * 32)
     root = ensure_owner_workspace(owner, cfg)
     for directory in ("one", "two"):
         (root / directory).mkdir()
@@ -320,7 +321,7 @@ def test_httpx_screenshot_artifacts_reject_ambiguous_output_directories(tmp_path
 
 def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("web-surface-finalize")
+    owner = personal_owner_context("tok_" + "6" * 32)
     root = ensure_owner_workspace(owner, cfg)
     (root / "shots" / "screenshot" / "app.example.test").mkdir(parents=True)
     screenshot_path = "shots/screenshot/app.example.test/app.webp"
@@ -345,7 +346,7 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
     ):
         recorded = save_run_file_artifacts_for_finalize(
             conn,
-            "web-surface-finalize",
+            owner.owner_id,
             "",
             "run-httpx",
             "httpx -json -screenshot -srd shots",
@@ -357,7 +358,7 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
         )
         failed_run_artifacts = save_run_file_artifacts_for_finalize(
             conn,
-            "web-surface-finalize",
+            owner.owner_id,
             "",
             "run-httpx-failed",
             "httpx -json -screenshot -srd shots",
@@ -378,6 +379,7 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
 
 def test_run_finalization_keeps_validated_artifacts_when_screenshot_discovery_fails():
     base = [{"workspace_path": "shots", "kind": "output"}]
+    owner = personal_owner_context("tok_" + "7" * 32)
     with (
         mock.patch(
             "services.runs.finalization_artifacts.append_httpx_screenshot_artifacts",
@@ -395,12 +397,12 @@ def test_run_finalization_keeps_validated_artifacts_when_screenshot_discovery_fa
     ):
         recorded = save_run_file_artifacts_for_finalize(
             object(),
-            "web-surface-failure",
+            owner.owner_id,
             "",
             "run-httpx",
             "httpx -json -screenshot -srd shots",
             base,
-            personal_owner_context("web-surface-failure"),
+            owner,
             workspace_artifacts_with_sizes_fn=lambda _session, artifacts: artifacts,
         )
 

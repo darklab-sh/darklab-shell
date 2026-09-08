@@ -3662,7 +3662,7 @@ class TestLoadConfig:
 
         artifact_job = {
             "id": job_id,
-            "session_id": "session-a",
+            "session_id": "tok_session-a",
             "team_id": "",
             "actor_member_id": "",
             "plan_summary": safe_plan.summary.to_dict(),
@@ -3853,7 +3853,7 @@ class TestLoadConfig:
                 ) as create_job,
             ):
                 queued = zap_job_queue_module.queue_zap_job(
-                    "session-a",
+                    "tok_session-a",
                     "prj_a",
                     "asm_a",
                     "chk_a",
@@ -3866,7 +3866,7 @@ class TestLoadConfig:
             store_plan.assert_called_once_with(job_id, safe_plan, artifact_cfg)
             assert create_job.call_args.kwargs["job_id"] == job_id
             assert create_job.call_args.args[:7] == (
-                "session-a", "prj_a", "asm_a", "chk_a", "php_a", 3, safe_plan.summary,
+                "tok_session-a", "prj_a", "asm_a", "chk_a", "php_a", 3, safe_plan.summary,
             )
             with (
                 mock.patch.object(
@@ -3911,7 +3911,7 @@ class TestLoadConfig:
         ) as preview_report:
             assert zap_worker_module._preview_report(artifact_job, report.payload) == draft_id
         assert preview_report.call_args.kwargs == {
-            "session_id": "session-a",
+            "session_id": "tok_session-a",
             "team_id": "",
             "actor_member_id": "",
             "role": "",
@@ -3927,7 +3927,7 @@ class TestLoadConfig:
 
         with pytest.raises(AtlasImportError) as exc_info:
             preview_atlas_import(
-                session_id="session-a",
+                session_id="tok_session-a",
                 file_content=report.payload,
                 filename="report.json",
                 format_id="zap_json",
@@ -8190,6 +8190,7 @@ class TestPostgresMigrations:
             "0076",
             "0077",
             "0078",
+            "0079",
         ]
         for table_name in (
             "runs",
@@ -9572,7 +9573,7 @@ class TestPostgresMigrations:
             (migration.version, migration.name)
             for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0078"
+        assert rows[-1]["version"] == "0079"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10041,6 +10042,7 @@ class TestPostgresMigrations:
             "0076",
             "0077",
             "0078",
+            "0079",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10083,7 +10085,8 @@ class TestPostgresMigrations:
         assert "0076" in conn.applied_versions
         assert "0077" in conn.applied_versions
         assert "0078" in conn.applied_versions
-        assert conn.commit_count == 40
+        assert "0079" in conn.applied_versions
+        assert conn.commit_count == 41
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -10531,24 +10534,27 @@ class TestTeamModeFoundation:
             team_owner_context,
         )
 
-        anonymous = anonymous_owner_context()
-        personal = personal_owner_context("sess_abc")
-        team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id="sess_abc")
+        anonymous_id = str(uuid.uuid4())
+        personal_id = "tok_" + "a" * 32
+        anonymous = anonymous_owner_context(anonymous_id)
+        personal = personal_owner_context(personal_id)
+        team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id=personal_id)
 
         assert anonymous.scope == "personal"
-        assert anonymous.owner_id == "anonymous"
-        assert anonymous.actor_session_id == ""
+        assert anonymous.owner_id == anonymous_id
+        assert anonymous.actor_session_id == anonymous_id
         assert personal.scope == "personal"
-        assert personal_scope_predicate(personal) == ("session_id = ?", ("sess_abc",))
+        assert personal_scope_predicate(personal) == ("session_id = ?", (personal_id,))
         assert shared_owner_predicate(personal) == (
             "(team_id IS NULL OR team_id = '') AND session_id = ?",
-            ("sess_abc",),
+            (personal_id,),
         )
         assert shared_owner_predicate(team) == ("team_id = ?", ("team_abc",))
-        assert owner_context_for_scope("").owner_id == "anonymous"
-        assert owner_context_for_scope("sess_abc") == personal
+        with pytest.raises(ValueError):
+            owner_context_for_scope("")
+        assert owner_context_for_scope(personal_id) == personal
         assert owner_context_for_scope(
-            "sess_abc",
+            personal_id,
             team_id="team_abc",
             actor_member_id="tmem_123",
         ) == team
@@ -17580,7 +17586,7 @@ class TestSessionWorkspace:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_enabled=False)
             try:
-                ensure_session_workspace("session-1", cfg)
+                ensure_session_workspace("tok_session-1", cfg)
                 assert False, "expected disabled workspace to reject operations"
             except WorkspaceDisabled:
                 pass
@@ -17603,7 +17609,7 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            personal = personal_owner_context("tok_workspace_owner")
+            personal = personal_owner_context("tok_" + "b" * 32)
             team = team_owner_context(
                 "team_workspace_owner",
                 actor_session_id="tok_workspace_owner",
@@ -17613,10 +17619,10 @@ class TestSessionWorkspace:
             personal_path = workspace_module.ensure_owner_workspace(personal, cfg)
             team_path = workspace_module.ensure_owner_workspace(team, cfg)
 
-            assert personal_path.name == session_workspace_name("tok_workspace_owner")
+            assert personal_path.name == session_workspace_name(personal.owner_id)
             assert team_path.name.startswith("team_")
             assert personal_path != team_path
-            assert "tok_workspace_owner" not in str(personal_path)
+            assert personal.owner_id not in str(personal_path)
             assert "team_workspace_owner" not in str(team_path)
 
     def test_owner_workspace_files_are_isolated_and_keep_session_wrappers_compatible(self):
@@ -17649,7 +17655,7 @@ class TestSessionWorkspace:
             cfg = self._cfg(tmp)
             with mock.patch("services.workspace.files.os.chmod", side_effect=OSError("chmod blocked")):
                 with mock.patch.object(workspace_module.log, "warning") as warning:
-                    path = ensure_session_workspace("session-1", cfg)
+                    path = ensure_session_workspace("tok_session-1", cfg)
 
             assert path.exists()
             warning.assert_called_once()
@@ -17662,86 +17668,86 @@ class TestSessionWorkspace:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
 
-            written = write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n", cfg)
+            written = write_workspace_text_file("tok_session-1", "targets.txt", "darklab.sh\n", cfg)
             assert written == {"path": "targets.txt", "size": 11}
-            written_path = resolve_workspace_path("session-1", "targets.txt", cfg)
+            written_path = resolve_workspace_path("tok_session-1", "targets.txt", cfg)
             assert (written_path.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
             assert not written_path.stat().st_mode & 0o007
-            assert read_workspace_text_file("session-1", "targets.txt", cfg) == "darklab.sh\n"
-            assert list_workspace_files("session-1", cfg)[0]["path"] == "targets.txt"
-            assert workspace_usage("session-1", cfg).bytes_used == 11
+            assert read_workspace_text_file("tok_session-1", "targets.txt", cfg) == "darklab.sh\n"
+            assert list_workspace_files("tok_session-1", cfg)[0]["path"] == "targets.txt"
+            assert workspace_usage("tok_session-1", cfg).bytes_used == 11
 
-            delete_workspace_file("session-1", "targets.txt", cfg)
-            assert list_workspace_files("session-1", cfg) == []
+            delete_workspace_file("tok_session-1", "targets.txt", cfg)
+            assert list_workspace_files("tok_session-1", cfg) == []
 
     def test_copy_and_touch_workspace_files_without_overwriting(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "source.txt", "copied\n", cfg)
-            create_workspace_directory("session-1", "archive", cfg)
+            write_workspace_text_file("tok_session-1", "source.txt", "copied\n", cfg)
+            create_workspace_directory("tok_session-1", "archive", cfg)
 
             copied = workspace_file_mutations.copy_workspace_file(
-                "session-1",
+                "tok_session-1",
                 "source.txt",
                 "archive",
                 cfg,
             )
             created = workspace_file_mutations.touch_workspace_file(
-                "session-1",
+                "tok_session-1",
                 "empty.txt",
                 cfg,
             )
             touched = workspace_file_mutations.touch_workspace_file(
-                "session-1",
+                "tok_session-1",
                 "source.txt",
                 cfg,
             )
             assert copied.source == "source.txt"
             assert copied.destination == "archive/source.txt"
             assert copied.size == len("copied\n")
-            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\n"
-            assert read_workspace_text_file("session-1", "archive/source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file("tok_session-1", "source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file("tok_session-1", "archive/source.txt", cfg) == "copied\n"
             assert created == {"path": "empty.txt", "size": 0, "created": True}
             assert touched == {"path": "source.txt", "size": len("copied\n"), "created": False}
             appended = workspace_file_mutations.append_workspace_text_file(
-                "session-1",
+                "tok_session-1",
                 "source.txt",
                 "again\n",
                 cfg,
             )
             appended_new = workspace_file_mutations.append_workspace_text_file(
-                "session-1",
+                "tok_session-1",
                 "appended-new.txt",
                 "new\n",
                 cfg,
             )
             assert appended == {"path": "source.txt", "size": len("copied\nagain\n")}
             assert appended_new == {"path": "appended-new.txt", "size": len("new\n")}
-            assert read_workspace_text_file("session-1", "source.txt", cfg) == "copied\nagain\n"
-            assert read_workspace_text_file("session-1", "appended-new.txt", cfg) == "new\n"
+            assert read_workspace_text_file("tok_session-1", "source.txt", cfg) == "copied\nagain\n"
+            assert read_workspace_text_file("tok_session-1", "appended-new.txt", cfg) == "new\n"
 
             with pytest.raises(InvalidWorkspacePath, match="destination already exists"):
                 workspace_file_mutations.copy_workspace_file(
-                    "session-1",
+                    "tok_session-1",
                     "source.txt",
                     "archive/source.txt",
                     cfg,
                 )
             with pytest.raises(InvalidWorkspacePath):
                 workspace_file_mutations.copy_workspace_file(
-                    "session-1",
+                    "tok_session-1",
                     "../source.txt",
                     "escape.txt",
                     cfg,
                 )
             with pytest.raises(InvalidWorkspacePath):
-                workspace_file_mutations.touch_workspace_file("session-1", "../escape.txt", cfg)
+                workspace_file_mutations.touch_workspace_file("tok_session-1", "../escape.txt", cfg)
 
     def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "output.txt", "old\n", cfg)
-            path = resolve_workspace_path("session-1", "output.txt", cfg)
+            write_workspace_text_file("tok_session-1", "output.txt", "old\n", cfg)
+            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
 
             prepare_workspace_file_for_command(path, mode="write")
 
@@ -17751,8 +17757,8 @@ class TestSessionWorkspace:
     def test_prepare_workspace_file_for_command_prefers_scanner_owned_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "output.txt", "", cfg)
-            path = resolve_workspace_path("session-1", "output.txt", cfg)
+            write_workspace_text_file("tok_session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
 
             with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
                     mock.patch("services.workspace.files._appuser_gid", return_value=996), \
@@ -17766,8 +17772,8 @@ class TestSessionWorkspace:
     def test_prepare_workspace_file_for_command_recreates_app_owned_outputs_as_scanner(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "output.txt", "", cfg)
-            path = resolve_workspace_path("session-1", "output.txt", cfg)
+            write_workspace_text_file("tok_session-1", "output.txt", "", cfg)
+            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
 
             with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
                     mock.patch("services.workspace.files._appuser_gid", return_value=996), \
@@ -17833,7 +17839,7 @@ class TestSessionWorkspace:
     def test_list_repairs_command_created_workspace_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            root = ensure_session_workspace("session-1", cfg)
+            root = ensure_session_workspace("tok_session-1", cfg)
             command_dir = root / "subfinder"
             command_dir.mkdir()
             command_file = command_dir / "provider-config.yaml"
@@ -17842,9 +17848,9 @@ class TestSessionWorkspace:
             os.chmod(command_file, 0o600)
 
             with mock.patch("services.workspace.files._scanner_uid", return_value=command_dir.stat().st_uid):
-                assert list_workspace_files("session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
-                assert list_workspace_directories("session-1", cfg)[0]["path"] == "subfinder"
-                assert read_workspace_text_file("session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
+                assert list_workspace_files("tok_session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
+                assert list_workspace_directories("tok_session-1", cfg)[0]["path"] == "subfinder"
+                assert read_workspace_text_file("tok_session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
                 assert command_dir.stat().st_mode & 0o070 == 0o070
                 assert not command_dir.stat().st_mode & 0o007
                 assert (command_file.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
@@ -17852,23 +17858,23 @@ class TestSessionWorkspace:
     def test_read_workspace_permission_denied_is_not_raw_os_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "provider-config.yaml", "sources: []\n", cfg)
+            write_workspace_text_file("tok_session-1", "provider-config.yaml", "sources: []\n", cfg)
 
             with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 with pytest.raises(WorkspacePermissionDenied):
-                    read_workspace_text_file("session-1", "provider-config.yaml", cfg)
+                    read_workspace_text_file("tok_session-1", "provider-config.yaml", cfg)
 
     def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
-            path = resolve_workspace_path("session-1", "nmap-dot/amass.dot", cfg)
+            write_workspace_text_file("tok_session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
+            path = resolve_workspace_path("tok_session-1", "nmap-dot/amass.dot", cfg)
 
             with mock.patch("services.workspace.files.Path.unlink", side_effect=PermissionError), \
                     mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
                     mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
                     mock.patch("services.workspace.files.subprocess.run") as run:
-                delete_workspace_file("session-1", "nmap-dot/amass.dot", cfg)
+                delete_workspace_file("tok_session-1", "nmap-dot/amass.dot", cfg)
 
             run.assert_called_once_with(
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
@@ -17881,47 +17887,47 @@ class TestSessionWorkspace:
     def test_workspace_path_info_and_delete_remove_folders_recursively(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            create_workspace_directory("session-1", "reports/empty", cfg)
-            write_workspace_text_file("session-1", "reports/one.txt", "1", cfg)
-            write_workspace_text_file("session-1", "reports/nested/two.txt", "2", cfg)
+            create_workspace_directory("tok_session-1", "reports/empty", cfg)
+            write_workspace_text_file("tok_session-1", "reports/one.txt", "1", cfg)
+            write_workspace_text_file("tok_session-1", "reports/nested/two.txt", "2", cfg)
 
-            assert workspace_path_info("session-1", "reports", cfg) == {
+            assert workspace_path_info("tok_session-1", "reports", cfg) == {
                 "path": "reports",
                 "kind": "directory",
                 "file_count": 2,
             }
 
             with mock.patch("services.workspace.files.app_metrics.record_workspace_evictions") as evictions:
-                result = delete_workspace_path("session-1", "reports", cfg)
+                result = delete_workspace_path("tok_session-1", "reports", cfg)
 
             assert result.kind == "directory"
             assert result.file_count == 2
             assert result.path == "reports"
-            assert list_workspace_files("session-1", cfg) == []
-            assert list_workspace_directories("session-1", cfg) == []
+            assert list_workspace_files("tok_session-1", cfg) == []
+            assert list_workspace_directories("tok_session-1", cfg) == []
             evictions.assert_called_once_with(2, "manual")
 
     def test_create_and_list_empty_directories_without_file_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
 
-            created = create_workspace_directory("session-1", "reports/empty", cfg)
+            created = create_workspace_directory("tok_session-1", "reports/empty", cfg)
 
             assert created == {"path": "reports/empty"}
-            assert {item["path"] for item in list_workspace_directories("session-1", cfg)} == {
+            assert {item["path"] for item in list_workspace_directories("tok_session-1", cfg)} == {
                 "reports",
                 "reports/empty",
             }
-            assert list_workspace_files("session-1", cfg) == []
-            assert workspace_usage("session-1", cfg).file_count == 0
+            assert list_workspace_files("tok_session-1", cfg) == []
+            assert workspace_usage("tok_session-1", cfg).file_count == 0
 
     def test_move_cleans_partial_destination_before_scanner_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("session-1", "source.txt", "moved\n", cfg)
-            create_workspace_directory("session-1", "archive", cfg)
-            source = resolve_workspace_path("session-1", "source.txt", cfg)
-            destination = resolve_workspace_path("session-1", "archive/source.txt", cfg, ensure_parent=True)
+            write_workspace_text_file("tok_session-1", "source.txt", "moved\n", cfg)
+            create_workspace_directory("tok_session-1", "archive", cfg)
+            source = resolve_workspace_path("tok_session-1", "source.txt", cfg)
+            destination = resolve_workspace_path("tok_session-1", "archive/source.txt", cfg, ensure_parent=True)
 
             def fake_shutil_move(source_arg, destination_arg):
                 assert Path(source_arg) == source
@@ -17939,7 +17945,7 @@ class TestSessionWorkspace:
                     mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
                     mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
                     mock.patch("services.workspace.files.subprocess.run", side_effect=fake_scanner_move):
-                moved = workspace_module.move_workspace_path("session-1", "source.txt", "archive", cfg)
+                moved = workspace_module.move_workspace_path("tok_session-1", "source.txt", "archive", cfg)
 
             assert moved.source == "source.txt"
             assert moved.destination == "archive/source.txt"
@@ -17949,13 +17955,13 @@ class TestSessionWorkspace:
     def test_workspace_glob_pattern_matches_one_path_segment(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            create_workspace_directory("session-1", "darklab", cfg)
-            create_workspace_directory("session-1", "reports/darklab-nested", cfg)
-            write_workspace_text_file("session-1", "darklab-a.txt", "1", cfg)
-            write_workspace_text_file("session-1", "darklab-b.txt", "2", cfg)
-            write_workspace_text_file("session-1", "reports/darklab-c.txt", "3", cfg)
+            create_workspace_directory("tok_session-1", "darklab", cfg)
+            create_workspace_directory("tok_session-1", "reports/darklab-nested", cfg)
+            write_workspace_text_file("tok_session-1", "darklab-a.txt", "1", cfg)
+            write_workspace_text_file("tok_session-1", "darklab-b.txt", "2", cfg)
+            write_workspace_text_file("tok_session-1", "reports/darklab-c.txt", "3", cfg)
 
-            matches = expand_workspace_path_pattern("session-1", "darklab-*", cfg)
+            matches = expand_workspace_path_pattern("tok_session-1", "darklab-*", cfg)
 
             assert [(item.path, item.kind) for item in matches] == [
                 ("darklab-a.txt", "file"),
@@ -17967,7 +17973,7 @@ class TestSessionWorkspace:
             cfg = self._cfg(tmp)
             for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", "safe\\.txt"]:
                 try:
-                    resolve_workspace_path("session-1", bad_path, cfg, ensure_parent=True)
+                    resolve_workspace_path("tok_session-1", bad_path, cfg, ensure_parent=True)
                     assert False, f"expected invalid path rejection for {bad_path}"
                 except InvalidWorkspacePath:
                     pass
@@ -17975,7 +17981,7 @@ class TestSessionWorkspace:
     def test_allows_hidden_files_that_are_listed_by_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            hidden = resolve_workspace_path("session-1", ".config/amass.txt", cfg, ensure_parent=True)
+            hidden = resolve_workspace_path("tok_session-1", ".config/amass.txt", cfg, ensure_parent=True)
 
             assert hidden.name == "amass.txt"
             assert hidden.parent.name == ".config"
@@ -17983,13 +17989,13 @@ class TestSessionWorkspace:
     def test_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            root = ensure_session_workspace("session-1", cfg)
+            root = ensure_session_workspace("tok_session-1", cfg)
             outside = Path(tmp) / "outside"
             outside.mkdir()
             (root / "link").symlink_to(outside, target_is_directory=True)
 
             try:
-                resolve_workspace_path("session-1", "link/file.txt", cfg)
+                resolve_workspace_path("tok_session-1", "link/file.txt", cfg)
                 assert False, "expected symlink path rejection"
             except InvalidWorkspacePath:
                 pass
@@ -18019,13 +18025,13 @@ class TestSessionWorkspace:
                 return path
 
             operations = [
-                lambda: read_workspace_text_file("session-1", "target.txt", cfg),
-                lambda: workspace_module.open_workspace_file_for_download("session-1", "target.txt", cfg),
-                lambda: write_workspace_text_file("session-1", "target.txt", "replacement\n", cfg),
-                lambda: delete_workspace_file("session-1", "target.txt", cfg),
-                lambda: workspace_path_info("session-1", "target.txt", cfg),
+                lambda: read_workspace_text_file("tok_session-1", "target.txt", cfg),
+                lambda: workspace_module.open_workspace_file_for_download("tok_session-1", "target.txt", cfg),
+                lambda: write_workspace_text_file("tok_session-1", "target.txt", "replacement\n", cfg),
+                lambda: delete_workspace_file("tok_session-1", "target.txt", cfg),
+                lambda: workspace_path_info("tok_session-1", "target.txt", cfg),
             ]
-            workspace_root = ensure_session_workspace("session-1", cfg)
+            workspace_root = ensure_session_workspace("tok_session-1", cfg)
             for operation in operations:
                 target = workspace_root / "target.txt"
                 if target.exists() or target.is_symlink():
@@ -18049,15 +18055,15 @@ class TestSessionWorkspace:
                 workspace_max_files=1,
             )
             try:
-                write_workspace_text_file("session-1", "too-big.txt", "x", cfg)
+                write_workspace_text_file("tok_session-1", "too-big.txt", "x", cfg)
                 assert False, "expected max file size rejection"
             except WorkspaceQuotaExceeded:
                 pass
-            empty_path = resolve_workspace_path("session-1", "append.txt", cfg, ensure_parent=True)
+            empty_path = resolve_workspace_path("tok_session-1", "append.txt", cfg, ensure_parent=True)
             empty_path.write_bytes(b"")
             with pytest.raises(WorkspaceQuotaExceeded):
                 workspace_file_mutations.append_workspace_text_file(
-                    "session-1",
+                    "tok_session-1",
                     "append.txt",
                     "x",
                     cfg,
@@ -18066,9 +18072,9 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_max_files=1)
-            write_workspace_text_file("session-1", "one.txt", "1", cfg)
+            write_workspace_text_file("tok_session-1", "one.txt", "1", cfg)
             try:
-                write_workspace_text_file("session-1", "two.txt", "2", cfg)
+                write_workspace_text_file("tok_session-1", "two.txt", "2", cfg)
                 assert False, "expected max file count rejection"
             except WorkspaceQuotaExceeded:
                 pass
@@ -18078,9 +18084,9 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            old_root = ensure_session_workspace("old-session", cfg)
-            blocked_root = ensure_session_workspace("blocked-session", cfg)
-            fresh_root = ensure_session_workspace("fresh-session", cfg)
+            old_root = ensure_session_workspace("tok_old-session", cfg)
+            blocked_root = ensure_session_workspace("tok_blocked-session", cfg)
+            fresh_root = ensure_session_workspace("tok_fresh-session", cfg)
             team_root = workspace_module.ensure_owner_workspace(team_owner_context("team-cleanup"), cfg)
             unrelated = Path(tmp) / "manual"
             unrelated.mkdir()
@@ -18115,7 +18121,7 @@ class TestSessionWorkspace:
     def test_cleanup_repairs_scanner_owned_child_directories_before_remove(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("scanner-output-session", cfg)
+            root = ensure_session_workspace("tok_scanner-output-session", cfg)
             scanner_child = root / "nuclei"
             scanner_child.mkdir()
             (scanner_child / "result.txt").write_text("finding\n", encoding="utf-8")
@@ -18135,7 +18141,7 @@ class TestSessionWorkspace:
     def test_cleanup_repairs_after_scanner_rm_fallback_fails(self, monkeypatch, caplog):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("scanner-rm-fallback-session", cfg)
+            root = ensure_session_workspace("tok_scanner-rm-fallback-session", cfg)
             scanner_child = root / "tools" / "cdncheck"
             scanner_child.parent.mkdir()
             scanner_child.write_text("scanner-owned output\n", encoding="utf-8")
@@ -18183,7 +18189,7 @@ class TestSessionWorkspace:
     def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("stale-output-session", cfg)
+            root = ensure_session_workspace("tok_stale-output-session", cfg)
             stale_child = root / "nuclei"
             stale_child.mkdir()
             os.utime(root, (1000, 1000))
@@ -18216,7 +18222,7 @@ class TestSessionWorkspace:
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("session-1", cfg)
+            root = ensure_session_workspace("tok_session-1", cfg)
             file_path = root / "fresh-output.txt"
             file_path.write_text("fresh\n", encoding="utf-8")
             old_ts = 1000
@@ -18232,10 +18238,10 @@ class TestSessionWorkspace:
     def test_touch_session_workspace_extends_cleanup_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("session-1", cfg)
+            root = ensure_session_workspace("tok_session-1", cfg)
             os.utime(root, (1000, 1000))
 
-            touch_session_workspace("session-1", cfg)
+            touch_session_workspace("tok_session-1", cfg)
 
             removed = cleanup_inactive_workspaces(cfg, now=4601)
 
@@ -18245,12 +18251,12 @@ class TestSessionWorkspace:
     def test_cleanup_can_skip_current_session_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            current_root = ensure_session_workspace("current-session", cfg)
-            old_root = ensure_session_workspace("old-session", cfg)
+            current_root = ensure_session_workspace("tok_current-session", cfg)
+            old_root = ensure_session_workspace("tok_old-session", cfg)
             os.utime(current_root, (1000, 1000))
             os.utime(old_root, (1000, 1000))
 
-            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id="current-session")
+            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id="tok_current-session")
 
             assert removed == 1
             assert current_root.exists()
@@ -18433,7 +18439,10 @@ class TestEntrypointWorkspaceRepair:
                     "factory_server_name_override": first_app.config["SERVER_NAME"],
                     "factory_before_count": sum(len(handlers) for handlers in first_app.before_request_funcs.values()),
                     "factory_after_count": sum(len(handlers) for handlers in first_app.after_request_funcs.values()),
-                    "factory_error_handler_codes": sorted(int(code) for code in first_app.error_handler_spec[None]),
+                    "factory_error_handler_codes": sorted(
+                        int(code) for code in first_app.error_handler_spec[None]
+                        if code is not None
+                    ),
                     "factory_limiter_configs_independent": (
                         first_app.config["RATELIMIT_ENABLED"] is False
                         and second_app.config["RATELIMIT_ENABLED"] is True
@@ -18488,7 +18497,7 @@ class TestEntrypointWorkspaceRepair:
             assert state["metrics_module_loaded"] is False
 
         assert payload["factory_distinct"] is True
-        assert payload["factory_blueprint_count"] == 16
+        assert payload["factory_blueprint_count"] == 17
         assert payload["factory_override_false"] is False
         assert payload["factory_override_true"] is True
         assert payload["factory_testing_override"] is True
@@ -20198,7 +20207,7 @@ class TestDerivedCommandRegistry:
                 "workspace_max_files": 80,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            session_id = "registry-workspace-flags"
+            session_id = "tok_registry-workspace-flags"
             for path, text in {
                 "urls.txt": "https://ip.darklab.sh\n",
                 "tls-targets.txt": "ip.darklab.sh\n",
@@ -20501,7 +20510,7 @@ class TestDerivedCommandRegistry:
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            session_id = "quote-sensitive-paths"
+            session_id = "tok_quote-sensitive-paths"
             write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
 
             with _patched_command_validation_helpers(), mock.patch(
@@ -20546,7 +20555,7 @@ class TestDerivedCommandRegistry:
             with _patched_command_validation_helpers():
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names",
-                    session_id="amass-quote-sensitive-paths",
+                    session_id="tok_amass-quote-sensitive-paths",
                     cfg=cfg,
                 )
 
@@ -20554,7 +20563,7 @@ class TestDerivedCommandRegistry:
             assert result.exec_command.startswith("env ")
             assert ";$(subshell)&`tick`" in result.exec_command
             tokens = commands.split_command_argv(result.exec_command)
-            amass_dir = resolve_workspace_path("amass-quote-sensitive-paths", "tools/amass", cfg, ensure_parent=True)
+            amass_dir = resolve_workspace_path("tok_amass-quote-sensitive-paths", "tools/amass", cfg, ensure_parent=True)
             assert tokens[:3] == [
                 "env",
                 f"XDG_CONFIG_HOME={amass_dir.parent}",
@@ -33978,6 +33987,7 @@ class TestBuiltinConfigAccess:
             "workspace_enabled": True,
             "workspace_quota_mb": 12,
         })
+        session_id = "tok_" + "c" * 32
 
         def fake_faq(app_name, _readme):
             return [{"question": f"{app_name} question", "answer": "shared config answer"}]
@@ -34013,12 +34023,12 @@ class TestBuiltinConfigAccess:
             {"type": "output", "text": "Phase Three Shell"}
         ]
         assert builtins_misc.run_builtin_groups() == [{"type": "output", "text": "Phase Three Shell operators"}]
-        assert builtins_system.run_builtin_env("sess-phase3")[1]["text"] == "APP_NAME=Phase Three Shell"
+        assert builtins_system.run_builtin_env(session_id)[1]["text"] == "APP_NAME=Phase Three Shell"
         assert builtins_system.run_builtin_pwd() == [{"type": "output", "text": "/"}]
         assert "77s (0 = unlimited)" in limits_text
         assert "9" in limits_text
         assert "12 MB" in limits_text
-        workspace_lines = builtins_workspace.run_builtin_workspace("file list", "sess-phase3")
+        workspace_lines = builtins_workspace.run_builtin_workspace("file list", session_id)
         assert any(str(line["text"]).startswith("Session files:") for line in workspace_lines)
         assert seen_workspace_cfg == [active_cfg]
 
@@ -34041,8 +34051,8 @@ class TestBuiltinConfigAccess:
         monkeypatch.setattr(builtins_assessment, "read_owner_workspace_text_file", fake_read)
         monkeypatch.setattr(builtins_assessment, "write_owner_workspace_text_file", fake_write)
         context = BuiltinExecutionContext(
-            "sess-phase3",
-            supplied_owner_context=personal_owner_context("sess-phase3"),
+            session_id,
+            supplied_owner_context=personal_owner_context(session_id),
             config_resolver=lambda: active_cfg,
         )
         scoped_lines, exit_code = builtins_assessment.run_builtin_urlscope(

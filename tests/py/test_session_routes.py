@@ -1684,22 +1684,22 @@ class TestSessionTokenInfo:
         assert data["created"] is not None
         assert len(data["created"]) > 0
 
-    def test_returns_null_for_tok_not_in_db(self):
-        """tok_ token that was never issued is treated as anonymous — both fields null."""
+    def test_unknown_tok_fails_closed(self):
+        """An unknown legacy token cannot fall back to anonymous state."""
         client = get_client()
         phantom = "tok_" + "f" * 32
-        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": phantom}).data)
-        assert data["token"] is None
-        assert data["created"] is None
+        response = client.get("/session/token/info", headers={"X-Session-ID": phantom})
+        assert response.status_code == 401
+        assert response.get_json()["error"] == "revoked_token"
 
-    def test_revoked_token_is_treated_as_anonymous(self):
-        """After revocation, using the old token returns anonymous (null) info."""
+    def test_revoked_tok_fails_closed(self):
+        """A revoked legacy token cannot fall back to anonymous state."""
         client = get_client()
         token = json.loads(client.get("/session/token/generate").data)["session_token"]
         client.post("/session/token/revoke", json={"token": token})
-        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": token}).data)
-        assert data["token"] is None
-        assert data["created"] is None
+        response = client.get("/session/token/info", headers={"X-Session-ID": token})
+        assert response.status_code == 401
+        assert response.get_json()["error"] == "revoked_token"
 
 
 # ── /session/preferences ──────────────────────────────────────────────────────

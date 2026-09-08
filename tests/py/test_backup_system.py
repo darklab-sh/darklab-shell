@@ -61,7 +61,7 @@ def _write_config(conf_dir: Path, body: str) -> None:
 
 def _write_sqlite_database(path: Path) -> None:
     from core.database_backend import DatabaseBackend
-    from core.migrations import v0078_principal_credential_persistence
+    from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
@@ -70,6 +70,8 @@ def _write_sqlite_database(path: Path) -> None:
         for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(
             DatabaseBackend.SQLITE
         ):
+            conn.execute(statement)
+        for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
         created = "2026-09-06T12:00:00+00:00"
         principal_id = "prn_" + "1" * 32

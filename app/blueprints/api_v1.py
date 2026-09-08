@@ -15,7 +15,12 @@ from config import CFG
 from core.helpers import get_client_ip, get_log_session_id
 from core.process import active_runs_for_session, active_runs_for_team, pid_for_session  # noqa: F401 - compatibility seam for api_v1_runs/tests
 from extensions import limiter
-from services.api_v1.auth import ApiAuthError, current_api_session, require_api_auth  # noqa: F401 - compatibility seam for api_v1 resource modules
+from services.api_v1.auth import (  # noqa: F401 - compatibility seam for api_v1 resource modules
+    ApiAuthError,
+    api_rate_limit_key as _api_team_rate_limit_key,
+    current_api_session,
+    require_api_auth,
+)
 from services.api_v1.serialization import json_error, run_summary
 from blueprints.api_v1_streaming import (
     ndjson_from_sse_chunks as _ndjson_from_sse_chunks,  # noqa: F401 - compatibility seam for api_v1_runs/tests
@@ -121,17 +126,6 @@ def _api_team_read_route_limit() -> str:
 def _api_team_write_route_limit() -> str:
     limit = int(CFG.get("team_write_rate_limit_per_minute") or 30)
     return f"{limit} per minute"
-
-
-def _api_team_rate_limit_key() -> str:
-    authorization = str(request.headers.get("Authorization") or "").strip()
-    bearer_prefix = "Bearer "
-    if authorization.lower().startswith(bearer_prefix.lower()):
-        token = authorization[len(bearer_prefix):].strip()
-        if token:
-            return token
-    session_id = str(request.headers.get("X-Session-ID") or "").strip()
-    return session_id or get_client_ip()
 
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")

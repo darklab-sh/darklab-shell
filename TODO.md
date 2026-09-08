@@ -112,28 +112,6 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - Raw credential secrets are shown once, are never recoverable from the server, and never enter URLs, command arguments, prompt history, recents, saved transcripts, logs, audit details, diagnostics, exports, error responses, or telemetry.
 - The cutover invalidates existing `tok_` values, removes `/session/migrate`, and keeps no deprecated command, endpoint, header, or raw-owner compatibility alias.
 
-#### Phase 2 — Centralize authentication and credential lifecycle handling
-
-**Steps**
-
-- [ ] Replace `get_session_id()` token validation with one central resolver that distinguishes no credential, valid credential, malformed credential, unknown credential, expired credential, revoked credential, and disabled principal. The resolver returns a typed authentication result or raises a typed error; it never represents failed authentication as `""`.
-- [ ] Make every supplied-but-invalid credential return an explicit authentication failure rather than an empty identity or anonymous fallback. Keep truly credential-free open-profile requests on the anonymous path.
-- [ ] Make personal owner construction reject empty ids and the shared literal `"anonymous"`. Require a validated anonymous UUID or an authenticated personal-workspace id before `OwnerContext` construction so `owner_context_for_scope("")` cannot become a data-access path.
-- [ ] Generate high-entropy, versioned secrets through `POST` routes, show them once, and extend the existing per-IP dynamic route limiter for anonymous upgrades and failed redemption attempts.
-- [ ] Implement authenticated self-service lifecycle operations for listing safe metadata, adding and labeling credentials, changing expiry, rotating, and revoking. Rotation issues the replacement before the old credential is revoked so the UI cannot strand the principal on a failed copy or response.
-- [ ] Protect the last usable credential from accidental self-revocation unless the user completes the recorded recovery/lockout confirmation. Keep local browser clearing separate from server-side revocation.
-- [ ] When restricted-profile browser sessions exist, make portable-credential revocation cascade to sessions redeemed from it while keeping browser-session revocation local to that session. A linked managed sign-in may recover access only where the configured profile permits portable credentials.
-- [ ] Add separately typed and scoped PATs for API/CLI use with `Authorization: Bearer`, default expiry, safe last-used metadata, and no ability to retrieve the secret after issuance.
-- [ ] Record safe audit events for principal creation/disable/enable and credential create/redeem/label/expiry/rotate/revoke/failure without recording secrets, submitted bearer values, or stable cross-deployment fingerprints.
-
-**Acceptance criteria**
-
-- [ ] Resolver tests run without a legacy test bypass, cover every credential state, and prove that malformed, unknown, expired, revoked, and disabled credentials cannot read or mutate another principal's data.
-- [ ] Focused regressions prove that invalid `tok_`, empty-owner, missing-owner, and shared-`"anonymous"` paths cannot construct a personal owner context or reach shared database rows or a shared workspace directory.
-- [ ] Issuance, rotation, and PAT secrets appear exactly once in successful responses and are absent from later list/detail responses.
-- [ ] Concurrent create/rotate/revoke requests preserve at least one usable credential unless the caller explicitly chose the tested lockout path.
-- [ ] Rate-limit and audit behavior is bounded, privacy-safe, and identical across SQLite and Postgres.
-
 #### Phase 3A — Build and adopt the `OwnerContext` query-ownership seam
 
 Treat this as query-ownership design and adoption, not as a mostly completed mechanical conversion. `OwnerContext` is already threaded through many function signatures and workspace paths, but `personal_scope_predicate()` currently has no production caller and `shared_owner_predicate()` has only a handful; most ownership SQL still bypasses both.
@@ -304,6 +282,7 @@ Give private deployments a real authentication boundary while keeping anonymous 
   - Exchange a portable credential presented by the browser for a shorter-lived server-side session carried in a `Secure`, `HttpOnly`, appropriately `SameSite` cookie. Remove the portable secret from browser storage after a successful exchange.
   - Add a persisted session signing key with defined storage, file permissions, sharing across worker processes, and rotation procedure. The app has no signing key today, and a regenerated or lost key signs every operator out at once.
   - Add session-id rotation after authentication and privilege changes, idle and absolute expiry, logout, revoke-all-sessions, and CSRF protection for cookie-authenticated mutations.
+  - Make portable-credential revocation cascade to every browser session redeemed from it while keeping browser-session revocation local to that session. A linked managed sign-in may recover access only where the configured profile permits portable credentials.
 - [ ] Implement the restricted profile as the first non-default deployment option:
   - Disable anonymous UUID access and unauthenticated credential issuance when this profile is active.
   - Provide a focused credential-entry screen that redeems the credential into a browser session without exposing the rest of the application first.
