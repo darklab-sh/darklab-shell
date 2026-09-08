@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 from unittest import mock
 
+from identity_helpers import anonymous_session_id
 from services.commands.registry import CommandValidationResult
 from services.runs.finalization_web_surface import append_httpx_screenshot_artifacts
 from services.runs.finalization_web_surface_query import load_protected_workspace_paths
@@ -224,6 +225,8 @@ def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner
 
 def test_protected_screenshot_paths_follow_personal_and_team_ownership():
     conn = _artifact_conn()
+    session_one = anonymous_session_id("protected-path-session-one")
+    session_two = anonymous_session_id("protected-path-session-two")
     for run_id, team_id in (
         ("personal-prior", ""),
         ("personal-current", ""),
@@ -233,9 +236,9 @@ def test_protected_screenshot_paths_follow_personal_and_team_ownership():
     ):
         conn.execute("INSERT INTO runs (id, team_id) VALUES (?, ?)", (run_id, team_id))
     for artifact_id, session_id, run_id, path in (
-        ("a1", "session-one", "personal-prior", "shots/personal.png"),
-        ("a2", "session-one", "personal-current", "shots/current.png"),
-        ("a3", "session-two", "other-personal", "shots/other.png"),
+        ("a1", session_one, "personal-prior", "shots/personal.png"),
+        ("a2", session_one, "personal-current", "shots/current.png"),
+        ("a3", session_two, "other-personal", "shots/other.png"),
         ("a4", "member-one", "team-prior", "shots/team.png"),
         ("a5", "member-two", "other-team", "shots/other-team.png"),
     ):
@@ -255,7 +258,7 @@ def test_protected_screenshot_paths_follow_personal_and_team_ownership():
         conn,
         candidates,
         run_id="personal-current",
-        session_id="session-one",
+        session_id=session_one,
         team_id="",
     ) == {"shots/personal.png"}
     assert load_protected_workspace_paths(

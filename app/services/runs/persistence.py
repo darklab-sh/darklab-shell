@@ -9,7 +9,10 @@ from typing import Any, Callable, TypeVar
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
+
 from services.storage.transactions import run_transaction
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 _T = TypeVar("_T")
 
@@ -140,16 +143,13 @@ def scan_target_observation_count(conn: Any, run_id: str) -> int:
 
 def run_scope_visibility_from_db(run_id: str, session_id: str, team_id: str = "") -> tuple[bool, bool, str]:
     with get_db_connect()() as conn:
-        if team_id:
-            row = conn.execute(
-                "SELECT 1 FROM runs WHERE id = ? AND team_id = ?",
-                (run_id, team_id),
-            ).fetchone()
-        else:
-            row = conn.execute(
-                "SELECT 1 FROM runs WHERE id = ? AND session_id = ? AND team_id = ''",
-                (run_id, session_id),
-            ).fetchone()
+        owner = composite_owner_predicate(
+            owner_context_for_scope(session_id, team_id=team_id),
+            key_values=(("id", run_id),),
+            team_column="team_id",
+            personal_team_rows=PersonalTeamRows.EMPTY,
+        )
+        row = conn.execute(f"SELECT 1 FROM runs WHERE {owner.sql}", owner.params).fetchone()  # nosec
         db_match = row is not None
         other_scope_row = None
         if not db_match:
