@@ -52,6 +52,12 @@ from services.watchers.models import (
     WatcherFire,
 )
 from services.storage.transactions import run_read, run_transaction
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+    token_keyed_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, team_owner_context
 
 log = logging.getLogger("shell")
 _T = TypeVar("_T")
@@ -150,9 +156,14 @@ def _watcher_update_fields(
 
 def _watcher_run_owner_clause(watcher: Watcher, *, table_alias: str = "r") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    if watcher.team_id:
-        return f"{prefix}team_id = ?", (watcher.team_id,)
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?", (watcher.session_token,)
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(watcher.session_token, team_id=watcher.team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
+    )
+    return owner.as_tuple()
 
 
 def _accepted_baseline_run_id(conn, watcher: Watcher, run_id: str | None = None) -> str:
@@ -330,10 +341,13 @@ def _max_watchers_per_session() -> int:
 
 def _owner_watcher_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    normalized_team_id = str(team_id or "").strip()
-    if normalized_team_id:
-        return f"{prefix}team_id = ?", (normalized_team_id,)
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_token = ?", (session_token,)
+    owner = token_keyed_owner_predicate(
+        owner_context_for_scope(session_token, team_id=team_id),
+        token_column=f"{prefix}session_token",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return owner.as_tuple()
 
 
 def _watcher_count(conn, session_token: str, *, team_id: str = "") -> int:
@@ -347,10 +361,14 @@ def _watcher_count(conn, session_token: str, *, team_id: str = "") -> int:
 
 def _project_owner_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    normalized_team_id = str(team_id or "").strip()
-    if normalized_team_id:
-        return f"{prefix}team_id = ?", (normalized_team_id,)
-    return f"({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?", (session_token,)
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_token, team_id=team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
+    )
+    return owner.as_tuple()
 
 
 def _project_in_owner_scope(conn, session_token: str, project_id: str, *, team_id: str = "") -> bool:
@@ -1041,9 +1059,16 @@ def pause_team_watchers_and_schedules(conn, team_id: str, *, reason: str = "team
     normalized_team_id = str(team_id or "").strip()
     if not normalized_team_id:
         return {"watchers": 0, "schedules": 0}
+    owner = token_keyed_owner_predicate(
+        team_owner_context(normalized_team_id),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
     rows = conn.execute(
-        "SELECT id FROM watchers WHERE team_id = ? AND state != ?",
-        (normalized_team_id, WATCHER_STATE_PAUSED),
+        "SELECT id FROM watchers WHERE "  # nosec B608
+        + owner.sql
+        + " AND state != ?",
+        (*owner.params, WATCHER_STATE_PAUSED),
     ).fetchall()
     count = 0
     for row in rows:

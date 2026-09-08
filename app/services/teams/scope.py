@@ -152,3 +152,21 @@ def shared_owner_predicate(
         owner_column_first=False,
     )
     return predicate.sql, predicate.params
+
+
+def empty_team_owner_predicate(
+    session_id: str,
+    team_id: str = "",
+    *,
+    table_prefix: str = "",
+) -> tuple[str, tuple[str, ...]]:
+    """Match a legacy connector owner whose personal rows use an empty team id."""
+    prefix = f"{table_prefix}." if table_prefix else ""
+    predicate = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+        owner_column_first=False,
+    )
+    return predicate.sql, predicate.params

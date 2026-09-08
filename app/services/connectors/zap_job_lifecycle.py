@@ -15,6 +15,7 @@ from services.connectors.zap_jobs import (
     _connection_scope,
     _decode_row,
     _json,
+    _owner_predicate,
     _utc_now,
     zap_job_for_owner,
 )
@@ -169,10 +170,9 @@ def mark_zap_job_imported_for_atlas_draft(
     conn=None,
 ) -> bool:
     """Link an operator-applied Atlas draft back to its ready connector job."""
-    owner_sql, owner_params = (
-        ("team_id = ?", (str(team_id or "").strip(),))
-        if str(team_id or "").strip()
-        else ("team_id = '' AND session_id = ?", (str(session_id or "").strip(),))
+    owner_sql, owner_params = _owner_predicate(
+        str(session_id or "").strip(),
+        str(team_id or "").strip(),
     )
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:

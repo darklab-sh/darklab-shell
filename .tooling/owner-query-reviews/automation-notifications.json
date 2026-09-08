@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "branch": "refactor/owner-context-automation-notifications",
+  "baseline_site_count": 28,
+  "summary": {
+    "equivalent_adapter": 27,
+    "equivalent_named_exception": 1,
+    "non_equivalent": 0
+  },
+  "classification_contract": "Every baseline site is classified by the per-path counts below. Adapter conversions preserve the prior bound-owner result set. The one remaining ZAP creation expression is an exact-source named exception in owner_query_inventory.py because it correlates assessment and HTTP-profile ownership across tables; no conversion changes behavior in this branch.",
+  "paths": {
+    "app/services/connectors/oast_correlations.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/connectors/zap_job_lifecycle.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/connectors/zap_jobs.py": {"baseline": 3, "adapter": 2, "named_exception": 1},
+    "app/services/notifications/channels_store.py": {"baseline": 4, "adapter": 4, "named_exception": 0},
+    "app/services/notifications/dispatcher.py": {"baseline": 3, "adapter": 3, "named_exception": 0},
+    "app/services/scheduler/dispatch.py": {"baseline": 1, "adapter": 1, "named_exception": 0},
+    "app/services/scheduler/route_helpers.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/scheduler/service.py": {"baseline": 3, "adapter": 3, "named_exception": 0},
+    "app/services/watchers/diff.py": {"baseline": 1, "adapter": 1, "named_exception": 0},
+    "app/services/watchers/service.py": {"baseline": 7, "adapter": 7, "named_exception": 0}
+  },
+  "result_set_contracts": {
+    "connector_empty_personal": "OAST and ZAP team requests match team_id; personal requests match session_id only when team_id is an empty string.",
+    "automation_null_or_empty_personal": "Schedule, watcher, run-baseline, and notification requests match team_id in team scope or the legacy token/session owner with a NULL or empty team_id in personal scope.",
+    "unfiltered_token_migration": "Notification-channel and event migration continues to replace the exact source token across personal and team rows without adding a team filter.",
+    "exact_event_key": "Notification deduplication continues to match the exact token, team, channel, trigger, and run tuple.",
+    "unfiltered_watcher_run": "Watcher diff loading continues to match the exact session and run id without adding a team predicate.",
+    "team_archive_mutation": "Archived-team cleanup continues to affect only the supplied team and its exact watcher, schedule, or enabled-state keys.",
+    "named_exception": "ZAP creation keeps its assessment-to-profile team and personal-owner correlations until Phase 3B."
+  },
+  "coverage": {
+    "list_detail": "Notification channel and event reads, schedule and watcher lists and details, baseline-run selection, OAST correlations, and ZAP job history.",
+    "mutation": "Channel and event writes, schedule and watcher updates, team archive pausing, OAST lifecycle changes, and ZAP import lifecycle transitions.",
+    "import_export": "Notification token migration and ZAP-to-Atlas import linking retain their exact legacy owners; these subsystems have no separate owner-scoped export query.",
+    "cleanup_retention": "Notification event retention, expired OAST cleanup, expired ZAP cleanup, and archived-team automation pausing retain their existing owner boundaries.",
+    "worker": "Schedule dispatch, watcher finalization, notification delivery, OAST polling, and ZAP worker paths continue to use the existing session/token owner."
+  }
+}

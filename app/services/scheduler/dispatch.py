@@ -27,6 +27,12 @@ from services.scheduler.models import (
     Schedule,
 )
 from services.scheduler.service import _bool_param, mark_schedule_after_fire, record_schedule_fire
+from services.teams.ownership_queries import (
+    OwnerKeyShape,
+    PersonalTeamRows,
+    composite_owner_predicate,
+)
+from services.teams.scope import team_owner_context
 
 log = logging.getLogger("shell")
 _FIRE_CLAIM_PREFIX = "__schedule_firing__:"
@@ -121,13 +127,17 @@ def _disable_archived_team_schedule(conn, schedule: Schedule, *, fired_at: str) 
         (_bool_param(False), fired_at, reason, "team_archived", fired_at, schedule.id),
     )
     if schedule.owner_kind == OWNER_KIND_WATCHER and schedule.owner_id:
+        owner = composite_owner_predicate(
+            team_owner_context(schedule.team_id),
+            owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+            team_column="team_id",
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+            key_values=(("id", schedule.owner_id),),
+        )
         conn.execute(
-            """
-            UPDATE watchers
-            SET state = 'paused', state_reason = ?
-            WHERE id = ? AND team_id = ?
-            """,
-            ("team_archived", schedule.owner_id, schedule.team_id),
+            "UPDATE watchers SET state = 'paused', state_reason = ? WHERE "  # nosec B608
+            + owner.sql,
+            ("team_archived", *owner.params),
         )
 
 
