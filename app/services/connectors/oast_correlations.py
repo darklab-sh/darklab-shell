@@ -15,7 +15,7 @@ import uuid
 
 from core.database_access import get_db_connect
 from services.connectors.oast_config import OastConnectorSettings
-
+from services.teams.scope import empty_team_owner_predicate as _owner_predicate
 
 _ACTIVE_STATUSES = ("reserved", "active")
 _CORRELATION_ID_RE = re.compile(r"ocr_[0-9a-f]{32}")
@@ -53,18 +53,6 @@ def _utc_now(now: datetime | None = None) -> datetime:
             "OAST correlation timestamps must include a timezone",
         )
     return value.astimezone(timezone.utc)
-
-
-def _owner_predicate(
-    session_id: str,
-    team_id: str,
-    *,
-    table_prefix: str = "",
-) -> tuple[str, tuple[str, ...]]:
-    prefix = f"{table_prefix}." if table_prefix else ""
-    if team_id:
-        return f"{prefix}team_id = ?", (team_id,)
-    return f"{prefix}team_id = '' AND {prefix}session_id = ?", (session_id,)
 
 
 def _decode_row(row: Any) -> dict[str, Any]:

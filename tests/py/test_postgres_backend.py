@@ -393,6 +393,101 @@ def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgre
 
 
 @pytest.mark.postgres
+def test_automation_notification_owner_clauses_preserve_mixed_postgres_result_sets(
+    postgres_schema,
+):
+    from services.connectors.oast_correlations import (
+        _owner_predicate as oast_owner_predicate,
+    )
+    from services.connectors.zap_jobs import _owner_predicate as zap_owner_predicate
+    from services.notifications.channels_store import (
+        _owner_where as notification_owner_where,
+    )
+    from services.scheduler.service import _owner_schedule_clause
+    from services.watchers.models import Watcher
+    from services.watchers.service import (
+        _owner_watcher_clause,
+        _project_owner_clause,
+        _watcher_run_owner_clause,
+    )
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        "CREATE TABLE owner_automation_rows ("
+        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "team_id TEXT, state TEXT NOT NULL, enabled BOOLEAN NOT NULL)"
+    )
+    owner_a = "tok_postgres_automation_owner_a"
+    owner_b = "tok_postgres_automation_owner_b"
+    conn.executemany(
+        "INSERT INTO owner_automation_rows "
+        "(id, session_id, session_token, team_id, state, enabled) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            ("owner-a-null", owner_a, owner_a, None, "ok", True),
+            ("owner-a-empty", owner_a, owner_a, "", "ok", True),
+            ("owner-b-empty", owner_b, owner_b, "", "ok", True),
+            ("team-red", owner_b, owner_b, "team-red", "ok", True),
+            ("team-blue", owner_a, owner_a, "team-blue", "ok", True),
+        ),
+    )
+
+    def selected_ids(clause, params):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM owner_automation_rows WHERE {clause} ORDER BY id",  # nosec B608
+                params,
+            ).fetchall()
+        ]
+
+    for owner_factory in (oast_owner_predicate, zap_owner_predicate):
+        personal_sql, personal_params = owner_factory(owner_a, "")
+        assert selected_ids(personal_sql, personal_params) == ["owner-a-empty"]
+        team_sql, team_params = owner_factory(owner_a, "team-red")
+        assert selected_ids(team_sql, team_params) == ["team-red"]
+
+    for owner_factory in (
+        notification_owner_where,
+        _owner_schedule_clause,
+        _owner_watcher_clause,
+        _project_owner_clause,
+    ):
+        personal_sql, personal_params = owner_factory(owner_a, "")
+        assert selected_ids(personal_sql, personal_params) == [
+            "owner-a-empty",
+            "owner-a-null",
+        ]
+        team_sql, team_params = owner_factory(owner_a, "team-red")
+        assert selected_ids(team_sql, team_params) == ["team-red"]
+
+    watcher = Watcher(
+        id="watcher",
+        session_token=owner_a,
+        team_id="",
+        project_id="",
+        label="",
+        command_text="echo test",
+        schedule_id="schedule",
+        baseline_run_id="",
+        last_run_id="",
+        last_diff_summary={},
+        state="ok",
+        state_reason="",
+        last_error="",
+        options={},
+        policy={},
+        consecutive_no_change=0,
+        consecutive_changed=0,
+        consecutive_failures=0,
+        created="",
+        updated="",
+    )
+    run_sql, run_params = _watcher_run_owner_clause(watcher, table_alias="")
+    assert selected_ids(run_sql, run_params) == ["owner-a-empty", "owner-a-null"]
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,

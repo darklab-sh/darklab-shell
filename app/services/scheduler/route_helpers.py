@@ -12,6 +12,11 @@ from typing import Any, Mapping
 from services.scheduler.commands import validate_schedule_command
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.service import coerce_schedule_bool, get_schedule
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 from services.watchers.service import WatcherError, get_watcher
 
 
@@ -83,13 +88,12 @@ def baseline_run_for_owner(run_id: str, session_id: str, *, team_id: str = "", c
     baseline_id = str(run_id or "").strip()
     if not baseline_id:
         raise RouteBaselineRunNotFound("baseline run not found")
-    normalized_team_id = str(team_id or "").strip()
-    if normalized_team_id:
-        owner_sql = "team_id = ?"
-        owner_params = (normalized_team_id,)
-    else:
-        owner_sql = "(team_id IS NULL OR team_id = '') AND session_id = ?"
-        owner_params = (session_id,)
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
+    )
+    owner_sql, owner_params = owner.as_tuple()
     row = conn.execute(
         f"SELECT id, session_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec
         (baseline_id, *owner_params),

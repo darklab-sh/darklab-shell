@@ -45,6 +45,11 @@ from services.notifications.payloads import build_test_payload
 from services.notifications.secrets import channel_secret_name, emit_channel_secret_audits, store_channel_secret_with_connection
 from services.secrets.storage import delete_secret
 from services.secrets.vault import MasterKeyError, SecretDecryptError
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    token_keyed_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, personal_owner_context
 
 CHANNEL_SECRET_FIELDS = {
     CHANNEL_KIND_WEBHOOK: ("url",),
@@ -159,9 +164,12 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
 
 
 def _owner_where(session_token: str, team_id: str = "") -> tuple[str, tuple[str, ...]]:
-    if team_id:
-        return "team_id = ?", (team_id,)
-    return "(team_id IS NULL OR team_id = '') AND session_token = ?", (session_token,)
+    owner = token_keyed_owner_predicate(
+        owner_context_for_scope(session_token, team_id=team_id),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return owner.as_tuple()
 
 
 def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
@@ -672,13 +680,16 @@ def delete_notification_channel(
 
 
 def migrate_notification_channels_session(conn, from_session_id: str, to_session_id: str) -> dict[str, int]:
+    source_owner = token_keyed_owner_predicate(personal_owner_context(from_session_id))
     channels_result = conn.execute(
-        "UPDATE notification_channels SET session_token = ? WHERE session_token = ?",
-        (to_session_id, from_session_id),
+        "UPDATE notification_channels SET session_token = ? WHERE "  # nosec B608
+        + source_owner.sql,
+        (to_session_id, *source_owner.params),
     )
     events_result = conn.execute(
-        "UPDATE notification_events SET session_token = ? WHERE session_token = ?",
-        (to_session_id, from_session_id),
+        "UPDATE notification_events SET session_token = ? WHERE "  # nosec B608
+        + source_owner.sql,
+        (to_session_id, *source_owner.params),
     )
     return {
         "migrated_notification_channels": int(getattr(channels_result, "rowcount", 0) or 0),
