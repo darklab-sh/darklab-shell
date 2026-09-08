@@ -8,6 +8,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 
 PROTECTED_PATH_LOOKUP_MAX = 1_000
 
@@ -24,30 +29,22 @@ def load_protected_workspace_paths(
     candidates = {str(path or "") for path in paths if path}
     if not candidates:
         return set()
-    if team_id:
-        count_row = conn.execute(
-            "SELECT COUNT(DISTINCT a.workspace_path) AS count FROM run_file_artifacts a "
-            "JOIN runs r ON r.id = a.run_id WHERE r.team_id = ? AND a.run_id <> ?",
-            (team_id, run_id),
-        ).fetchone()
-        rows_query = (
-            "SELECT DISTINCT a.workspace_path FROM run_file_artifacts a "
-            "JOIN runs r ON r.id = a.run_id WHERE r.team_id = ? AND a.run_id <> ? LIMIT ?"
-        )
-        params = (team_id, run_id, PROTECTED_PATH_LOOKUP_MAX)
-    else:
-        count_row = conn.execute(
-            "SELECT COUNT(DISTINCT a.workspace_path) AS count FROM run_file_artifacts a "
-            "JOIN runs r ON r.id = a.run_id WHERE a.session_id = ? "
-            "AND COALESCE(r.team_id, '') = '' AND a.run_id <> ?",
-            (session_id, run_id),
-        ).fetchone()
-        rows_query = (
-            "SELECT DISTINCT a.workspace_path FROM run_file_artifacts a "
-            "JOIN runs r ON r.id = a.run_id WHERE a.session_id = ? "
-            "AND COALESCE(r.team_id, '') = '' AND a.run_id <> ? LIMIT ?"
-        )
-        params = (session_id, run_id, PROTECTED_PATH_LOOKUP_MAX)
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column="a.session_id",
+        team_column="r.team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    count_row = conn.execute(
+        "SELECT COUNT(DISTINCT a.workspace_path) AS count FROM run_file_artifacts a "
+        f"JOIN runs r ON r.id = a.run_id WHERE {owner.sql} AND a.run_id <> ?",  # nosec
+        (*owner.params, run_id),
+    ).fetchone()
+    rows_query = (
+        "SELECT DISTINCT a.workspace_path FROM run_file_artifacts a "
+        f"JOIN runs r ON r.id = a.run_id WHERE {owner.sql} AND a.run_id <> ? LIMIT ?"  # nosec
+    )
+    params = (*owner.params, run_id, PROTECTED_PATH_LOOKUP_MAX)
     if count_row and int(count_row["count"] or 0) > PROTECTED_PATH_LOOKUP_MAX:
         raise RuntimeError("protected artifact path lookup exceeded its bound")
     rows = conn.execute(rows_query, params).fetchall()

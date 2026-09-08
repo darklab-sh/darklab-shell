@@ -19,9 +19,19 @@ from core.database_backend import (
     sqlite_table_exists,
 )
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
+
 from services.atlas.lookup import atlas_counts_by_run
-from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
+from services.runs.kinds import (
+    RUN_KIND_BUILTIN,
+    RUN_KIND_EXTERNAL,
+    builtin_command_roots_for_storage,
+)
 from services.storage.body_store import load_text_body, stored_body_pointer
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 
 log = logging.getLogger("shell")
 
@@ -176,30 +186,33 @@ def history_offloaded_search_run_ids(
 ) -> list[str]:
     if not query:
         return []
-    if team_id:
-        sql = " FROM runs r WHERE r.team_id = ?"
-        params: list[Any] = [team_id]
-    else:
-        sql = " FROM runs r WHERE r.session_id = ? AND (r.team_id IS NULL OR r.team_id = '')"
-        params = [session_id]
+    owner = owner_context_for_scope(session_id, team_id=team_id)
+    run_owner = team_capable_owner_predicate(
+        owner,
+        owner_column="r.session_id",
+        team_column="r.team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    sql = f" FROM runs r WHERE {run_owner.sql}"
+    params: list[Any] = list(run_owner.params)
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
         run_kind_expr = "r.run_kind" if has_run_kind_column else history_run_kind_sql("r.command", _history_backend(conn))
         sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
-        if team_id:
-            project_scope_sql = "p.team_id = ?"
-            project_scope_params: list[Any] = [team_id]
-        else:
-            project_scope_sql = "p.session_id = ? AND (p.team_id IS NULL OR p.team_id = '')"
-            project_scope_params = [session_id]
+        project_owner = team_capable_owner_predicate(
+            owner,
+            owner_column="p.session_id",
+            team_column="p.team_id",
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        )
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
             "JOIN projects p ON p.id = pl.project_id "
-            f"WHERE {project_scope_sql} AND p.id = ? "  # nosec
+            f"WHERE {project_owner.sql} AND p.id = ? "  # nosec
             "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
         )
-        params.extend([*project_scope_params, project_id])
+        params.extend([*project_owner.params, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "

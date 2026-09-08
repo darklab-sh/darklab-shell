@@ -29653,11 +29653,12 @@ class TestDatabaseInit:
             return FakeConn()
 
         owner_scope = SimpleNamespace(predicate=lambda *args, **kwargs: ("session_id = ?", ["session"]))
+        history_session_id = str(uuid.uuid4())
         monkeypatch.setattr(database, "db_connect", fake_connect)
 
         assert artifact_queries.list_project_artifacts("session", "project") is None
         assert package_queries.list_evidence_packages("session", "project") is None
-        assert history_mutations.history_run_cleanup_preview("session", "run-1") is None
+        assert history_mutations.history_run_cleanup_preview(history_session_id, "run-1") is None
         assert atlas_lookup.run_atlas_read(lambda conn: conn) is opened[-1]
         assert len(opened) == 4
         assert any("FROM projects" in query for query, _params in opened[0].queries)

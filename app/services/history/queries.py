@@ -8,20 +8,26 @@ from __future__ import annotations
 import logging
 import math
 import time
-from hashlib import sha256
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 
 from core.database_access import get_db_backend, get_db_connect
-from core.database_backend import DatabaseBackend, SQLiteOperationalError, dialect_for_backend
+from core.database_backend import (
+    DatabaseBackend,
+    SQLiteOperationalError,
+    dialect_for_backend,
+)
 from core.helpers import GRACEFUL_TERMINATION_EXIT_CODE, get_log_session_id
 from core.output_signals import command_root as output_command_root
 from core.process import active_runs_for_session
+
 from services.assessments.batch.provenance import (
     apply_assessment_batch_provenance,
     assessment_batch_provenance_by_run,
 )
-from services.metrics_lazy import app_metrics
+from services.history import mutations as _history_mutations
+from services.history.insights import history_insights as history_insights
 from services.history.run_metadata import (
     history_add_filters,
     history_column_exists,
@@ -34,20 +40,24 @@ from services.history.run_metadata import (
     run_finding_counts_by_run,
 )
 from services.history.search import run_search_clause, sqlite_fts_query
+from services.metrics_lazy import app_metrics
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 from services.runs.output_store import load_run_output_events_for_run
 from services.runs.structured_filters import (
     entity_run_exists_clause,
     filters_have_summary_selectors,
     filters_need_line_event_scan,
-    run_output_summary_exists_clause,
     run_matches_structured_filters,
+    run_output_summary_exists_clause,
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
-from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
-from services.history.insights import history_insights as history_insights
-from services.history import mutations as _history_mutations
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
+from services.workflows.storage import (
+    apply_workflow_provenance,
+    workflow_provenance_by_run,
+)
 
 log = logging.getLogger("shell")
 
@@ -162,13 +172,17 @@ def history_base_clause(
         sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
+        project_owner = personal_only_owner_predicate(
+            personal_owner_context(session_id),
+            owner_column="p.session_id",
+        )
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "
             "JOIN projects p ON p.id = pl.project_id "
-            "WHERE p.session_id = ? AND p.id = ? "
+            f"WHERE {project_owner.sql} AND p.id = ? "  # nosec
             "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
         )
-        params.extend([session_id, project_id])
+        params.extend([*project_owner.params, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -392,18 +406,21 @@ def project_links_by_run(conn, session_id: str, run_ids) -> dict[str, list[dict[
     ):
         return {run_id: [] for run_id in ids}
     placeholders = ",".join("?" for _ in ids)
+    owner = personal_owner_context(session_id)
+    project_owner = personal_only_owner_predicate(owner, owner_column="p.session_id")
+    run_owner = personal_only_owner_predicate(owner, owner_column="r.session_id")
     rows = conn.execute(
         "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "  # nosec
         "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
         "FROM project_links l "
         "JOIN projects p ON p.id = l.project_id "
         "JOIN runs r ON r.id = l.entity_id "
-        "WHERE p.session_id = ? "
+        f"WHERE {project_owner.sql} "  # nosec
         "AND l.entity_type = 'run' "
-        "AND r.session_id = ? AND r.run_kind = ? "
+        f"AND {run_owner.sql} AND r.run_kind = ? "  # nosec
         f"AND l.entity_id IN ({placeholders}) "
         "ORDER BY LOWER(p.name) ASC, l.created ASC",
-        [session_id, session_id, RUN_KIND_EXTERNAL, *ids],
+        [*project_owner.params, *run_owner.params, RUN_KIND_EXTERNAL, *ids],
     ).fetchall()
     grouped = {run_id: [] for run_id in ids}
     for row in rows:
@@ -780,9 +797,12 @@ def session_history_stats(session_id: str, owner_scope) -> dict[str, Any]:
             ).fetchone()["count"] or 0)
         starred = 0
         if history_table_exists(conn, "starred_commands"):
+            starred_owner = personal_only_owner_predicate(
+                personal_owner_context(session_id),
+            )
             starred = int(conn.execute(
-                "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?",
-                (session_id,),
+                f"SELECT COUNT(*) AS count FROM starred_commands WHERE {starred_owner.sql}",  # nosec
+                starred_owner.params,
             ).fetchone()["count"] or 0)
     return {
         "runs": {

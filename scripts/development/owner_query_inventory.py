@@ -43,6 +43,57 @@ QUERY_HELPERS = (
     "composite_owner_predicate",
     "attribution_values",
 )
+NAMED_RELATIONAL_EXCEPTIONS = {
+    (
+        "app/services/history/queries.py",
+        "history_base_clause",
+    ): (
+        "starred command ownership is correlated to the selected run by session and command",
+        "AND EXISTS (SELECT 1 FROM starred_commands sc WHERE sc.session_id = r.session_id AND sc.command = r.command)",
+    ),
+    (
+        "app/services/history/run_metadata.py",
+        "history_offloaded_search_run_ids",
+    ): (
+        "starred command ownership is correlated to the selected run by session and command",
+        "AND EXISTS (SELECT 1 FROM starred_commands sc WHERE sc.session_id = r.session_id AND sc.command = r.command)",
+    ),
+    (
+        "app/services/history/run_metadata.py",
+        "run_metadata_counts_by_run",
+    ): (
+        "finding ownership is correlated to the already selected runs' session ids",
+        "SELECT fo.run_id, COUNT(*) AS count FROM findings_occurrences fo "
+        "JOIN findings f ON f.id = fo.finding_id WHERE f.session_id IN "
+        "(SELECT session_id FROM runs WHERE id IN ({placeholders})) "
+        "AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
+    ),
+    (
+        "app/services/history/run_metadata.py",
+        "run_finding_counts_by_run",
+    ): (
+        "finding ownership is correlated to the already selected runs' session ids",
+        "SELECT fo.run_id, COUNT(*) AS count FROM findings_occurrences fo "
+        "JOIN findings f ON f.id = fo.finding_id WHERE f.session_id IN "
+        "(SELECT session_id FROM runs WHERE id IN ({placeholders})) "
+        "AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
+    ),
+    (
+        "app/services/history/selections.py",
+        "matching_history_runs._query",
+    ): (
+        "starred command ownership is correlated to the selected run by session and command",
+        "SELECT r.id, EXISTS (SELECT 1 FROM starred_commands sc "
+        "WHERE sc.session_id = r.session_id AND sc.command = r.command) AS starred",
+    ),
+    (
+        "app/services/runs/structured_filters.py",
+        "entity_run_exists_clause",
+    ): (
+        "Atlas entity ownership is correlated to the selected run's session id",
+        "sfe_e.session_id = {run_alias}.session_id",
+    ),
+}
 OWNER_COLUMN_RE = re.compile(
     r"(?i)\b(?:[a-z_][a-z0-9_]*\.)?"
     r"(?:session_id|session_token|session_hash|token_hash|team_id|principal_id|personal_workspace_id|credential_id|"
@@ -309,19 +360,34 @@ def _phase_3b_replacement(key_shape: str) -> str:
     return "personal_workspace_id or team_id"
 
 
-def _classification(path: str) -> str:
+def _named_relational_exception(path: str, scope: str, source: str) -> str:
+    entry = NAMED_RELATIONAL_EXCEPTIONS.get((path, scope))
+    if entry is None:
+        return ""
+    description, expected_source = entry
+    if _normalized_source(source) != expected_source:
+        return ""
+    return description
+
+
+def _classification(path: str, scope: str, source: str) -> str:
     if _planned_branch(path) == "migration-code":
         return "migration"
     if path.startswith("app/services/auth/"):
         return "principal-foundation"
+    if _named_relational_exception(path, scope, source):
+        return "equivalent"
     return "unclassified"
 
 
-def _reviewed_exception(path: str) -> str:
+def _reviewed_exception(path: str, scope: str, source: str) -> str:
     if _planned_branch(path) == "migration-code":
         return "migration code"
     if path.startswith("app/services/auth/"):
         return "principal credential persistence boundary"
+    named = _named_relational_exception(path, scope, source)
+    if named:
+        return f"named relational owner-correlation exception: {named}"
     return "temporary Phase 3A direct predicate"
 
 
@@ -438,10 +504,10 @@ def generate_sites() -> list[InventorySite]:
                         table: table_shapes.get(table, "unknown") for table in tables
                     },
                     current_result_set=_current_result_set(key_shape, team_behavior),
-                    conversion_classification=_classification(relative),
+                    conversion_classification=_classification(relative, scope, normalized),
                     planned_branch=_planned_branch(relative),
                     phase_3b_replacement=_phase_3b_replacement(key_shape),
-                    reviewed_exception=_reviewed_exception(relative),
+                    reviewed_exception=_reviewed_exception(relative, scope, normalized),
                     source=normalized[:500],
                 )
             )
@@ -476,6 +542,16 @@ def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) 
         for field in REVIEWED_FIELDS:
             if field in reviewed:
                 site[field] = reviewed[field]
+        named_exception = _named_relational_exception(
+            str(site["path"]),
+            str(site["scope"]),
+            str(site["source"]),
+        )
+        if named_exception:
+            site["conversion_classification"] = "equivalent"
+            site["reviewed_exception"] = (
+                f"named relational owner-correlation exception: {named_exception}"
+            )
     return {
         "format_version": 1,
         "contract": (

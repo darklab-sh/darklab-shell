@@ -11,6 +11,7 @@ from typing import Any
 from core.database_access import get_db_backend, get_db_connect
 from core.helpers import get_log_session_id
 from core.process import active_runs_for_session, active_runs_for_team
+
 from services.assessments.batch.provenance import (
     apply_assessment_batch_provenance,
     assessment_batch_provenance_by_run,
@@ -35,23 +36,39 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import schedule_refs_by_run
-from services.workflows.storage import apply_workflow_provenance, workflow_provenance_by_run
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
+from services.workflows.storage import (
+    apply_workflow_provenance,
+    workflow_provenance_by_run,
+)
 
 log = logging.getLogger("shell")
 
 
 def run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tuple[str, list[Any]]:
     prefix = f"{alias}." if alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", [team_id]
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')", [session_id]
+    predicate = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return predicate.sql, list(predicate.params)
 
 
 def project_owner_clause(session_id: str, team_id: str, *, alias: str = "p") -> tuple[str, list[Any]]:
     prefix = f"{alias}." if alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", [team_id]
-    return f"{prefix}session_id = ? AND ({prefix}team_id IS NULL OR {prefix}team_id = '')", [session_id]
+    predicate = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    return predicate.sql, list(predicate.params)
 
 
 def apply_schedule_ref(run: dict[str, Any], schedule_ref: dict[str, str] | None) -> None:
