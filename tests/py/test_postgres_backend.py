@@ -307,6 +307,92 @@ def test_project_and_atlas_owner_clauses_preserve_mixed_postgres_result_sets(pos
 
 
 @pytest.mark.postgres
+def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgres_schema):
+    from services.secrets.storage import _secret_scope_owner
+    from services.session.storage import _recent_values_owner
+    from services.teams.ownership_queries import token_keyed_owner_predicate
+    from services.teams.request_scope import RequestScope
+    from services.teams.scope import personal_owner_context, team_owner_context
+    from services.workflows.storage import _owner_where
+    from services.workflows.user_workflows import _workflow_owner_where
+    from services.workspace.metadata import _workspace_metadata_owner_where
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        "CREATE TABLE owner_storage_rows ("
+        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "team_id TEXT, kind TEXT NOT NULL)"
+    )
+    owner_a = anonymous_session_id("postgres-files-workflows-secrets-owner-a")
+    owner_b = anonymous_session_id("postgres-files-workflows-secrets-owner-b")
+    conn.executemany(
+        "INSERT INTO owner_storage_rows (id, session_id, session_token, team_id, kind) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            ("owner-a-null", owner_a, owner_a, None, "domain"),
+            ("owner-a-empty", owner_a, owner_a, "", "domain"),
+            ("owner-b-empty", owner_b, owner_b, "", "domain"),
+            ("team-red", owner_b, "team-red", "team-red", "domain"),
+            ("team-blue", owner_a, "team-blue", "team-blue", "domain"),
+            ("team-red-flat-null", "team-red", "team-red", None, "domain"),
+            ("team-red-flat-empty", "team-red", "team-red", "", "domain"),
+            ("owner-a-other-kind", owner_a, owner_a, "", "ip"),
+        ),
+    )
+
+    def selected_ids(clause, params):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM owner_storage_rows WHERE {clause} ORDER BY id",  # nosec B608
+                params,
+            ).fetchall()
+        ]
+
+    workflow_sql, workflow_params = _owner_where(owner_a)
+    assert selected_ids(workflow_sql, workflow_params) == [
+        "owner-a-empty",
+        "owner-a-null",
+        "owner-a-other-kind",
+    ]
+    user_workflow_sql, user_workflow_params = _workflow_owner_where(owner_a)
+    assert selected_ids(user_workflow_sql, user_workflow_params) == [
+        "owner-a-empty",
+        "owner-a-null",
+        "owner-a-other-kind",
+    ]
+    workflow_team_sql, workflow_team_params = _owner_where(owner_a, team_id="team-red")
+    assert selected_ids(workflow_team_sql, workflow_team_params) == ["team-red"]
+
+    recent_owner = _recent_values_owner(owner_a, "", kind="domain")
+    assert selected_ids(recent_owner.sql, recent_owner.params) == ["owner-a-empty"]
+
+    personal_scope = RequestScope(personal_owner_context(owner_a))
+    metadata_sql, metadata_params = _workspace_metadata_owner_where(personal_scope)
+    assert selected_ids(metadata_sql, metadata_params) == [
+        "owner-a-empty",
+        "owner-a-null",
+        "owner-a-other-kind",
+    ]
+    team_scope = RequestScope(
+        team_owner_context("team-red", actor_session_id=owner_a),
+        team_id="team-red",
+    )
+    metadata_team_sql, metadata_team_params = _workspace_metadata_owner_where(team_scope)
+    assert selected_ids(metadata_team_sql, metadata_team_params) == [
+        "team-red",
+        "team-red-flat-empty",
+        "team-red-flat-null",
+    ]
+    secret_owner = token_keyed_owner_predicate(_secret_scope_owner("team-red"))
+    assert selected_ids(secret_owner.sql, secret_owner.params) == [
+        "team-red",
+        "team-red-flat-empty",
+        "team-red-flat-null",
+    ]
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,

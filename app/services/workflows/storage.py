@@ -17,8 +17,14 @@ from core.database_backend import (
     postgres_advisory_lock_id,
     sqlite_table_exists,
 )
+
 from services.runs.private_data import redact_private_values
-from services.teams.scope import personal_owner_context, shared_owner_predicate
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    personal_only_owner_predicate,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, personal_owner_context
 from services.workflows.captures import MAX_CAPTURE_TOTAL_BYTES
 from services.workflows.compiler import workflow_private_values
 from services.workflows.contracts import WorkflowActiveExecutionLimitExceeded
@@ -31,7 +37,6 @@ from services.workflows.fanout_checkpoint import checkpoint_from_payload
 from services.workflows.fanout_child_cancellation import cancel_fanout_children_on_conn
 from services.workflows.fanout_summary import summarize_fanout_results
 from services.workflows.transitions import transition_for_step
-
 
 ACTIVE_EXECUTION_STATUSES = ("queued", "running", "canceling")
 TERMINAL_EXECUTION_STATUSES = ("completed", "failed", "canceled")
@@ -194,13 +199,14 @@ def public_execution(execution: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def _owner_where(session_id: str, *, team_id: str = "", table_alias: str = "") -> tuple[str, tuple[Any, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    if team_id:
-        return f"{prefix}team_id = ?", (team_id,)
-    return shared_owner_predicate(
-        personal_owner_context(session_id),
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column=f"{prefix}session_id",
         team_column=f"{prefix}team_id",
-        session_column=f"{prefix}session_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        owner_column_first=False,
     )
+    return owner.as_tuple()
 
 
 def _lock_execution_owner(conn, session_id: str, team_id: str) -> None:
@@ -348,12 +354,13 @@ def active_execution_count(session_id: str, *, team_id: str = "") -> int:
 
 
 def active_execution_count_for_actor(session_id: str) -> int:
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions "
-            "WHERE execution_kind IN (?, ?) AND session_id = ? "
+            "SELECT COUNT(*) AS n FROM workflow_executions "  # nosec B608
+            "WHERE execution_kind IN (?, ?) AND " + owner.sql + " "
             "AND status IN ('queued', 'running', 'canceling')",
-            (WORKFLOW_EXECUTION_KIND, ASSESSMENT_BATCH_EXECUTION_KIND, session_id),
+            (WORKFLOW_EXECUTION_KIND, ASSESSMENT_BATCH_EXECUTION_KIND, *owner.params),
         ).fetchone()
     return int(row["n"] if row else 0)
 

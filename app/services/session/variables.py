@@ -9,11 +9,17 @@ subprocess environment; commands are expanded before normal policy validation.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 
 from core.database_access import get_db_connect
+
+from services.teams.ownership_queries import (
+    composite_owner_predicate,
+    personal_only_owner_predicate,
+)
+from services.teams.scope import personal_owner_context
 
 VARIABLE_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
 VARIABLE_REFERENCE_RE = re.compile(r"(?<!\\)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
@@ -73,10 +79,11 @@ def validate_variable_value(value: str) -> str:
 
 
 def list_session_variables(session_id: str) -> dict[str, str]:
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT name, value FROM session_variables WHERE session_id = ? ORDER BY name",
-            (session_id,),
+            "SELECT name, value FROM session_variables WHERE " + owner.sql + " ORDER BY name",  # nosec B608
+            owner.params,
         ).fetchall()
     return {str(row["name"]): str(row["value"]) for row in rows}
 
@@ -96,10 +103,14 @@ def set_session_variable(session_id: str, name: str, value: str) -> None:
 
 def unset_session_variable(session_id: str, name: str) -> bool:
     normalized_name = normalize_variable_name(name)
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        key_values=(("name", normalized_name),),
+    )
     with get_db_connect()() as conn:
         result = conn.execute(
-            "DELETE FROM session_variables WHERE session_id = ? AND name = ?",
-            (session_id, normalized_name),
+            "DELETE FROM session_variables WHERE " + owner.sql,  # nosec B608
+            owner.params,
         )
         conn.commit()
     return bool(result.rowcount)
