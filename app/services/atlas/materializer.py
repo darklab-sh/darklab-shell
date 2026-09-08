@@ -29,6 +29,8 @@ from services.intel.canonical import (
     entity_signature,
     parse_canonical_port,
 )
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 PORT_SCAN_OBSERVATION_ROOTS = frozenset({"nmap", "masscan", "rustscan", "naabu", "nc"})
 log = logging.getLogger("shell")
@@ -237,17 +239,16 @@ def upsert_entity(
                 occurrence_count=max(0, int(occurrence_count or 0)),
             )
     attributes_payload = _json_param(conn, attributes)
-    if team_id:
-        existing_row = conn.execute(
-            "SELECT id, attributes_json FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
-            (team_id, entity_type, signature_hash),
-        ).fetchone()
-    else:
-        existing_row = conn.execute(
-            "SELECT id, attributes_json FROM entities "
-            "WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("type", entity_type), ("signature_hash", signature_hash)),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    existing_row = conn.execute(
+        f"SELECT id, attributes_json FROM entities WHERE {owner.sql}",  # nosec
+        owner.params,
+    ).fetchone()
     conflict_target = (
         "ON CONFLICT(team_id, type, signature_hash) WHERE team_id != '' DO UPDATE SET "
         if team_id

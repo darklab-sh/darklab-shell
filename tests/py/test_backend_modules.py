@@ -47,6 +47,8 @@ from typing import Any, IO, cast
 
 import pytest
 import yaml
+
+from identity_helpers import anonymous_session_id
 import core.process as process
 import services.pty.service as pty_service
 import services.runs.broker as run_broker
@@ -7425,7 +7427,7 @@ class TestReportTemplateCatalog:
         with mock.patch("core.database.DB_PATH", db_path):
             database.db_init()
             saved = report_storage.save_report_draft(
-                "session-report",
+                "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                 "project-1",
                 {
                     "metadata": {"engagement_name": "June assessment", "date_range": "2026-06-01 to 2026-06-05"},
@@ -7457,34 +7459,34 @@ class TestReportTemplateCatalog:
             }
             assert saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
             assert saved["draft"]["selection_exclude_ids"]["target_ids"] == ["target-1"]
-            reloaded_saved = report_storage.get_report_draft("session-report", "project-1")
+            reloaded_saved = report_storage.get_report_draft("facbddf1-a4e3-44ca-98f1-2501b26a3ff3", "project-1")
             assert reloaded_saved is not None
             assert reloaded_saved["draft"]["selection_exclude_ids"]["run_ids"] == ["run-1", "run-2", "run-3"]
             assert reloaded_saved["draft"]["selection_filters"]["run_ids"]["q"] == "nmap"
 
             with pytest.raises(ProjectWorkspaceError, match="YYYY-MM-DD to YYYY-MM-DD"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-invalid-date-format",
                     {"metadata": {"date_range": "June 1 - June 5"}},
                 )
 
             with pytest.raises(ProjectWorkspaceError, match="invalid calendar date"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-invalid-date-value",
                     {"metadata": {"date_range": "2026-06-31 to 2026-07-01"}},
                 )
 
             with pytest.raises(ProjectWorkspaceError, match="on or after"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-invalid-date-order",
                     {"metadata": {"date_range": "2026-06-05 to 2026-06-01"}},
                 )
 
             legacy = report_storage.save_report_draft(
-                "session-report",
+                "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                 "project-legacy-entity-selection",
                 {"selection": {"entity_ids": ["target-legacy"]}},
             )
@@ -7493,7 +7495,7 @@ class TestReportTemplateCatalog:
 
             with pytest.raises(ProjectWorkspaceError, match="unsupported report run_ids filter"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-invalid-selection-filter",
                     {"selection_filters": {"run_ids": {"q": "nmap", "status": "done"}}},
                 )
@@ -7501,7 +7503,7 @@ class TestReportTemplateCatalog:
             oversized_selection = [f"run-{index}" for index in range(501)]
             with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-oversized-manual-selection",
                     {"selection": {"run_ids": oversized_selection}},
                 )
@@ -7509,13 +7511,13 @@ class TestReportTemplateCatalog:
             oversized_exclusions = [f"run-{index}" for index in range(501)]
             with pytest.raises(ProjectWorkspaceError, match="limited to 500 ids per section"):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-oversized-selection-exclusions",
                     {"selection_exclude_ids": {"run_ids": oversized_exclusions}},
                 )
 
             updated = report_storage.save_report_draft(
-                "session-report",
+                "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                 "project-1",
                 {"metadata": {"engagement_name": "Final report"}},
                 expected_updated=saved["updated"],
@@ -7524,28 +7526,28 @@ class TestReportTemplateCatalog:
 
             with pytest.raises(report_storage.ReportDraftConflict):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-1",
                     {"metadata": {"engagement_name": "Missing update token"}},
                 )
 
             with pytest.raises(report_storage.ReportDraftConflict):
                 report_storage.save_report_draft(
-                    "session-report",
+                    "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                     "project-1",
                     {"metadata": {"engagement_name": "Stale report"}},
                     expected_updated=saved["updated"],
                 )
 
             team_saved = report_storage.save_report_draft(
-                "session-report",
+                "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                 "project-1",
                 {"metadata": {"engagement_name": "Team report"}},
                 team_id="team-1",
             )
             assert team_saved["team_id"] == "team-1"
-            personal_draft = report_storage.get_report_draft("session-report", "project-1")
-            team_draft = report_storage.get_report_draft("session-report", "project-1", team_id="team-1")
+            personal_draft = report_storage.get_report_draft("facbddf1-a4e3-44ca-98f1-2501b26a3ff3", "project-1")
+            team_draft = report_storage.get_report_draft("facbddf1-a4e3-44ca-98f1-2501b26a3ff3", "project-1", team_id="team-1")
             assert personal_draft is not None
             assert team_draft is not None
             assert personal_draft["id"] == updated["id"]
@@ -8361,14 +8363,14 @@ class TestPostgresMigrations:
             conn.execute(
                 "INSERT INTO projects "
                 "(id, session_id, name, slug, created, updated) "
-                "VALUES ('prj_assessment', 'session-a', 'Assessment', 'assessment', ?, ?)",
+                "VALUES ('prj_assessment', '8ccf5879-2798-447b-a83c-c58f06d1a6d6', 'Assessment', 'assessment', ?, ?)",
                 (now, now),
             )
 
             assessment_sql = (
                 "INSERT INTO project_assessments "
                 "(id, session_id, project_id, title, profile_key, profile_version, "
-                "started_at, created_at, updated_at) VALUES (?, 'session-a', "
+                "started_at, created_at, updated_at) VALUES (?, '8ccf5879-2798-447b-a83c-c58f06d1a6d6', "
                 "'prj_assessment', ?, 'network', '1.0', ?, ?, ?)"
             )
             conn.execute(assessment_sql, ("asm_one", "First cycle", now, now, now))
@@ -8381,7 +8383,7 @@ class TestPostgresMigrations:
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute(
                     assessment_sql.replace(
-                        "VALUES (?, 'session-a'",
+                        "VALUES (?, '8ccf5879-2798-447b-a83c-c58f06d1a6d6'",
                         "VALUES (?, ''",
                     ),
                     ("asm_ownerless", "Ownerless", now, now, now),
@@ -8395,7 +8397,7 @@ class TestPostgresMigrations:
             conn.execute(
                 "INSERT INTO project_http_profiles "
                 "(id, session_id, project_id, name, name_key, base_url, created_at, updated_at) "
-                "VALUES ('php_zap', 'session-a', 'prj_assessment', 'ZAP', 'zap', "
+                "VALUES ('php_zap', '8ccf5879-2798-447b-a83c-c58f06d1a6d6', 'prj_assessment', 'ZAP', 'zap', "
                 "'https://app.example.test', ?, ?)",
                 (now, now),
             )
@@ -8446,7 +8448,7 @@ class TestPostgresMigrations:
                 egress_proxy="zap-egress.example.test:8080",
             )
             zap_job = create_zap_job(
-                "session-a",
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                 "prj_assessment",
                 "asm_two",
                 "chk_two",
@@ -8462,7 +8464,7 @@ class TestPostgresMigrations:
             assert zap_job["progress"] == {}
             assert zap_job["expires_at"] == "2026-08-09T16:15:00+00:00"
             assert zap_job_for_owner(
-                "other-session", zap_job["id"], conn=conn,
+                "a8842f80-432a-4e5a-9668-da626e3111ae", zap_job["id"], conn=conn,
             ) is None
 
             submitting = transition_zap_job(
@@ -8494,7 +8496,7 @@ class TestPostgresMigrations:
             )
             assert progressed["progress"]["info_count"] == 1
             cancel_requested = request_zap_job_cancel(
-                "session-a", zap_job["id"], now=job_now, conn=conn,
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6", zap_job["id"], now=job_now, conn=conn,
             )
             assert cancel_requested["status"] == "cancel_requested"
             canceled = transition_zap_job(
@@ -8512,7 +8514,7 @@ class TestPostgresMigrations:
             assert exc_info.value.code == "zap_job_transition_conflict"
 
             cancel_race_job = create_zap_job(
-                "session-a",
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                 "prj_assessment",
                 "asm_two",
                 "chk_two",
@@ -8526,7 +8528,7 @@ class TestPostgresMigrations:
                 cancel_race_job["id"], ("queued",), "submitting", now=job_now, conn=conn,
             )
             request_zap_job_cancel(
-                "session-a", cancel_race_job["id"], now=job_now, conn=conn,
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6", cancel_race_job["id"], now=job_now, conn=conn,
             )
             canceled_submission = record_zap_job_submission(
                 cancel_race_job["id"], "18", now=job_now, conn=conn,
@@ -8542,7 +8544,7 @@ class TestPostgresMigrations:
             )
 
             ready_job = create_zap_job(
-                "session-a",
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                 "prj_assessment",
                 "asm_two",
                 "chk_two",
@@ -8584,26 +8586,26 @@ class TestPostgresMigrations:
             )
             assert ready["import_source_id"] == "impd_" + "b" * 32
             assert mark_zap_job_imported_for_atlas_draft(
-                "other-session",
+                "a8842f80-432a-4e5a-9668-da626e3111ae",
                 ready["import_source_id"],
                 "impb_" + "c" * 32,
                 now=job_now,
                 conn=conn,
             ) is False
             assert mark_zap_job_imported_for_atlas_draft(
-                "session-a",
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                 ready["import_source_id"],
                 "impb_" + "c" * 32,
                 now=job_now,
                 conn=conn,
             ) is True
-            imported = zap_job_for_owner("session-a", ready_job["id"], conn=conn)
+            imported = zap_job_for_owner("8ccf5879-2798-447b-a83c-c58f06d1a6d6", ready_job["id"], conn=conn)
             assert imported is not None
             assert imported["status"] == "imported"
             assert imported["import_source_id"] == "impb_" + "c" * 32
 
             expiring_job = create_zap_job(
-                "session-a",
+                "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                 "prj_assessment",
                 "asm_two",
                 "chk_two",
@@ -8616,14 +8618,14 @@ class TestPostgresMigrations:
             assert expire_zap_jobs(
                 now=job_now + timedelta(seconds=901), conn=conn,
             ) == 1
-            expired = zap_job_for_owner("session-a", expiring_job["id"], conn=conn)
+            expired = zap_job_for_owner("8ccf5879-2798-447b-a83c-c58f06d1a6d6", expiring_job["id"], conn=conn)
             assert expired is not None
             assert expired["status"] == "expired"
             assert expired["error_code"] == "zap_job_expired"
 
             with pytest.raises(ZapJobError) as exc_info:
                 create_zap_job(
-                    "session-a",
+                    "8ccf5879-2798-447b-a83c-c58f06d1a6d6",
                     "prj_assessment",
                     "asm_two",
                     "chk_two",
@@ -8664,8 +8666,8 @@ class TestPostgresMigrations:
                 "INSERT INTO finding_evidence_links "
                 "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
                 "created_by_session_id, created_at) VALUES "
-                "('fel_project_delete', 'session-a', 'prj_assessment', 'fnd_deleted', "
-                "'run', 'run_deleted', 'session-a', ?)",
+                "('fel_project_delete', '8ccf5879-2798-447b-a83c-c58f06d1a6d6', 'prj_assessment', 'fnd_deleted', "
+                "'run', 'run_deleted', '8ccf5879-2798-447b-a83c-c58f06d1a6d6', ?)",
                 (now,),
             )
             with pytest.raises(sqlite3.IntegrityError):
@@ -8684,7 +8686,7 @@ class TestPostgresMigrations:
                 "schema_artifact_id, schema_sha256, schema_version, profile_key, "
                 "profile_version, tool_version, seed, stop_reason, running_time_seconds, "
                 "expected_operation_count, observed_operation_count, case_count, failure_count, "
-                "observed_at, created_at) VALUES (?, 'session-a', 'prj_assessment', "
+                "observed_at, created_at) VALUES (?, '8ccf5879-2798-447b-a83c-c58f06d1a6d6', 'prj_assessment', "
                 "'asm_one', 'chk_one', 'run_deleted', 'rfa_0123456789abcdef', ?, '3.1.0', "
                 "'api', '1.0', '4.24.3', 1, 'completed', 2.5, 1, 1, 2, 1, ?, ?)"
             )
@@ -8705,7 +8707,7 @@ class TestPostgresMigrations:
                 "(id, session_id, project_id, assessment_id, check_id, "
                 "target_entity_id, action_key, callback_label, allowed_domain, "
                 "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
-                "VALUES ('ocr_0123456789abcdef0123456789abcdef', 'session-a', "
+                "VALUES ('ocr_0123456789abcdef0123456789abcdef', '8ccf5879-2798-447b-a83c-c58f06d1a6d6', "
                 "'prj_assessment', 'asm_two', 'chk_two', 'ent_oast_delete', "
                 "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
                 "'oast.darklab.test', ?, ?, ?, ?, ?)",
@@ -8722,7 +8724,7 @@ class TestPostgresMigrations:
 
             from services.projects.crud import delete_project
 
-            assert delete_project("session-a", "prj_assessment", conn=conn) is True
+            assert delete_project("8ccf5879-2798-447b-a83c-c58f06d1a6d6", "prj_assessment", conn=conn) is True
             assert conn.execute("SELECT COUNT(*) FROM project_assessments").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_checks").fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_assessment_evidence").fetchone()[0] == 0
@@ -16880,7 +16882,7 @@ class TestIntelServices:
         from services.intel.base import IntelResult
         from services.intel.lookup import IntelLookupResult, ProviderLookup
 
-        session_id = "intel-snapshot-session-" + uuid.uuid4().hex
+        session_id = anonymous_session_id("intel-snapshot-session")
         run_id = "run-intel-snapshot-" + uuid.uuid4().hex
         with database.db_connect() as conn:
             conn.execute(
@@ -28835,7 +28837,7 @@ class TestDatabaseInit:
             try:
                 entity_id = upsert_entity(
                     conn,
-                    "lookup-session",
+                    "63abb248-ed2c-4321-8d9f-46c1abeee387",
                     "domain",
                     "known.example.com",
                     seen_at="2026-08-02T00:00:00+00:00",
@@ -28848,7 +28850,7 @@ class TestDatabaseInit:
                 unreadable_url = "https://known.example.com/private"
                 unreadable_url_id = upsert_entity(
                     conn,
-                    "lookup-session",
+                    "63abb248-ed2c-4321-8d9f-46c1abeee387",
                     "url",
                     unreadable_url,
                     seen_at="2026-08-02T00:00:01+00:00",
@@ -28883,9 +28885,9 @@ class TestDatabaseInit:
                         side_effect=AssertionError("exact Atlas lookup must not read cached Intel quota state"),
                     ) as cached_quota,
                 ):
-                    found = resolve_entity_lookup(conn, "lookup-session", "KNOWN.Example.COM.")
-                    cross_session = resolve_entity_lookup(conn, "other-session", "known.example.com")
-                    parent = resolve_entity_lookup(conn, "lookup-session", raw_url)
+                    found = resolve_entity_lookup(conn, "63abb248-ed2c-4321-8d9f-46c1abeee387", "KNOWN.Example.COM.")
+                    cross_session = resolve_entity_lookup(conn, "a8842f80-432a-4e5a-9668-da626e3111ae", "known.example.com")
+                    parent = resolve_entity_lookup(conn, "63abb248-ed2c-4321-8d9f-46c1abeee387", raw_url)
                     with (
                         mock.patch(
                             "services.atlas.lookup_resolve.entity_detail",
@@ -28899,7 +28901,7 @@ class TestDatabaseInit:
                     ):
                         unreadable_parent = resolve_entity_lookup(
                             conn,
-                            "lookup-session",
+                            "63abb248-ed2c-4321-8d9f-46c1abeee387",
                             unreadable_url,
                         )
                 after_counts = {
@@ -28910,9 +28912,9 @@ class TestDatabaseInit:
                     "SELECT COUNT(*) AS count FROM audit_events WHERE details LIKE ?",
                     (f"%{raw_url}%",),
                 ).fetchone()["count"])
-                expected_detail = entity_detail(conn, "lookup-session", entity_id)
+                expected_detail = entity_detail(conn, "63abb248-ed2c-4321-8d9f-46c1abeee387", entity_id)
                 lookup_sql, lookup_params = exact_lookup_candidate_query(
-                    "lookup-session",
+                    "63abb248-ed2c-4321-8d9f-46c1abeee387",
                     "domain",
                     "known.example.com",
                     team_id="lookup-team",
@@ -28970,7 +28972,10 @@ class TestDatabaseInit:
             conn.row_factory = sqlite3.Row
             try:
                 personal_ids = []
-                member_sessions = tuple(f"member-{index}" for index in range(1, 12))
+                member_sessions = tuple(
+                    anonymous_session_id(f"lookup-member-{index}")
+                    for index in range(1, 12)
+                )
                 for index, session_id in enumerate(member_sessions, start=1):
                     entity_id = upsert_entity(
                         conn,
@@ -29005,13 +29010,13 @@ class TestDatabaseInit:
                 ):
                     ambiguous = resolve_entity_lookup(
                         conn,
-                        "member-one",
+                        "ad619c6f-f73c-48a7-a06f-da87be0c35f9",
                         canonical_value,
                         team_id=team_id,
                     )
                 direct_id = upsert_entity(
                     conn,
-                    "member-one",
+                    "ad619c6f-f73c-48a7-a06f-da87be0c35f9",
                     "domain",
                     canonical_value,
                     team_id=team_id,
@@ -29020,7 +29025,7 @@ class TestDatabaseInit:
                 conn.commit()
                 direct = resolve_entity_lookup(
                     conn,
-                    "member-one",
+                    "ad619c6f-f73c-48a7-a06f-da87be0c35f9",
                     canonical_value,
                     team_id=team_id,
                 )
@@ -29082,13 +29087,13 @@ class TestDatabaseInit:
                 conn.execute(
                     "INSERT INTO projects "
                     "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
-                    "VALUES ('project-plan', 'scope-session', '', 'Plan', 'plan', '', 'active', '', ?, ?)",
+                    "VALUES ('project-plan', '52057f5a-094d-4cdf-b078-398dc07ab75d', '', 'Plan', 'plan', '', 'active', '', ?, ?)",
                     (timestamp, timestamp),
                 )
                 conn.executemany(
                     "INSERT INTO projects "
                     "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
-                    "VALUES (?, 'scope-session', '', ?, ?, '', 'active', '', ?, ?)",
+                    "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, '', 'active', '', ?, ?)",
                     [
                         (
                             f"project-plan-extra-{index:03}",
@@ -29104,7 +29109,7 @@ class TestDatabaseInit:
                     "INSERT INTO project_assessments "
                     "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
                     "status, started_at, completed_at, archived_at, created_at, updated_at) "
-                    "VALUES (?, 'scope-session', '', 'project-plan', ?, 'network', '1.0', "
+                    "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', 'project-plan', ?, 'network', '1.0', "
                     "?, ?, ?, ?, ?, ?)",
                     [
                         (
@@ -29124,7 +29129,7 @@ class TestDatabaseInit:
                     "INSERT INTO project_assessments "
                     "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
                     "status, started_at, completed_at, created_at, updated_at) "
-                    "VALUES (?, 'scope-session', '', ?, ?, 'network', '1.0', "
+                    "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'network', '1.0', "
                     "'completed', ?, ?, ?, ?)",
                     [
                         (
@@ -29162,7 +29167,7 @@ class TestDatabaseInit:
                     "INSERT INTO risk_escalations "
                     "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
                     "transition_kind, feed_version, created_at, updated_at) "
-                    "VALUES (?, 'scope-session', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
+                    "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
                     [
                         (
                             f"risk-plan-{index:03}",
@@ -29193,7 +29198,7 @@ class TestDatabaseInit:
                 conn.executemany(
                     "INSERT INTO findings "
                     "(id, session_id, run_id, target_id, status, title, created, last_seen_at) "
-                    "VALUES (?, 'scope-session', ?, ?, ?, 'Plan finding', ?, ?)",
+                    "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', ?, ?, ?, 'Plan finding', ?, ?)",
                     [
                         (
                             f"finding-plan-{index:03}",
@@ -29253,10 +29258,10 @@ class TestDatabaseInit:
                 atlas_entity_plan = self._sqlite_query_plan(
                     conn,
                     atlas_entity_sql,
-                    (*entity_scope_params("scope-session"), "domain", 10),
+                    (*entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), "domain", 10),
                 )
                 exact_lookup_sql, exact_lookup_params = exact_lookup_candidate_query(
-                    "scope-session",
+                    "52057f5a-094d-4cdf-b078-398dc07ab75d",
                     "domain",
                     "exact.example",
                     team_id="scope-team",
@@ -29275,7 +29280,7 @@ class TestDatabaseInit:
                 atlas_finding_plan = self._sqlite_query_plan(
                     conn,
                     atlas_finding_sql,
-                    (*finding_source_scope_params("scope-session"), "run-1", 10),
+                    (*finding_source_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), "run-1", 10),
                 )
 
                 profile_related_entities_sql = (
@@ -29289,7 +29294,7 @@ class TestDatabaseInit:
                 profile_related_entities_plan = self._sqlite_query_plan(
                     conn,
                     profile_related_entities_sql,
-                    (*entity_scope_params("scope-session"), "url", "host-entity", 25),
+                    (*entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), "url", "host-entity", 25),
                 )
 
                 profile_related_findings_sql = (
@@ -29305,21 +29310,25 @@ class TestDatabaseInit:
                     conn,
                     profile_related_findings_sql,
                     (
-                        *finding_source_scope_params("scope-session"),
+                        *finding_source_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"),
                         "host-entity",
                         "url",
-                        *entity_scope_params("scope-session"),
+                        *entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"),
                     ),
                 )
 
-                project_owner_sql, project_owner_params = shared_owner_where("scope-session")
+                project_owner_sql, project_owner_params = shared_owner_where(
+                    "52057f5a-094d-4cdf-b078-398dc07ab75d"
+                )
                 project_slug_plan = self._sqlite_query_plan(
                     conn,
                     "SELECT id FROM projects WHERE " + project_owner_sql + " AND slug = ?",
                     (*project_owner_params, "project-one"),
                 )
 
-                project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause("scope-session")
+                project_entity_owner_sql, project_entity_owner_params = project_entity_owner_clause(
+                    "52057f5a-094d-4cdf-b078-398dc07ab75d"
+                )
                 project_entity_plan = self._sqlite_query_plan(
                     conn,
                     "SELECT e.id FROM entities e WHERE 1 = 1 "
@@ -29328,7 +29337,9 @@ class TestDatabaseInit:
                     (*project_entity_owner_params, "domain", 10),
                 )
 
-                project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause("scope-session")
+                project_finding_owner_sql, project_finding_owner_params = project_finding_owner_clause(
+                    "52057f5a-094d-4cdf-b078-398dc07ab75d"
+                )
                 project_finding_plan = self._sqlite_query_plan(
                     conn,
                     "SELECT f.id FROM findings f WHERE 1 = 1 "
@@ -29342,7 +29353,7 @@ class TestDatabaseInit:
                     "SELECT e.id FROM entities e WHERE "
                     + entity_scope_sql("e")
                     + " ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
-                    (*entity_scope_params("scope-session"), 10),
+                    (*entity_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), 10),
                 )
                 project_visible_sort_plan = self._sqlite_query_plan(
                     conn,
@@ -29369,7 +29380,7 @@ class TestDatabaseInit:
                     "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
                     "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
                     "f.last_seen_at DESC, f.created DESC LIMIT ?",
-                    (*finding_source_scope_params("scope-session"), 10),
+                    (*finding_source_scope_params("52057f5a-094d-4cdf-b078-398dc07ab75d"), 10),
                 )
                 team_first_run_finding_plan = self._sqlite_query_plan(
                     conn,
@@ -29652,12 +29663,15 @@ class TestDatabaseInit:
         def fake_connect():
             return FakeConn()
 
-        owner_scope = SimpleNamespace(predicate=lambda *args, **kwargs: ("session_id = ?", ["session"]))
+        query_session_id = anonymous_session_id("split-query-session")
+        owner_scope = SimpleNamespace(
+            predicate=lambda *args, **kwargs: ("session_id = ?", [query_session_id])
+        )
         history_session_id = str(uuid.uuid4())
         monkeypatch.setattr(database, "db_connect", fake_connect)
 
-        assert artifact_queries.list_project_artifacts("session", "project") is None
-        assert package_queries.list_evidence_packages("session", "project") is None
+        assert artifact_queries.list_project_artifacts(query_session_id, "project") is None
+        assert package_queries.list_evidence_packages(query_session_id, "project") is None
         assert history_mutations.history_run_cleanup_preview(history_session_id, "run-1") is None
         assert atlas_lookup.run_atlas_read(lambda conn: conn) is opened[-1]
         assert len(opened) == 4
@@ -29665,7 +29679,7 @@ class TestDatabaseInit:
         assert any("FROM projects" in query for query, _params in opened[1].queries)
         assert any("FROM runs" in query for query, _params in opened[2].queries)
         deleted, _atlas_cleanup, _cleanup_log_fields = history_mutations.delete_history_run(
-            session_id="session",
+            session_id=query_session_id,
             owner_scope=owner_scope,
             run_id="run-1",
             prune_atlas=True,
@@ -29944,14 +29958,14 @@ class TestDatabaseInit:
             conn.execute(
                 "INSERT INTO findings "
                 "(id, session_id, subject_key, signature_hash, cve_ids_json, title, created) "
-                "VALUES ('finding-triage-1', 'session-triage', 'host:example', 'sig-triage', "
+                "VALUES ('finding-triage-1', 'a2533fc7-ff81-4405-b80d-1509e83411e8', 'host:example', 'sig-triage', "
                 "'[\"CVE-2026-12345\"]', 'Finding', '2026-01-01')"
             )
             conn.execute(
                 "INSERT INTO findings "
                 "(id, session_id, subject_key, signature_hash, cve_ids_json, origin, "
                 "validation_method, title, created) "
-                "VALUES ('finding-triage-related', 'session-triage', 'host:example', "
+                "VALUES ('finding-triage-related', 'a2533fc7-ff81-4405-b80d-1509e83411e8', 'host:example', "
                 "'sig-triage-related', '[\"CVE-2026-12345\"]', 'manual', "
                 "'manual_assessment', 'Related finding', '2026-01-02')"
             )
@@ -29963,8 +29977,8 @@ class TestDatabaseInit:
                 "INSERT INTO finding_evidence_links "
                 "(id, session_id, project_id, finding_id, evidence_type, evidence_id, "
                 "created_by_session_id, created_at) VALUES "
-                "('fel-triage-cleanup', 'session-triage', 'prj-deleted', "
-                "'finding-triage-1', 'run', 'run-deleted', 'session-triage', "
+                "('fel-triage-cleanup', 'a2533fc7-ff81-4405-b80d-1509e83411e8', 'prj-deleted', "
+                "'finding-triage-1', 'run', 'run-deleted', 'a2533fc7-ff81-4405-b80d-1509e83411e8', "
                 "'2026-01-01')"
             )
             conn.execute(
@@ -29981,7 +29995,7 @@ class TestDatabaseInit:
             with mock.patch("core.database.DB_PATH", db_path), \
                     mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 5}, clear=False):
                 saved = project_metadata.upsert_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                     {
                         "remediation": "Patch Samba.",
@@ -29994,13 +30008,13 @@ class TestDatabaseInit:
                 assert saved["verification_status"] == "ready_to_verify"
                 assert saved["remediation"] == "Patch Samba."
                 loaded = project_metadata.get_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                 )
                 assert loaded is not None
                 assert loaded["verification_steps"] == "Re-run the SMB checks."
                 related = project_metadata.get_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-related",
                 )
                 assert related is not None
@@ -30024,23 +30038,23 @@ class TestDatabaseInit:
                 with database.db_connect() as quota_conn:
                     quota_conn.execute(
                         "INSERT INTO findings (id, session_id, subject_key, signature_hash, title, created) "
-                        "VALUES ('finding-triage-2', 'session-triage', 'host:other', 'sig-triage-2', "
+                        "VALUES ('finding-triage-2', 'a2533fc7-ff81-4405-b80d-1509e83411e8', 'host:other', 'sig-triage-2', "
                         "'Finding 2', '2026-01-01')"
                     )
                     quota_conn.commit()
                 assert project_metadata.get_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-2",
                 ) is None
                 with mock.patch.dict("config.CFG", {"max_finding_triage_details_per_owner": 1}, clear=False):
                     with pytest.raises(ProjectWorkspaceQuotaExceeded, match="finding triage quota exceeded"):
                         project_metadata.upsert_finding_triage_details(
-                            "session-triage",
+                            "a2533fc7-ff81-4405-b80d-1509e83411e8",
                             "finding-triage-2",
                             {"verification_status": "ready_to_verify"},
                         )
                 updated = project_metadata.upsert_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                     {
                         "remediation": "Patch Samba and restart smbd.",
@@ -30063,7 +30077,7 @@ class TestDatabaseInit:
                 with database.db_connect() as disposition_conn:
                     preserved = project_metadata.upsert_finding_triage_details_on_conn(
                         disposition_conn,
-                        "session-triage",
+                        "a2533fc7-ff81-4405-b80d-1509e83411e8",
                         "finding-triage-1",
                         {
                             "remediation": "Patch Samba and restart smbd.",
@@ -30103,7 +30117,7 @@ class TestDatabaseInit:
                 with database.db_connect() as race_conn:
                     raced = project_metadata.upsert_finding_triage_details_on_conn(
                         _RaceConnection(race_conn),
-                        "session-triage",
+                        "a2533fc7-ff81-4405-b80d-1509e83411e8",
                         "finding-triage-1",
                         {
                             "remediation": "Patch Samba after concurrent save.",
@@ -30121,41 +30135,47 @@ class TestDatabaseInit:
                 with database.db_connect() as triage_conn:
                     batch = project_metadata._finding_triage_by_id(
                         triage_conn,
-                        "session-triage",
+                        "a2533fc7-ff81-4405-b80d-1509e83411e8",
                         ["finding-triage-1", "missing"],
                     )
                     assert set(batch) == {"finding-triage-1"}
                     recalculate_atlas_findings(triage_conn, ["finding-triage-1"])
                     triage_conn.commit()
                 recalculated = project_metadata.get_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                 )
                 assert recalculated is not None
                 assert recalculated["verification_status"] == "needs_retest"
                 with pytest.raises(ProjectWorkspaceError, match="invalid verification_status"):
                     project_metadata.upsert_finding_triage_details(
-                        "session-triage",
+                        "a2533fc7-ff81-4405-b80d-1509e83411e8",
                         "finding-triage-1",
                         {"verification_status": "done"},
                     )
                 assert project_metadata.upsert_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                     {"verification_status": "not_started"},
                 ) is None
-                assert project_metadata.get_finding_triage_details("session-triage", "finding-triage-1") is None
+                assert (
+                    project_metadata.get_finding_triage_details(
+                        "a2533fc7-ff81-4405-b80d-1509e83411e8",
+                        "finding-triage-1",
+                    )
+                    is None
+                )
                 assert project_metadata.get_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-related",
                 ) is None
                 project_metadata.upsert_finding_triage_details(
-                    "session-triage",
+                    "a2533fc7-ff81-4405-b80d-1509e83411e8",
                     "finding-triage-1",
                     {"verification_status": "needs_retest"},
                 )
                 with database.db_connect() as cleanup_conn:
-                    assert delete_atlas_findings(cleanup_conn, "session-triage", ["finding-triage-1"]) == 1
+                    assert delete_atlas_findings(cleanup_conn, "a2533fc7-ff81-4405-b80d-1509e83411e8", ["finding-triage-1"]) == 1
                     cleanup_conn.commit()
                 with database.db_connect() as cleanup_conn:
                     row = cleanup_conn.execute(
@@ -30230,7 +30250,7 @@ class TestDatabaseInit:
             insert_import_draft(
                 conn,
                 draft_id="draft-import",
-                session_id="atlas-session",
+                session_id="4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 source_tool="nessus",
                 import_name="Nessus staging scan",
                 created=now,
@@ -30241,7 +30261,7 @@ class TestDatabaseInit:
             insert_import_batch(
                 conn,
                 batch_id="batch-import",
-                session_id="atlas-session",
+                session_id="4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 source_tool="nessus",
                 import_name="Nessus staging scan",
                 created=now,
@@ -30253,7 +30273,7 @@ class TestDatabaseInit:
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', ?, ?, 0, ?)",
-                ("entity-import", "atlas-session", now, now, now),
+                ("entity-import", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", now, now, now),
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -30262,7 +30282,7 @@ class TestDatabaseInit:
                 "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', ?, ?, 0, 'new', ?, ?, ?)",
                 (
                     "finding-import",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "entity-import",
                     now,
                     now,
@@ -30343,7 +30363,7 @@ class TestDatabaseInit:
             insert_import_batch(
                 conn,
                 batch_id="batch-import",
-                session_id="atlas-session",
+                session_id="4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 source_tool="nessus",
                 import_name="Nessus staging scan",
                 created=now,
@@ -30353,7 +30373,7 @@ class TestDatabaseInit:
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'domain', 'darklab.sh', 'entity-sig', '', '', 0, ?)",
-                ("entity-import", "atlas-session", now),
+                ("entity-import", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", now),
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -30362,7 +30382,7 @@ class TestDatabaseInit:
                 "VALUES (?, ?, ?, 'domain:darklab.sh', 'finding-sig', '', '', 0, 'new', ?, ?, ?)",
                 (
                     "finding-import",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "entity-import",
                     "TLS certificate expires soon",
                     "TLS certificate expires soon",
@@ -30394,12 +30414,12 @@ class TestDatabaseInit:
                 "SELECT occurrence_count, run_id, first_run_id, last_run_id, first_seen_at, last_seen_at, line_number "
                 "FROM findings"
             ).fetchone()
-            entity_visible = entity_exists_in_scope(conn, "atlas-session", "entity-import")
-            finding_visible = finding_exists_in_scope(conn, "atlas-session", "finding-import")
-            listed_entities = list_entities(conn, "atlas-session", limit=10)
-            listed_findings = list_findings(conn, "atlas-session", limit=10)
-            imported_entity_detail = entity_detail(conn, "atlas-session", "entity-import")
-            imported_finding_detail = finding_detail(conn, "atlas-session", "finding-import")
+            entity_visible = entity_exists_in_scope(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "entity-import")
+            finding_visible = finding_exists_in_scope(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "finding-import")
+            listed_entities = list_entities(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", limit=10)
+            listed_findings = list_findings(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", limit=10)
+            imported_entity_detail = entity_detail(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "entity-import")
+            imported_finding_detail = finding_detail(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "finding-import")
             conn.close()
 
         assert entity_row["occurrence_count"] == 2
@@ -30436,13 +30456,13 @@ class TestDatabaseInit:
             now = "2026-06-01T00:00:00+00:00"
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_search_text) "
-                "VALUES ('run-import-mixed', 'atlas-session', 'nmap darklab.sh', ?, '[]', 'darklab.sh')",
+                "VALUES ('run-import-mixed', '4d4659e9-5837-4282-92d4-98c55ac2fa5b', 'nmap darklab.sh', ?, '[]', 'darklab.sh')",
                 (now,),
             )
             insert_import_batch(
                 conn,
                 batch_id="batch-import",
-                session_id="atlas-session",
+                session_id="4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 source_tool="nessus",
                 import_name="Nessus staging scan",
                 created=now,
@@ -30452,7 +30472,8 @@ class TestDatabaseInit:
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                 "occurrence_count, created) "
-                "VALUES ('entity-mixed', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                "VALUES ('entity-mixed', '4d4659e9-5837-4282-92d4-98c55ac2fa5b', "
+                "'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
                 (now, now, now),
             )
             conn.execute(
@@ -30464,7 +30485,7 @@ class TestDatabaseInit:
                 "INSERT INTO findings "
                 "(id, session_id, run_id, entity_id, subject_key, signature_hash, first_run_id, last_run_id, "
                 "first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
-                "VALUES ('finding-mixed', 'atlas-session', 'run-import-mixed', 'entity-mixed', "
+                "VALUES ('finding-mixed', '4d4659e9-5837-4282-92d4-98c55ac2fa5b', 'run-import-mixed', 'entity-mixed', "
                 "'domain:darklab.sh', 'finding-sig', 'run-import-mixed', 'run-import-mixed', "
                 "?, ?, 1, 'new', 'TLS certificate expires soon', 'TLS certificate expires soon', ?)",
                 (now, now, now),
@@ -30491,7 +30512,7 @@ class TestDatabaseInit:
                 snippet="TLS certificate expires soon",
             )
 
-            result = detach_atlas_run_sources(conn, "atlas-session", ["run-import-mixed"])
+            result = detach_atlas_run_sources(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", ["run-import-mixed"])
             entity_row = conn.execute(
                 "SELECT occurrence_count, first_seen_at, last_seen_at FROM entities WHERE id = 'entity-mixed'"
             ).fetchone()
@@ -30538,7 +30559,7 @@ class TestDatabaseInit:
             insert_import_batch(
                 conn,
                 batch_id="batch-import",
-                session_id="atlas-session",
+                session_id="4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 source_tool="nessus",
                 import_name="Nessus staging scan",
                 created=now,
@@ -30548,7 +30569,8 @@ class TestDatabaseInit:
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                 "occurrence_count, created) "
-                "VALUES ('entity-import', 'atlas-session', 'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
+                "VALUES ('entity-import', '4d4659e9-5837-4282-92d4-98c55ac2fa5b', "
+                "'domain', 'darklab.sh', 'entity-sig', ?, ?, 1, ?)",
                 (now, now, now),
             )
             upsert_entity_import_link(
@@ -30560,7 +30582,7 @@ class TestDatabaseInit:
                 occurrence_count=1,
             )
 
-            result = delete_atlas_entities(conn, "atlas-session", ["entity-import"])
+            result = delete_atlas_entities(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", ["entity-import"])
             entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
             import_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
             conn.close()
@@ -31216,7 +31238,7 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-atlas", "atlas-session", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                ("run-atlas", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
             gau_metadata = OutputSignalClassifier(
                 "gau example.com",
@@ -31226,7 +31248,7 @@ SQL syntax error near q</response>
             assert isinstance(gau_entities, list)
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-atlas",
                 [
                     {
@@ -31258,7 +31280,7 @@ SQL syntax error near q</response>
             with mock.patch("services.atlas.materializer.log.warning") as warning_log:
                 materialize_run_entities(
                     conn,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "run-atlas",
                     [{"entities": [{"type": "domain", "value": "darklab.sh", "attributes": {"source": "manual"}}]}],
                     seen_at="2026-05-14T00:00:02+00:00",
@@ -31286,7 +31308,7 @@ SQL syntax error near q</response>
         assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 7
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
         assert warning_events["ATLAS_ENTITY_ATTRIBUTES_DECODE_FAILED"] == {
-            "session": get_log_session_id("atlas-session"),
+            "session": get_log_session_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b"),
             "entity_id": domain_id,
             "entity_type": "domain",
             "value_type": "str",
@@ -31303,11 +31325,17 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-url-atlas", "atlas-session", "curl https://api.example.com/login", "2026-05-14T00:00:00+00:00", "[]"),
+                (
+                    "run-url-atlas",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
+                    "curl https://api.example.com/login",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-url-atlas",
                 [{"entities": [{"type": "url", "value": "https://api.example.com/login"}]}],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -31315,7 +31343,7 @@ SQL syntax error near q</response>
             )
             ip_url_id = upsert_entity(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "url",
                 "https://192.0.2.10/status",
                 seen_at="2026-05-14T00:00:02+00:00",
@@ -31323,7 +31351,7 @@ SQL syntax error near q</response>
             )
             ipv6_url_id = upsert_entity(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "url",
                 "http://[2001:db8::1]:8080/status",
                 seen_at="2026-05-14T00:00:03+00:00",
@@ -31370,11 +31398,17 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-url-extracted", "atlas-session", "curl https://api.example.com/login", "2026-05-14T00:00:00+00:00", "[]"),
+                (
+                    "run-url-extracted",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
+                    "curl https://api.example.com/login",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-url-extracted",
                 [{"entities": extract_entities("visit https://api.example.com/login now")}],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -31384,7 +31418,7 @@ SQL syntax error near q</response>
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
                 (
                     "run-private-url-extracted",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "curl http://127.0.0.1/private",
                     "2026-05-14T00:00:02+00:00",
                     "[]"
@@ -31392,7 +31426,7 @@ SQL syntax error near q</response>
             )
             private_recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-private-url-extracted",
                 [{"entities": extract_entities("visit http://127.0.0.1/private now")}],
                 seen_at="2026-05-14T00:00:03+00:00",
@@ -31402,7 +31436,7 @@ SQL syntax error near q</response>
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
                 (
                     "run-url-extracted-repeat",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "curl https://api.example.com/login",
                     "2026-05-14T00:00:04+00:00",
                     "[]",
@@ -31410,7 +31444,7 @@ SQL syntax error near q</response>
             )
             repeat_recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-url-extracted-repeat",
                 [
                     {"entities": extract_entities("visit https://api.example.com/login now")},
@@ -31472,7 +31506,7 @@ SQL syntax error near q</response>
             self._create_tables(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
-            url_id = atlas_entity_id("atlas-session", "url", "https://legacy.example.com/path")
+            url_id = atlas_entity_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b", "url", "https://legacy.example.com/path")
             conn.execute(
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
@@ -31480,7 +31514,7 @@ SQL syntax error near q</response>
                 "VALUES (?, ?, 'url', ?, ?, ?, ?, 3, '', ?, ?)",
                 (
                     url_id,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "https://legacy.example.com/path",
                     entity_signature("url", "https://legacy.example.com/path"),
                     "2026-05-14T00:00:01+00:00",
@@ -31489,7 +31523,7 @@ SQL syntax error near q</response>
                     "2026-05-14T00:00:01+00:00",
                 ),
             )
-            ipv6_url_id = atlas_entity_id("atlas-session", "url", "https://[2001:db8::1]:8443/status")
+            ipv6_url_id = atlas_entity_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b", "url", "https://[2001:db8::1]:8443/status")
             conn.execute(
                 "INSERT INTO entities "
                 "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
@@ -31497,7 +31531,7 @@ SQL syntax error near q</response>
                 "VALUES (?, ?, 'url', ?, ?, ?, ?, 3, '', ?, ?)",
                 (
                     ipv6_url_id,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "https://[2001:db8::1]:8443/status",
                     entity_signature("url", "https://[2001:db8::1]:8443/status"),
                     "2026-05-14T00:00:02+00:00",
@@ -31550,7 +31584,7 @@ SQL syntax error near q</response>
                 "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
                 (
                     "ent-url-host-backfill-invalid",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "https://bad host/path?secret=hidden",
                     entity_signature("url", "https://bad host/path?secret=hidden"),
                     "2026-05-14T00:00:05+00:00",
@@ -31628,7 +31662,7 @@ SQL syntax error near q</response>
                 "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, '', ?, ?)",
                 (
                     "ent-url-host-backfill-error",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "https://error.example.com/path",
                     entity_signature("url", "https://error.example.com/path"),
                     "2026-05-14T00:00:06+00:00",
@@ -31651,7 +31685,7 @@ SQL syntax error near q</response>
             "stage": "upsert_host",
             "backend": database.DB_BACKEND.value,
             "url_entity_id": "ent-url-host-backfill-error",
-            "session": get_log_session_id("atlas-session"),
+            "session": get_log_session_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b"),
             "team_id": "",
             "host_entity_type": "domain",
         }
@@ -31668,12 +31702,12 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-port-atlas", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+                ("run-port-atlas", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
             )
             with mock.patch("services.atlas.materializer.log.debug") as debug_log:
                 recorded = materialize_run_entities(
                     conn,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "run-port-atlas",
                     [
                         {
@@ -31717,7 +31751,7 @@ SQL syntax error near q</response>
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     "prj-port-atlas",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "Port Atlas",
                     "port-atlas",
                     "2026-05-14T00:00:00+00:00",
@@ -31736,7 +31770,7 @@ SQL syntax error near q</response>
             )
             materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-other-port-atlas",
                 [{
                     "entities": [
@@ -31762,18 +31796,18 @@ SQL syntax error near q</response>
                 ),
             )
             conn.commit()
-            export_rows = atlas_entities_export(conn, "atlas-session", entity_type="port")
+            export_rows = atlas_entities_export(conn, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", entity_type="port")
             export_csv = atlas_entities_export_csv(export_rows)
             export_jsonl = atlas_entities_export_jsonl(export_rows)
             conn.close()
             with mock.patch("core.database.DB_PATH", db_path):
                 project_entity_page = project_queries.list_project_entities(
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "prj-port-atlas",
                     entity_type="port",
                 )
                 project_host_filtered_page = project_queries.list_project_entities(
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "prj-port-atlas",
                     {"host_entity_id": [rows["domain"]["id"]]},
                     entity_type="port",
@@ -31786,7 +31820,7 @@ SQL syntax error near q</response>
             if call.args == ("ATLAS_ENTITY_MATERIALIZATION_SUMMARY",)
         )
         assert summary == {
-            "session": get_log_session_id("atlas-session"),
+            "session": get_log_session_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b"),
             "run_id": "run-port-atlas",
             "command_root": "nmap",
             "entity_count": 2,
@@ -31835,11 +31869,17 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-internal-port-atlas", "atlas-session", "rustscan -a 127.0.0.1", "2026-05-14T00:00:00+00:00", "[]"),
+                (
+                    "run-internal-port-atlas",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
+                    "rustscan -a 127.0.0.1",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
             )
             materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-internal-port-atlas",
                 [
                     {
@@ -31870,7 +31910,7 @@ SQL syntax error near q</response>
                 with mock.patch.object(intel_bridge, "lookup_entity") as lookup_entity:
                     with mock.patch.object(intel_bridge.log, "debug") as intel_debug:
                         refresh_result = intel_bridge.refresh_entity_intel(
-                            "atlas-session",
+                            "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                             internal_rows["127.0.0.1:8080/tcp"]["id"],
                         )
         assert internal_rows["127.0.0.1:8080/tcp"]["host_entity_id"] == internal_rows["127.0.0.1"]["id"]
@@ -31895,11 +31935,11 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-port-empty", "atlas-session", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
+                ("run-port-empty", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "nmap example.com", "2026-05-14T00:00:00+00:00", "[]"),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-port-empty",
                 [],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -31915,7 +31955,7 @@ SQL syntax error near q</response>
             with mock.patch("services.atlas.materializer.log.warning") as warning_log:
                 materialize_run_entities(
                     conn,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "run-port-empty",
                     [],
                     seen_at="2026-05-14T00:00:02+00:00",
@@ -31936,7 +31976,7 @@ SQL syntax error near q</response>
         }]
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
         assert warning_events["SCAN_TARGET_OBSERVATIONS_DROPPED"] == {
-            "session": get_log_session_id("atlas-session"),
+            "session": get_log_session_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b"),
             "run_id": "run-port-empty",
             "command_root": "",
             "deleted_count": 1,
@@ -31968,11 +32008,11 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+                (run_id, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", command, "2026-05-14T00:00:00+00:00", "[]"),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 run_id,
                 [],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -32006,7 +32046,7 @@ SQL syntax error near q</response>
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
                 (
                     "run-quiet-masscan",
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     "masscan -p 80 198.51.100.7",
                     "2026-05-14T00:00:00+00:00",
                     "[]",
@@ -32014,7 +32054,7 @@ SQL syntax error near q</response>
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-quiet-masscan",
                 [],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -32040,11 +32080,17 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-curl-port", "atlas-session", "curl -v https://example.com", "2026-05-14T00:00:00+00:00", "[]"),
+                (
+                    "run-curl-port",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
+                    "curl -v https://example.com",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-curl-port",
                 [{
                     "entities": [
@@ -32080,11 +32126,11 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-atlas-raw", "atlas-session", "host darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                ("run-atlas-raw", "4d4659e9-5837-4282-92d4-98c55ac2fa5b", "host darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
             recorded = materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-atlas-raw",
                 [{"text": "darklab.sh has address 203.0.113.10"}],
                 seen_at="2026-05-14T00:00:01+00:00",
@@ -32152,7 +32198,7 @@ SQL syntax error near q</response>
             for run_id, command, line in rows:
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                    (run_id, "atlas-session", command, "2026-05-14T00:00:00+00:00", "[]"),
+                    (run_id, "4d4659e9-5837-4282-92d4-98c55ac2fa5b", command, "2026-05-14T00:00:00+00:00", "[]"),
                 )
                 classifier = OutputSignalClassifier(command)
                 events = []
@@ -32160,7 +32206,7 @@ SQL syntax error near q</response>
                     events.append({"text": output_line, **classifier.classify_line(output_line)})
                 materialize_run_entities(
                     conn,
-                    "atlas-session",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                     run_id,
                     events,
                     seen_at="2026-05-14T00:00:01+00:00",
@@ -32300,7 +32346,7 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
-                "VALUES ('run-nmap-vulners', 'sess-nmap-vulners', 'external', "
+                "VALUES ('run-nmap-vulners', '2cce0814-aadc-4262-af83-2b3f110dbed0', 'external', "
                 "'nmap -sV --script vulners 192.168.1.5', ?, ?, 0)",
                 ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
             )
@@ -32315,7 +32361,7 @@ SQL syntax error near q</response>
                 signals = metadata.get("signals")
                 if isinstance(signals, list) and "findings" in signals and "vulners.com/" in line:
                     entries.append({"text": line, **metadata})
-            recorded = record_run_findings(conn, "sess-nmap-vulners", "run-nmap-vulners", entries)
+            recorded = record_run_findings(conn, "2cce0814-aadc-4262-af83-2b3f110dbed0", "run-nmap-vulners", entries)
             conn.commit()
             rows = conn.execute(
                 "SELECT entity_id, subject_key, raw_line, severity FROM findings ORDER BY line_number"
@@ -32384,13 +32430,13 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
-                "VALUES ('run-trufflehog', 'sess-trufflehog', 'external', "
+                "VALUES ('run-trufflehog', '243b4ee6-f0d8-4965-b6fd-f763d1ad5f71', 'external', "
                 "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
                 ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
             )
             classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
             entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
-            recorded = record_run_findings(conn, "sess-trufflehog", "run-trufflehog", [entry])
+            recorded = record_run_findings(conn, "243b4ee6-f0d8-4965-b6fd-f763d1ad5f71", "run-trufflehog", [entry])
             conn.commit()
             finding = conn.execute("SELECT title, raw_line, severity FROM findings").fetchone()
             entity = conn.execute("SELECT type, canonical_value FROM entities").fetchone()
@@ -32445,13 +32491,13 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
-                "VALUES ('run-trufflehog-safe-hint', 'sess-trufflehog', 'external', "
+                "VALUES ('run-trufflehog-safe-hint', '243b4ee6-f0d8-4965-b6fd-f763d1ad5f71', 'external', "
                 "'trufflehog git https://github.com/trufflesecurity/test_keys --json', ?, ?, 0)",
                 ("2026-05-14T00:00:00+00:00", "2026-05-14T00:00:01+00:00"),
             )
             classifier = OutputSignalClassifier("trufflehog git https://github.com/trufflesecurity/test_keys --json")
             entry = {"text": filtered_line, **classifier.classify_line(filtered_line)}
-            record_run_findings(conn, "sess-trufflehog", "run-trufflehog-safe-hint", [entry])
+            record_run_findings(conn, "243b4ee6-f0d8-4965-b6fd-f763d1ad5f71", "run-trufflehog-safe-hint", [entry])
             conn.commit()
             finding = conn.execute("SELECT title, raw_line FROM findings").fetchone()
             conn.close()
@@ -32514,18 +32560,24 @@ SQL syntax error near q</response>
             conn.row_factory = sqlite3.Row
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
-                ("run-atlas-refinalize", "atlas-session", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+                (
+                    "run-atlas-refinalize",
+                    "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
+                    "nmap darklab.sh",
+                    "2026-05-14T00:00:00+00:00",
+                    "[]",
+                ),
             )
             materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-atlas-refinalize",
                 [{"entities": [{"type": "domain", "value": "darklab.sh"}]}],
                 seen_at="2026-05-14T00:00:01+00:00",
             )
             materialize_run_entities(
                 conn,
-                "atlas-session",
+                "4d4659e9-5837-4282-92d4-98c55ac2fa5b",
                 "run-atlas-refinalize",
                 [{"entities": [{"type": "cve", "value": "CVE-2025-49113"}]}],
                 seen_at="2026-05-14T00:00:02+00:00",
@@ -32667,7 +32719,12 @@ SQL syntax error near q</response>
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _insert_auto_promote_project(self, conn, project_id="prj-auto-promote", session_id="auto-session"):
+    def _insert_auto_promote_project(
+        self,
+        conn,
+        project_id="prj-auto-promote",
+        session_id="9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+    ):
         slug = project_id.replace("_", "-")
         conn.execute(
             "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
@@ -32675,7 +32732,14 @@ SQL syntax error near q</response>
             (project_id, session_id, slug, "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
         )
 
-    def _insert_auto_promote_entity(self, conn, entity_id, entity_type, canonical_value, session_id="auto-session"):
+    def _insert_auto_promote_entity(
+        self,
+        conn,
+        entity_id,
+        entity_type,
+        canonical_value,
+        session_id="9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+    ):
         conn.execute(
             "INSERT INTO entities "
             "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
@@ -32700,7 +32764,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-beta", "domain", "beta.example.com")
             rule = project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Alpha domains",
@@ -32715,8 +32779,18 @@ SQL syntax error near q</response>
                 mock.patch.object(project_auto_promote.log, "debug") as debug_log,
                 mock.patch.object(project_auto_promote.log, "warning") as warning_log,
             ):
-                first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
-                second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                first = project_auto_promote.apply_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    rule,
+                )
+                second = project_auto_promote.apply_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    rule,
+                )
             rows = conn.execute(
                 "SELECT entity_id, source, source_detail FROM project_links "
                 "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
@@ -32858,11 +32932,16 @@ SQL syntax error near q</response>
                 "pattern": "example",
             }
             with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_rules_per_project": 1}, clear=False):
-                first = project_auto_promote.create_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+                first = project_auto_promote.create_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    payload,
+                )
                 with pytest.raises(ProjectWorkspaceQuotaExceeded) as exc:
                     project_auto_promote.create_rule_on_conn(
                         conn,
-                        "auto-session",
+                        "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                         "prj-auto-promote",
                         {**payload, "name": "Beta domains"},
                     )
@@ -32885,7 +32964,7 @@ SQL syntax error near q</response>
             )
             rule = project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Darklab domains",
@@ -32896,9 +32975,24 @@ SQL syntax error near q</response>
                 },
             )
 
-            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
-            first = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
-            second = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                "prj-auto-promote",
+                rule,
+            )
+            first = project_auto_promote.apply_rule_on_conn(
+                conn,
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                "prj-auto-promote",
+                rule,
+            )
+            second = project_auto_promote.apply_rule_on_conn(
+                conn,
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                "prj-auto-promote",
+                rule,
+            )
             row = conn.execute(
                 "SELECT source, confidence, review_state, source_detail FROM project_links "
                 "WHERE project_id = 'prj-auto-promote' AND entity_id = 'ent-auto-graph'"
@@ -32928,9 +33022,9 @@ SQL syntax error near q</response>
             conn.execute("UPDATE entities SET suppressed = 1 WHERE id = 'ent-auto-suppressed'")
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
-                "('run-auto-nmap', 'auto-session', 'nmap nmap.example.com', ?, '[]'), "
-                "('run-auto-nuclei', 'auto-session', 'nuclei -u https://nuclei.example.com', ?, '[]'), "
-                "('run-auto-suppressed', 'auto-session', 'nmap suppressed.example.com', ?, '[]')",
+                "('run-auto-nmap', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap nmap.example.com', ?, '[]'), "
+                "('run-auto-nuclei', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nuclei -u https://nuclei.example.com', ?, '[]'), "
+                "('run-auto-suppressed', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap suppressed.example.com', ?, '[]')",
                 ("2026-05-31 00:00:00", "2026-05-31 00:00:00", "2026-05-31 00:00:00"),
             )
             conn.execute(
@@ -32950,7 +33044,7 @@ SQL syntax error near q</response>
             )
             preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Nmap examples",
@@ -32973,8 +33067,8 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-second-run", "domain", "second.example.com")
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES "
-                "('run-auto-first', 'auto-session', 'nmap first.example.com', ?, '[]'), "
-                "('run-auto-second', 'auto-session', 'nuclei -u https://second.example.com', ?, '[]')",
+                "('run-auto-first', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap first.example.com', ?, '[]'), "
+                "('run-auto-second', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nuclei -u https://second.example.com', ?, '[]')",
                 ("2026-05-31 00:00:00", "2026-05-31 00:00:00"),
             )
             conn.execute(
@@ -32991,7 +33085,7 @@ SQL syntax error near q</response>
             )
             preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Specific run examples",
@@ -33012,7 +33106,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-apply", "domain", "apply.example.com")
             rule = project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Apply domains",
@@ -33027,8 +33121,18 @@ SQL syntax error near q</response>
                 "_candidate_rows",
                 side_effect=original_candidate_rows,
             ) as candidate_rows:
-                preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
-                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                preview = project_auto_promote.preview_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    rule,
+                )
+                result = project_auto_promote.apply_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    rule,
+                )
             conn.close()
 
         assert preview["skipped_suppressed_count"] == 0
@@ -33046,7 +33150,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-underscore-miss", "url", "https://example.test/axb")
             percent_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Literal percent",
@@ -33057,7 +33161,7 @@ SQL syntax error near q</response>
             )
             underscore_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Literal underscore",
@@ -33080,7 +33184,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-url", "url", "https://darklab.sh/admin")
             domain_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Any exact domain",
@@ -33091,7 +33195,7 @@ SQL syntax error near q</response>
             )
             port_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Any exact port",
@@ -33102,7 +33206,7 @@ SQL syntax error near q</response>
             )
             url_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Any exact URL",
@@ -33113,7 +33217,7 @@ SQL syntax error near q</response>
             )
             slash_url_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Distinct slash URL",
@@ -33140,7 +33244,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-ip-miss", "ip", "198.51.100.55")
             url_suffix_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "URL darklab hosts",
@@ -33151,7 +33255,7 @@ SQL syntax error near q</response>
             )
             any_suffix_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Any darklab hosts",
@@ -33162,7 +33266,7 @@ SQL syntax error near q</response>
             )
             any_cidr_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Any documentation IPs",
@@ -33202,10 +33306,15 @@ SQL syntax error near q</response>
                 "filters": {"first_seen_after_rule_created": True},
             }
             with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
-                draft_preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", payload)
+                draft_preview = project_auto_promote.preview_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    payload,
+                )
             existing_preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {**payload, "created": "2026-05-30 23:00:00"},
             )
@@ -33235,7 +33344,7 @@ SQL syntax error near q</response>
             with mock.patch.object(project_auto_promote, "_now", return_value="2026-05-31 00:00:00"):
                 rule = project_auto_promote.create_rule_on_conn(
                     conn,
-                    "auto-session",
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                     "prj-auto-promote",
                     {
                         "name": "Stored fresh examples",
@@ -33245,7 +33354,12 @@ SQL syntax error near q</response>
                         "filters": {"first_seen_after_rule_created": True},
                     },
                 )
-            preview = project_auto_promote.preview_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+            preview = project_auto_promote.preview_rule_on_conn(
+                conn,
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                "prj-auto-promote",
+                rule,
+            )
             conn.close()
 
         assert rule["created"] == "2026-05-31 00:00:00"
@@ -33291,7 +33405,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-v6-miss", "ip", "2001:db9::1")
             preview = project_auto_promote.preview_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "IPv6 lab",
@@ -33313,7 +33427,7 @@ SQL syntax error near q</response>
             with mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_scan_candidates": 1}, clear=False):
                 preview = project_auto_promote.preview_rule_on_conn(
                     conn,
-                    "auto-session",
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                     "prj-auto-promote",
                     {
                         "name": "Example suffix",
@@ -33346,7 +33460,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-cap-two", "domain", "two.example.com")
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) "
-                "VALUES ('run-auto-cap', 'auto-session', 'nmap example.com', ?, '[]')",
+                "VALUES ('run-auto-cap', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap example.com', ?, '[]')",
                 ("2026-05-31 00:00:00",),
             )
             conn.execute(
@@ -33363,7 +33477,7 @@ SQL syntax error near q</response>
             )
             project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Example domains",
@@ -33377,7 +33491,11 @@ SQL syntax error near q</response>
                 mock.patch.dict(shell_app_module.CFG, {"max_project_auto_promote_run_matches": 1}, clear=False),
                 mock.patch.object(project_auto_promote.log, "warning") as warning_log,
             ):
-                summary = project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-cap")
+                summary = project_auto_promote.apply_run_rules_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "run-auto-cap",
+                )
             linked_count = conn.execute(
                 "SELECT COUNT(*) AS count FROM project_links "
                 "WHERE project_id = 'prj-auto-promote' AND entity_type = 'atlas_entity'"
@@ -33398,12 +33516,12 @@ SQL syntax error near q</response>
             self._insert_auto_promote_project(conn, project_id="prj-auto-promote-error")
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) "
-                "VALUES ('run-auto-error', 'auto-session', 'nmap error.example', ?, '[]')",
+                "VALUES ('run-auto-error', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap error.example', ?, '[]')",
                 ("2026-05-31 00:00:00",),
             )
             rule = project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote-error",
                 {
                     "name": "Error domains",
@@ -33418,7 +33536,7 @@ SQL syntax error near q</response>
                 mock.patch.object(project_auto_promote.log, "error") as error_log,
                 pytest.raises(RuntimeError),
             ):
-                project_auto_promote.apply_run_rules_on_conn(conn, "auto-session", "run-auto-error")
+                project_auto_promote.apply_run_rules_on_conn(conn, "9b98decb-0d82-4b3d-9750-04c58ab6f0df", "run-auto-error")
             conn.close()
 
         assert error_log.call_args.args[0] == "PROJECT_AUTO_PROMOTE_RULE_RUN_APPLY_ERROR"
@@ -33444,7 +33562,7 @@ SQL syntax error near q</response>
             )
             rule = project_auto_promote.create_rule_on_conn(
                 conn,
-                "auto-session",
+                "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                 "prj-auto-promote",
                 {
                     "name": "Quota examples",
@@ -33454,7 +33572,12 @@ SQL syntax error near q</response>
                 },
             )
             with mock.patch.dict(shell_app_module.CFG, {"max_project_entities_per_project": 1}, clear=False):
-                result = project_auto_promote.apply_rule_on_conn(conn, "auto-session", "prj-auto-promote", rule)
+                result = project_auto_promote.apply_rule_on_conn(
+                    conn,
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
+                    "prj-auto-promote",
+                    rule,
+                )
             rows = conn.execute(
                 "SELECT entity_id, source, review_state FROM project_links "
                 "WHERE project_id = 'prj-auto-promote' ORDER BY entity_id"
@@ -33477,7 +33600,7 @@ SQL syntax error near q</response>
             self._insert_auto_promote_entity(conn, "ent-auto-rule-cap", "domain", "rulecap.example.com")
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview) "
-                "VALUES ('run-auto-rule-cap', 'auto-session', 'nmap rulecap.example.com', ?, '[]')",
+                "VALUES ('run-auto-rule-cap', '9b98decb-0d82-4b3d-9750-04c58ab6f0df', 'nmap rulecap.example.com', ?, '[]')",
                 ("2026-05-31 00:00:00",),
             )
             conn.execute(
@@ -33488,7 +33611,7 @@ SQL syntax error near q</response>
             for project_id in ("prj-auto-one", "prj-auto-two", "prj-auto-three"):
                 project_auto_promote.create_rule_on_conn(
                     conn,
-                    "auto-session",
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                     project_id,
                     {
                         "name": f"{project_id} examples",
@@ -33501,7 +33624,7 @@ SQL syntax error near q</response>
             with mock.patch.object(project_auto_promote.log, "warning") as warning_log:
                 summary = project_auto_promote.apply_run_rules_on_conn(
                     conn,
-                    "auto-session",
+                    "9b98decb-0d82-4b3d-9750-04c58ab6f0df",
                     "run-auto-rule-cap",
                     rule_limit=2,
                 )

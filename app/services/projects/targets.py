@@ -33,6 +33,8 @@ from services.projects.contracts import (
     PROJECT_TARGET_TYPES,
     ProjectWorkspaceError,
 )
+from services.teams.ownership_queries import composite_owner_predicate
+from services.teams.scope import personal_owner_context
 from services.projects.links import _insert_project_link
 from services.projects.metadata import _attach_target_metadata, _metadata_owner_where
 from services.projects.models import row_to_target as _row_to_target
@@ -730,9 +732,13 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     if not project_id or not run_id:
         return []
+    project_owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        key_values=(("id", project_id),),
+    )
     project = conn.execute(
-        "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-        (session_id, project_id),
+        f"SELECT 1 FROM projects WHERE {project_owner.sql}",  # nosec
+        project_owner.params,
     ).fetchone()
     if not project:
         return []
@@ -785,9 +791,16 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                     "reason": str(exc)[:160],
                 })
                 continue
+            entity_owner = composite_owner_predicate(
+                personal_owner_context(session_id),
+                key_values=(
+                    ("type", entity_type),
+                    ("signature_hash", entity_signature(entity_type, canonical_value)),
+                ),
+            )
             existing_entity = conn.execute(
-                "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
-                (session_id, entity_type, entity_signature(entity_type, canonical_value)),
+                f"SELECT id FROM entities WHERE {entity_owner.sql}",  # nosec
+                entity_owner.params,
             ).fetchone()
             existing_link = None
             if existing_entity:

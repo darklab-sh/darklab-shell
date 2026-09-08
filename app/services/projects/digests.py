@@ -17,6 +17,8 @@ from core.helpers import get_log_session_id
 from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceNotFound
 from services.projects.monitoring import get_project_monitoring_summary
 from services.projects.scope import shared_owner_where
+from services.teams.ownership_queries import PersonalTeamRows, token_keyed_owner_predicate
+from services.teams.scope import owner_context_for_scope
 from services.notifications.dispatcher import enqueue as enqueue_notification
 from services.notifications.models import TRIGGER_PROJECT_DIGEST
 from services.notifications.payloads import build_project_digest_payload
@@ -224,17 +226,17 @@ def _validate_channel_ids(conn: Any, session_id: str, team_id: str, channel_ids:
     if not channel_ids:
         return
     placeholders = ",".join("?" for _ in channel_ids)
-    if team_id:
-        rows = conn.execute(
-            f"SELECT id FROM notification_channels WHERE team_id = ? AND id IN ({placeholders})",  # nosec
-            (team_id, *channel_ids),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id FROM notification_channels "
-            f"WHERE session_token = ? AND (team_id IS NULL OR team_id = '') AND id IN ({placeholders})",  # nosec
-            (session_id, *channel_ids),
-        ).fetchall()
+    owner = token_keyed_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
+    rows = conn.execute(
+        "SELECT id FROM notification_channels WHERE "  # nosec B608
+        + owner.sql
+        + f" AND id IN ({placeholders})",
+        (*owner.params, *channel_ids),
+    ).fetchall()
     found = {str(row["id"]) for row in rows}
     missing = [channel_id for channel_id in channel_ids if channel_id not in found]
     if missing:

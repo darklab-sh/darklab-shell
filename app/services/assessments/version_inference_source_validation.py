@@ -9,6 +9,7 @@ from typing import Any
 
 from core.output_targets import command_root
 from services.assessments.nessus_import_observations import persisted_nessus_import_observation_matches
+from services.projects.scope import shared_owner_where
 
 
 _RUN_PARSER_PREFIXES = {"httpx": "httpx-", "nmap": "nmap-"}
@@ -24,10 +25,10 @@ def resolve_version_inference_source(
     query = "SELECT s.* FROM runs s " if record["source_kind"] == "run" else (
         "SELECT s.* FROM atlas_import_batches s "
     )
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="s")
     row = conn.execute(
-        query + "WHERE ((? != '' AND s.team_id = ?) OR "
-        "(? = '' AND s.session_id = ? AND s.team_id = '')) AND s.id = ?",
-        (team_id, team_id, team_id, session_id, record["source_id"]),
+        query + f"WHERE {owner_sql} AND s.id = ?",  # nosec
+        (*owner_params, record["source_id"]),
     ).fetchone()
     if not row:
         return None
@@ -44,9 +45,7 @@ def resolve_version_inference_source(
         return row, source_root
     if str(row["status"] or "") != "applied":
         return None
-    return (row, "import") if persisted_nessus_import_observation_matches(
-        conn, session_id, team_id, record
-    ) else None
+    return (row, "import") if persisted_nessus_import_observation_matches(conn, session_id, team_id, record) else None
 
 
 def resolve_version_inference_entity(
@@ -56,11 +55,10 @@ def resolve_version_inference_entity(
     record: dict[str, str],
 ) -> Any:
     """Resolve exactly one owned entity linked to the validated source."""
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="e")
     query = (
         "SELECT e.id, e.type, e.canonical_value FROM entities e "
-        "WHERE ((? != '' AND e.team_id = ?) OR "
-        "(? = '' AND e.session_id = ? AND e.team_id = '')) "
-        "AND e.canonical_value = ? AND "
+        f"WHERE {owner_sql} AND e.canonical_value = ? AND "  # nosec
     )
     source_query = (
         "EXISTS (SELECT 1 FROM entity_run_links l WHERE l.entity_id = e.id AND l.run_id = ?) "
@@ -69,7 +67,7 @@ def resolve_version_inference_entity(
     )
     rows = conn.execute(
         query + source_query + "ORDER BY e.id LIMIT 2",
-        (team_id, team_id, team_id, session_id, record["target"], record["source_id"]),
+        (*owner_params, record["target"], record["source_id"]),
     ).fetchall()
     return rows[0] if len(rows) == 1 else None
 

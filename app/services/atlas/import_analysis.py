@@ -9,6 +9,8 @@ from typing import Any
 
 from services.intel.canonical import entity_signature
 from services.projects.scope import shared_owner_where
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 from services.teams.capabilities import Capability, role_can
 
 
@@ -116,31 +118,31 @@ def project_target_exists(conn, project_id: str, key: tuple[str, str]) -> bool:
 def entity_id_for(conn, session_id: str, team_id: str, entity: dict[str, Any]) -> str:
     entity_type, canonical_value = entity_key(entity)
     signature_hash = entity_signature(entity_type, canonical_value)
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
-            (team_id, entity_type, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("type", entity_type), ("signature_hash", signature_hash)),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    row = conn.execute(
+        f"SELECT id FROM entities WHERE {owner.sql}",  # nosec
+        owner.params,
+    ).fetchone()
     return str(row["id"]) if row else ""
 
 
 def finding_id_for(conn, session_id: str, team_id: str, finding: dict[str, Any]) -> str:
     signature_hash = str(finding.get("signature_hash") or "")
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE team_id = ? AND signature_hash = ?",
-            (team_id, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND team_id = '' AND signature_hash = ?",
-            (session_id, signature_hash),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("signature_hash", signature_hash),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    row = conn.execute(
+        f"SELECT id FROM findings WHERE {owner.sql}",  # nosec
+        owner.params,
+    ).fetchone()
     return str(row["id"]) if row else ""
 
 

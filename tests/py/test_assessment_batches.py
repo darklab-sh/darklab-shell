@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id
 from core.database_access import get_db_connect
 from core.migrations import MIGRATIONS
 from core.migrations.v0075_assessment_batch_coordinator import (
@@ -252,7 +253,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         for statement in ITEM_MIGRATION.postgres_statements or ()
     )
     timestamp = "2026-08-17 12:00:00"
-    session_id = "batch-storage-owner"
+    session_id = anonymous_session_id("batch-storage-owner")
     project_id = "prj-batch-storage"
     assessment_id = "asm-batch-storage"
     with get_db_connect()() as conn:
@@ -435,7 +436,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
     ]
     assert events[-1]["details"] == {"item_count": 1}
     with pytest.raises(AssessmentBatchError, match="wasn't found"):
-        _batch_events("another-owner", batch_id)
+        _batch_events(anonymous_session_id("another-owner"), batch_id)
     assert [
         event["sequence"]
         for event in _batch_events(

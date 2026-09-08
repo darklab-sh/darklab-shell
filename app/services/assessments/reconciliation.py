@@ -16,6 +16,7 @@ from services.assessments.reconciliation_observations import (
 )
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.finding_verification import finding_verification_context_on_conn
+from services.projects.scope import shared_nullable_owner_where
 from services.projects.utils import cfg_int, now, raise_quota
 
 
@@ -214,12 +215,9 @@ def _verified_before_cycle(
         return False
     dialect = dialect_for_backend(get_db_backend())
     in_sql, in_params = dialect.in_clause("finding_id", sorted(finding_ids))
-    if str(assessment["team_id"] or ""):
-        owner_sql = "team_id = ?"
-        owner_params: tuple[object, ...] = (str(assessment["team_id"]),)
-    else:
-        owner_sql = "session_id = ? AND COALESCE(team_id, '') = ''"
-        owner_params = (str(assessment["session_id"]),)
+    owner_sql, owner_params = shared_nullable_owner_where(
+        str(assessment["session_id"]), team_id=str(assessment["team_id"] or "")
+    )
     query = "".join((
         "SELECT finding_id FROM finding_triage_details WHERE ",
         owner_sql,

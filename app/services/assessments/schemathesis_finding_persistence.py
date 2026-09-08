@@ -18,6 +18,7 @@ from services.assessments.schemathesis_report_contracts import (
 from services.projects.contracts import MAX_FINDING_TITLE_LEN
 from services.projects.finding_evidence import link_finding_evidence_on_conn
 from services.projects.findings import row_to_finding
+from services.projects.scope import shared_owner_where
 
 
 def persist_schemathesis_findings(
@@ -138,11 +139,11 @@ def _upsert_finding(
         ),
     )
     created_now = max(0, int(getattr(result, "rowcount", 0) or 0)) > 0
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     row = conn.execute(
         "SELECT id, entity_id, signature_hash, origin, validation_method FROM findings "
-        "WHERE id = ? AND ((? != '' AND team_id = ?) OR "
-        "(? = '' AND session_id = ? AND team_id = ''))",
-        (finding_id, team_id, team_id, team_id, session_id),
+        f"WHERE {owner_sql} AND id = ?",  # nosec
+        (*owner_params, finding_id),
     ).fetchone()
     if not row or (
         str(row["entity_id"] or "") != target_entity_id

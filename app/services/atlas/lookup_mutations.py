@@ -10,12 +10,15 @@ from typing import Any
 from services.projects.finding_dispositions import (
     set_remediation_group_review_state as update_finding_review_states,  # noqa: F401
 )
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def run_belongs_to_session(conn: Any, session_id: str, run_id: str) -> bool:
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     row = conn.execute(
-        "SELECT id FROM runs WHERE id = ? AND session_id = ?",
-        (run_id, session_id),
+        f"SELECT id FROM runs WHERE id = ? AND {owner.sql}",  # nosec
+        (run_id, *owner.params),
     ).fetchone()
     return row is not None
 
@@ -24,10 +27,11 @@ def entity_ids_in_session(conn: Any, session_id: str, entity_ids: list[str]) -> 
     if not entity_ids:
         return set()
     placeholders = ",".join("?" for _ in entity_ids)
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     rows = conn.execute(
-        "SELECT id FROM entities WHERE session_id = ? "  # nosec
+        f"SELECT id FROM entities WHERE {owner.sql} "  # nosec
         f"AND id IN ({placeholders})",
-        [session_id, *entity_ids],
+        [*owner.params, *entity_ids],
     ).fetchall()
     return {str(row["id"] or "") for row in rows}
 
@@ -36,10 +40,11 @@ def finding_ids_in_session(conn: Any, session_id: str, finding_ids: list[str]) -
     if not finding_ids:
         return set()
     placeholders = ",".join("?" for _ in finding_ids)
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     rows = conn.execute(
-        "SELECT id FROM findings WHERE session_id = ? "  # nosec
+        f"SELECT id FROM findings WHERE {owner.sql} "  # nosec
         f"AND id IN ({placeholders})",
-        [session_id, *finding_ids],
+        [*owner.params, *finding_ids],
     ).fetchall()
     return {str(row["id"] or "") for row in rows}
 

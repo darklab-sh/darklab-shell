@@ -21,6 +21,7 @@ from services.atlas.observations import (
     scan_observations_by_entity as _overview_scan_observations_by_entity,  # noqa: F401 - compatibility export
 )
 from services.intel.canonical import CanonicalizationError, canonical_domain, canonical_ip
+from services.projects.scope import shared_owner_where
 
 _OVERVIEW_LOG_SAMPLE_LIMIT = 5
 
@@ -68,10 +69,16 @@ def _overview_url_host_entity_ids(
         if target_id:
             url_target_ids.append(target_id)
     if url_target_ids:
-        owner_sql = "url_e.team_id = ?" if team_id else "url_e.session_id = ? AND url_e.team_id = ''"
-        owner_params = (team_id,) if team_id else (session_id,)
-        host_owner_sql = "host_e.team_id = ?" if team_id else "host_e.session_id = ? AND host_e.team_id = ''"
-        host_owner_params = (team_id,) if team_id else (session_id,)
+        owner_sql, owner_params = shared_owner_where(
+            session_id,
+            team_id=team_id,
+            table_alias="url_e",
+        )
+        host_owner_sql, host_owner_params = shared_owner_where(
+            session_id,
+            team_id=team_id,
+            table_alias="host_e",
+        )
         placeholders = ",".join("?" for _ in url_target_ids)
         rows = conn.execute(
             "SELECT url_e.id AS url_id, host_e.id AS host_id "
@@ -122,8 +129,7 @@ def _overview_url_host_entity_ids(
             "invalid_url_host_count": invalid_url_host_count,
         })
         return result
-    owner_sql = "team_id = ?" if team_id else "session_id = ? AND team_id = ''"
-    owner_params = (team_id,) if team_id else (session_id,)
+    owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     host_pairs = sorted({pair for pair in url_hosts.values()})
     pair_clause = " OR ".join("(type = ? AND canonical_value = ?)" for _ in host_pairs)
     pair_params = tuple(value for pair in host_pairs for value in pair)

@@ -125,6 +125,8 @@ Treat this as query-ownership design and adoption, not as a mostly completed mec
 - [ ] Add targeted subsystem tests that place rows for two personal owners, team scope, `team_id IS NULL`, and `team_id = ''` into the same fixture, then prove the exact list/detail/mutation boundary on SQLite and Postgres. Do not treat a broad suite pass as evidence that the adopted helpers executed.
 - [ ] Land Phase 3A in bounded subsystem merge requests rather than one repository-wide rewrite; each merge request must identify its equivalent and non-equivalent sites, preserve or deliberately correct behavior as declared, list remaining direct-predicate exceptions, and leave the branch releasable.
 
+Completed review ledgers cover the foundation adapters, History/runs, and Projects/Assessments/Atlas. The remaining bounded conversions are Files/workflows/secrets, automation/notifications, and the audited remaining surfaces.
+
 **Acceptance criteria**
 
 - [ ] Every unclassified inventory site has an equivalence decision, and every non-equivalent site has a reviewed disposition before conversion begins.

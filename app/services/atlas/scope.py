@@ -5,6 +5,11 @@
 
 from __future__ import annotations
 
+from services.teams.ownership_queries import PersonalTeamRows, team_capable_owner_predicate
+from services.teams.scope import owner_context_for_scope
+
+_PREDICATE_TEMPLATE_SESSION_ID = "00000000-0000-4000-8000-000000000000"
+
 
 # Personal-scope predicates intentionally use team_id = '' so they match the
 # partial indexes; schema and migration tests guard that team_id never stays NULL.
@@ -20,14 +25,26 @@ def metadata_owner_id(session_id: str, team_id: str = "") -> str:
     return normalize_team_id(team_id) or str(session_id or "").strip()
 
 
+def _scope_context(team_id: str = ""):
+    return owner_context_for_scope(_PREDICATE_TEMPLATE_SESSION_ID, team_id=team_id)
+
+
 def metadata_owner_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    if normalize_team_id(team_id):
+    normalized_team_id = normalize_team_id(team_id)
+    context = _scope_context(normalized_team_id)
+    direct = team_capable_owner_predicate(
+        context,
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    if normalized_team_id:
         return (
-            f"({prefix}team_id = ? OR "
+            f"({direct.sql} OR "
             f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))"
         )
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
+    return direct.sql
 
 
 def metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
@@ -39,9 +56,13 @@ def metadata_owner_params(session_id: str, team_id: str = "") -> list[str]:
 
 def run_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
-    if normalize_team_id(team_id):
-        return f"{prefix}team_id = ? AND {prefix}team_id != ''"
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
+    context = _scope_context(team_id)
+    return team_capable_owner_predicate(
+        context,
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    ).sql
 
 
 def run_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -50,10 +71,7 @@ def run_scope_params(session_id: str, team_id: str = "") -> list[str]:
 
 
 def project_scope_sql(alias: str, team_id: str = "") -> str:
-    prefix = f"{alias}." if alias else ""
-    if normalize_team_id(team_id):
-        return f"{prefix}team_id = ? AND {prefix}team_id != ''"
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
+    return run_scope_sql(alias, team_id)
 
 
 def project_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -64,11 +82,18 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
+        direct = team_capable_owner_predicate(
+            _scope_context(normalized_team_id),
+            owner_column=f"{prefix}session_id",
+            team_column=f"{prefix}team_id",
+            personal_team_rows=PersonalTeamRows.EMPTY,
+        )
         run_sql = run_scope_sql("scope_run", normalized_team_id)
         import_sql = project_scope_sql("scope_import_batch", normalized_team_id)
         return _sql_join((
             "(",
-            f"({prefix}team_id = ? AND {prefix}team_id != '') OR EXISTS (",
+            direct.sql,
+            " OR EXISTS (",
             "SELECT 1 FROM entity_run_links scope_erl ",
             "JOIN runs scope_run ON scope_run.id = scope_erl.run_id ",
             f"WHERE scope_erl.entity_id = {prefix}id AND ",
@@ -80,7 +105,12 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
             import_sql,
             "))",
         ))
-    return f"{prefix}session_id = ? AND {prefix}team_id = ''"
+    return team_capable_owner_predicate(
+        _scope_context(),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    ).sql
 
 
 def entity_scope_params(session_id: str, team_id: str = "") -> list[str]:
@@ -152,11 +182,23 @@ def finding_import_exists_sql(finding_alias: str, batch_alias: str, team_id: str
 def finding_source_scope_sql(alias: str, team_id: str = "") -> str:
     prefix = f"{alias}." if alias else ""
     if not normalize_team_id(team_id):
-        return f"{prefix}session_id = ? AND {prefix}team_id = ''"
+        return team_capable_owner_predicate(
+            _scope_context(),
+            owner_column=f"{prefix}session_id",
+            team_column=f"{prefix}team_id",
+            personal_team_rows=PersonalTeamRows.EMPTY,
+        ).sql
     run_sql = run_scope_sql("source_run", team_id)
+    direct = team_capable_owner_predicate(
+        _scope_context(team_id),
+        owner_column=f"{prefix}session_id",
+        team_column=f"{prefix}team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
     return _sql_join((
         "(",
-        f"({prefix}team_id = ? AND {prefix}team_id != '') OR ",
+        direct.sql,
+        " OR ",
         finding_run_exists_sql(alias, "source_occurrence_run", team_id),
         " OR EXISTS (SELECT 1 FROM runs source_run WHERE source_run.id = ",
         f"{prefix}run_id AND ",

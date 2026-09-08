@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from identity_helpers import anonymous_session_id
 from config import CveRiskConfig
 from core import process
 from core.database_backend import DatabaseBackend
@@ -86,6 +87,11 @@ from services.reports.rendering import (
 )
 
 
+_NESSUS_OWNER = anonymous_session_id("nessus-owner")
+_VERSION_OWNER = anonymous_session_id("version-owner")
+_OTHER_VERSION_OWNER = anonymous_session_id("other-version-owner")
+
+
 @pytest.fixture
 def risk_db():
     conn = sqlite3.connect(":memory:")
@@ -121,9 +127,9 @@ def test_nessus_import_observation_loader_is_bounded_and_fails_closed(risk_db, m
     risk_db.execute(
         "INSERT INTO atlas_import_batches "
         "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
-        "VALUES ('batch-nessus-bounded', 'nessus-owner', 'Nessus', 'nessus_xml', "
+        "VALUES ('batch-nessus-bounded', ?, 'Nessus', 'nessus_xml', "
         "'Bounded', ?, ?, 'applied')",
-        (observed_at, observed_at),
+        (_NESSUS_OWNER, observed_at, observed_at),
     )
     for index in range(2):
         cpe = f"cpe:2.3:a:example:server{index}:1.0:*:*:*:*:*:*:*"
@@ -154,7 +160,7 @@ def test_nessus_import_observation_loader_is_bounded_and_fails_closed(risk_db, m
     monkeypatch.setattr(nessus_import_observations, "NESSUS_IMPORT_OBSERVATION_LIMIT", 1)
 
     result = nessus_import_observations.load_nessus_import_version_observations(
-        risk_db, "nessus-owner", "batch-nessus-bounded"
+        risk_db, _NESSUS_OWNER, "batch-nessus-bounded"
     )
 
     assert [item["observation_id"] for item in result["observations"]] == [
@@ -167,7 +173,7 @@ def test_nessus_import_observation_loader_is_bounded_and_fails_closed(risk_db, m
     )
     assert nessus_import_observations.load_nessus_import_version_observations(
         risk_db,
-        "nessus-owner",
+        _NESSUS_OWNER,
         "batch-nessus-bounded",
         observation_id="impe-nessus-bounded-0",
     )["observations"] == []
@@ -2368,15 +2374,15 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert risk_db.total_changes == changes_before_read
     risk_db.execute(
         "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
-        "VALUES ('run-nmap-xml-1', 'version-owner', 'nmap -sV 192.0.2.10', ?, ?, 0)",
-        ("2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
+        "VALUES ('run-nmap-xml-1', ?, 'nmap -sV 192.0.2.10', ?, ?, 0)",
+        (_VERSION_OWNER, "2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
     )
     risk_db.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('entity-version-port', 'version-owner', 'port', '192.0.2.10:443/tcp', "
+        "('entity-version-port', ?, 'port', '192.0.2.10:443/tcp', "
         "'signature-version-port', ?, ?, 1, ?)",
-        ("2026-08-05T12:30:00+00:00",) * 3,
+        (_VERSION_OWNER,) + ("2026-08-05T12:30:00+00:00",) * 3,
     )
     risk_db.execute(
         "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
@@ -2384,13 +2390,13 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         ("2026-08-05T12:30:00+00:00",) * 2,
     )
     assert persist_version_inference_candidate(
-        risk_db, "other-version-owner", nmap_candidate
+        risk_db, _OTHER_VERSION_OWNER, nmap_candidate
     ) is None
     saved_inference = persist_version_inference_candidate(
-        risk_db, "version-owner", nmap_candidate
+        risk_db, _VERSION_OWNER, nmap_candidate
     )
     repeated_inference = persist_version_inference_candidate(
-        risk_db, "version-owner", nmap_candidate
+        risk_db, _VERSION_OWNER, nmap_candidate
     )
     assert saved_inference is not None
     assert saved_inference["created"] is True
@@ -2398,7 +2404,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert repeated_inference == {**saved_inference, "created": False, "source_created": False}
     materialized_nmap = materialize_nmap_xml_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         """<nmaprun version="7.96"><host><address addr="192.0.2.10" addrtype="ipv4"/>
         <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https">
         <cpe>cpe:/a:example:server:2.5.1</cpe></service></port></ports></host></nmaprun>""",
@@ -2419,15 +2425,15 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     }
     risk_db.execute(
         "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
-        "VALUES ('run-httpx-json-1', 'version-owner', 'httpx -u https://api.example.test -json', ?, ?, 0)",
-        ("2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
+        "VALUES ('run-httpx-json-1', ?, 'httpx -u https://api.example.test -json', ?, ?, 0)",
+        (_VERSION_OWNER, "2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
     )
     risk_db.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('entity-version-url', 'version-owner', 'url', 'https://api.example.test', "
+        "('entity-version-url', ?, 'url', 'https://api.example.test', "
         "'signature-version-url', ?, ?, 1, ?)",
-        ("2026-08-05T12:30:00+00:00",) * 3,
+        (_VERSION_OWNER,) + ("2026-08-05T12:30:00+00:00",) * 3,
     )
     risk_db.execute(
         "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
@@ -2436,7 +2442,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     )
     materialized_httpx = materialize_httpx_json_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         {
             "url": "https://api.example.test",
             "timestamp": "2026-08-05T12:30:00Z",
@@ -2474,7 +2480,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     }
     repeated_httpx = materialize_httpx_json_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         {
             "url": "https://api.example.test",
             "timestamp": "2026-08-05T12:30:00Z",
@@ -2495,7 +2501,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     risk_db.execute("UPDATE runs SET exit_code = 1 WHERE id = 'run-httpx-json-1'")
     failed_httpx = materialize_httpx_json_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         {
             "url": "https://api.example.test",
             "timestamp": "2026-08-05T12:30:00Z",
@@ -2520,7 +2526,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         },
     }
     assert persist_version_inference_candidate(
-        risk_db, "version-owner", mismatched_httpx
+        risk_db, _VERSION_OWNER, mismatched_httpx
     ) is None
     saved_row = risk_db.execute(
         "SELECT origin, validation_method, severity, confidence, cve_ids_json, occurrence_count, "
@@ -2557,7 +2563,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         (saved_inference["finding_id"],),
     ).fetchone()["link_source"] == "version_inference"
     tampered = {**nmap_candidate, "affected_range": "all versions"}
-    assert persist_version_inference_candidate(risk_db, "version-owner", tampered) is None
+    assert persist_version_inference_candidate(risk_db, _VERSION_OWNER, tampered) is None
     assert risk_db.execute(
         "SELECT COUNT(*) FROM finding_version_inference_sources"
     ).fetchone()[0] == 2
@@ -2606,16 +2612,16 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     risk_db.execute(
         "INSERT INTO atlas_import_batches "
         "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
-        "VALUES ('batch-version-import', 'version-owner', 'Nessus', 'nessus_xml', "
+        "VALUES ('batch-version-import', ?, 'Nessus', 'nessus_xml', "
         "'Version import', ?, ?, 'applied')",
-        ("2026-08-05T12:30:00+00:00",) * 2,
+        (_VERSION_OWNER,) + ("2026-08-05T12:30:00+00:00",) * 2,
     )
     risk_db.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('entity-version-import', 'version-owner', 'domain', 'api.example.test', "
+        "('entity-version-import', ?, 'domain', 'api.example.test', "
         "'signature-version-import', ?, ?, 1, ?)",
-        ("2026-08-05T12:30:00+00:00",) * 3,
+        (_VERSION_OWNER,) + ("2026-08-05T12:30:00+00:00",) * 3,
     )
     risk_db.execute(
         "INSERT INTO atlas_entity_import_links "
@@ -2653,7 +2659,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     )
     nessus_correlation = correlate_nessus_import_with_stored_nvd(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         source_batch_id="batch-version-import",
         now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
     )
@@ -2661,7 +2667,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert nessus_correlation["candidate_count"] == 1
     assert correlate_nessus_import_with_stored_nvd(
         risk_db,
-        "other-version-owner",
+        _OTHER_VERSION_OWNER,
         source_batch_id="batch-version-import",
     )["candidate_count"] == 0
     import_candidate = nessus_correlation["observations"][0]["candidates"][0]
@@ -2675,7 +2681,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     }
     assert persist_version_inference_candidate(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         {**import_candidate, "observed_version": "2.5.2"},
     ) is None
     for source_key, value in (
@@ -2686,14 +2692,14 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     ):
         assert persist_version_inference_candidate(
             risk_db,
-            "version-owner",
+            _VERSION_OWNER,
             {
                 **import_candidate,
                 "source": {**import_candidate["source"], source_key: value},
             },
         ) is None
     saved_import_inference = persist_version_inference_candidate(
-        risk_db, "version-owner", import_candidate
+        risk_db, _VERSION_OWNER, import_candidate
     )
     assert saved_import_inference is not None
     assert saved_import_inference["created"] is True
@@ -2711,7 +2717,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     }
     repeated_nessus = materialize_nessus_import_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         source_batch_id="batch-version-import",
         now=datetime.fromisoformat("2026-08-05T13:00:00+00:00"),
     )
@@ -2723,7 +2729,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     )
     rejected_unapplied_nessus = materialize_nessus_import_version_inferences(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         source_batch_id="batch-version-import",
     )
     assert rejected_unapplied_nessus["candidate_count"] == 0
@@ -2743,7 +2749,7 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     )["candidate_count"] == 1
     assert correlate_nessus_import_with_stored_nvd(
         risk_db,
-        "version-owner",
+        _VERSION_OWNER,
         source_batch_id="batch-version-import",
     )["candidate_count"] == 0
     risk_db.execute(

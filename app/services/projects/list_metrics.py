@@ -12,7 +12,7 @@ from core.database_access import get_db_backend
 from core.database_backend import dialect_for_backend
 from services.projects.metadata import _metadata_owner_where
 from services.projects.owner_clauses import project_entity_owner_clause, project_finding_owner_clause
-from services.projects.scope import shared_owner_where
+from services.projects.scope import personal_owner_prefix, shared_owner_where
 from services.query_debug import log_project_list_metrics_debug, query_debug_started
 from services.runs.kinds import RUN_KIND_EXTERNAL
 
@@ -155,8 +155,8 @@ def project_list_metrics(conn, session_id, project_ids, *, team_id=""):
             for project_id in run_project_ids.get(run_id, ()):
                 counts[project_id]["artifacts"] += artifact_count
 
-    package_owner_sql = "" if team_id else "session_id = ? AND "
-    package_owner_params = () if team_id else (session_id,)
+    package_owner = ("", ()) if team_id else personal_owner_prefix(session_id)
+    package_owner_sql, package_owner_params = package_owner
     for row in conn.execute(
         "SELECT project_id, COUNT(*) AS count FROM evidence_packages "  # nosec
         "WHERE " + package_owner_sql + package_filter_sql + " "

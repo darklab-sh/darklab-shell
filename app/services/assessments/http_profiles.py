@@ -147,8 +147,12 @@ def _validate_references(
     actor_member_id: str,
     profile: dict[str, Any],
 ) -> None:
-    owner_id = team_id or session_id
-    references = _secret_reference_lookup(conn, owner_id)
+    owner = owner_context_for_scope(
+        session_id,
+        team_id=team_id,
+        actor_member_id=actor_member_id,
+    )
+    references = _secret_reference_lookup(conn, owner)
     missing_fields = {
         _SECRET_REFERENCE_LABELS.get(str(slot), "Protected Secret")
         for slot, value in profile.get("secret_refs", {}).items()
@@ -169,11 +173,6 @@ def _validate_references(
     workflow_id = str(profile.get("login_workflow_id") or "")
     if workflow_id and workflow_id not in _workflow_ids(conn, session_id, team_id):
         raise HttpProfileError("HTTP profile login workflow was not found in this owner scope")
-    owner = owner_context_for_scope(
-        session_id,
-        team_id=team_id,
-        actor_member_id=actor_member_id,
-    )
     for path in profile.get("file_refs", {}).values():
         try:
             info = owner_workspace_path_info(owner, str(path))
@@ -286,7 +285,11 @@ def _serialize_profile(
     }
     if include_references:
         available_secrets = _available_secret_names(
-            conn, str(profile.get("team_id") or profile.get("session_id") or "")
+            conn,
+            owner_context_for_scope(
+                str(profile.get("session_id") or ""),
+                team_id=str(profile.get("team_id") or ""),
+            ),
         )
         item["headers"] = [
             {

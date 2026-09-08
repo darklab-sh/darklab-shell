@@ -138,7 +138,9 @@ def test_anonymous_attachment_preserves_storage_and_never_persists_reusable_secr
     assert "secret" not in bundle.to_safe_dict()["credential"]
 
     dump = "\n".join(principal_db.iterdump())
-    reusable_component = bundle.credential.secret.rsplit("_", 1)[-1]
+    reusable_component = bundle.credential.secret.removeprefix(
+        f"dlc_v1_{bundle.credential.metadata.id}_"
+    )
     assert bundle.credential.secret not in dump
     assert reusable_component not in dump
     columns = [row[1] for row in principal_db.execute("PRAGMA table_info(credentials)")]

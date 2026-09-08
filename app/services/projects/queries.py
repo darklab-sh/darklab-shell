@@ -44,7 +44,7 @@ from services.projects.artifact_queries import (
 )
 from services.projects.package_queries import get_evidence_package as _get_evidence_package_impl
 from services.projects.package_queries import list_evidence_packages as _list_evidence_packages_impl
-from services.projects.scope import project_select_columns, shared_owner_where
+from services.projects.scope import personal_owner_suffix, project_select_columns, shared_owner_sql_template, shared_owner_where
 from services.projects.utils import (
     metadata_filter_values as _metadata_filter_values,
     normalize_page_window as _normalize_page_window,
@@ -198,8 +198,8 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra
     type_filter = "AND e.type IN ('domain', 'ip', 'url') " if target_only else ""
     if entity_type:
         type_filter += "AND e.type = ? "
-    run_owner_sql, _run_owner_params = shared_owner_where("", team_id=team_id, table_alias="er")
-    entity_owner_sql = "" if team_id else "AND e.session_id = ? AND e.team_id = '' "
+    run_owner_sql = shared_owner_sql_template(team_id=team_id, table_alias="er")
+    entity_owner_sql = "" if team_id else f"AND {shared_owner_sql_template(table_alias='e')} "
     dialect = dialect_for_backend(get_db_backend())
     provider_list_expr = dialect.string_agg_distinct("eis.provider")
     value_order_expr = dialect.case_insensitive_order("e.canonical_value")
@@ -506,8 +506,8 @@ def get_project_summary(session_id, project_id, *, team_id="", include_provenanc
         package_where = "project_id = ?"
         package_params = [project_id]
         if not team_id:
-            package_where += " AND session_id = ?"
-            package_params.append(session_id)
+            package_where += (package_owner := personal_owner_suffix(session_id))[0]
+            package_params.extend(package_owner[1])
         package_rows = conn.execute(
             "SELECT id FROM evidence_packages WHERE " + package_where,  # nosec
             package_params,

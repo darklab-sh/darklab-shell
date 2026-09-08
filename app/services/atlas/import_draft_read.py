@@ -19,6 +19,8 @@ from services.atlas.import_limits import (
     warning_sample_limit,
 )
 from services.projects.scope import normalize_team_id
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 from services.projects.utils import now as project_now
 
 DRAFT_ID_RE = re.compile(r"impd_[0-9a-f]{32}")
@@ -39,15 +41,15 @@ def decode_json_list(conn, value: Any) -> list[Any]:
 
 def load_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):
     normalized_team_id = normalize_team_id(team_id)
-    if normalized_team_id:
-        return conn.execute(
-            "SELECT * FROM atlas_import_drafts WHERE team_id = ? AND id = ?",
-            (normalized_team_id, draft_id),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=normalized_team_id),
+        key_values=(("id", draft_id),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
     return conn.execute(
-        "SELECT * FROM atlas_import_drafts "
-        "WHERE (team_id IS NULL OR team_id = '') AND session_id = ? AND id = ?",
-        (str(session_id or "").strip(), draft_id),
+        f"SELECT * FROM atlas_import_drafts WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
 
 

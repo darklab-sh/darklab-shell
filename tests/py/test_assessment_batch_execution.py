@@ -102,7 +102,7 @@ def batch_builder():
         session_id: str = "",
     ) -> dict[str, str]:
         suffix = uuid.uuid4().hex
-        session_id = session_id or "batch-execution-" + suffix
+        session_id = session_id or anonymous_session_id("batch-execution-" + suffix)
         project_id = "prj_batch_" + suffix[:20]
         project_ids.append(project_id)
         assessment_id = "asm_batch_" + suffix[:20]

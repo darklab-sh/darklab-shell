@@ -9,7 +9,7 @@ from core.database_access import get_db_connect
 from services.projects.actors import actor_for_session, team_actor_map
 from services.projects.metadata import _attach_package_metadata
 from services.projects.packages import row_to_evidence_package as _row_to_evidence_package
-from services.projects.scope import shared_owner_where
+from services.projects.scope import personal_owner_suffix, shared_owner_where
 
 
 def list_evidence_packages(session_id, project_id, *, team_id=""):
@@ -24,8 +24,8 @@ def list_evidence_packages(session_id, project_id, *, team_id=""):
         package_where = "project_id = ?"
         package_params = [project_id]
         if not team_id:
-            package_where += " AND session_id = ?"
-            package_params.append(session_id)
+            package_where += (owner := personal_owner_suffix(session_id))[0]
+            package_params.extend(owner[1])
         rows = conn.execute(
             "SELECT id, session_id, project_id, name, description, redaction_mode, "
             "include_artifacts, manifest, status, created, updated "
@@ -53,8 +53,8 @@ def get_evidence_package(session_id, project_id, package_id, *, team_id=""):
         package_owner_sql = ""
         package_params = [*owner_params, project_id, package_id]
         if not team_id:
-            package_owner_sql = " AND ep.session_id = ?"
-            package_params.append(session_id)
+            package_owner_sql, owner_params = personal_owner_suffix(session_id, table_alias="ep")
+            package_params.extend(owner_params)
         row = conn.execute(
             "SELECT ep.id, ep.session_id, ep.project_id, ep.name, ep.description, ep.redaction_mode, "
             "ep.include_artifacts, ep.manifest, ep.status, ep.created, ep.updated "

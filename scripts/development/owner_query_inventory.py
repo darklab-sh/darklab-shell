@@ -94,6 +94,88 @@ NAMED_RELATIONAL_EXCEPTIONS = {
         "sfe_e.session_id = {run_alias}.session_id",
     ),
 }
+NAMED_SOURCE_HASH_EXCEPTIONS = {
+    ("app/services/assessments/coverage_candidates.py", "candidate_checks_for_run", "c7fd2fc2d9"):
+        "assessment candidates preserve cross-table project, run, and owner correlations",
+    ("app/services/assessments/reconciliation_read.py", "_finding_summaries", "eb843d375d"):
+        "team triage ownership is correlated to the already scoped finding",
+    ("app/services/assessments/reconciliation_read.py", "_finding_summaries", "94fbdc3bb5"):
+        "personal triage ownership is correlated to the already scoped finding",
+    ("app/services/assessments/retest_queue.py", "_queue_rows", "0258b4b5fa"):
+        "personal triage ownership is correlated to the already scoped project link",
+    ("app/services/assessments/schemathesis_evidence_persistence.py", "_load_storage_contract", "19ecf96e62"):
+        "Schemathesis evidence validates one cross-table assessment and run storage contract",
+    ("app/services/atlas/cleanup.py", "_same_owner_sql", "b482127f7c"):
+        "team cleanup ownership compares two already scoped rows",
+    ("app/services/atlas/cleanup.py", "_same_owner_sql", "f097524c1d"):
+        "personal cleanup ownership compares two already scoped rows",
+    ("app/services/atlas/cleanup.py", "_metadata_same_owner_sql", "8e5f832214"):
+        "metadata cleanup correlates its flattened owner to an already scoped row",
+    ("app/services/atlas/cleanup.py", "_metadata_same_owner_sql", "f097524c1d"):
+        "personal metadata cleanup compares two already scoped rows",
+    ("app/services/atlas/cleanup.py", "delete_atlas_entities", "49ebb07011"):
+        "snapshot cleanup reads metadata owners derived from the already scoped entity set",
+    ("app/services/atlas/cleanup.py", "delete_atlas_entities", "42211639c4"):
+        "snapshot cleanup deletes metadata owners derived from the already scoped entity set",
+    ("app/services/atlas/intel_bridge.py", "_persist_lookup_snapshots", "1c650e689b"):
+        "snapshot upsert assigns the flattened metadata owner rather than filtering access",
+    ("app/services/atlas/lookup.py", "entity_detail", "ccc99f154e"):
+        "snapshot detail uses the legacy flattened metadata-owner key",
+    ("app/services/atlas/lookup_export.py", "_query_export_entities", "6bfe94e58d"):
+        "snapshot export uses the legacy flattened metadata-owner key",
+    ("app/services/atlas/lookup_query.py", "exact_lookup_candidate_query", "26af7a7b3c"):
+        "team ownership expression ranks exact lookup candidates and does not grant access",
+    ("app/services/atlas/materializer.py", "upsert_entity", "d71c60e173"):
+        "team entity upsert mirrors the matching partial unique index conflict target",
+    ("app/services/atlas/materializer.py", "upsert_entity", "1492b8a812"):
+        "personal entity upsert mirrors the matching partial unique index conflict target",
+    ("app/services/atlas/scope.py", "metadata_owner_sql", "125da7700f"):
+        "team metadata reads retain the legacy flattened-owner fallback",
+    ("app/services/projects/actors.py", "team_actor_map", "448a23d94d"):
+        "team-member lookup resolves display attribution from legacy token hashes",
+    ("app/services/projects/digests.py", "_schedule_for_digest", "410598c68a"):
+        "digest schedules retain their exact legacy owner-kind, owner-id, token, and team key",
+    ("app/services/projects/digests.py", "get_digest_settings", "1b6d8b84ba"):
+        "digest settings retain their exact project, session, and team key",
+    ("app/services/projects/digests.py", "mark_digest_evaluated", "53eb53f8cc"):
+        "digest evaluation updates retain their exact project, session, and team key",
+    ("app/services/projects/digests.py", "mark_digest_sent", "860d6b4d36"):
+        "digest delivery updates retain their exact project, session, and team key",
+    ("app/services/projects/finding_dispositions.py", "attach_remediation_dispositions", "002fea1afc"):
+        "batched remediation reads retain each exact legacy compound owner and identity key",
+    ("app/services/projects/finding_dispositions.py", "remediation_guidance_by_finding_id", "002fea1afc"):
+        "batched guidance reads retain each exact legacy compound owner and identity key",
+    ("app/services/projects/finding_remediation_merge_store.py", "rows_by_keys", "002fea1afc"):
+        "batched merge-member reads retain each exact legacy compound owner and identity key",
+    ("app/services/projects/finding_remediation_merge_store.py", "rows_by_merge_ids", "85dc0e14e9"):
+        "batched merge-member expansion retains each exact legacy compound owner and merge key",
+    ("app/services/projects/finding_remediation_merges.py", "_dispositions_for_members", "002fea1afc"):
+        "batched disposition reads retain each exact legacy compound owner and identity key",
+    ("app/services/projects/finding_remediation_merges.py", "merge_remediation_groups", "725ec7132e"):
+        "merge consolidation retains the exact legacy session, team, and merge key",
+    ("app/services/projects/findings.py", "_project_finding_source_exists_sql", "23d9e932a6"):
+        "finding source validation correlates source runs to an already scoped finding",
+    ("app/services/projects/findings.py", "list_project_findings", "faaeb6eb88"):
+        "finding run ordering correlates an already scoped run to its finding",
+    ("app/services/projects/metadata.py", "upsert_finding_triage_details_on_conn", "bc10b5b842"):
+        "team triage upsert mirrors the matching partial unique index conflict target",
+    ("app/services/projects/metadata.py", "upsert_finding_triage_details_on_conn", "3cdb59023c"):
+        "personal triage upsert mirrors the matching partial unique index conflict target",
+    ("app/services/projects/overview.py", "_overview_snapshots_by_entity", "c708a24663"):
+        "overview snapshots use the legacy flattened metadata-owner key",
+    ("app/services/projects/overview.py", "_overview_audit_owner_scope", "e1470342fb"):
+        "team overview activity reads the audit attribution scope",
+    ("app/services/projects/overview.py", "_overview_audit_owner_scope", "82538e52b2"):
+        "personal overview activity reads the legacy hashed audit attribution scope",
+    ("app/services/projects/queries.py", "_project_atlas_entity_select_sql", "fda06733bd"):
+        "project target snapshot counts use the legacy flattened metadata-owner key",
+    ("app/services/projects/queries.py", "_project_atlas_entity_select_sql", "688176140f"):
+        "project target snapshot summaries use the legacy flattened metadata-owner key",
+    ("app/services/projects/targets.py", "list_project_targets", "3ec08f6e02"):
+        "target snapshot counts use the legacy flattened metadata-owner key",
+    ("app/services/projects/targets.py", "list_project_targets", "d2f4109545"):
+        "target snapshot summaries use the legacy flattened metadata-owner key",
+}
 OWNER_COLUMN_RE = re.compile(
     r"(?i)\b(?:[a-z_][a-z0-9_]*\.)?"
     r"(?:session_id|session_token|session_hash|token_hash|team_id|principal_id|personal_workspace_id|credential_id|"
@@ -362,12 +444,19 @@ def _phase_3b_replacement(key_shape: str) -> str:
 
 def _named_relational_exception(path: str, scope: str, source: str) -> str:
     entry = NAMED_RELATIONAL_EXCEPTIONS.get((path, scope))
-    if entry is None:
-        return ""
-    description, expected_source = entry
-    if _normalized_source(source) != expected_source:
-        return ""
-    return description
+    if entry is not None:
+        description, expected_source = entry
+        if _normalized_source(source) == expected_source:
+            return description
+    normalized = _normalized_source(source)
+    fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10]
+    return NAMED_SOURCE_HASH_EXCEPTIONS.get((path, scope, fingerprint), "")
+
+
+def _named_source_hash_exception(path: str, scope: str, site_id: str) -> str:
+    parts = site_id.rsplit(":", 2)
+    fingerprint = parts[-2] if parts[-1].isdigit() else parts[-1]
+    return NAMED_SOURCE_HASH_EXCEPTIONS.get((path, scope, fingerprint), "")
 
 
 def _classification(path: str, scope: str, source: str) -> str:
@@ -542,10 +631,12 @@ def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) 
         for field in REVIEWED_FIELDS:
             if field in reviewed:
                 site[field] = reviewed[field]
-        named_exception = _named_relational_exception(
+        named_exception = _named_source_hash_exception(
             str(site["path"]),
             str(site["scope"]),
-            str(site["source"]),
+            str(site["site_id"]),
+        ) or _named_relational_exception(
+            str(site["path"]), str(site["scope"]), str(site["source"])
         )
         if named_exception:
             site["conversion_classification"] = "equivalent"

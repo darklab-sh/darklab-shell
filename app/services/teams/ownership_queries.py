@@ -103,6 +103,7 @@ def team_capable_owner_predicate(
     owner_column: str = "session_id",
     team_column: str = "team_id",
     personal_team_rows: PersonalTeamRows,
+    owner_column_first: bool = True,
 ) -> OwnershipPredicate:
     """Match a team-capable table while preserving its current row semantics."""
     owner_column = _identifier(owner_column, "Owner column")
@@ -112,7 +113,11 @@ def team_capable_owner_predicate(
     team_sql = _personal_team_sql(team_column, personal_team_rows)
     owner_sql = f"{owner_column} = ?"
     if team_sql:
-        owner_sql = f"{team_sql} AND {owner_sql}"
+        owner_sql = (
+            f"{owner_sql} AND {team_sql}"
+            if owner_column_first
+            else f"{team_sql} AND {owner_sql}"
+        )
     return OwnershipPredicate(owner_sql, (context.owner_id,))
 
 
@@ -123,11 +128,12 @@ def token_keyed_owner_predicate(
     team_column: str | None = None,
     personal_team_rows: PersonalTeamRows | None = None,
 ) -> OwnershipPredicate:
-    """Match tables whose legacy personal owner column is ``session_token``."""
+    """Match tables whose legacy owner column is ``session_token``."""
     if team_column is None:
         if personal_team_rows is not None:
             raise TeamError("Personal team rows require a team column")
-        return personal_only_owner_predicate(context, owner_column=token_column)
+        token_column = _identifier(token_column, "Token column")
+        return OwnershipPredicate(f"{token_column} = ?", (context.owner_id,))
     if personal_team_rows is None:
         raise TeamError("Token-keyed team tables require an explicit personal-row representation")
     return team_capable_owner_predicate(
