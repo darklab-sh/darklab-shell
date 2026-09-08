@@ -158,6 +158,62 @@ def _create_smoke_schema(conn: Any, *, backend: str) -> None:
 
 
 @pytest.mark.postgres
+def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schema):
+    from services.teams.ownership_queries import PersonalTeamRows, team_capable_owner_predicate
+    from services.teams.scope import personal_owner_context, team_owner_context
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        """
+        CREATE TABLE owner_adapter_rows (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            team_id TEXT
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO owner_adapter_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        (
+            ("owner-a-null", "tok_owner_a", None),
+            ("owner-a-empty", "tok_owner_a", ""),
+            ("owner-b-empty", "tok_owner_b", ""),
+            ("team-row", "tok_owner_a", "team_red"),
+        ),
+    )
+    owner_a = personal_owner_context("tok_owner_a")
+    team = team_owner_context("team_red", actor_session_id="tok_owner_a")
+
+    def selected_ids(predicate):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM owner_adapter_rows WHERE {predicate.sql} ORDER BY id",  # nosec B608
+                predicate.params,
+            ).fetchall()
+        ]
+
+    assert selected_ids(
+        team_capable_owner_predicate(
+            owner_a,
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        )
+    ) == ["owner-a-empty", "owner-a-null"]
+    assert selected_ids(
+        team_capable_owner_predicate(
+            owner_a,
+            personal_team_rows=PersonalTeamRows.UNFILTERED,
+        )
+    ) == ["owner-a-empty", "owner-a-null", "team-row"]
+    assert selected_ids(
+        team_capable_owner_predicate(
+            team,
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        )
+    ) == ["team-row"]
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,
