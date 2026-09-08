@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from identity_helpers import anonymous_session_id
 from core.database_backend import DatabaseBackend
 from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
@@ -15,6 +16,13 @@ from services.assessments.nmap_service_evidence_persistence import (
 from services.assessments.nmap_service_evidence_read import (
     nmap_service_evidence_for_run_on_conn,
 )
+
+
+_NMAP_OWNER = anonymous_session_id("nmap-owner")
+_OTHER_OWNER = anonymous_session_id("other-owner")
+_TEAM_MEMBER_A = anonymous_session_id("team-member-a")
+_TEAM_MEMBER_B = anonymous_session_id("team-member-b")
+_TEAM_MEMBER_C = anonymous_session_id("team-member-c")
 
 
 @pytest.fixture
@@ -33,7 +41,7 @@ def _seed_run(
     conn,
     run_id: str,
     *,
-    session_id: str = "nmap-owner",
+    session_id: str = _NMAP_OWNER,
     team_id: str = "",
     command: str = "nmap -sV -oX scan.xml 192.0.2.10",
     exit_code: int = 0,
@@ -67,14 +75,14 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
 
     first = persist_nmap_xml_service_observations(
         evidence_db,
-        "nmap-owner",
+        _NMAP_OWNER,
         _xml(),
         source_run_id="run-nmap-service",
         observed_at="2026-08-09T00:01:00+00:00",
     )
     repeated = persist_nmap_xml_service_observations(
         evidence_db,
-        "nmap-owner",
+        _NMAP_OWNER,
         _xml(),
         source_run_id="run-nmap-service",
         observed_at="2026-08-09T00:01:00+00:00",
@@ -94,7 +102,7 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
     }
     row = dict(evidence_db.execute("SELECT * FROM nmap_service_observations").fetchone())
     assert row["id"].startswith("obs_")
-    assert row["session_id"] == "nmap-owner"
+    assert row["session_id"] == _NMAP_OWNER
     assert row["team_id"] == ""
     assert row["run_id"] == "run-nmap-service"
     assert row["target"] == "192.0.2.10:445/tcp"
@@ -107,7 +115,7 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
 
     page = nmap_service_evidence_for_run_on_conn(
         evidence_db,
-        "nmap-owner",
+        _NMAP_OWNER,
         "run-nmap-service",
         limit=1,
     )
@@ -134,18 +142,18 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
         "has_more": False,
     }
     assert nmap_service_evidence_for_run_on_conn(
-        evidence_db, "other-owner", "run-nmap-service",
+        evidence_db, _OTHER_OWNER, "run-nmap-service",
     ) is None
 
     _seed_run(
         evidence_db,
         "run-nmap-team",
-        session_id="team-member-a",
+        session_id=_TEAM_MEMBER_A,
         team_id="team-nmap",
     )
     team_summary = persist_nmap_xml_service_observations(
         evidence_db,
-        "team-member-b",
+        _TEAM_MEMBER_B,
         _xml(),
         source_run_id="run-nmap-team",
         team_id="team-nmap",
@@ -153,27 +161,27 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
     )
     team_page = nmap_service_evidence_for_run_on_conn(
         evidence_db,
-        "team-member-c",
+        _TEAM_MEMBER_C,
         "run-nmap-team",
         team_id="team-nmap",
     )
     assert team_summary["created_count"] == 1
     assert team_page is not None and team_page["total"] == 1
     assert nmap_service_evidence_for_run_on_conn(
-        evidence_db, "team-member-a", "run-nmap-team",
+        evidence_db, _TEAM_MEMBER_A, "run-nmap-team",
     ) is None
     assert nmap_service_evidence_for_run_on_conn(
-        evidence_db, "team-member-a", "run-nmap-team", team_id="other-team",
+        evidence_db, _TEAM_MEMBER_A, "run-nmap-team", team_id="other-team",
     ) is None
 
 
 @pytest.mark.parametrize(
     ("owner", "team_id", "command", "exit_code"),
     [
-        ("other-owner", "", "nmap -sV 192.0.2.10", 0),
-        ("nmap-owner", "team-other", "nmap -sV 192.0.2.10", 0),
-        ("nmap-owner", "", "httpx 192.0.2.10", 0),
-        ("nmap-owner", "", "nmap -sV 192.0.2.10", 2),
+        (_OTHER_OWNER, "", "nmap -sV 192.0.2.10", 0),
+        (_NMAP_OWNER, "team-other", "nmap -sV 192.0.2.10", 0),
+        (_NMAP_OWNER, "", "httpx 192.0.2.10", 0),
+        (_NMAP_OWNER, "", "nmap -sV 192.0.2.10", 2),
     ],
 )
 def test_persistence_rejects_cross_owner_non_nmap_and_failed_sources(
@@ -209,7 +217,7 @@ def test_persistence_rejects_conflicting_replay_for_the_same_observation(evidenc
     _seed_run(evidence_db, "run-conflict")
     persist_nmap_xml_service_observations(
         evidence_db,
-        "nmap-owner",
+        _NMAP_OWNER,
         _xml(),
         source_run_id="run-conflict",
         observed_at="2026-08-09T00:01:00+00:00",
@@ -221,7 +229,7 @@ def test_persistence_rejects_conflicting_replay_for_the_same_observation(evidenc
     with pytest.raises(RuntimeError, match="identity conflict"):
         persist_nmap_xml_service_observations(
             evidence_db,
-            "nmap-owner",
+            _NMAP_OWNER,
             _xml(),
             source_run_id="run-conflict",
             observed_at="2026-08-09T00:01:00+00:00",
@@ -232,7 +240,7 @@ def test_persisted_observations_follow_the_source_run_lifecycle(evidence_db):
     _seed_run(evidence_db, "run-cascade")
     persist_nmap_xml_service_observations(
         evidence_db,
-        "nmap-owner",
+        _NMAP_OWNER,
         _xml(),
         source_run_id="run-cascade",
         observed_at="2026-08-09T00:01:00+00:00",

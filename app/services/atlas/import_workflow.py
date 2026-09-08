@@ -80,6 +80,8 @@ from services.projects.contracts import MAX_FINDING_REMEDIATION_LEN, ProjectWork
 from services.projects.links import insert_project_link_with_quota
 from services.projects.metadata import _finding_triage_details_on_conn, upsert_finding_triage_details_on_conn
 from services.projects.scope import normalize_team_id
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 from services.projects.targets import ensure_project_target_on_conn
 from services.projects.utils import now as project_now
 from services.teams.capabilities import Capability, role_can
@@ -274,16 +276,16 @@ def cleanup_expired_import_drafts(*, conn=None, now: str | None = None) -> int:
 
 def _load_batch_for_draft(conn, session_id: str, draft_id: str, *, team_id: str = ""):
     normalized_team_id = normalize_team_id(team_id)
-    if normalized_team_id:
-        return conn.execute(
-            "SELECT * FROM atlas_import_batches WHERE team_id = ? AND draft_id = ? "
-            "ORDER BY applied_at DESC, id DESC LIMIT 1",
-            (normalized_team_id, draft_id),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=normalized_team_id),
+        key_values=(("draft_id", draft_id),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
     return conn.execute(
-        "SELECT * FROM atlas_import_batches WHERE (team_id IS NULL OR team_id = '') AND session_id = ? AND draft_id = ? "
+        f"SELECT * FROM atlas_import_batches WHERE {owner.sql} "  # nosec
         "ORDER BY applied_at DESC, id DESC LIMIT 1",
-        (str(session_id or "").strip(), draft_id),
+        owner.params,
     ).fetchone()
 
 

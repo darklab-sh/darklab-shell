@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 from flask import Request
+from identity_helpers import anonymous_session_id
 
 from core.database import db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter
@@ -67,7 +68,7 @@ def _initialize_probe_schema():
 
 @pytest.fixture
 def probe_project():
-    session_id = "probe-services-" + uuid.uuid4().hex
+    session_id = anonymous_session_id("probe-services-" + uuid.uuid4().hex)
     project = create_project(session_id, {"name": "Probe services"})
     assert project is not None
     project_id = str(project["id"])
@@ -1021,7 +1022,7 @@ def test_probe_target_resolver_requires_one_confirmed_owner_scoped_project_link(
         assert unconfirmed.value.code == "probe_target_not_found"
         with pytest.raises(ProbeError) as foreign:
             resolve_probe_target(
-                conn, "foreign-session", "",
+                conn, anonymous_session_id("foreign-session"), "",
                 ProbePlanRequest(project_id, "ping", entity_id=str(confirmed["id"])),
             )
         assert foreign.value.code == "project_not_found"
@@ -1086,7 +1087,7 @@ def test_probe_target_value_ambiguity_returns_only_safe_entity_identifiers():
     with pytest.raises(ProbeError) as ambiguous:
         resolve_probe_target(
             _AmbiguousTargetConnection(),
-            "session",
+            anonymous_session_id("ambiguous-probe-owner"),
             "",
             ProbePlanRequest("prj_probe", "ping", target_value="same.example"),
         )
@@ -1095,7 +1096,7 @@ def test_probe_target_value_ambiguity_returns_only_safe_entity_identifiers():
 
 
 def test_probe_target_resolver_uses_team_scope_instead_of_the_callers_session():
-    creator = "probe-team-owner-" + uuid.uuid4().hex
+    creator = anonymous_session_id("probe-team-owner-" + uuid.uuid4().hex)
     team_id = "team-probe-" + uuid.uuid4().hex
     project = create_project(creator, {"name": "Team probes"}, team_id=team_id)
     assert project is not None

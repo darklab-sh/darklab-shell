@@ -81,7 +81,7 @@ from services.projects.queries import (
     get_evidence_package,
     get_project_summary,
 )
-from services.projects.scope import shared_owner_where
+from services.projects.scope import personal_owner_where, shared_owner_where
 from services.projects.utils import (
     cfg_int as _cfg_int,
     cfg_mb_bytes as _cfg_mb_bytes,
@@ -915,8 +915,9 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         package_where = "project_id = ?"
         package_params = [project_id]
         if not team_id:
-            package_where += " AND session_id = ?"
-            package_params.append(session_id)
+            package_owner_sql, package_owner_params = personal_owner_where(session_id)
+            package_where += f" AND {package_owner_sql}"
+            package_params.extend(package_owner_params)
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM evidence_packages WHERE " + package_where,  # nosec
             package_params,
@@ -980,8 +981,9 @@ def delete_evidence_package(session_id, project_id, package_id, *, team_id="", c
         package_owner_sql = ""
         package_params = [*project_owner_params, project_id, package_id]
         if not team_id:
-            package_owner_sql = " AND ep.session_id = ?"
-            package_params.append(session_id)
+            personal_sql, personal_params = personal_owner_where(session_id, table_alias="ep")
+            package_owner_sql = f" AND {personal_sql}"
+            package_params.extend(personal_params)
         row = conn.execute(
             "SELECT ep.id FROM evidence_packages ep "
             "JOIN projects p ON p.id = ep.project_id "
@@ -1002,8 +1004,9 @@ def delete_evidence_package(session_id, project_id, package_id, *, team_id="", c
         delete_where = "project_id = ? AND id = ?"
         delete_params = [project_id, package_id]
         if not team_id:
-            delete_where += " AND session_id = ?"
-            delete_params.append(session_id)
+            personal_sql, personal_params = personal_owner_where(session_id)
+            delete_where += f" AND {personal_sql}"
+            delete_params.extend(personal_params)
         result = conn.execute(
             "DELETE FROM evidence_packages WHERE " + delete_where,  # nosec
             delete_params,

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from services.projects.scope import shared_owner_where
+
 
 MEMBER_UPSERT_SQL = (
     "INSERT INTO finding_remediation_merge_members "
@@ -194,12 +196,15 @@ def migrate_remediation_merge_members(
     to_session_id: str,
 ) -> int:
     """Move personal merge memberships and union any colliding destination groups."""
+    source_owner_sql, source_owner_params = shared_owner_where(from_session_id)
     rows = conn.execute(
-        "SELECT merge_id, affected_subject, identity_kind, identity_value, vulnerability_id, "
+        "SELECT merge_id, affected_subject, identity_kind, identity_value, vulnerability_id, "  # nosec B608
         "rule_identity, created_by_session_id, created_at "
-        "FROM finding_remediation_merge_members WHERE session_id = ? AND team_id = '' "
+        "FROM finding_remediation_merge_members WHERE "
+        + source_owner_sql
+        + " "
         "ORDER BY merge_id, affected_subject, identity_value",
-        (from_session_id,),
+        source_owner_params,
     ).fetchall()
     if not rows:
         return 0
@@ -217,10 +222,11 @@ def migrate_remediation_merge_members(
         })
         merge_id = destination_merge_ids[0] if destination_merge_ids else source_merge_id
         for stale_merge_id in destination_merge_ids[1:]:
+            destination_owner_sql, destination_owner_params = shared_owner_where(to_session_id)
             conn.execute(
-                "UPDATE finding_remediation_merge_members SET merge_id = ? "
-                "WHERE session_id = ? AND team_id = '' AND merge_id = ?",
-                (merge_id, to_session_id, stale_merge_id),
+                "UPDATE finding_remediation_merge_members SET merge_id = ? "  # nosec B608
+                "WHERE " + destination_owner_sql + " AND merge_id = ?",
+                (merge_id, *destination_owner_params, stale_merge_id),
             )
         conn.executemany(MEMBER_UPSERT_SQL, [
             (
@@ -242,7 +248,7 @@ def migrate_remediation_merge_members(
             for row in members
         ])
     conn.execute(
-        "DELETE FROM finding_remediation_merge_members WHERE session_id = ? AND team_id = ''",
-        (from_session_id,),
+        "DELETE FROM finding_remediation_merge_members WHERE " + source_owner_sql,  # nosec B608
+        source_owner_params,
     )
     return len(rows)

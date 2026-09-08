@@ -19,7 +19,7 @@ from services.assessments.batch.lifecycle_guard import (
 from services.projects.models import normalize_project_payload
 from services.projects.preferences import clear_active_project_preference
 from services.projects.queries import get_project
-from services.projects.scope import shared_owner_where
+from services.projects.scope import personal_owner_where, shared_owner_where
 from services.projects.slugs import allocate_slug
 from services.projects.utils import (
     new_project_id,
@@ -157,9 +157,10 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
             (project_id,),
         ).fetchall()
         target_ids = [row["entity_id"] for row in target_rows if row["entity_id"]]
+        package_owner_sql, package_owner_params = personal_owner_where(session_id)
         package_rows = conn.execute(
-            "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
-            (session_id, project_id),
+            f"SELECT id FROM evidence_packages WHERE {package_owner_sql} AND project_id = ?",  # nosec
+            (*package_owner_params, project_id),
         ).fetchall()
         package_ids = [row["id"] for row in package_rows if row["id"]]
         conn.execute(
@@ -221,8 +222,8 @@ def delete_project(session_id, project_id, *, team_id="", conn=None):
                 "watcher_count": watcher_membership_cleared,
             })
         conn.execute(
-            "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ?",
-            (session_id, project_id),
+            f"DELETE FROM evidence_packages WHERE {package_owner_sql} AND project_id = ?",  # nosec
+            (*package_owner_params, project_id),
         )
         conn.execute("DELETE FROM finding_evidence_links WHERE project_id = ?", (project_id,))
         conn.execute(

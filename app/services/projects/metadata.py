@@ -20,6 +20,8 @@ from services.atlas.scope import (
     finding_source_scope_params,
     finding_source_scope_sql,
     metadata_owner_id,
+    metadata_owner_params,
+    metadata_owner_sql,
 )
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
@@ -41,6 +43,8 @@ from services.projects.finding_dispositions import (
 )
 from services.projects.scope import normalize_team_id, shared_owner_where
 from services.projects.utils import text_exceeds_limit as _text_exceeds_limit, trim_text as _trim_text
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import owner_context_for_scope, personal_owner_context
 from services.teams.scope import team_owner_context
 from services.workspace.files import WorkspaceError, resolve_owner_workspace_path, resolve_workspace_path
 
@@ -176,18 +180,9 @@ def _metadata_row_owner_values(session_id, team_id=""):
 
 
 def _metadata_owner_where(session_id, team_id="", *, table_alias=""):
-    prefix = f"{table_alias}." if table_alias else ""
-    normalized_team_id = normalize_team_id(team_id)
-    if normalized_team_id:
-        legacy_session_id = _metadata_session_id(session_id, normalized_team_id)
-        return (
-            f"({prefix}team_id = ? OR "
-            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))",
-            (normalized_team_id, legacy_session_id),
-        )
     return (
-        f"{prefix}session_id = ? AND {prefix}team_id = ''",
-        (str(session_id or "").strip(),),
+        metadata_owner_sql(table_alias, team_id),
+        tuple(metadata_owner_params(session_id, team_id)),
     )
 
 
@@ -705,30 +700,47 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id, *, team
         return _shared_record_exists(conn, session_id, "snapshots", entity_id, team_id=normalized_team_id)
     elif entity_type == "run_file_artifact":
         if normalized_team_id:
+            owner_sql, owner_params = shared_owner_where(
+                session_id,
+                team_id=normalized_team_id,
+                table_alias="r",
+            )
             row = conn.execute(
                 "SELECT 1 FROM run_file_artifacts rfa "
                 "JOIN runs r ON r.id = rfa.run_id "
-                "WHERE r.team_id = ? AND rfa.id = ?",
-                (normalized_team_id, entity_id),
+                f"WHERE {owner_sql} AND rfa.id = ?",  # nosec
+                (*owner_params, entity_id),
             ).fetchone()
             return row is not None
+        owner = personal_only_owner_predicate(
+            personal_owner_context(session_id),
+            owner_column="session_id",
+        )
         row = conn.execute(
-            "SELECT 1 FROM run_file_artifacts WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
+            f"SELECT 1 FROM run_file_artifacts WHERE {owner.sql} AND id = ?",  # nosec
+            (*owner.params, entity_id),
         ).fetchone()
         return row is not None
     elif entity_type == "finding":
         return finding_exists_in_scope(conn, session_id, entity_id, team_id=normalized_team_id)
     elif entity_type == "package":
         if normalized_team_id:
+            owner_sql, owner_params = shared_owner_where(
+                session_id,
+                team_id=normalized_team_id,
+            )
             row = conn.execute(
-                "SELECT 1 FROM evidence_packages WHERE team_id = ? AND id = ?",
-                (normalized_team_id, entity_id),
+                f"SELECT 1 FROM evidence_packages WHERE {owner_sql} AND id = ?",  # nosec
+                (*owner_params, entity_id),
             ).fetchone()
             return row is not None
+        owner = personal_only_owner_predicate(
+            owner_context_for_scope(session_id),
+            owner_column="session_id",
+        )
         row = conn.execute(
-            "SELECT 1 FROM evidence_packages WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
+            f"SELECT 1 FROM evidence_packages WHERE {owner.sql} AND id = ?",  # nosec
+            (*owner.params, entity_id),
         ).fetchone()
         return row is not None
     else:

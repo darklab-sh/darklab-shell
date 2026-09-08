@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import make_test_app
+from identity_helpers import anonymous_session_id
 from core.database_access import get_db_connect
 from services.assessments.batch.claim import claim_next_batch_item
 from services.assessments.batch.contracts import BatchConcurrency
@@ -129,7 +130,7 @@ def test_claim_skips_busy_targets_and_records_authoritative_events(batch_factory
             conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"]
         )
     batch = batch_factory(
-        "batch-claim-owner",
+        anonymous_session_id("batch-claim-owner"),
         ["ent-target-a", "ent-target-a", "ent-target-b", "ent-target-b"],
         concurrency=BatchConcurrency(batch=8, target=1, owner=16, instance=32),
     )
@@ -168,7 +169,7 @@ def test_claim_skips_busy_targets_and_records_authoritative_events(batch_factory
         (2, "launching"),
     ]
     assert run_count == initial_run_count
-    events = _batch_events("batch-claim-owner", batch_id)
+    events = _batch_events(anonymous_session_id("batch-claim-owner"), batch_id)
     assert [event["event_type"] for event in events[-4:]] == [
         "parent_status_changed",
         "chunk_status_changed",
@@ -180,7 +181,7 @@ def test_claim_skips_busy_targets_and_records_authoritative_events(batch_factory
 
 def test_claim_enforces_batch_and_owner_limits(batch_factory):
     batch_limited = batch_factory(
-        "batch-limit-owner",
+        anonymous_session_id("batch-limit-owner"),
         ["ent-batch-a", "ent-batch-b"],
         concurrency=BatchConcurrency(batch=1, target=1, owner=16, instance=32),
     )
@@ -191,12 +192,12 @@ def test_claim_enforces_batch_and_owner_limits(batch_factory):
     }
 
     first_owner_batch = batch_factory(
-        "shared-limit-owner",
+        anonymous_session_id("shared-limit-owner"),
         ["ent-owner-a"],
         concurrency=BatchConcurrency(batch=8, target=1, owner=1, instance=32),
     )
     second_owner_batch = batch_factory(
-        "shared-limit-owner",
+        anonymous_session_id("shared-limit-owner"),
         ["ent-owner-b"],
         concurrency=BatchConcurrency(batch=8, target=1, owner=8, instance=32),
     )
@@ -209,12 +210,12 @@ def test_claim_enforces_batch_and_owner_limits(batch_factory):
 
 def test_claim_enforces_the_most_restrictive_instance_limit(batch_factory):
     first = batch_factory(
-        "instance-owner-one",
+        anonymous_session_id("instance-owner-one"),
         ["ent-instance-a"],
         concurrency=BatchConcurrency(batch=8, target=1, owner=32, instance=1),
     )
     second = batch_factory(
-        "instance-owner-two",
+        anonymous_session_id("instance-owner-two"),
         ["ent-instance-b"],
         concurrency=BatchConcurrency(batch=8, target=1, owner=32, instance=64),
     )

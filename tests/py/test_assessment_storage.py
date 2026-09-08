@@ -221,7 +221,9 @@ def test_create_cycle_rejects_unknown_profiles_and_out_of_scope_projects(project
     with pytest.raises(AssessmentError, match="profile was not found"):
         create_assessment_cycle(session_id, project_id, "unknown")
     with pytest.raises(AssessmentNotFound, match="not found in this scope"):
-        create_assessment_cycle("another-session", project_id, "network")
+        create_assessment_cycle(
+            anonymous_session_id("another-session"), project_id, "network"
+        )
 
 
 def test_assessment_reads_are_isolated_by_personal_and_team_scope(project_factory):
@@ -235,11 +237,13 @@ def test_assessment_reads_are_isolated_by_personal_and_team_scope(project_factor
     )["assessment"]
 
     assert get_assessment_read_model(
-        "another-session",
+        anonymous_session_id("another-session"),
         personal_project_id,
         personal["id"],
     ) is None
-    assert list_assessment_cycles("another-session", personal_project_id) is None
+    assert list_assessment_cycles(
+        anonymous_session_id("another-session"), personal_project_id
+    ) is None
 
     team_id = "team-assessment-" + uuid.uuid4().hex
     creator, team_project = project_factory(team_id=team_id)
@@ -539,7 +543,7 @@ def test_cycle_lifecycle_is_forward_only_and_completed_content_is_immutable(
     )["assessment"]["id"]
     with pytest.raises(AssessmentNotFound, match="not found in this scope"):
         update_assessment_cycle(
-            "another-session",
+            anonymous_session_id("another-session"),
             project_id,
             assessment_id,
             {"title": "Out of scope"},

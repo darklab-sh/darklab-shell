@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+from identity_helpers import anonymous_session_id
 import config as app_config
 from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES, nuclei_output_metadata
 from services.assessments import action_plan_nuclei
@@ -204,6 +205,8 @@ from services.projects.web_surface_comparison import (
     capture_matches_change_state,
     normalize_change_state,
 )
+
+_SERVICE_OWNER = anonymous_session_id("assessment-service-owner")
 
 
 def _source_detail(metadata: dict[str, object]) -> dict[str, Any]:
@@ -453,7 +456,7 @@ def test_duplicate_port_rows_keep_conflicting_services_in_review():
             ])
 
     ports = app_ports_by_host(
-        FakeConn(), "session-1", "", "project-1", ["ent_target"],
+        FakeConn(), _SERVICE_OWNER, "", "project-1", ["ent_target"],
     )["ent_target"]
 
     assert len(ports) == 1
@@ -502,7 +505,7 @@ def test_assessment_service_recommendations_are_project_scoped_and_read_only(mon
     }]
 
     service_action_recommendations.attach_service_action_recommendations(
-        object(), checks, session_id="session-1", team_id="", project_id="project-1",
+        object(), checks, session_id=_SERVICE_OWNER, team_id="", project_id="project-1",
     )
 
     result = checks[0]["service_action_recommendations"]
@@ -555,7 +558,7 @@ def test_nuclei_recommendation_evidence_is_target_scoped_and_bounded():
 
     signals = load_nuclei_recommendation_signals(
         FakeConn(),
-        "session-1",
+        _SERVICE_OWNER,
         "",
         "project-1",
         [{"entity_id": "ent_target", "type": "domain", "value": "example.com"}],
@@ -617,7 +620,7 @@ def test_nuclei_recommendations_explain_signals_without_recommending_intrusive_r
     ]
 
     nuclei_recommendations.attach_nuclei_recommendations(
-        object(), checks, session_id="session-1", team_id="", project_id="project-1",
+        object(), checks, session_id=_SERVICE_OWNER, team_id="", project_id="project-1",
     )
 
     standard = checks[0]["nuclei_recommendation"]
@@ -2173,7 +2176,7 @@ def test_schemathesis_action_options_are_bounded_and_selected_in_project_scope(m
     )
     context = schemathesis_action_context(
         FakeConnection(),
-        "session-api",
+        _SERVICE_OWNER,
         "",
         "prj_api",
         "openapi_negative_testing",
@@ -2207,7 +2210,7 @@ def test_schemathesis_action_options_are_bounded_and_selected_in_project_scope(m
 
     overflow = schemathesis_action_context(
         OverflowConnection(),
-        "session-api",
+        _SERVICE_OWNER,
         "",
         "prj_api",
         "openapi_negative_testing",
@@ -2323,7 +2326,7 @@ def test_schemathesis_launch_rechecks_plan_and_keeps_runtime_paths_private(monke
     )
 
     protected, launch_context = materialize_assessment_run_launch(
-        "session-api",
+        _SERVICE_OWNER,
         "prj_api",
         plan,
     )
@@ -2617,7 +2620,7 @@ def test_takeover_signal_keeps_dangling_records_potential_until_reviewed_confirm
             return SimpleNamespace(fetchall=lambda: [])
 
     project_evidence = project_takeover_evidence(
-        EmptyConnection(), "session-1", "", "project-1", "run-current", [],
+        EmptyConnection(), _SERVICE_OWNER, "", "project-1", "run-current", [],
     )
     assert project_evidence is not None
     assert "LIKE 'dnsx %'" not in query_calls[0][0]

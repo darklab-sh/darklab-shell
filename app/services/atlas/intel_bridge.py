@@ -20,6 +20,8 @@ from services.intel.schema import INTEL_ENTITY_TYPES
 from services.intel.canonical import entity_signature
 from services.intel.lookup import IntelLookupResult, lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 log = logging.getLogger("shell")
 
@@ -56,16 +58,16 @@ def _matching_entity_id(
     team_id: str = "",
 ) -> str:
     signature_hash = entity_signature(entity_type, canonical_value)
-    if team_id:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE team_id = ? AND type = ? AND signature_hash = ?",
-            (team_id, entity_type, signature_hash),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND team_id = '' AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("type", entity_type), ("signature_hash", signature_hash)),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    row = conn.execute(
+        f"SELECT id FROM entities WHERE {owner.sql}",  # nosec
+        owner.params,
+    ).fetchone()
     return str(row["id"] or "") if row else ""
 
 

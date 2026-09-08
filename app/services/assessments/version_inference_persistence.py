@@ -18,6 +18,8 @@ from services.assessments.version_inference_source_validation import (
 )
 from services.atlas.recalculation import recalculate_atlas_findings
 from services.projects.utils import now
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 
 def persist_version_inference_candidate(
@@ -157,10 +159,15 @@ def _upsert_finding(
     )
     if max(0, int(getattr(result, "rowcount", 0) or 0)) > 0:
         return finding_id, True
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("signature_hash", signature),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
     existing = conn.execute(
-        "SELECT id FROM findings WHERE ((? != '' AND team_id = ?) OR "
-        "(? = '' AND session_id = ? AND team_id = '')) AND signature_hash = ?",
-        (team_id, team_id, team_id, session_id, signature),
+        f"SELECT id FROM findings WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
     return (str(existing["id"]), False) if existing else None
 

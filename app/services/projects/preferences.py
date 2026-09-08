@@ -14,6 +14,8 @@ from services.projects.contracts import (
     PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY,
     PROJECT_AUTO_LINK_RUN_ENTITIES_PREF_KEY,
 )
+from services.teams.ownership_queries import composite_owner_predicate, personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def _now() -> str:
@@ -21,9 +23,10 @@ def _now() -> str:
 
 
 def load_session_preferences(conn, session_id):
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = ?",
-        (session_id,),
+        f"SELECT preferences FROM session_preferences WHERE {owner.sql}",  # nosec
+        owner.params,
     ).fetchone()
     if not row:
         return {}
@@ -65,9 +68,13 @@ def project_is_active_for_session(conn, session_id, project_id):
     project_id = str(project_id or "")
     if not project_id:
         return False
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        key_values=(("id", project_id),),
+    )
     row = conn.execute(
-        "SELECT 1 FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-        (session_id, project_id),
+        f"SELECT 1 FROM projects WHERE {owner.sql} AND status != 'archived'",  # nosec
+        owner.params,
     ).fetchone()
     return row is not None
 

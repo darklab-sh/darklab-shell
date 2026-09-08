@@ -19,6 +19,9 @@ from services.cleanup_reasons import (
     set_cleanup_bucket_count,
 )
 from services.storage.body_store import delete_text_body
+from services.projects.scope import personal_owner_where, shared_owner_where
+from services.teams.ownership_queries import PersonalTeamRows, team_capable_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 _ATLAS_CLEANUP_TEMP_TABLES = (
     "atlas_cleanup_run_ids",
@@ -27,6 +30,7 @@ _ATLAS_CLEANUP_TEMP_TABLES = (
     "atlas_cleanup_allowed_findings",
     "atlas_cleanup_not_eligible_findings",
 )
+_PREDICATE_TEMPLATE_SESSION_ID = "00000000-0000-4000-8000-000000000000"
 
 
 def _unique_ids(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -177,9 +181,13 @@ def _cleanup_reason_summary_with_samples(
 
 
 def _row_owner_filter(alias: str, team_id: str) -> str:
-    if normalize_team_id(team_id):
-        return f"{alias}.team_id = ? AND {alias}.team_id != ''"
-    return f"{alias}.session_id = ? AND {alias}.team_id = ''"
+    predicate = team_capable_owner_predicate(
+        owner_context_for_scope(_PREDICATE_TEMPLATE_SESSION_ID, team_id=team_id),
+        owner_column=f"{alias}.session_id",
+        team_column=f"{alias}.team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+    )
+    return predicate.sql
 
 
 def _same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
@@ -198,8 +206,12 @@ def _metadata_same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
 
 
 def _owner_filter(alias: str, session_id: str, team_id: str) -> tuple[str, list[str]]:
-    normalized_team_id = normalize_team_id(team_id)
-    return _row_owner_filter(alias, normalized_team_id), [normalized_team_id or session_id]
+    sql, params = shared_owner_where(
+        session_id,
+        team_id=team_id,
+        table_alias=alias,
+    )
+    return sql, list(params)
 
 
 _FINDING_NOT_ELIGIBLE_REASONS = (
@@ -678,9 +690,10 @@ def _owned_run_ids(conn, session_id: str, run_ids: list[str]) -> list[str]:
     if not ids:
         return []
     placeholders = _placeholders(ids)
+    owner_sql, owner_params = personal_owner_where(session_id)
     rows = conn.execute(
-        f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders}) ORDER BY started DESC, id DESC",  # nosec
-        [session_id, *ids],
+        f"SELECT id FROM runs WHERE {owner_sql} AND id IN ({placeholders}) ORDER BY started DESC, id DESC",  # nosec
+        [*owner_params, *ids],
     ).fetchall()
     return [str(row["id"]) for row in rows if row["id"]]
 
@@ -689,12 +702,13 @@ def _atlas_entity_ids_for_runs(conn, session_id: str, run_ids: list[str]) -> lis
     if not run_ids:
         return []
     placeholders = _placeholders(run_ids)
+    owner_sql, owner_params = personal_owner_where(session_id, table_alias="e")
     rows = conn.execute(
         "SELECT DISTINCT erl.entity_id "  # nosec
         "FROM entity_run_links erl "
         "JOIN entities e ON e.id = erl.entity_id "
-        f"WHERE e.session_id = ? AND erl.run_id IN ({placeholders})",
-        [session_id, *run_ids],
+        f"WHERE {owner_sql} AND erl.run_id IN ({placeholders})",
+        [*owner_params, *run_ids],
     ).fetchall()
     return [str(row["entity_id"]) for row in rows if row["entity_id"]]
 
@@ -703,12 +717,13 @@ def _atlas_finding_ids_for_runs(conn, session_id: str, run_ids: list[str]) -> li
     if not run_ids:
         return []
     placeholders = _placeholders(run_ids)
+    owner_sql, owner_params = personal_owner_where(session_id, table_alias="f")
     rows = conn.execute(
         "SELECT DISTINCT fo.finding_id "  # nosec
         "FROM findings_occurrences fo "
         "JOIN findings f ON f.id = fo.finding_id "
-        f"WHERE f.session_id = ? AND fo.run_id IN ({placeholders})",
-        [session_id, *run_ids],
+        f"WHERE {owner_sql} AND fo.run_id IN ({placeholders})",
+        [*owner_params, *run_ids],
     ).fetchall()
     return [str(row["finding_id"]) for row in rows if row["finding_id"]]
 
@@ -771,23 +786,25 @@ def detach_atlas_run_sources(
 
 
 def atlas_entity_delete_preview(conn, session_id: str, entity_id: str) -> dict[str, Any] | None:
+    entity_owner_sql, entity_owner_params = personal_owner_where(session_id)
     row = conn.execute(
-        "SELECT id FROM entities WHERE session_id = ? AND id = ?",
-        (session_id, entity_id),
+        f"SELECT id FROM entities WHERE {entity_owner_sql} AND id = ?",  # nosec
+        (*entity_owner_params, entity_id),
     ).fetchone()
     if not row:
         return None
+    run_owner_sql, run_owner_params = personal_owner_where(session_id, table_alias="r")
     run_rows = conn.execute(
         "SELECT erl.run_id FROM entity_run_links erl "
-        "JOIN runs r ON r.id = erl.run_id AND r.session_id = ? "
+        f"JOIN runs r ON r.id = erl.run_id AND {run_owner_sql} "  # nosec
         "WHERE erl.entity_id = ?",
-        (session_id, entity_id),
+        (*run_owner_params, entity_id),
     ).fetchall()
     attached_findings = [
         str(finding["id"])
         for finding in conn.execute(
-            "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
-            (session_id, entity_id),
+            f"SELECT id FROM findings WHERE {entity_owner_sql} AND entity_id = ?",  # nosec
+            (*entity_owner_params, entity_id),
         ).fetchall()
         if finding["id"]
     ]
@@ -811,23 +828,25 @@ def atlas_entity_delete_preview(conn, session_id: str, entity_id: str) -> dict[s
 
 
 def atlas_finding_delete_preview(conn, session_id: str, finding_id: str) -> dict[str, Any] | None:
+    finding_owner_sql, finding_owner_params = personal_owner_where(session_id)
     row = conn.execute(
-        "SELECT id, last_run_id FROM findings WHERE session_id = ? AND id = ?",
-        (session_id, finding_id),
+        f"SELECT id, last_run_id FROM findings WHERE {finding_owner_sql} AND id = ?",  # nosec
+        (*finding_owner_params, finding_id),
     ).fetchone()
     if not row:
         return None
+    run_owner_sql, run_owner_params = personal_owner_where(session_id, table_alias="r")
     run_rows = conn.execute(
         "SELECT DISTINCT fo.run_id FROM findings_occurrences fo "
-        "JOIN runs r ON r.id = fo.run_id AND r.session_id = ? "
+        f"JOIN runs r ON r.id = fo.run_id AND {run_owner_sql} "  # nosec
         "WHERE fo.finding_id = ?",
-        (session_id, finding_id),
+        (*run_owner_params, finding_id),
     ).fetchall()
     run_ids = [str(run["run_id"]) for run in run_rows if run["run_id"]]
     if not run_ids and row["last_run_id"]:
         last_run = conn.execute(
-            "SELECT id FROM runs WHERE session_id = ? AND id = ?",
-            (session_id, row["last_run_id"]),
+            f"SELECT id FROM runs WHERE {finding_owner_sql} AND id = ?",  # nosec
+            (*finding_owner_params, row["last_run_id"]),
         ).fetchone()
         if last_run:
             run_ids = [str(row["last_run_id"])]

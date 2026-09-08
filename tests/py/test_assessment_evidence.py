@@ -389,7 +389,9 @@ def test_saved_dalfox_parameter_evidence_rejects_scope_partial_and_provenance_dr
                 expected_target=expected_target,
             )
 
-        assert resolve(owner_session_id="another-owner") is None
+        assert resolve(
+            owner_session_id=anonymous_session_id("another-owner")
+        ) is None
         assert resolve(owner_project_id="prj_unrelated") is None
         assert resolve(expected_target="https://other.example.test/") is None
 

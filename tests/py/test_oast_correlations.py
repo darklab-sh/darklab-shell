@@ -9,6 +9,7 @@ import sqlite3
 
 import pytest
 
+from identity_helpers import anonymous_session_id
 from core.database_backend import DatabaseBackend
 from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
@@ -31,6 +32,10 @@ from services.connectors.oast_interactions import ingest_oast_interaction
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
 RUN_ID = "12345678-1234-4123-8123-123456789abc"
+OWNER_A = anonymous_session_id("oast-owner-a")
+OWNER_B = anonymous_session_id("oast-owner-b")
+ACTOR_SESSION = anonymous_session_id("oast-actor-session")
+DIFFERENT_ACTOR = anonymous_session_id("oast-different-actor")
 
 
 @pytest.fixture
@@ -42,15 +47,15 @@ def correlation_db():
     timestamp = NOW.isoformat()
     conn.execute(
         "INSERT INTO projects (id, session_id, name, slug, created, updated) "
-        "VALUES ('project-oast', 'owner-a', 'OAST', 'oast', ?, ?)",
-        (timestamp, timestamp),
+        "VALUES ('project-oast', ?, 'OAST', 'oast', ?, ?)",
+        (OWNER_A, timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('entity-oast', 'owner-a', 'domain', 'app.example.test', 'target-hash', "
+        "('entity-oast', ?, 'domain', 'app.example.test', 'target-hash', "
         "?, ?, 1, ?)",
-        (timestamp, timestamp, timestamp),
+        (OWNER_A, timestamp, timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
@@ -66,9 +71,9 @@ def correlation_db():
         "INSERT INTO project_assessments ("
         "id, session_id, project_id, title, profile_key, profile_version, "
         "started_at, created_at, updated_at) VALUES "
-        "('assessment-oast', 'owner-a', 'project-oast', 'OAST cycle', "
+        "('assessment-oast', ?, 'project-oast', 'OAST cycle', "
         "'web', '1.0', ?, ?, ?)",
-        (timestamp, timestamp, timestamp),
+        (OWNER_A, timestamp, timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_assessment_checks ("
@@ -83,8 +88,8 @@ def correlation_db():
     conn.execute(
         "INSERT INTO runs "
         "(id, session_id, run_kind, command, started, finished, exit_code) "
-        "VALUES (?, 'owner-a', 'external', 'private OAST probe', ?, ?, 0)",
-        (RUN_ID, timestamp, (NOW + timedelta(seconds=30)).isoformat()),
+        "VALUES (?, ?, 'external', 'private OAST probe', ?, ?, 0)",
+        (RUN_ID, OWNER_A, timestamp, (NOW + timedelta(seconds=30)).isoformat()),
     )
     conn.execute(
         "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
@@ -111,7 +116,7 @@ def _settings(*, enabled: bool = True, retention_seconds: int = 3600):
 
 def _reserve(correlation_db, suffix: str, *, now: datetime = NOW):
     return reserve_oast_correlation(
-        "owner-a",
+        OWNER_A,
         "project-oast",
         "assessment-oast",
         "check-oast",
@@ -128,7 +133,7 @@ def _reserve(correlation_db, suffix: str, *, now: datetime = NOW):
 def _activate(correlation_db, suffix: str = "a"):
     reservation = _reserve(correlation_db, suffix)
     return activate_oast_correlation(
-        "owner-a", reservation["id"], RUN_ID, now=NOW, conn=correlation_db
+        OWNER_A, reservation["id"], RUN_ID, now=NOW, conn=correlation_db
     )
 
 
@@ -171,12 +176,12 @@ def test_reservation_is_private_owner_scoped_and_provider_free(correlation_db):
     assert "DARKLAB_OAST_TOKEN" not in str(reservation)
     assert "interactsh.internal.example" not in str(reservation)
     assert oast_correlation_for_owner(
-        "owner-b", reservation["id"], conn=correlation_db
+        OWNER_B, reservation["id"], conn=correlation_db
     ) is None
     assert [
         item["id"]
         for item in oast_correlations_for_owner_check(
-            "owner-a",
+            OWNER_A,
             "project-oast",
             "assessment-oast",
             "check-oast",
@@ -198,7 +203,7 @@ def test_team_reservation_uses_team_scope_instead_of_actor_session(correlation_d
     )
 
     reservation = reserve_oast_correlation(
-        "actor-session",
+        ACTOR_SESSION,
         "project-oast",
         "assessment-oast",
         "check-oast",
@@ -214,17 +219,17 @@ def test_team_reservation_uses_team_scope_instead_of_actor_session(correlation_d
 
     assert reservation["team_id"] == "team-a"
     assert oast_correlation_for_owner(
-        "different-actor", reservation["id"], team_id="team-a", conn=correlation_db
+        DIFFERENT_ACTOR, reservation["id"], team_id="team-a", conn=correlation_db
     ) is not None
     assert oast_correlation_for_owner(
-        "actor-session", reservation["id"], team_id="team-b", conn=correlation_db
+        ACTOR_SESSION, reservation["id"], team_id="team-b", conn=correlation_db
     ) is None
 
 
 def test_reservation_requires_current_intrusive_action_and_bounded_window(correlation_db):
     with pytest.raises(OastCorrelationError) as exc_info:
         reserve_oast_correlation(
-            "owner-a",
+            OWNER_A,
             "project-oast",
             "assessment-oast",
             "check-oast",
@@ -236,7 +241,7 @@ def test_reservation_requires_current_intrusive_action_and_bounded_window(correl
 
     with pytest.raises(OastCorrelationError) as exc_info:
         reserve_oast_correlation(
-            "owner-a",
+            OWNER_A,
             "project-oast",
             "assessment-oast",
             "check-oast",
@@ -248,7 +253,7 @@ def test_reservation_requires_current_intrusive_action_and_bounded_window(correl
 
     with pytest.raises(OastCorrelationError) as exc_info:
         reserve_oast_correlation(
-            "owner-a",
+            OWNER_A,
             "project-oast",
             "assessment-oast",
             "check-oast",
@@ -274,7 +279,7 @@ def test_lifecycle_binds_one_run_per_check_then_expires_and_purges(correlation_d
     run_id = "12345678-1234-4123-8123-123456789abc"
 
     active = activate_oast_correlation(
-        "owner-a", first["id"], run_id, now=NOW, conn=correlation_db
+        OWNER_A, first["id"], run_id, now=NOW, conn=correlation_db
     )
     assert active["status"] == "active"
     assert active["run_id"] == run_id
@@ -282,24 +287,24 @@ def test_lifecycle_binds_one_run_per_check_then_expires_and_purges(correlation_d
 
     with pytest.raises(OastCorrelationError) as exc_info:
         activate_oast_correlation(
-            "owner-a", second["id"], run_id, now=NOW, conn=correlation_db
+            OWNER_A, second["id"], run_id, now=NOW, conn=correlation_db
         )
     assert exc_info.value.code == "oast_correlation_run_conflict"
 
     closed = close_oast_correlation(
-        "owner-a", first["id"], now=NOW + timedelta(seconds=30), conn=correlation_db
+        OWNER_A, first["id"], now=NOW + timedelta(seconds=30), conn=correlation_db
     )
     assert closed["status"] == "closed"
     assert closed["closed_at"] == "2026-08-09T12:00:30+00:00"
     with pytest.raises(OastCorrelationError) as exc_info:
-        close_oast_correlation("owner-a", first["id"], conn=correlation_db)
+        close_oast_correlation(OWNER_A, first["id"], conn=correlation_db)
     assert exc_info.value.code == "oast_correlation_close_conflict"
 
     assert expire_oast_correlations(
         now=NOW + timedelta(seconds=61), conn=correlation_db
     ) == 1
     expired = oast_correlation_for_owner(
-        "owner-a", second["id"], conn=correlation_db
+        OWNER_A, second["id"], conn=correlation_db
     )
     assert expired is not None
     assert expired["status"] == "expired"
@@ -331,7 +336,7 @@ def test_interaction_ingestion_redacts_deduplicates_and_marks_check_for_review(
     payload = _interaction_payload()
 
     created = ingest_oast_interaction(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         payload,
         interaction_id="oin_" + "1" * 32,
@@ -353,7 +358,7 @@ def test_interaction_ingestion_redacts_deduplicates_and_marks_check_for_review(
     assert "private-token" not in str(interaction)
     assert "private-query" not in str(interaction)
     duplicate = ingest_oast_interaction(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         {**payload, "details": {"method": "GET", "path": "/changed"}},
         now=NOW + timedelta(seconds=21),
@@ -392,7 +397,7 @@ def test_interaction_ingestion_rejects_malformed_mismatched_and_late_callbacks(
 
     with pytest.raises(OastCorrelationError) as exc_info:
         ingest_oast_interaction(
-            "owner-a",
+            OWNER_A,
             correlation["id"],
             _interaction_payload(protocol="ftp"),
             now=NOW + timedelta(seconds=20),
@@ -402,7 +407,7 @@ def test_interaction_ingestion_rejects_malformed_mismatched_and_late_callbacks(
 
     with pytest.raises(OastCorrelationError) as exc_info:
         ingest_oast_interaction(
-            "owner-a",
+            OWNER_A,
             correlation["id"],
             _interaction_payload(callback_label="b" * 33),
             now=NOW + timedelta(seconds=20),
@@ -412,7 +417,7 @@ def test_interaction_ingestion_rejects_malformed_mismatched_and_late_callbacks(
 
     with pytest.raises(OastCorrelationError) as exc_info:
         ingest_oast_interaction(
-            "owner-a",
+            OWNER_A,
             correlation["id"],
             _interaction_payload(observed_at=NOW + timedelta(seconds=61)),
             now=NOW + timedelta(seconds=61),
@@ -457,7 +462,7 @@ def test_interaction_ingestion_keeps_protocol_summaries_bounded(correlation_db):
     )
     for index, (protocol, details, expected) in enumerate(cases, start=1):
         result = ingest_oast_interaction(
-            "owner-a",
+            OWNER_A,
             correlation["id"],
             _interaction_payload(
                 event_id=f"provider-event-{index}",
@@ -485,7 +490,7 @@ def test_interaction_limit_rejects_without_evicting_existing_evidence(
     monkeypatch.setattr(oast_interactions, "_MAX_INTERACTIONS_PER_CORRELATION", 1)
     correlation = _activate(correlation_db)
     ingest_oast_interaction(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         _interaction_payload(),
         now=NOW + timedelta(seconds=20),
@@ -494,7 +499,7 @@ def test_interaction_limit_rejects_without_evicting_existing_evidence(
 
     with pytest.raises(OastCorrelationError) as exc_info:
         ingest_oast_interaction(
-            "owner-a",
+            OWNER_A,
             correlation["id"],
             _interaction_payload(event_id="provider-event-2"),
             now=NOW + timedelta(seconds=21),
@@ -511,7 +516,7 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
 ):
     correlation = _activate(correlation_db)
     created = ingest_oast_interaction(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         _interaction_payload(),
         interaction_id="oin_" + "9" * 32,
@@ -520,15 +525,15 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
     )
     correlation_db.execute(
         "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
-        "VALUES ('finding-oast', 'owner-a', 'entity-oast', 'entity-oast', ?)",
-        (NOW.isoformat(),),
+        "VALUES ('finding-oast', ?, 'entity-oast', 'entity-oast', ?)",
+        (OWNER_A, NOW.isoformat()),
     )
     correlation_db.execute(
         "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
-        "('entity-other', 'owner-a', 'domain', 'other.example.test', 'other-hash', "
+        "('entity-other', ?, 'domain', 'other.example.test', 'other-hash', "
         "?, ?, 1, ?)",
-        (NOW.isoformat(), NOW.isoformat(), NOW.isoformat()),
+        (OWNER_A, NOW.isoformat(), NOW.isoformat(), NOW.isoformat()),
     )
     correlation_db.execute(
         "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
@@ -537,13 +542,13 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
     )
     correlation_db.execute(
         "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
-        "VALUES ('finding-other', 'owner-a', 'entity-other', 'entity-other', ?)",
-        (NOW.isoformat(),),
+        "VALUES ('finding-other', ?, 'entity-other', 'entity-other', ?)",
+        (OWNER_A, NOW.isoformat()),
     )
 
     with pytest.raises(OastCorrelationError) as exc_info:
         attach_oast_interaction_to_finding(
-            "owner-a",
+            OWNER_A,
             created["interaction"]["id"],
             "finding-other",
             conn=correlation_db,
@@ -551,7 +556,7 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
     assert exc_info.value.code == "oast_interaction_finding_mismatch"
 
     attached = attach_oast_interaction_to_finding(
-        "owner-a",
+        OWNER_A,
         created["interaction"]["id"],
         "finding-oast",
         actor_member_id="member-a",
@@ -569,7 +574,7 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
         ("run", RUN_ID, "member-a"),
     ]
     repeated = attach_oast_interaction_to_finding(
-        "owner-a",
+        OWNER_A,
         created["interaction"]["id"],
         "finding-oast",
         actor_member_id="member-a",
@@ -584,14 +589,14 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
 def test_interactions_are_removed_with_their_expired_correlation(correlation_db):
     correlation = _activate(correlation_db)
     ingest_oast_interaction(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         _interaction_payload(),
         now=NOW + timedelta(seconds=20),
         conn=correlation_db,
     )
     close_oast_correlation(
-        "owner-a",
+        OWNER_A,
         correlation["id"],
         now=NOW + timedelta(seconds=30),
         conn=correlation_db,
