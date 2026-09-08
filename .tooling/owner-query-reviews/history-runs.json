@@ -1,0 +1,164 @@
+{
+  "format_version": 1,
+  "branch": "refactor/owner-context-history-runs",
+  "baseline_site_count": 28,
+  "summary": {
+    "equivalent_adapter": 22,
+    "equivalent_named_exception": 6,
+    "non_equivalent": 0
+  },
+  "classifications": [
+    {
+      "path": "app/services/history/api_queries.py",
+      "scope": "run_owner_clause",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Team rows match team_id; personal rows match session_id with a NULL or empty team_id."
+    },
+    {
+      "path": "app/services/history/api_queries.py",
+      "scope": "project_owner_clause",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Team rows match team_id; personal rows match session_id with a NULL or empty team_id."
+    },
+    {
+      "path": "app/services/history/mutations.py",
+      "scope": "history_run_cleanup_preview",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "personal-only adapter",
+      "current_result_set": "The compatibility path matches runs by session_id without adding a team filter."
+    },
+    {
+      "path": "app/services/history/queries.py",
+      "scope": "history_base_clause project filter",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "personal-only adapter",
+      "current_result_set": "The project subquery matches the supplied session_id and project id without adding a team filter."
+    },
+    {
+      "path": "app/services/history/queries.py",
+      "scope": "history_base_clause starred filter",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "A star matches when its session_id and command equal the already scoped run."
+    },
+    {
+      "path": "app/services/history/queries.py",
+      "scope": "project_links_by_run",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "personal-only adapters",
+      "current_result_set": "Both the project and external run match the supplied session_id."
+    },
+    {
+      "path": "app/services/history/queries.py",
+      "scope": "session_history_stats",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "personal-only adapter",
+      "current_result_set": "Star totals match the supplied session_id."
+    },
+    {
+      "path": "app/services/history/run_metadata.py",
+      "scope": "history_offloaded_search_run_ids run owner",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Team runs match team_id; personal runs match session_id with a NULL or empty team_id."
+    },
+    {
+      "path": "app/services/history/run_metadata.py",
+      "scope": "history_offloaded_search_run_ids project owner",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Team projects match team_id; personal projects match session_id with a NULL or empty team_id."
+    },
+    {
+      "path": "app/services/history/run_metadata.py",
+      "scope": "history_offloaded_search_run_ids starred filter",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "A star matches when its session_id and command equal the already scoped run."
+    },
+    {
+      "path": "app/services/history/run_metadata.py",
+      "scope": "run_metadata_counts_by_run",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "Finding ownership follows the session ids of the supplied run ids."
+    },
+    {
+      "path": "app/services/history/run_metadata.py",
+      "scope": "run_finding_counts_by_run",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "Finding ownership follows the session ids of the supplied run ids."
+    },
+    {
+      "path": "app/services/history/selections.py",
+      "scope": "matching_history_runs._query",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "A star matches when its session_id and command equal the already scoped run."
+    },
+    {
+      "path": "app/services/history/snapshots.py",
+      "scope": "bulk_delete_snapshots",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "personal-only adapter",
+      "current_result_set": "Bulk selection and deletion match session_id without adding a team filter."
+    },
+    {
+      "path": "app/services/history/snapshots.py",
+      "scope": "delete_snapshot",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "personal-only adapter",
+      "current_result_set": "Single selection and deletion match both snapshot id and session_id without adding a team filter."
+    },
+    {
+      "path": "app/services/runs/finalization_web_surface_query.py",
+      "scope": "load_protected_workspace_paths team",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Prior artifact paths belong to runs matching the supplied team_id."
+    },
+    {
+      "path": "app/services/runs/finalization_web_surface_query.py",
+      "scope": "load_protected_workspace_paths personal",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable adapter",
+      "current_result_set": "Prior artifact paths match the supplied session_id and a NULL or empty run team_id."
+    },
+    {
+      "path": "app/services/runs/persistence.py",
+      "scope": "run_scope_visibility_from_db",
+      "site_count": 2,
+      "classification": "equivalent",
+      "disposition": "team-capable composite adapter",
+      "current_result_set": "The run id matches team_id in team scope or session_id with an empty team_id in personal scope."
+    },
+    {
+      "path": "app/services/runs/structured_filters.py",
+      "scope": "entity_run_exists_clause",
+      "site_count": 1,
+      "classification": "equivalent",
+      "disposition": "named relational exception",
+      "current_result_set": "An Atlas entity matches when its session_id equals the already scoped run's session_id."
+    }
+  ]
+}

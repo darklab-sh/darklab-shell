@@ -9,8 +9,11 @@ from typing import Any
 
 from core.database import delete_snapshot_metadata
 from core.database_access import get_db_connect
+
 from services.audit.models import AuditEventType, AuditTargetType
 from services.audit.recorder import record_event
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def save_snapshot(
@@ -65,9 +68,10 @@ def bulk_delete_snapshots(
     deletable_ids = []
     with get_db_connect()() as conn:
         placeholders = ",".join("?" for _ in snapshot_ids)
+        owner = personal_only_owner_predicate(personal_owner_context(session_id))
         rows = conn.execute(
-            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
-            [session_id, *snapshot_ids],
+            f"SELECT id FROM snapshots WHERE {owner.sql} AND id IN ({placeholders})",  # nosec
+            [*owner.params, *snapshot_ids],
         ).fetchall()
         owned_ids = {str(row["id"]) for row in rows}
         for snapshot_id in snapshot_ids:
@@ -80,8 +84,8 @@ def bulk_delete_snapshots(
             delete_snapshot_metadata(conn, deletable_ids)
             delete_placeholders = ",".join("?" for _ in deletable_ids)
             conn.execute(
-                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
-                [session_id, *deletable_ids],
+                f"DELETE FROM snapshots WHERE {owner.sql} AND id IN ({delete_placeholders})",  # nosec
+                [*owner.params, *deletable_ids],
             )
             record_event(
                 AuditEventType.SNAPSHOT_DELETE,
@@ -106,14 +110,15 @@ def snapshot_row(share_id: str):
 
 def delete_snapshot(*, session_id: str, share_id: str, audit_fields: dict[str, Any]) -> int:
     with get_db_connect()() as conn:
+        owner = personal_only_owner_predicate(personal_owner_context(session_id))
         snapshot_rows = conn.execute(
-            "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
-            (share_id, session_id),
+            f"SELECT id FROM snapshots WHERE id = ? AND {owner.sql}",  # nosec
+            (share_id, *owner.params),
         ).fetchall()
         delete_snapshot_metadata(conn, [row["id"] for row in snapshot_rows])
         cur = conn.execute(
-            "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
-            (share_id, session_id),
+            f"DELETE FROM snapshots WHERE id = ? AND {owner.sql}",  # nosec
+            (share_id, *owner.params),
         )
         if cur.rowcount:
             record_event(

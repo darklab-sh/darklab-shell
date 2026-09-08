@@ -214,6 +214,43 @@ def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schem
 
 
 @pytest.mark.postgres
+def test_history_owner_clauses_preserve_mixed_postgres_result_sets(postgres_schema):
+    from services.history.api_queries import project_owner_clause, run_owner_clause
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        "CREATE TABLE owner_history_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+    )
+    owner_a = anonymous_session_id("postgres-history-owner-a")
+    owner_b = anonymous_session_id("postgres-history-owner-b")
+    conn.executemany(
+        "INSERT INTO owner_history_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        (
+            ("owner-a-null", owner_a, None),
+            ("owner-a-empty", owner_a, ""),
+            ("owner-b-empty", owner_b, ""),
+            ("team-red", owner_b, "team-red"),
+            ("team-blue", owner_a, "team-blue"),
+        ),
+    )
+
+    def selected_ids(clause, params, alias):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT {alias}.id FROM owner_history_rows {alias} WHERE {clause} ORDER BY {alias}.id",  # nosec B608
+                params,
+            ).fetchall()
+        ]
+
+    for clause_factory, alias in ((run_owner_clause, "r"), (project_owner_clause, "p")):
+        personal_sql, personal_params = clause_factory(owner_a, "", alias=alias)
+        assert selected_ids(personal_sql, personal_params, alias) == ["owner-a-empty", "owner-a-null"]
+        team_sql, team_params = clause_factory(owner_a, "team-red", alias=alias)
+        assert selected_ids(team_sql, team_params, alias) == ["team-red"]
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,

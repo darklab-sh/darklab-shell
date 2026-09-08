@@ -10,17 +10,29 @@ from typing import Any
 from core.database import delete_run_artifacts
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
-from services.atlas.cleanup import atlas_run_cleanup_preview, delete_atlas_cleanup_preview
+
 from services.assessments.cleanup import mark_run_evidence_unavailable_on_conn
+from services.atlas.cleanup import (
+    atlas_run_cleanup_preview,
+    delete_atlas_cleanup_preview,
+)
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.history.cleanup_logging import history_cleanup_log_fields
 from services.history.snapshots import (
     bulk_delete_snapshots as bulk_delete_snapshots,
+)
+from services.history.snapshots import (
     delete_snapshot as delete_snapshot,
+)
+from services.history.snapshots import (
     save_snapshot as save_snapshot,
+)
+from services.history.snapshots import (
     snapshot_row as snapshot_row,
 )
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def delete_history_run(
@@ -84,7 +96,11 @@ def delete_history_run(
 
 def history_run_cleanup_preview(session_id: str, run_id: str, owner_scope=None):
     with get_db_connect()() as conn:
-        scope_sql, scope_params = ("session_id = ?", [session_id]) if owner_scope is None else owner_scope.predicate()
+        if owner_scope is None:
+            predicate = personal_only_owner_predicate(personal_owner_context(session_id))
+            scope_sql, scope_params = predicate.sql, predicate.params
+        else:
+            scope_sql, scope_params = owner_scope.predicate()
         owned = conn.execute(
             "SELECT session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),
