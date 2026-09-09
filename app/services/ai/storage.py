@@ -18,6 +18,8 @@ import uuid
 from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
 from services.ai import ai_cfg
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 TERMINAL_STATUSES = frozenset({"completed", "failed"})
 ACTIVE_STATUSES = frozenset({"queued", "in_progress"})
@@ -68,20 +70,23 @@ def cached_completed_assist(
 ) -> dict[str, Any] | None:
     with _timed_db_operation("ai_cache_lookup"):
         with _connection_scope(conn) as active_conn:
-            if team_id:
-                row = active_conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
-                    "AND variant = ? AND model = ? AND prompt_version = ? AND context_hash = ? "
-                    "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
-                    (team_id, run_id, variant, model, prompt_version, context_hash),
-                ).fetchone()
-            else:
-                row = active_conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') AND session_id = ? "
-                    "AND run_id = ? AND variant = ? AND model = ? AND prompt_version = ? AND context_hash = ? "
-                    "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
-                    (session_id, run_id, variant, model, prompt_version, context_hash),
-                ).fetchone()
+            owner = composite_owner_predicate(
+                owner_context_for_scope(session_id, team_id=team_id),
+                key_values=(
+                    ("run_id", run_id),
+                    ("variant", variant),
+                    ("model", model),
+                    ("prompt_version", prompt_version),
+                    ("context_hash", context_hash),
+                ),
+                team_column="team_id",
+                personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+            )
+            row = active_conn.execute(
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
+                owner.params,
+            ).fetchone()
             return _decode_assist_row(row) if row else None
 
 
@@ -97,20 +102,22 @@ def active_assist(
 ) -> dict[str, Any] | None:
     with _timed_db_operation("ai_active_lookup"):
         with _connection_scope(conn) as active_conn:
-            if team_id:
-                row = active_conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
-                    "AND variant = ? AND model = ? AND prompt_version = ? "
-                    "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
-                    (team_id, run_id, variant, model, prompt_version),
-                ).fetchone()
-            else:
-                row = active_conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') AND session_id = ? "
-                    "AND run_id = ? AND variant = ? AND model = ? AND prompt_version = ? "
-                    "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
-                    (session_id, run_id, variant, model, prompt_version),
-                ).fetchone()
+            owner = composite_owner_predicate(
+                owner_context_for_scope(session_id, team_id=team_id),
+                key_values=(
+                    ("run_id", run_id),
+                    ("variant", variant),
+                    ("model", model),
+                    ("prompt_version", prompt_version),
+                ),
+                team_column="team_id",
+                personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+            )
+            row = active_conn.execute(
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
+                owner.params,
+            ).fetchone()
             return _decode_assist_row(row) if row else None
 
 
@@ -367,18 +374,17 @@ def list_recent_assists_for_run(
     with _timed_db_operation("ai_list_recent_assists"):
         with get_db_connect()() as conn:
             normalized_limit = max(1, min(100, int(limit)))
-            if team_id:
-                rows = conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE team_id = ? AND run_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (team_id, run_id, normalized_limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM ai_run_assists WHERE (team_id IS NULL OR team_id = '') "
-                    "AND session_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT ?",
-                    (session_id, run_id, normalized_limit),
-                ).fetchall()
+            owner = composite_owner_predicate(
+                owner_context_for_scope(session_id, team_id=team_id),
+                key_values=(("run_id", run_id),),
+                team_column="team_id",
+                personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+            )
+            rows = conn.execute(
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                "ORDER BY created_at DESC LIMIT ?",
+                (*owner.params, normalized_limit),
+            ).fetchall()
         return [_decode_assist_row(row) for row in rows]
 
 

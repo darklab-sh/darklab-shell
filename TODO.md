@@ -112,28 +112,6 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - Raw credential secrets are shown once, are never recoverable from the server, and never enter URLs, command arguments, prompt history, recents, saved transcripts, logs, audit details, diagnostics, exports, error responses, or telemetry.
 - The cutover invalidates existing `tok_` values, removes `/session/migrate`, and keeps no deprecated command, endpoint, header, or raw-owner compatibility alias.
 
-#### Phase 3A — Build and adopt the `OwnerContext` query-ownership seam
-
-Treat this as query-ownership design and adoption, not as a mostly completed mechanical conversion. `OwnerContext` is already threaded through many function signatures and workspace paths, but `personal_scope_predicate()` currently has no production caller and `shared_owner_predicate()` has only a handful; most ownership SQL still bypasses both.
-
-**Steps**
-
-- [ ] Classify each conversion as **equivalent** or **non-equivalent** before changing it. In particular, compare direct `session_id = ?` behavior with the personal form of `shared_owner_predicate()`, which also adds `(team_id IS NULL OR team_id = '')`; record the count and location of sites where adopting the helper would change the returned rows.
-- [ ] Convert equivalent sites in behavior-preserving batches while keeping the existing session ids and schema meaning. Land every non-equivalent site separately with tests that pin the old and intended result sets, an explicit determination that the change is a bug fix or rejected regression, and the documentation/changelog update required for any user-visible correction.
-- [ ] Cover list, detail, mutation, export, cleanup, retention, import, worker, and filesystem paths across runs, active-run metadata, History, snapshots and shares, preferences, stars, recent values, Files, workflows, Projects, Assessments, Atlas, findings, packages, secrets, schedules, watchers, notifications, provider state, and other personal/team surfaces.
-- [ ] Consolidate subsystem-specific scope helpers onto the shared context contract where their behavior is equivalent. Keep small, named adapters where a table has a genuinely different owner shape instead of constructing ownership SQL at arbitrary call sites.
-- [ ] Add targeted subsystem tests that place rows for two personal owners, team scope, `team_id IS NULL`, and `team_id = ''` into the same fixture, then prove the exact list/detail/mutation boundary on SQLite and Postgres. Do not treat a broad suite pass as evidence that the adopted helpers executed.
-- [ ] Land Phase 3A in bounded subsystem merge requests rather than one repository-wide rewrite; each merge request must identify its equivalent and non-equivalent sites, preserve or deliberately correct behavior as declared, list remaining direct-predicate exceptions, and leave the branch releasable.
-
-Completed review ledgers cover the foundation adapters, History/runs, Projects/Assessments/Atlas, Files/workflows/secrets, and automation/notifications. The remaining bounded conversion is the audited remaining surfaces.
-
-**Acceptance criteria**
-
-- [ ] Every unclassified inventory site has an equivalence decision, and every non-equivalent site has a reviewed disposition before conversion begins.
-- [ ] Every mechanical batch changes no ownership semantics or stored owner values and can merge independently with the current session-token model still functioning; semantic fixes are isolated from those batches and reviewed as behavior changes.
-- [ ] Focused tests actively exercise every adopted `OwnerContext` query adapter and personal/team result-set variant on both backends; repository scans limit direct ownership predicates to audited storage adapters, schema/migration code, and narrowly documented exceptions.
-- [ ] Every remaining exception has a named Phase 3B replacement path, so the semantic cutover has a finite and auditable blast radius.
-
 #### Phase 3B — Switch personal ownership and attribution to principals and workspaces
 
 **Steps**

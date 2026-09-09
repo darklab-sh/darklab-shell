@@ -159,7 +159,11 @@ def _create_smoke_schema(conn: Any, *, backend: str) -> None:
 
 @pytest.mark.postgres
 def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schema):
-    from services.teams.ownership_queries import PersonalTeamRows, team_capable_owner_predicate
+    from services.teams.ownership_queries import (
+        PersonalTeamRows,
+        team_capable_owner_predicate,
+        team_only_owner_predicate,
+    )
     from services.teams.scope import personal_owner_context, team_owner_context
 
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
@@ -211,6 +215,72 @@ def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schem
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         )
     ) == ["team-row"]
+    assert selected_ids(team_only_owner_predicate(team)) == ["team-row"]
+
+
+@pytest.mark.postgres
+def test_remaining_surface_adapters_preserve_mixed_postgres_result_sets(postgres_schema):
+    from services.teams.ownership_queries import (
+        PersonalTeamRows,
+        composite_owner_predicate,
+        personal_only_owner_predicate,
+        team_capable_owner_predicate,
+        team_only_owner_predicate,
+    )
+    from services.teams.scope import personal_owner_context, team_owner_context
+
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn.execute(
+        "CREATE TABLE owner_remaining_rows ("
+        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT, run_id TEXT NOT NULL)"
+    )
+    owner_a = anonymous_session_id("postgres-remaining-surfaces-owner-a")
+    owner_b = anonymous_session_id("postgres-remaining-surfaces-owner-b")
+    conn.executemany(
+        "INSERT INTO owner_remaining_rows (id, session_id, team_id, run_id) VALUES (?, ?, ?, ?)",
+        (
+            ("owner-a-null", owner_a, None, "run-one"),
+            ("owner-a-empty", owner_a, "", "run-one"),
+            ("owner-a-other-run", owner_a, "", "run-two"),
+            ("owner-b-empty", owner_b, "", "run-one"),
+            ("team-red", owner_b, "team-red", "run-one"),
+            ("team-blue", owner_a, "team-blue", "run-one"),
+        ),
+    )
+
+    def selected_ids(predicate):
+        return [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM owner_remaining_rows WHERE {predicate.sql} ORDER BY id",  # nosec B608
+                predicate.params,
+            ).fetchall()
+        ]
+
+    personal = personal_owner_context(owner_a)
+    team = team_owner_context("team-red", actor_session_id=owner_a)
+    assert selected_ids(personal_only_owner_predicate(personal)) == [
+        "owner-a-empty",
+        "owner-a-null",
+        "owner-a-other-run",
+        "team-blue",
+    ]
+    assert selected_ids(
+        composite_owner_predicate(personal, key_values=(("run_id", "run-one"),))
+    ) == ["owner-a-empty", "owner-a-null", "team-blue"]
+    assert selected_ids(
+        team_capable_owner_predicate(
+            personal,
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        )
+    ) == ["owner-a-empty", "owner-a-null", "owner-a-other-run"]
+    assert selected_ids(
+        team_capable_owner_predicate(
+            team,
+            personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+        )
+    ) == ["team-red"]
+    assert selected_ids(team_only_owner_predicate(team)) == ["team-red"]
 
 
 @pytest.mark.postgres

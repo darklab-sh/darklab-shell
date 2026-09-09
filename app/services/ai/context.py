@@ -24,6 +24,12 @@ from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal
 from services.runs.output_store import load_run_output_events_for_run
 from services.projects.metadata import _full_finding_triage_by_id
 from services.secrets.storage import list_secret_metadata
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    composite_owner_predicate,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope, personal_owner_context
 from services.workspace.settings import workspace_settings
 
 _SECRET_NAME_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9_]{0,63}\b")
@@ -465,11 +471,16 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
             (run_id, run_id),
         ).fetchall()
     else:
+        owner = composite_owner_predicate(
+            personal_owner_context(session_id),
+            owner_column="session_id",
+            key_values=(("run_id", run_id),),
+        )
         rows = conn.execute(
             "SELECT id, severity, kind, title, raw_line, line_number, status "
-            "FROM findings WHERE session_id = ? AND run_id = ? AND COALESCE(suppressed, FALSE) = FALSE "
+            f"FROM findings WHERE {owner.sql} AND COALESCE(suppressed, FALSE) = FALSE "  # nosec B608
             "ORDER BY line_number, created LIMIT 200",
-            (session_id, run_id),
+            owner.params,
         ).fetchall()
     findings = [{
         "id": row["id"],
@@ -503,12 +514,17 @@ def _load_entities(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
             (run_id,),
         ).fetchall()
     else:
+        owner = composite_owner_predicate(
+            personal_owner_context(session_id),
+            owner_column="e.session_id",
+            key_values=(("erl.run_id", run_id),),
+        )
         rows = conn.execute(
             "SELECT e.type, e.canonical_value FROM entities e "
             "JOIN entity_run_links erl ON erl.entity_id = e.id "
-            "WHERE e.session_id = ? AND erl.run_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            f"WHERE {owner.sql} AND COALESCE(e.suppressed, FALSE) = FALSE "  # nosec B608
             "ORDER BY e.type, e.canonical_value",
-            (session_id, run_id),
+            owner.params,
         ).fetchall()
     grouped: dict[str, list[str]] = defaultdict(list)
     for row in rows:
@@ -529,19 +545,19 @@ def _load_project_context(
         return []
     values = [value for items in entities.values() for value in items]
     placeholders = ",".join("?" for _ in values)
-    if team_id:
-        project_scope_sql = "p.team_id = ?"
-        project_scope_params: tuple[str, ...] = (team_id,)
-    else:
-        project_scope_sql = "p.session_id = ? AND (p.team_id IS NULL OR p.team_id = '')"
-        project_scope_params = (session_id,)
+    project_owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column="p.session_id",
+        team_column="p.team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
     rows = conn.execute(
         "SELECT DISTINCT p.name, p.slug, pl.entity_type, e.canonical_value "
         "FROM projects p JOIN project_links pl ON pl.project_id = p.id "
         "JOIN entities e ON e.id = pl.entity_id "
-        f"WHERE {project_scope_sql} AND e.canonical_value IN ({placeholders}) "  # nosec
+        f"WHERE {project_owner.sql} AND e.canonical_value IN ({placeholders}) "  # nosec
         "ORDER BY p.name, e.canonical_value LIMIT 100",
-        (*project_scope_params, *values),
+        (*project_owner.params, *values),
     ).fetchall()
     return [{
         "project": row["name"],
