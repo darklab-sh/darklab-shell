@@ -38,7 +38,7 @@ def row_to_report_draft(row) -> dict[str, Any] | None:
         return None
     return {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "team_id": row["team_id"],
         "project_id": row["project_id"],
         "draft": normalize_report_draft(_decode_draft(row["draft"])),
@@ -55,7 +55,7 @@ def _report_owner_where(session_id: str, *, team_id: str = "", table_alias: str 
 def get_report_draft_on_conn(conn, session_id: str, project_id: str, *, team_id: str = "") -> dict[str, Any] | None:
     owner_sql, owner_params = _report_owner_where(session_id, team_id=team_id)
     row = conn.execute(
-        "SELECT id, session_id, team_id, project_id, draft, report_format_version, created, updated "
+        "SELECT id, personal_workspace_id, team_id, project_id, draft, report_format_version, created, updated "
         "FROM project_reports WHERE " + owner_sql + " AND project_id = ?",  # nosec
         (*owner_params, str(project_id or "").strip()),
     ).fetchone()
@@ -71,7 +71,7 @@ def default_report_record(session_id: str, project_id: str, *, team_id: str = ""
     timestamp = _now()
     return {
         "id": "",
-        "session_id": str(session_id or "").strip(),
+        "personal_workspace_id": str(session_id or "").strip(),
         "team_id": str(team_id or "").strip(),
         "project_id": str(project_id or "").strip(),
         "draft": default_report_draft(),
@@ -131,7 +131,7 @@ def save_report_draft_on_conn(
     try:
         conn.execute(
             "INSERT INTO project_reports "
-            "(id, session_id, team_id, project_id, draft, report_format_version, created, updated) "
+            "(id, personal_workspace_id, team_id, project_id, draft, report_format_version, created, updated) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 report_id,

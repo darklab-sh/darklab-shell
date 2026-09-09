@@ -36,8 +36,8 @@ def load_session_preferences(conn, session_id):
 def save_session_preferences(conn, session_id, preferences):
     updated = _now()
     conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
+        "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) VALUES (?, ?, ?) "
+        "ON CONFLICT(personal_workspace_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
         (session_id, dialect_for_backend(get_db_backend()).json_param(preferences), updated),
     )
 

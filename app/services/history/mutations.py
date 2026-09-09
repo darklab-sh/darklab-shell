@@ -51,11 +51,11 @@ def delete_history_run(
     with get_db_connect()() as conn:
         conn.execute(dialect_for_backend(get_db_backend()).begin_immediate_sql())
         owned = conn.execute(
-            "SELECT id, session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
+            "SELECT id, personal_workspace_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),
         ).fetchone()
         if owned:
-            cleanup_session_id = str(owned["session_id"] or session_id)
+            cleanup_session_id = str(owned["personal_workspace_id"] or session_id)
             cleanup_team_id = str(owned["team_id"] or getattr(owner_scope, "team_id", "") or "")
             cleanup_preview = atlas_run_cleanup_preview(
                 conn, cleanup_session_id, [run_id], include_curated=prune_curated_atlas, team_id=cleanup_team_id
@@ -102,12 +102,12 @@ def history_run_cleanup_preview(session_id: str, run_id: str, owner_scope=None):
         else:
             scope_sql, scope_params = owner_scope.predicate()
         owned = conn.execute(
-            "SELECT session_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
+            "SELECT personal_workspace_id, team_id FROM runs WHERE id = ? AND " + scope_sql,  # nosec
             (run_id, *scope_params),
         ).fetchone()
         if not owned:
             return None
-        cleanup_session_id = str(owned["session_id"] or session_id)
+        cleanup_session_id = str(owned["personal_workspace_id"] or session_id)
         cleanup_team_id = str(owned["team_id"] or getattr(owner_scope, "team_id", "") or "")
         return atlas_run_cleanup_preview(conn, cleanup_session_id, [run_id], team_id=cleanup_team_id)
 

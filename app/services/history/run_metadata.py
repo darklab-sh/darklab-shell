@@ -189,7 +189,7 @@ def history_offloaded_search_run_ids(
     owner = owner_context_for_scope(session_id, team_id=team_id)
     run_owner = team_capable_owner_predicate(
         owner,
-        owner_column="r.session_id",
+        owner_column="r.personal_workspace_id",
         team_column="r.team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -202,7 +202,7 @@ def history_offloaded_search_run_ids(
     if project_id:
         project_owner = team_capable_owner_predicate(
             owner,
-            owner_column="p.session_id",
+            owner_column="p.personal_workspace_id",
             team_column="p.team_id",
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         )
@@ -216,7 +216,7 @@ def history_offloaded_search_run_ids(
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
-            "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
+            "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command)"
         )
     sql, params = history_add_filters(sql, params, command_root, exit_code_filter, date_range)
     rows = conn.execute("SELECT r.id, r.output_search_text" + sql, params).fetchall()
@@ -247,7 +247,7 @@ def run_file_artifacts_by_run(conn, run_ids) -> dict[str, list[dict[str, object]
         return {run_id: [] for run_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
+        "SELECT id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
         "detected_by, content_type, preview_type, created "
         f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "
         "ORDER BY created ASC, workspace_path ASC",
@@ -283,7 +283,7 @@ def run_metadata_counts_by_run(conn, run_ids) -> dict[str, dict[str, int]]:
         for row in conn.execute(
             "SELECT fo.run_id, COUNT(*) AS count "
             "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-            f"WHERE f.session_id IN (SELECT session_id FROM runs WHERE id IN ({placeholders})) "  # nosec
+            f"WHERE f.personal_workspace_id IN (SELECT personal_workspace_id FROM runs WHERE id IN ({placeholders})) "  # nosec
             f"AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
             [*ids, *ids],
         ).fetchall():
@@ -320,7 +320,7 @@ def run_finding_counts_by_run(conn, run_ids) -> dict[str, int]:
     for row in conn.execute(
         "SELECT fo.run_id, COUNT(*) AS count "
         "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-        f"WHERE f.session_id IN (SELECT session_id FROM runs WHERE id IN ({placeholders})) "  # nosec
+        f"WHERE f.personal_workspace_id IN (SELECT personal_workspace_id FROM runs WHERE id IN ({placeholders})) "  # nosec
         f"AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
         [*ids, *ids],
     ).fetchall():

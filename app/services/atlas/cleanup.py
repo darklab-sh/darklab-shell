@@ -78,8 +78,7 @@ def _public_preview(preview: dict[str, Any]) -> dict[str, Any]:
         "total": entity_count + finding_count,
         "has_cleanup": bool(entity_count or finding_count),
         "has_curated_cleanup": bool(curated_entity_count or curated_finding_count),
-        "cleanup_reasons": preview.get("cleanup_reasons")
-        or build_cleanup_reason_summary(empty_cleanup_bucket_counts(), {}),
+        "cleanup_reasons": preview.get("cleanup_reasons") or build_cleanup_reason_summary(empty_cleanup_bucket_counts(), {}),
     }
 
 
@@ -183,7 +182,7 @@ def _cleanup_reason_summary_with_samples(
 def _row_owner_filter(alias: str, team_id: str) -> str:
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(_PREDICATE_TEMPLATE_SESSION_ID, team_id=team_id),
-        owner_column=f"{alias}.session_id",
+        owner_column=f"{alias}.personal_workspace_id",
         team_column=f"{alias}.team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )
@@ -193,16 +192,17 @@ def _row_owner_filter(alias: str, team_id: str) -> str:
 def _same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
     if normalize_team_id(team_id):
         return f"{alias}.team_id = {owner_alias}.team_id AND {alias}.team_id != ''"
-    return f"{alias}.session_id = {owner_alias}.session_id AND {alias}.team_id = ''"
+    return f"{alias}.personal_workspace_id = {owner_alias}.personal_workspace_id AND {alias}.team_id = ''"
 
 
 def _metadata_same_owner_sql(alias: str, owner_alias: str, team_id: str) -> str:
     if normalize_team_id(team_id):
         return (
             f"({alias}.team_id = {owner_alias}.team_id OR "
-            f"(({alias}.team_id IS NULL OR {alias}.team_id = '') AND {alias}.session_id = {owner_alias}.session_id))"
+            f"(({alias}.team_id IS NULL OR {alias}.team_id = '') AND "
+            f"{alias}.personal_workspace_id = {owner_alias}.personal_workspace_id))"
         )
-    return f"{alias}.session_id = {owner_alias}.session_id AND {alias}.team_id = ''"
+    return f"{alias}.personal_workspace_id = {owner_alias}.personal_workspace_id AND {alias}.team_id = ''"
 
 
 def _owner_filter(alias: str, session_id: str, team_id: str) -> tuple[str, list[str]]:
@@ -307,7 +307,9 @@ def atlas_run_cleanup_preview(
         "SELECT DISTINCT f.id, "
         "EXISTS ("
         "  SELECT 1 FROM findings_occurrences other_fo "
-        "  JOIN runs other_run ON other_run.id = other_fo.run_id AND ", finding_run_owner_sql, " "
+        "  JOIN runs other_run ON other_run.id = other_fo.run_id AND ",
+        finding_run_owner_sql,
+        " "
         "  WHERE other_fo.finding_id = f.id "
         "  AND other_fo.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
         ") AS has_other_runs, "
@@ -326,7 +328,9 @@ def atlas_run_cleanup_preview(
         "  JOIN projects finding_project ON finding_project.id = finding_link.project_id "
         "  WHERE finding_link.entity_type = 'finding' "
         "  AND finding_link.entity_id = f.id "
-        "  AND ", finding_project_owner_sql, " "
+        "  AND ",
+        finding_project_owner_sql,
+        " "
         ") AS has_project_link, "
         "EXISTS ("
         "  SELECT 1 FROM findings_occurrences project_fo "
@@ -334,13 +338,17 @@ def atlas_run_cleanup_preview(
         "    AND project_run_link.entity_id = project_fo.run_id "
         "  JOIN projects project_run_project ON project_run_project.id = project_run_link.project_id "
         "  WHERE project_fo.finding_id = f.id "
-        "  AND ", finding_project_run_owner_sql, " "
+        "  AND ",
+        finding_project_run_owner_sql,
+        " "
         ") AS has_project_run_occurrence, "
         "EXISTS ("
         "  SELECT 1 FROM project_links direct_run_link "
         "  JOIN projects direct_run_project ON direct_run_project.id = direct_run_link.project_id "
         "  WHERE direct_run_link.entity_type = 'run' "
-        "  AND ", finding_direct_run_owner_sql, " "
+        "  AND ",
+        finding_direct_run_owner_sql,
+        " "
         "  AND (direct_run_link.entity_id = f.run_id "
         "    OR direct_run_link.entity_id = f.first_run_id "
         "    OR direct_run_link.entity_id = f.last_run_id)"
@@ -350,25 +358,33 @@ def atlas_run_cleanup_preview(
         "  JOIN projects linked_entity_project ON linked_entity_project.id = linked_entity_link.project_id "
         "  WHERE linked_entity_link.entity_type = 'atlas_entity' "
         "  AND linked_entity_link.entity_id = COALESCE(f.entity_id, f.target_id) "
-        "  AND ", finding_parent_entity_owner_sql, " "
+        "  AND ",
+        finding_parent_entity_owner_sql,
+        " "
         ") AS has_parent_entity_project_link, "
         "EXISTS ("
         "  SELECT 1 FROM entity_labels finding_label "
         "  WHERE finding_label.entity_type = 'finding' "
         "  AND finding_label.entity_id = f.id "
-        "  AND ", finding_label_owner_sql, " "
+        "  AND ",
+        finding_label_owner_sql,
+        " "
         ") AS has_label, "
         "EXISTS ("
         "  SELECT 1 FROM entity_notes finding_note "
         "  WHERE finding_note.entity_type = 'finding' "
         "  AND finding_note.entity_id = f.id "
-        "  AND ", finding_note_owner_sql, " "
+        "  AND ",
+        finding_note_owner_sql,
+        " "
         ") AS has_note "
         "FROM findings f "
         "JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        "JOIN runs source_run ON source_run.id = fo.run_id AND ", finding_source_run_owner_sql, " "
-        "WHERE ", finding_owner_sql, " "
-        "AND fo.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
+        "JOIN runs source_run ON source_run.id = fo.run_id AND ",
+        finding_source_run_owner_sql,
+        " WHERE ",
+        finding_owner_sql,
+        " AND fo.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
     )
     finding_candidate_rows = conn.execute(finding_candidate_sql, finding_params).fetchall()
     finding_ids = []
@@ -421,7 +437,9 @@ def atlas_run_cleanup_preview(
         "SELECT DISTINCT e.id, "
         "EXISTS ("
         "  SELECT 1 FROM entity_run_links other_erl "
-        "  JOIN runs other_run ON other_run.id = other_erl.run_id AND ", entity_run_owner_sql, " "
+        "  JOIN runs other_run ON other_run.id = other_erl.run_id AND ",
+        entity_run_owner_sql,
+        " "
         "  WHERE other_erl.entity_id = e.id "
         "  AND other_erl.run_id NOT IN (SELECT id FROM atlas_cleanup_run_ids)"
         ") AS has_other_runs, "
@@ -438,37 +456,45 @@ def atlas_run_cleanup_preview(
         "  JOIN projects entity_project ON entity_project.id = entity_link.project_id "
         "  WHERE entity_link.entity_type = 'atlas_entity' "
         "  AND entity_link.entity_id = e.id "
-        "  AND ", entity_project_owner_sql, " "
+        "  AND ",
+        entity_project_owner_sql,
+        " "
         ") AS has_project_link, "
         "EXISTS ("
         "  SELECT 1 FROM entity_labels entity_label "
         "  WHERE entity_label.entity_type = 'atlas_entity' "
         "  AND entity_label.entity_id = e.id "
-        "  AND ", entity_label_owner_sql, " "
+        "  AND ",
+        entity_label_owner_sql,
+        " "
         ") AS has_label, "
         "EXISTS ("
         "  SELECT 1 FROM entity_notes entity_note "
         "  WHERE entity_note.entity_type = 'atlas_entity' "
         "  AND entity_note.entity_id = e.id "
-        "  AND ", entity_note_owner_sql, " "
-        ") AS has_note, "
-        "EXISTS ("
-        "  SELECT 1 FROM findings child_f "
-        "  WHERE ", entity_child_finding_owner_sql, " "
+        "  AND ",
+        entity_note_owner_sql,
+        " ) AS has_note, EXISTS (  SELECT 1 FROM findings child_f   WHERE ",
+        entity_child_finding_owner_sql,
+        " "
         "  AND child_f.entity_id = e.id "
         "  AND child_f.id NOT IN (SELECT id FROM atlas_cleanup_allowed_findings)"
         ") AS has_kept_findings, "
         "EXISTS ("
         "  SELECT 1 FROM findings child_f "
         "  JOIN atlas_cleanup_not_eligible_findings not_eligible_child ON not_eligible_child.id = child_f.id "
-        "  WHERE ", entity_child_finding_owner_sql, " "
+        "  WHERE ",
+        entity_child_finding_owner_sql,
+        " "
         "  AND child_f.entity_id = e.id"
         ") AS has_not_eligible_findings "
         "FROM entities e "
         "JOIN entity_run_links erl ON erl.entity_id = e.id "
-        "JOIN runs source_run ON source_run.id = erl.run_id AND ", entity_source_run_owner_sql, " "
-        "WHERE ", entity_owner_sql, " "
-        "AND erl.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
+        "JOIN runs source_run ON source_run.id = erl.run_id AND ",
+        entity_source_run_owner_sql,
+        " WHERE ",
+        entity_owner_sql,
+        " AND erl.run_id IN (SELECT id FROM atlas_cleanup_run_ids)",
     )
     entity_candidate_rows = conn.execute(entity_candidate_sql, entity_params).fetchall()
     entity_ids = []
@@ -607,14 +633,14 @@ def delete_atlas_entities(
     entity_owner_sql, entity_owner_params = _owner_filter("entities", session_id, team_id)
     finding_owner_sql, finding_owner_params = _owner_filter("findings", session_id, team_id)
     owned_rows = conn.execute(
-        f"SELECT id, session_id FROM entities WHERE {entity_owner_sql} AND id IN ({placeholders})",  # nosec
+        f"SELECT id, personal_workspace_id FROM entities WHERE {entity_owner_sql} AND id IN ({placeholders})",  # nosec
         [*entity_owner_params, *ids],
     ).fetchall()
     owned = [str(row["id"]) for row in owned_rows]
     if not owned:
         return {"entities": 0, "findings": 0}
     owned_placeholders = _placeholders(owned)
-    owned_session_ids = _unique_ids([str(row["session_id"]) for row in owned_rows if row["session_id"]])
+    owned_session_ids = _unique_ids([str(row["personal_workspace_id"]) for row in owned_rows if row["personal_workspace_id"]])
     owned_session_placeholders = _placeholders(owned_session_ids)
     finding_rows = conn.execute(
         f"SELECT id FROM findings WHERE {finding_owner_sql} AND entity_id IN ({owned_placeholders})",  # nosec
@@ -645,12 +671,12 @@ def delete_atlas_entities(
     if owned_session_ids:
         intel_rows = conn.execute(
             "SELECT data_json FROM entity_intel_snapshots "  # nosec
-            f"WHERE session_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
+            f"WHERE personal_workspace_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
             [*owned_session_ids, *owned],
         ).fetchall()
         conn.execute(
             "DELETE FROM entity_intel_snapshots "  # nosec
-            f"WHERE session_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
+            f"WHERE personal_workspace_id IN ({owned_session_placeholders}) AND entity_id IN ({owned_placeholders})",
             [*owned_session_ids, *owned],
         )
     for row in intel_rows:

@@ -90,7 +90,7 @@ def build_run_context(
         if not run_row:
             raise ValueError("run not found")
         run = dict(run_row)
-        owner_session_id = str(run.get("session_id") or "")
+        owner_session_id = str(run.get("personal_workspace_id") or "")
         owner_team_id = str(run.get("team_id") or "")
         requested_team_id = str(team_id or "").strip()
         if requested_team_id:
@@ -473,7 +473,7 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
     else:
         owner = composite_owner_predicate(
             personal_owner_context(session_id),
-            owner_column="session_id",
+            owner_column="personal_workspace_id",
             key_values=(("run_id", run_id),),
         )
         rows = conn.execute(
@@ -516,7 +516,7 @@ def _load_entities(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
     else:
         owner = composite_owner_predicate(
             personal_owner_context(session_id),
-            owner_column="e.session_id",
+            owner_column="e.personal_workspace_id",
             key_values=(("erl.run_id", run_id),),
         )
         rows = conn.execute(
@@ -547,7 +547,7 @@ def _load_project_context(
     placeholders = ",".join("?" for _ in values)
     project_owner = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column="p.session_id",
+        owner_column="p.personal_workspace_id",
         team_column="p.team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )

@@ -90,6 +90,7 @@ from . import (
     v0077_assessment_batch_retry_previews,
     v0078_principal_credential_persistence,
     v0079_credential_scopes,
+    v0080_principal_ownership_cutover,
 )
 
 _ = baseline
@@ -174,4 +175,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0077_assessment_batch_retry_previews.MIGRATION,
     v0078_principal_credential_persistence.MIGRATION,
     v0079_credential_scopes.MIGRATION,
+    v0080_principal_ownership_cutover.MIGRATION,
 )

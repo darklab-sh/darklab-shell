@@ -71,7 +71,7 @@ def global_fairness_reason(conn: Any, context: Mapping[str, object]) -> str:
         return "batch_parallel_limit"
 
     owner_sql, owner_params = shared_owner_where(
-        str(context.get("session_id") or ""),
+        str(context.get("personal_workspace_id") or ""),
         team_id=str(context.get("team_id") or ""),
         table_alias="e",
     )
@@ -108,7 +108,7 @@ def target_is_active(
 ) -> bool:
     """Return whether this owner already has active work for the exact target."""
     owner_sql, owner_params = shared_owner_where(
-        str(context.get("session_id") or ""),
+        str(context.get("personal_workspace_id") or ""),
         team_id=str(context.get("team_id") or ""),
         table_alias="e",
     )

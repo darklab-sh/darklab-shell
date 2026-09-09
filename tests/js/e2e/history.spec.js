@@ -83,13 +83,13 @@ conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 conn.row_factory = sqlite3.Row
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 0, 0)",
         (run_id, session_id, command, json.dumps([command, "cleanup fixture output"])),
     )
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, 1, 0, 0)",
         (other_run_id, session_id, "nmap shared.cleanup.playwright.example", json.dumps([not_eligible_value])),
@@ -122,7 +122,7 @@ try:
     )
     entity_ids = {item["type"]: item["id"] for item in materialized}
     conn.execute(
-        "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+        "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
         "VALUES (?, ?, 'atlas_entity', ?, 'keep-e2e', 'manual', datetime('now'))",
         ("lbl_cleanup_e2e_" + uuid.uuid4().hex[:16], session_id, entity_ids["cve"]),
     )

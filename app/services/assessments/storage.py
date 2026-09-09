@@ -317,7 +317,7 @@ def create_assessment_cycle(
         )
         result = conn.execute(
             "INSERT INTO project_assessments "
-            "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+            "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
             "profile_snapshot, status, started_at, completed_at, archived_at, "
             "created_by_session_id, created_by_member_id, updated_by_session_id, "
             "updated_by_member_id, created_at, updated_at) "

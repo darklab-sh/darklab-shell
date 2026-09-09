@@ -39,7 +39,7 @@ def _absolute_or_relative_url(path: str) -> str:
 def _summary_snapshot(batch_id: str) -> dict[str, object] | None:
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT e.session_id, e.team_id, e.project_id, e.status, e.finished, "
+            "SELECT e.personal_workspace_id, e.team_id, e.project_id, e.status, e.finished, "
             "b.assessment_id, b.source_execution_id FROM workflow_executions e "
             "JOIN assessment_batches b ON b.execution_id = e.id "
             "WHERE e.id = ? AND e.execution_kind = ?",
@@ -49,7 +49,7 @@ def _summary_snapshot(batch_id: str) -> dict[str, object] | None:
             return None
         counts = batch_progress_details_on_conn(conn, batch_id)
     return {
-        "session_id": str(row["session_id"] or ""),
+        "personal_workspace_id": str(row["personal_workspace_id"] or ""),
         "team_id": str(row["team_id"] or ""),
         "project_id": str(row["project_id"] or ""),
         "assessment_id": str(row["assessment_id"] or ""),
@@ -100,7 +100,7 @@ def enqueue_terminal_batch_summary(batch_id: str) -> list[str]:
         return dispatcher.enqueue(
             TRIGGER_RUN_COMPLETE,
             payload,
-            str(snapshot["session_id"]),
+            str(snapshot["personal_workspace_id"]),
             run_id=normalized_batch_id,
             team_id=str(snapshot["team_id"]),
         )
@@ -111,7 +111,7 @@ def enqueue_terminal_batch_summary(batch_id: str) -> list[str]:
             extra={
                 "batch_id": normalized_batch_id,
                 "session": get_log_session_id(
-                    str((snapshot or {}).get("session_id") or "")
+                    str((snapshot or {}).get("personal_workspace_id") or "")
                 ),
             },
         )

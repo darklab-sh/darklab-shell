@@ -228,7 +228,7 @@ def entity_run_exists_clause(filters: StructuredOutputFilters, *, run_alias: str
     params: list[str] = []
     predicates = [
         f"sfe_erl.run_id = {run_alias}.id",
-        f"sfe_e.session_id = {run_alias}.session_id",
+        f"sfe_e.personal_workspace_id = {run_alias}.personal_workspace_id",
     ]
     if filters.entity_types:
         predicates.append("LOWER(sfe_e.type) IN (" + ", ".join("?" for _ in filters.entity_types) + ")")

@@ -30,14 +30,14 @@ def _mixed_owner_rows(conn):
         """
         CREATE TABLE owner_adapter_rows (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            session_token TEXT NOT NULL,
+            personal_workspace_id TEXT NOT NULL,
+            legacy_token_owner TEXT NOT NULL,
             team_id TEXT
         )
         """
     )
     conn.executemany(
-        "INSERT INTO owner_adapter_rows (id, session_id, session_token, team_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO owner_adapter_rows (id, personal_workspace_id, legacy_token_owner, team_id) VALUES (?, ?, ?, ?)",
         (
             ("owner-a-null", "tok_owner_a", "tok_owner_a", None),
             ("owner-a-empty", "tok_owner_a", "tok_owner_a", ""),
@@ -131,7 +131,7 @@ def test_composite_and_attribution_adapters_keep_roles_separate():
         owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
         key_values=(("name", "API_KEY"), ("revision", 3)),
     )
-    assert composite.sql == "session_token = ? AND name = ? AND revision = ?"
+    assert composite.sql == "personal_workspace_id = ? AND name = ? AND revision = ?"
     assert composite.params == ("tok_owner_a", "API_KEY", 3)
 
     team = team_owner_context(
@@ -139,9 +139,11 @@ def test_composite_and_attribution_adapters_keep_roles_separate():
         actor_member_id="tmem_owner",
         actor_session_id="tok_owner_a",
     )
-    assert attribution_values(team).session_id == "tok_owner_a"
+    assert attribution_values(team).principal_id == ""
+    assert attribution_values(team).credential_id == ""
     assert attribution_values(team).member_id == "tmem_owner"
-    assert attribution_values(owner).session_id == "tok_owner_a"
+    assert attribution_values(owner).principal_id == ""
+    assert attribution_values(owner).credential_id == ""
     assert attribution_values(owner).member_id == ""
 
 
@@ -169,10 +171,10 @@ def test_owner_query_adapters_require_explicit_table_shape():
         composite_owner_predicate(
             owner,
             key_values=(("name", "API_KEY"),),
-            owner_key_shape="session_token",  # type: ignore[arg-type]
+            owner_key_shape="personal_workspace_id",  # type: ignore[arg-type]
         )
     with pytest.raises(TeamError, match="duplicate key column"):
-        composite_owner_predicate(owner, key_values=(("session_id", "other"),))
+        composite_owner_predicate(owner, key_values=(("personal_workspace_id", "other"),))
 
 
 def test_checked_in_owner_query_inventory_matches_source():

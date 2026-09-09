@@ -212,7 +212,7 @@ def _query_export_entities(
     ).fetchall()
     snapshots = conn.execute(
         "SELECT entity_id, provider, data_json FROM entity_intel_snapshots "
-        f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY " + _provider_order_sql(),  # nosec
+        f"WHERE personal_workspace_id = ? AND entity_id IN ({placeholders}) ORDER BY " + _provider_order_sql(),  # nosec
         [metadata_owner_id(session_id, team_id), *entity_ids],
     ).fetchall()
     by_id = {str(entity["id"]): entity for entity in entities}

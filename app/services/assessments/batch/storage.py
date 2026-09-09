@@ -265,7 +265,7 @@ def create_batch_parent(
         first_step_id = "chunk_0001"
         conn.execute(
             "INSERT INTO workflow_executions "
-            "(id, execution_kind, session_id, team_id, workflow_id, workflow_source, title, "
+            "(id, execution_kind, personal_workspace_id, team_id, workflow_id, workflow_source, title, "
             "definition_snapshot, input_values, variables, status, current_step_id, project_id, "
             "actor_member_id, actor_role, owner_client_id, owner_tab_id, created, updated) "
             "VALUES (?, ?, ?, ?, ?, 'assessment', 'Assessment batch', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",

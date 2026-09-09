@@ -43,7 +43,7 @@ RELATIONSHIP_SAMPLE_LIMIT = 5
 FINDING_SAMPLE_LIMIT = 5
 FINDING_PAGE_LIMIT = 50
 _ENTITY_COLUMNS = (
-    "id, session_id, type, canonical_value, host_entity_id, attributes_json, "
+    "id, personal_workspace_id, type, canonical_value, host_entity_id, attributes_json, "
     "first_seen_at, last_seen_at, occurrence_count, suppressed, suppressed_reason, suppressed_at, created"
 )
 
@@ -661,7 +661,7 @@ def load_profile_finding_page(
         findings,
         conn=conn,
         owner_by_finding_id={
-            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""))
             for row in rows
         },
     )

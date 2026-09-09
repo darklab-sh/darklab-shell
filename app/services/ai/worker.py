@@ -176,7 +176,7 @@ def _process_assist(assist: dict, *, cfg: Mapping[str, Any] | None = None) -> No
     active_cfg = resolve_effective_cfg(cfg)
     assist_id = str(assist.get("id") or "")
     run_id = str(assist.get("run_id") or "")
-    session_id = str(assist.get("session_id") or "")
+    session_id = str(assist.get("personal_workspace_id") or "")
     team_id = str(assist.get("team_id") or "")
     variant = str(assist.get("variant") or "")
     provider_request_started = False
@@ -281,7 +281,7 @@ def _assist_scope_log_fields(assist: dict) -> dict[str, str]:
     team_id = str(assist.get("team_id") or "")
     fields = {
         "team_id": team_id,
-        "session": get_log_session_id(assist.get("session_id")),
+        "session": get_log_session_id(assist.get("personal_workspace_id")),
         "secret_scope": "team" if team_id else "personal",
     }
     actor_member_id = str(assist.get("actor_member_id") or "")

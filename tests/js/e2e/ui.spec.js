@@ -139,7 +139,7 @@ byte_size = len(content.encode("utf-8"))
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 1, 0)",
         (
@@ -156,13 +156,13 @@ try:
     )
     conn.execute(
         "INSERT INTO run_file_artifacts "
-        "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
+        "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
         "VALUES (?, ?, ?, ?, 'evidence.txt', 'output', ?, 'workspace_flag', 'text/plain', 'text', datetime('now'))",
         (artifact_id, session_id, run_id, artifact_rel, byte_size),
     )
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
+        "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
         "VALUES (?, ?, ?, 'finding', '80/tcp open http', '80/tcp open http', 1, 'info', ?, 'new', datetime('now'))",
         (finding_id, session_id, run_id, "fp-" + finding_id),
     )
@@ -216,7 +216,7 @@ try:
         artifact_path.write_text(artifact_content, encoding="utf-8")
         byte_size = len(artifact_content.encode("utf-8"))
         conn.execute(
-            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
             "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
             "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, 2, 1, 0)",
             (
@@ -235,7 +235,7 @@ try:
         )
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
             "VALUES (?, ?, ?, ?, ?, 'output', ?, 'workspace_flag', 'text/plain', 'text', datetime('now', ?))",
             (
                 artifact_id,
@@ -249,7 +249,7 @@ try:
         )
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
+            "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
             "VALUES (?, ?, ?, 'finding', ?, ?, 1, 'info', ?, 'new', datetime('now', ?))",
             (
                 finding_id,
@@ -264,7 +264,7 @@ try:
         canonical_value = f"report-target-{suffix}.example.test"
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
             "VALUES (?, ?, 'domain', ?, ?, datetime('now', ?), datetime('now', ?), datetime('now', ?))",
             (
                 target_id,
@@ -353,14 +353,14 @@ now = "2026-05-31 00:00:00"
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 1, 0, 0)",
         (run_id, session_id, "nmap portal.autopromote-e2e.example.com", json.dumps(["portal.autopromote-e2e.example.com"])),
     )
     conn.execute(
         "INSERT INTO entities "
-        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+        "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
         "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
         (entity_id, session_id, entity_value, "sig-" + entity_id, now, now, now),
     )
@@ -371,7 +371,7 @@ try:
     )
     conn.execute(
         "INSERT INTO entities "
-        "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+        "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, "
         "first_seen_at, last_seen_at, created) "
         "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, ?)",
         (child_entity_id, session_id, child_entity_value, "sig-" + child_entity_id, entity_id, now, now, now),
@@ -387,7 +387,7 @@ try:
     ):
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, 'finding', 'nuclei', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
             (

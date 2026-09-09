@@ -133,7 +133,7 @@ def classifier_drift_report(
 
 def _recent_run_rows(conn, limit: int):
     return conn.execute(
-        "SELECT r.id, r.session_id, r.command, r.run_kind, r.output, r.output_preview, "
+        "SELECT r.id, r.personal_workspace_id, r.command, r.run_kind, r.output, r.output_preview, "
         "r.preview_truncated, r.full_output_available, "
         "r.full_output_truncated, art.rel_path "
         "FROM runs r LEFT JOIN run_output_artifacts art ON art.run_id = r.id "

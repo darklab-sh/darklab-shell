@@ -9,7 +9,6 @@ from typing import Any, Callable, TypeVar
 
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
-
 from services.storage.transactions import run_transaction
 from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
 from services.teams.scope import owner_context_for_scope
@@ -44,7 +43,8 @@ def insert_run_row(
     conn.execute(
         "INSERT INTO runs "
         "("
-        "id, session_id, team_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
+        "id, personal_workspace_id, team_id, run_kind, owner_tab_id, command, "
+        "started, finished, exit_code, output, output_preview, "
         "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
         "output_search_text"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -137,7 +137,7 @@ def scan_target_observation_count(conn: Any, run_id: str) -> int:
         return 0
     try:
         return int(row["count"] or 0)
-    except (KeyError, TypeError, IndexError):
+    except KeyError, TypeError, IndexError:
         return int(row[0] or 0)
 
 

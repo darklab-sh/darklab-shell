@@ -4,6 +4,7 @@
 """
 Tests for session token routes: /session/token/generate and /session/migrate.
 """
+
 import json
 import sqlite3
 import uuid
@@ -24,8 +25,7 @@ def _audit_event_rows(event_type):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT event_type, target_type, target_id, details "
-            "FROM audit_events WHERE event_type = ? ORDER BY created, id",
+            "SELECT event_type, target_type, target_id, details FROM audit_events WHERE event_type = ? ORDER BY created, id",
             (event_type,),
         ).fetchall()
     return [
@@ -40,6 +40,7 @@ def _audit_event_rows(event_type):
 
 
 # ── /session/token/generate ───────────────────────────────────────────────────
+
 
 class TestSessionTokenGenerate:
     def test_returns_200(self):
@@ -68,9 +69,7 @@ class TestSessionTokenGenerate:
         data = json.loads(client.get("/session/token/generate").data)
         token = data["session_token"]
         with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute(
-                "SELECT token FROM session_tokens WHERE token = ?", (token,)
-            ).fetchone()
+            row = conn.execute("SELECT token FROM session_tokens WHERE token = ?", (token,)).fetchone()
         assert row is not None
         assert row[0] == token
 
@@ -86,8 +85,7 @@ class TestSessionTokenGenerate:
         data = json.loads(client.get("/session/token/generate", headers={"X-Session-ID": source_session}).data)
         token = data["session_token"]
         token_events = [
-            row for row in _audit_event_rows("session_token.generate")
-            if row["details"].get("session_hash") == token_hash(token)
+            row for row in _audit_event_rows("session_token.generate") if row["details"].get("session_hash") == token_hash(token)
         ]
         assert len(token_events) == 1
         assert token_events[0]["target_type"] == "session_token"
@@ -95,6 +93,7 @@ class TestSessionTokenGenerate:
 
 
 # ── /session/token/verify ─────────────────────────────────────────────────────
+
 
 class TestSessionTokenVerify:
     def test_verify_returns_true_for_issued_token(self):
@@ -133,6 +132,7 @@ class TestSessionTokenVerify:
 
 # ── /session/migrate ──────────────────────────────────────────────────────────
 
+
 class TestSessionMigrate:
     def _seed_runs(self, session_id, count=2):
         """Insert synthetic run rows for the given session_id."""
@@ -143,7 +143,7 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             for _ in range(count):
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'echo hi', ?)",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, 'echo hi', ?)",
                     (str(uuid.uuid4()), session_id, now),
                 )
             conn.commit()
@@ -156,7 +156,7 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             for i in range(count):
                 conn.execute(
-                    "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                     (str(uuid.uuid4()), session_id, f"label-{i}", now, "{}"),
                 )
             conn.commit()
@@ -164,14 +164,15 @@ class TestSessionMigrate:
     def _count_rows(self, table, session_id):
         with sqlite3.connect(DB_PATH) as conn:
             return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",
+                f"SELECT COUNT(*) FROM {table} WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()[0]
 
     def _seed_preferences(self, session_id, preferences):
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, datetime('now'))",
+                "INSERT OR REPLACE INTO session_preferences "
+                "(personal_workspace_id, preferences, updated) VALUES (?, ?, datetime('now'))",
                 (session_id, json.dumps(preferences, sort_keys=True)),
             )
             conn.commit()
@@ -179,7 +180,7 @@ class TestSessionMigrate:
     def _seed_variable(self, session_id, name, value):
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO session_variables (session_id, name, value, updated) "
+                "INSERT OR REPLACE INTO session_variables (personal_workspace_id, name, value, updated) "
                 "VALUES (?, ?, ?, datetime('now'))",
                 (session_id, name, value),
             )
@@ -189,24 +190,26 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO user_workflows "
-                "(id, session_id, title, description, inputs, steps, created, updated) "
+                "(id, personal_workspace_id, title, description, inputs, steps, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
                 (
                     workflow_id,
                     session_id,
                     "Saved DNS",
                     "custom workflow",
-                    json.dumps([
-                        {
-                            "id": "domain",
-                            "label": "Domain",
-                            "type": "domain",
-                            "required": True,
-                            "placeholder": "example.com",
-                            "default": "",
-                            "help": "",
-                        },
-                    ]),
+                    json.dumps(
+                        [
+                            {
+                                "id": "domain",
+                                "label": "Domain",
+                                "type": "domain",
+                                "required": True,
+                                "placeholder": "example.com",
+                                "default": "",
+                                "help": "",
+                            },
+                        ]
+                    ),
                     json.dumps([{"cmd": "dig {{domain}} A", "note": "resolve apex"}]),
                 ),
             )
@@ -216,7 +219,7 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             for kind, value, last_used, use_count in rows:
                 conn.execute(
-                    "INSERT OR REPLACE INTO recent_values (session_id, kind, value, last_used, use_count) "
+                    "INSERT OR REPLACE INTO recent_values (personal_workspace_id, kind, value, last_used, use_count) "
                     "VALUES (?, ?, ?, ?, ?)",
                     (session_id, kind, value, last_used, use_count),
                 )
@@ -226,13 +229,14 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO projects "
-                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "(id, personal_workspace_id, name, slug, description, status, color, created, updated) "
                 "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
                 (project_id, session_id, slug),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, "
+                "first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'domain', 'darklab.sh', 'sig_migrate_test', "
                 "datetime('now'), datetime('now'), 1, datetime('now'))",
                 ("ent_migrate_test", session_id),
@@ -245,19 +249,19 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, created) "
                 "VALUES (?, ?, ?, ?, datetime('now'))",
                 ("rfa_migrate_test", session_id, "run_migrate_test", "findings.txt"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO findings "
-                "(id, session_id, run_id, target_id, entity_id, scope, raw_line, created) "
+                "(id, personal_workspace_id, run_id, target_id, entity_id, scope, raw_line, created) "
                 "VALUES (?, ?, ?, ?, ?, 'finding', 'open port 443', datetime('now'))",
                 ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO finding_remediation_dispositions "
-                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
                 "rule_identity, review_state, created_at, updated_at) "
                 "VALUES (?, '', 'entity:ent_migrate_test', 'rule', 'RULE:observation:fnd_migrate_test', "
                 "'observation:fnd_migrate_test', 'reviewed', datetime('now'), datetime('now'))",
@@ -265,25 +269,25 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
                 ("lbl_migrate_test", session_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
                 ("note_migrate_test", session_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO evidence_packages "
-                "(id, session_id, project_id, name, manifest, created, updated) "
+                "(id, personal_workspace_id, project_id, name, manifest, created, updated) "
                 "VALUES (?, ?, ?, 'Package', '{}', datetime('now'), datetime('now'))",
                 ("pkg_migrate_test", session_id, project_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO project_assessments "
-                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "(id, personal_workspace_id, project_id, title, profile_key, profile_version, "
                 "profile_snapshot, status, started_at, created_by_session_id, "
                 "updated_by_session_id, created_at, updated_at) VALUES "
                 "('asm_migrate_test', ?, ?, 'Assessment', 'network', '1.0', '{}', "
@@ -303,7 +307,7 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO project_http_profiles "
-                "(id, session_id, project_id, name, name_key, role_key, base_url, "
+                "(id, personal_workspace_id, project_id, name, name_key, role_key, base_url, "
                 "created_by_session_id, updated_by_session_id, created_at, updated_at) "
                 "VALUES ('htp_migrate_test', ?, ?, 'Anonymous', 'anonymous', "
                 "'anonymous', 'https://darklab.sh', ?, ?, datetime('now'), datetime('now'))",
@@ -311,7 +315,7 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO zap_connector_jobs "
-                "(id, session_id, project_id, assessment_id, check_id, "
+                "(id, personal_workspace_id, project_id, assessment_id, check_id, "
                 "http_profile_id, http_profile_revision, policy_level, "
                 "target_count, created_at, updated_at, expires_at) VALUES "
                 "('zap_migrate_test', ?, ?, 'asm_migrate_test', "
@@ -321,7 +325,7 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO oast_correlations "
-                "(id, session_id, project_id, assessment_id, check_id, "
+                "(id, personal_workspace_id, project_id, assessment_id, check_id, "
                 "target_entity_id, action_key, callback_label, allowed_domain, "
                 "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
                 "VALUES ('ocr_0123456789abcdef0123456789abcdef', ?, ?, "
@@ -366,7 +370,7 @@ class TestSessionMigrate:
         resp = client.post(
             "/session/migrate",
             json={"from_session_id": "some-other-session", "to_session_id": "tok_abc"},
-            headers={"X-Session-ID": anonymous_session_id('actual-current-session')},
+            headers={"X-Session-ID": anonymous_session_id("actual-current-session")},
         )
         assert resp.status_code == 403
 
@@ -375,7 +379,7 @@ class TestSessionMigrate:
         resp = client.post(
             "/session/migrate",
             json={"to_session_id": "tok_abc"},
-            headers={"X-Session-ID": anonymous_session_id('s')},
+            headers={"X-Session-ID": anonymous_session_id("s")},
         )
         assert resp.status_code == 400
 
@@ -484,7 +488,8 @@ class TestSessionMigrate:
         )
         assert resp.status_code == 200
         migration_events = [
-            row for row in _audit_event_rows("session.migrate")
+            row
+            for row in _audit_event_rows("session.migrate")
             if row["details"].get("destination_session_hash") == token_hash(to_id)
         ]
         assert len(migration_events) == 1
@@ -515,7 +520,7 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             for cmd in commands:
                 conn.execute(
-                    "INSERT OR IGNORE INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (session_id, cmd),
                 )
             conn.commit()
@@ -603,11 +608,11 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             src = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
                 (from_id,),
             ).fetchone()
             dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
                 (to_id,),
             ).fetchone()
         assert src is None
@@ -659,14 +664,14 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO projects "
-                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "(id, personal_workspace_id, name, slug, description, status, color, created, updated) "
                 "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', "
                 "datetime('now'), datetime('now'))",
                 (to_id,),
             )
             conn.execute(
                 "INSERT INTO finding_remediation_dispositions "
-                "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+                "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
                 "rule_identity, review_state, created_at, updated_at) "
                 "VALUES (?, '', 'entity:ent_migrate_test', 'rule', "
                 "'RULE:observation:fnd_migrate_test', 'observation:fnd_migrate_test', "
@@ -684,50 +689,45 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             migrated_slug = conn.execute(
-                "SELECT slug FROM projects WHERE session_id = ? AND id = 'prj_migrate_test'",
+                "SELECT slug FROM projects WHERE personal_workspace_id = ? AND id = 'prj_migrate_test'",
                 (to_id,),
             ).fetchone()[0]
             project_target = conn.execute(
-                "SELECT e.session_id, e.canonical_value "
+                "SELECT e.personal_workspace_id, e.canonical_value "
                 "FROM project_links l JOIN entities e ON e.id = l.entity_id "
                 "WHERE l.id = 'pl_migrate_test'",
             ).fetchone()
             run_artifact = conn.execute(
-                "SELECT session_id, workspace_path FROM run_file_artifacts "
-                "WHERE id = 'rfa_migrate_test'",
+                "SELECT personal_workspace_id, workspace_path FROM run_file_artifacts WHERE id = 'rfa_migrate_test'",
             ).fetchone()
             finding_occurrence = conn.execute(
-                "SELECT f.session_id, fo.finding_id, f.entity_id "
+                "SELECT f.personal_workspace_id, fo.finding_id, f.entity_id "
                 "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
                 "WHERE fo.finding_id = 'fnd_migrate_test'",
             ).fetchone()
             finding_disposition = conn.execute(
-                "SELECT session_id, review_state FROM finding_remediation_dispositions "
+                "SELECT personal_workspace_id, review_state FROM finding_remediation_dispositions "
                 "WHERE affected_subject = 'entity:ent_migrate_test'",
             ).fetchone()
             evidence_package = conn.execute(
-                "SELECT session_id, project_id FROM evidence_packages "
-                "WHERE id = 'pkg_migrate_test'",
+                "SELECT personal_workspace_id, project_id FROM evidence_packages WHERE id = 'pkg_migrate_test'",
             ).fetchone()
             assessment = conn.execute(
-                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "SELECT personal_workspace_id, created_by_session_id, updated_by_session_id "
                 "FROM project_assessments WHERE id = 'asm_migrate_test'",
             ).fetchone()
             assessment_check = conn.execute(
-                "SELECT state_changed_by_session_id FROM project_assessment_checks "
-                "WHERE id = 'chk_migrate_test'",
+                "SELECT state_changed_by_session_id FROM project_assessment_checks WHERE id = 'chk_migrate_test'",
             ).fetchone()
             http_profile = conn.execute(
-                "SELECT session_id, created_by_session_id, updated_by_session_id "
+                "SELECT personal_workspace_id, created_by_session_id, updated_by_session_id "
                 "FROM project_http_profiles WHERE id = 'htp_migrate_test'",
             ).fetchone()
             zap_job = conn.execute(
-                "SELECT session_id FROM zap_connector_jobs "
-                "WHERE id = 'zap_migrate_test'",
+                "SELECT personal_workspace_id FROM zap_connector_jobs WHERE id = 'zap_migrate_test'",
             ).fetchone()
             oast_correlation = conn.execute(
-                "SELECT session_id FROM oast_correlations "
-                "WHERE id = 'ocr_0123456789abcdef0123456789abcdef'",
+                "SELECT personal_workspace_id FROM oast_correlations WHERE id = 'ocr_0123456789abcdef0123456789abcdef'",
             ).fetchone()
         assert resp.status_code == 200
         assert data["migrated_projects"] == 1
@@ -767,14 +767,20 @@ class TestSessionMigrate:
         client = get_client()
         from_id = anonymous_session_id("migrate-recents-from-" + __import__("uuid").uuid4().hex[:8])
         to_id = str(__import__("uuid").uuid4())
-        self._seed_recent_values(from_id, [
-            ("domain", "alpha.example.com", "2026-05-01 10:00:00.000001", 2),
-            ("domain", "shared.example.com", "2026-05-01 11:00:00.000001", 3),
-            ("ip", "192.0.2.10", "2026-05-01 12:00:00.000001", 1),
-        ])
-        self._seed_recent_values(to_id, [
-            ("domain", "shared.example.com", "2026-05-01 09:00:00.000001", 4),
-        ])
+        self._seed_recent_values(
+            from_id,
+            [
+                ("domain", "alpha.example.com", "2026-05-01 10:00:00.000001", 2),
+                ("domain", "shared.example.com", "2026-05-01 11:00:00.000001", 3),
+                ("ip", "192.0.2.10", "2026-05-01 12:00:00.000001", 1),
+            ],
+        )
+        self._seed_recent_values(
+            to_id,
+            [
+                ("domain", "shared.example.com", "2026-05-01 09:00:00.000001", 4),
+            ],
+        )
 
         resp = client.post(
             "/session/migrate",
@@ -785,11 +791,11 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             source_count = conn.execute(
-                "SELECT COUNT(*) FROM recent_values WHERE session_id = ?",
+                "SELECT COUNT(*) FROM recent_values WHERE personal_workspace_id = ?",
                 (from_id,),
             ).fetchone()[0]
             rows = conn.execute(
-                "SELECT kind, value, last_used, use_count FROM recent_values WHERE session_id = ?",
+                "SELECT kind, value, last_used, use_count FROM recent_values WHERE personal_workspace_id = ?",
                 (to_id,),
             ).fetchall()
         by_value = {(row[0], row[1]): {"last_used": row[2], "use_count": row[3]} for row in rows}
@@ -818,7 +824,7 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
                 (to_id,),
             ).fetchone()
         assert json.loads(dst[0]) == dst_prefs
@@ -829,14 +835,20 @@ class TestSessionMigrate:
         to_id = str(__import__("uuid").uuid4())
         project_id = "prj_active_pref_migrate"
         self._seed_project_workspace_records(from_id, project_id=project_id, slug="active-pref")
-        self._seed_preferences(from_id, {
-            "pref_active_project_id": project_id,
-            "pref_theme_name": "theme_light_blue",
-        })
-        self._seed_preferences(to_id, {
-            "pref_theme_name": "darklab_obsidian.yaml",
-            "pref_timestamps": "off",
-        })
+        self._seed_preferences(
+            from_id,
+            {
+                "pref_active_project_id": project_id,
+                "pref_theme_name": "theme_light_blue",
+            },
+        )
+        self._seed_preferences(
+            to_id,
+            {
+                "pref_theme_name": "darklab_obsidian.yaml",
+                "pref_timestamps": "off",
+            },
+        )
 
         resp = client.post(
             "/session/migrate",
@@ -847,7 +859,7 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
                 (to_id,),
             ).fetchone()
         preferences = json.loads(dst[0])
@@ -951,13 +963,13 @@ class TestSessionMigrate:
             for path, label in (("shared.txt", "source-shared"), ("from-only.txt", "source-only")):
                 conn.execute(
                     "INSERT OR REPLACE INTO entity_labels "
-                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                     "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'))",
                     ("lbl_" + __import__("uuid").uuid4().hex, from_id, path, label),
                 )
                 conn.execute(
                     "INSERT OR REPLACE INTO entity_notes "
-                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                     "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'), datetime('now'))",
                     ("note_" + __import__("uuid").uuid4().hex, from_id, path, f"note {label}"),
                 )
@@ -972,22 +984,22 @@ class TestSessionMigrate:
 
         with sqlite3.connect(DB_PATH) as conn:
             moved_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
                 "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
                 (to_id,),
             ).fetchone()
             skipped_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
                 "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
                 (from_id,),
             ).fetchone()
             drifted_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
                 "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
                 (to_id,),
             ).fetchone()
             moved_note = conn.execute(
-                "SELECT body FROM entity_notes WHERE session_id = ? "
+                "SELECT body FROM entity_notes WHERE personal_workspace_id = ? "
                 "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
                 (to_id,),
             ).fetchone()
@@ -1006,6 +1018,7 @@ class TestSessionMigrate:
 
 
 # ── /session/workflows ────────────────────────────────────────────────────────
+
 
 class TestSessionWorkflows:
     def _payload(self, title="Saved DNS"):
@@ -1033,8 +1046,7 @@ class TestSessionWorkflows:
         launched: list[str] = []
         monkeypatch.setattr(
             "blueprints.workflows.launch_execution_step",
-            lambda execution_id: launched.append(execution_id)
-            or {"execution_id": execution_id},
+            lambda execution_id: launched.append(execution_id) or {"execution_id": execution_id},
         )
 
         create_resp = client.post(
@@ -1063,13 +1075,15 @@ class TestSessionWorkflows:
                     {
                         "id": "collect",
                         "cmd": "echo hosts",
-                        "captures": [{
-                            "name": "hosts",
-                            "kind": "collection",
-                            "source": "json_pointer",
-                            "pointer": "/hosts",
-                            "item_limit": 4,
-                        }],
+                        "captures": [
+                            {
+                                "name": "hosts",
+                                "kind": "collection",
+                                "source": "json_pointer",
+                                "pointer": "/hosts",
+                                "item_limit": 4,
+                            }
+                        ],
                     },
                     {
                         "id": "probe",
@@ -1131,13 +1145,12 @@ class TestSessionWorkflows:
             headers={"X-Session-ID": session_id},
         )
         assert create_error.status_code == 400
-        assert create_error.get_json()["errors"] == [{
-            "field": "inputs.0.id",
-            "message": (
-                "parameter ID must start with a letter and use lowercase letters, "
-                "numbers, and underscores"
-            ),
-        }]
+        assert create_error.get_json()["errors"] == [
+            {
+                "field": "inputs.0.id",
+                "message": ("parameter ID must start with a letter and use lowercase letters, numbers, and underscores"),
+            }
+        ]
 
         created = client.post(
             "/session/workflows",
@@ -1158,24 +1171,30 @@ class TestSessionWorkflows:
             headers={"X-Session-ID": session_id},
         )
         assert update_error.status_code == 400
-        assert update_error.get_json()["errors"] == [{
-            "field": "steps.1.id",
-            "message": "step ID must be unique",
-        }]
+        assert update_error.get_json()["errors"] == [
+            {
+                "field": "steps.1.id",
+                "message": "step ID must be unique",
+            }
+        ]
 
         invalid_capture = {
             **self._payload("Invalid capture"),
             "version": 2,
-            "steps": [{
-                "id": "resolve",
-                "cmd": "dig {{domain}} A",
-                "note": "",
-                "captures": [{
-                    "name": "resolved_ip",
-                    "source": "json_pointer",
-                    "pointer": "result.ip",
-                }],
-            }],
+            "steps": [
+                {
+                    "id": "resolve",
+                    "cmd": "dig {{domain}} A",
+                    "note": "",
+                    "captures": [
+                        {
+                            "name": "resolved_ip",
+                            "source": "json_pointer",
+                            "pointer": "result.ip",
+                        }
+                    ],
+                }
+            ],
         }
         capture_error = client.put(
             f"/session/workflows/{created['id']}",
@@ -1183,10 +1202,12 @@ class TestSessionWorkflows:
             headers={"X-Session-ID": session_id},
         )
         assert capture_error.status_code == 400
-        assert capture_error.get_json()["errors"] == [{
-            "field": "steps.0.captures.0.pointer",
-            "message": "workflow capture JSON Pointer must start with /",
-        }]
+        assert capture_error.get_json()["errors"] == [
+            {
+                "field": "steps.0.captures.0.pointer",
+                "message": "workflow capture JSON Pointer must start with /",
+            }
+        ]
 
         invalid_sensitive = self._payload("Invalid sensitive flag")
         invalid_sensitive["inputs"][0]["sensitive"] = "yes"
@@ -1196,10 +1217,12 @@ class TestSessionWorkflows:
             headers={"X-Session-ID": session_id},
         )
         assert sensitive_error.status_code == 400
-        assert sensitive_error.get_json()["errors"] == [{
-            "field": "inputs.0.sensitive",
-            "message": "parameter sensitive state must be true or false",
-        }]
+        assert sensitive_error.get_json()["errors"] == [
+            {
+                "field": "inputs.0.sensitive",
+                "message": "parameter sensitive state must be true or false",
+            }
+        ]
 
         unsupported_version = self._payload("Unsupported version")
         unsupported_version["version"] = 4
@@ -1209,20 +1232,24 @@ class TestSessionWorkflows:
             headers={"X-Session-ID": session_id},
         )
         assert version_error.status_code == 400
-        assert version_error.get_json()["errors"] == [{
-            "field": "version",
-            "message": "unsupported workflow version",
-        }]
+        assert version_error.get_json()["errors"] == [
+            {
+                "field": "version",
+                "message": "unsupported workflow version",
+            }
+        ]
 
     def test_update_and_delete_are_session_scoped(self):
         client = get_client()
         session_id = anonymous_session_id("workflow-update-" + __import__("uuid").uuid4().hex[:8])
         other_session_id = anonymous_session_id("workflow-other-" + __import__("uuid").uuid4().hex[:8])
-        created = json.loads(client.post(
-            "/session/workflows",
-            json=self._payload(),
-            headers={"X-Session-ID": session_id},
-        ).data)["workflow"]
+        created = json.loads(
+            client.post(
+                "/session/workflows",
+                json=self._payload(),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["workflow"]
 
         denied = client.put(
             f"/session/workflows/{created['id']}",
@@ -1242,21 +1269,25 @@ class TestSessionWorkflows:
         assert denied.status_code == 404
         assert json.loads(updated.data)["workflow"]["title"] == "Updated DNS"
         assert deleted.status_code == 200
-        assert json.loads(client.get(
-            "/session/workflows",
-            headers={"X-Session-ID": session_id},
-        ).data)["items"] == []
+        assert (
+            json.loads(
+                client.get(
+                    "/session/workflows",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )["items"]
+            == []
+        )
 
 
 # ── /session/recent-values ───────────────────────────────────────────────────
+
 
 class TestSessionRecentValues:
     def _values(self, session_id, kind):
         with sqlite3.connect(DB_PATH) as conn:
             rows = conn.execute(
-                "SELECT value FROM recent_values "
-                "WHERE session_id = ? AND kind = ? "
-                "ORDER BY last_used DESC, value ASC",
+                "SELECT value FROM recent_values WHERE personal_workspace_id = ? AND kind = ? ORDER BY last_used DESC, value ASC",
                 (session_id, kind),
             ).fetchall()
         return [row[0] for row in rows]
@@ -1358,7 +1389,7 @@ class TestSessionRecentValues:
 
         with sqlite3.connect(DB_PATH) as conn:
             count = conn.execute(
-                "SELECT use_count FROM recent_values WHERE session_id = ? AND kind = ? AND value = ?",
+                "SELECT use_count FROM recent_values WHERE personal_workspace_id = ? AND kind = ? AND value = ?",
                 (session_id, "domain", "alpha.example.com"),
             ).fetchone()[0]
         resp = client.get("/session/recent-values?kind=domain", headers={"X-Session-ID": session_id})
@@ -1387,6 +1418,7 @@ class TestSessionRecentValues:
 
 # ── /session/run-count ────────────────────────────────────────────────────────
 
+
 class TestSessionRunCount:
     def _seed_runs(self, session_id, count):
         import uuid
@@ -1396,7 +1428,7 @@ class TestSessionRunCount:
         with sqlite3.connect(DB_PATH) as conn:
             for _ in range(count):
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'echo hi', ?)",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, 'echo hi', ?)",
                     (str(uuid.uuid4()), session_id, now),
                 )
             conn.commit()
@@ -1452,10 +1484,12 @@ class TestSessionRunCount:
         client.post(
             "/session/recent-values",
             headers={"X-Session-ID": session_id},
-            json={"values": [
-                {"kind": "domain", "value": "alpha.example.com"},
-                {"kind": "ip", "value": "192.0.2.10"},
-            ]},
+            json={
+                "values": [
+                    {"kind": "domain", "value": "alpha.example.com"},
+                    {"kind": "ip", "value": "192.0.2.10"},
+                ]
+            },
         )
 
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
@@ -1465,18 +1499,19 @@ class TestSessionRunCount:
 
 # ── /session/starred ──────────────────────────────────────────────────────────
 
+
 class TestSessionStarred:
     def _count_stars(self, session_id):
         with sqlite3.connect(DB_PATH) as conn:
             return conn.execute(
-                "SELECT COUNT(*) FROM starred_commands WHERE session_id = ?",
+                "SELECT COUNT(*) FROM starred_commands WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()[0]
 
     def _get_stars(self, session_id):
         with sqlite3.connect(DB_PATH) as conn:
             rows = conn.execute(
-                "SELECT command FROM starred_commands WHERE session_id = ?",
+                "SELECT command FROM starred_commands WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchall()
         return {row[0] for row in rows}
@@ -1496,7 +1531,7 @@ class TestSessionStarred:
         session_id = anonymous_session_id("get-stars-existing-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                 (session_id, "nmap target"),
             )
             conn.commit()
@@ -1510,7 +1545,7 @@ class TestSessionStarred:
         session_b = anonymous_session_id("get-stars-scope-b-" + __import__("uuid").uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                 (session_a, "cmd-a"),
             )
             conn.commit()
@@ -1552,7 +1587,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={},
-            headers={"X-Session-ID": anonymous_session_id('post-stars-no-cmd')},
+            headers={"X-Session-ID": anonymous_session_id("post-stars-no-cmd")},
         )
         assert resp.status_code == 400
 
@@ -1561,7 +1596,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={"command": ""},
-            headers={"X-Session-ID": anonymous_session_id('post-stars-empty-cmd')},
+            headers={"X-Session-ID": anonymous_session_id("post-stars-empty-cmd")},
         )
         assert resp.status_code == 400
 
@@ -1573,7 +1608,7 @@ class TestSessionStarred:
         with sqlite3.connect(DB_PATH) as conn:
             for cmd in ["keep", "remove"]:
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (session_id, cmd),
                 )
             conn.commit()
@@ -1604,7 +1639,7 @@ class TestSessionStarred:
         with sqlite3.connect(DB_PATH) as conn:
             for sid in [session_a, session_b]:
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (sid, "shared-cmd"),
                 )
             conn.commit()
@@ -1624,7 +1659,7 @@ class TestSessionStarred:
         with sqlite3.connect(DB_PATH) as conn:
             for cmd in ["cmd1", "cmd2", "cmd3"]:
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (session_id, cmd),
                 )
             conn.commit()
@@ -1643,7 +1678,7 @@ class TestSessionStarred:
         with sqlite3.connect(DB_PATH) as conn:
             for sid in [session_a, session_b]:
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (sid, "cmd"),
                 )
             conn.commit()
@@ -1656,6 +1691,7 @@ class TestSessionStarred:
 
 
 # ── /session/token/info ───────────────────────────────────────────────────────
+
 
 class TestSessionTokenInfo:
     def test_returns_null_for_uuid_session(self):
@@ -1703,6 +1739,7 @@ class TestSessionTokenInfo:
 
 
 # ── /session/preferences ──────────────────────────────────────────────────────
+
 
 class TestSessionPreferences:
     def test_returns_empty_preferences_when_none_saved(self):
@@ -1763,6 +1800,7 @@ class TestSessionPreferences:
 
 # ── /session/token/revoke ─────────────────────────────────────────────────────
 
+
 class TestSessionTokenRevoke:
     def test_returns_200_for_existing_token(self):
         client = get_client()
@@ -1776,9 +1814,7 @@ class TestSessionTokenRevoke:
         token = json.loads(client.get("/session/token/generate").data)["session_token"]
         client.post("/session/token/revoke", json={"token": token})
         with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute(
-                "SELECT 1 FROM session_tokens WHERE token = ?", (token,)
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM session_tokens WHERE token = ?", (token,)).fetchone()
         assert row is None
 
     def test_returns_404_for_unknown_token(self):
@@ -1821,8 +1857,7 @@ class TestSessionTokenRevoke:
         )
         assert resp.status_code == 200
         revoke_events = [
-            row for row in _audit_event_rows("session_token.revoke")
-            if row["details"].get("session_hash") == token_hash(token)
+            row for row in _audit_event_rows("session_token.revoke") if row["details"].get("session_hash") == token_hash(token)
         ]
         assert len(revoke_events) == 1
         assert revoke_events[0]["target_type"] == "session_token"

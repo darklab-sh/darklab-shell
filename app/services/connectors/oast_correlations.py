@@ -199,7 +199,7 @@ def reserve_oast_correlation(
             )
         active_conn.execute(
             "INSERT INTO oast_correlations ("
-            "id, session_id, team_id, project_id, assessment_id, check_id, "
+            "id, personal_workspace_id, team_id, project_id, assessment_id, check_id, "
             "target_entity_id, action_key, callback_label, allowed_domain, "
             "service_origin_sha256, actor_member_id, actor_role, created_at, "
             "updated_at, active_until, purge_at) "

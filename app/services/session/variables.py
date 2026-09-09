@@ -94,8 +94,8 @@ def set_session_variable(session_id: str, name: str, value: str) -> None:
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connect()() as conn:
         conn.execute(
-            "INSERT INTO session_variables (session_id, name, value, updated) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(session_id, name) DO UPDATE SET value = excluded.value, updated = excluded.updated",
+            "INSERT INTO session_variables (personal_workspace_id, name, value, updated) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(personal_workspace_id, name) DO UPDATE SET value = excluded.value, updated = excluded.updated",
             (session_id, normalized_name, normalized_value, updated),
         )
         conn.commit()

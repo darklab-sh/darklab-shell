@@ -743,7 +743,7 @@ def test_probe_launch_itself_writes_no_cycle_evidence_but_finalized_run_can_cove
         launch = started_calls[0]
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, exit_code) "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code) "
             "VALUES (?, ?, '', 'external', ?, ?, ?, 0)",
             (
                 "run_probe_coverage",

@@ -77,6 +77,11 @@ _UNQUALIFIED_TEAM_RUN_PREDICATE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _RUN_SQL_RE = re.compile(r"\b(?:FROM|JOIN)\s+runs\b|\bruns\.", re.IGNORECASE)
+_LEGACY_E2E_OWNER_COLUMN_RE = re.compile(
+    r'^\s*"(?:INSERT\s+(?:OR\s+\w+\s+)?INTO\b.*|\(id,\s*|id,\s*)'
+    r".*\b(?:session_id|session_token|owner_session_id)\b",
+    re.IGNORECASE,
+)
 
 
 def _stringish_source(node: ast.AST) -> str:
@@ -698,6 +703,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workspace/metadata.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/modes.py", 6, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/models.py", 87, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/workspace/naming.py", 36, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/paths.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workspace/settings.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/core/migrations/baseline.py", 1689, "cohesive-ratchet"),
@@ -815,7 +821,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/runs/lifecycle.py", 660, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/project_notices.py", 116, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/scope.py", 188, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/schema_manifest.py", 919, "cohesive-ratchet"),
+    ModuleSizeBudget("app/core/schema_manifest.py", 958, "cohesive-ratchet"),
     ModuleSizeBudget("app/core/database_backend.py", 845, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime.py", 824, "split-package-ratchet"),
     ModuleSizeBudget("app/services/commands/builtins_runtime_specs.py", 169, "split-package-ratchet"),
@@ -2143,9 +2149,15 @@ class TestTeamModeScopePredicates:
                 snippet = " ".join(source.split())[:180]
                 issues.append(f"  {relative}:{line_number}: {snippet}")
 
+        for path in sorted((_REPO_ROOT / "tests" / "js" / "e2e").rglob("*.js")):
+            relative = path.relative_to(_REPO_ROOT)
+            for line_number, line in enumerate(path.read_text().splitlines(), start=1):
+                if _LEGACY_E2E_OWNER_COLUMN_RE.search(line):
+                    issues.append(f"  {relative}:{line_number}: {line.strip()[:180]}")
+
         assert not issues, (
-            "Direct team run predicates can hide team-owned runs from other members. "
-            "Use owner_scope.predicate(), _run_owner_clause(), or another shared "
-            "owner-scope helper instead of combining session_id = ? with team_id = ? on runs:\n"
+            "Owner-scope schema drift detected. Use owner_scope.predicate(), "
+            "_run_owner_clause(), or another shared owner-scope helper for app queries, "
+            "and keep browser seed SQL on the current personal_workspace_id schema:\n"
             + "\n".join(issues)
         )

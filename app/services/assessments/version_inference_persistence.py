@@ -141,7 +141,7 @@ def _upsert_finding(
     run_id = ""
     json_param = dialect_for_backend(get_db_backend()).json_param
     result = conn.execute(
-        "INSERT INTO findings (id, session_id, team_id, run_id, target_id, scope, line_number, "
+        "INSERT INTO findings (id, personal_workspace_id, team_id, run_id, target_id, scope, line_number, "
         "review_state, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
         "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
         "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method, "

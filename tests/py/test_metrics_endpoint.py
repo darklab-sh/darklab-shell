@@ -158,7 +158,7 @@ class TestMetricsEndpoint:
         with database.db_connect() as conn:
             conn.executemany(
                 "INSERT INTO ai_run_assists "
-                "(id, run_id, session_id, variant, prompt_version, prompt_version_source, "
+                "(id, run_id, personal_workspace_id, variant, prompt_version, prompt_version_source, "
                 "payload_schema_version, model, context_hash, status, created_at, updated_at, "
                 "claimed_at, heartbeat_at) "
                 "VALUES (?, ?, ?, ?, 'ai-assist-v1', 'canonical', 'v1', 'llama', ?, ?, ?, ?, ?, ?)",

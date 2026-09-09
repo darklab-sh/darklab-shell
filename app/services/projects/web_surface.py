@@ -105,9 +105,9 @@ def _capture_items(session_id: str, rows: list[Any]) -> list[dict[str, Any]]:
             "conflict" if workspace_path in metadata_by_path else "missing"
         )
         availability = artifact_availability(
-            str(artifact.get("session_id") or session_id),
+            str(artifact.get("personal_workspace_id") or session_id),
             artifact,
-            owner_context=artifact_owner_context(str(artifact.get("session_id") or session_id), artifact),
+            owner_context=artifact_owner_context(str(artifact.get("personal_workspace_id") or session_id), artifact),
         )
         capture: dict[str, object] = {
             **(metadata or {}),

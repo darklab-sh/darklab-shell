@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
 from config import resolve_effective_cfg
 from services.teams.scope import OwnerContext, owner_context_for_scope
 from services.workspace.models import WorkspaceDisabled, WorkspaceError, WorkspaceSettings
+from services.workspace.naming import (  # noqa: F401 - public compatibility exports
+    owner_workspace_name,
+    session_workspace_name,
+)
 
 
 def coerce_owner_context(owner: OwnerContext | Any) -> OwnerContext:
@@ -58,18 +61,6 @@ def workspace_settings(cfg: Mapping[str, Any] | None = None) -> WorkspaceSetting
 def require_enabled(settings: WorkspaceSettings) -> None:
     if not settings.enabled:
         raise WorkspaceDisabled("Files are disabled on this instance")
-
-
-def session_workspace_name(session_id: str) -> str:
-    digest = hashlib.sha256(str(session_id or "anonymous").encode("utf-8")).hexdigest()
-    return f"sess_{digest[:32]}"
-
-
-def owner_workspace_name(owner: OwnerContext | Any) -> str:
-    context = coerce_owner_context(owner)
-    digest = hashlib.sha256(context.owner_id.encode("utf-8")).hexdigest()
-    prefix = "team" if context.is_team else "sess"
-    return f"{prefix}_{digest[:32]}"
 
 
 def workspace_session_owner_context(session_id: str) -> OwnerContext:

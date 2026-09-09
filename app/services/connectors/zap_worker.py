@@ -103,7 +103,7 @@ def _fail_job(job_id: str, status: str, exc: BaseException, cfg) -> None:
 def _preview_report(job: Mapping[str, Any], payload: bytes) -> str:
     draft_id = atlas_draft_id_for_zap_job(str(job.get("id") or ""))
     result = preview_atlas_import(
-        session_id=str(job.get("session_id") or ""),
+        session_id=str(job.get("personal_workspace_id") or ""),
         team_id=str(job.get("team_id") or ""),
         actor_member_id=str(job.get("actor_member_id") or ""),
         role=str(job.get("actor_role") or ""),

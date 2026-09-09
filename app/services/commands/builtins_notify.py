@@ -27,6 +27,7 @@ from services.notifications.channels_store import (
     send_test_notification,
     update_notification_channel,
 )
+from services.notifications.models import is_durable_personal_owner
 
 log = logging.getLogger("shell")
 
@@ -58,7 +59,7 @@ def _durable_session_error(session_id: str) -> str:
 
 
 def _is_durable_session(session_id: str) -> bool:
-    return str(session_id or "").startswith("tok_")
+    return is_durable_personal_owner(session_id)
 
 
 def _notify_ref(parts: list[str], usage: str) -> str:
@@ -153,7 +154,7 @@ def _parse_events(parts: list[str]) -> dict[str, Any]:
 
 def _audit_fields(session_id: str, *, team_id: str = "", team_role: str = "") -> dict[str, Any]:
     return {
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "actor_session_id": session_id,
         "team_id": team_id,
         "actor_role": team_role,

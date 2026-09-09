@@ -36,7 +36,7 @@ MAX_MERGE_QUERY_LEN = 200
 _LIKE_ESCAPE = "\\"
 
 _FINDING_COLUMNS = (
-    "id, session_id, team_id, entity_id, target_id, subject_key, signature_hash, "
+    "id, personal_workspace_id, team_id, entity_id, target_id, subject_key, signature_hash, "
     "origin, validation_method, status, severity, title, raw_line, fingerprint, "
     "summary, impact, reproduction_steps, confidence, cve_ids_json, cwe_ids_json, "
     "cvss_vector, cvss_score, references_json, first_seen_at, last_seen_at, created"
@@ -44,11 +44,11 @@ _FINDING_COLUMNS = (
 
 _DISPOSITION_UPSERT_SQL = (
     "INSERT INTO finding_remediation_dispositions "
-    "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+    "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
     "vulnerability_id, rule_identity, review_state, remediation, created_at, "
     "updated_at, remediation_updated_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-    "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+    "ON CONFLICT(personal_workspace_id, team_id, affected_subject, identity_value) DO UPDATE SET "
     "identity_kind = excluded.identity_kind, vulnerability_id = excluded.vulnerability_id, "
     "rule_identity = excluded.rule_identity, review_state = excluded.review_state, "
     "remediation = excluded.remediation, updated_at = excluded.updated_at, "
@@ -64,7 +64,7 @@ def _finding_payload(row: Any, *, session_id: str, team_id: str) -> dict[str, An
     finding = dict(row)
     finding.update(finding_detail_fields(row))
     owner_session_id, owner_team_id = _owner(session_id, team_id)
-    finding["session_id"] = owner_session_id
+    finding["personal_workspace_id"] = owner_session_id
     finding["team_id"] = owner_team_id
     return finding
 
@@ -109,7 +109,7 @@ def _primary_member(finding: dict[str, Any]) -> dict[str, str]:
         references[0],
     )
     key = remediation_reference_key(
-        str(finding.get("session_id") or ""),
+        str(finding.get("personal_workspace_id") or ""),
         str(finding.get("team_id") or ""),
         reference,
     )
@@ -118,7 +118,7 @@ def _primary_member(finding: dict[str, Any]) -> dict[str, str]:
 
 def _member_rows_for_primary(conn: Any, member: dict[str, str]) -> list[dict[str, str]]:
     key = (
-        member["session_id"],
+        member["personal_workspace_id"],
         member["team_id"],
         member["affected_subject"],
         member["identity_value"],
@@ -129,7 +129,7 @@ def _member_rows_for_primary(conn: Any, member: dict[str, str]) -> list[dict[str
     merge_id = str(rows[0]["merge_id"] or "")
     return [
         {
-            "session_id": str(row["session_id"] or ""),
+            "personal_workspace_id": str(row["personal_workspace_id"] or ""),
             "team_id": str(row["team_id"] or ""),
             "affected_subject": str(row["affected_subject"] or ""),
             "identity_kind": str(row["identity_kind"] or "rule"),
@@ -182,7 +182,7 @@ def _matching_observations(
             )
     member_keys = {
         (
-            item["session_id"],
+            item["personal_workspace_id"],
             item["team_id"],
             item["affected_subject"],
             item["identity_value"],
@@ -193,7 +193,7 @@ def _matching_observations(
     for finding in findings.values():
         for reference in finding_identity_references(finding, finding_cves(finding)):
             key = remediation_reference_key(
-                str(finding.get("session_id") or ""),
+                str(finding.get("personal_workspace_id") or ""),
                 str(finding.get("team_id") or ""),
                 reference,
             )
@@ -258,7 +258,7 @@ def _build_preview(
     target_members = _member_rows_for_primary(conn, target_primary)
     all_members = {
         (
-            item["session_id"],
+            item["personal_workspace_id"],
             item["team_id"],
             item["affected_subject"],
             item["identity_value"],
@@ -266,11 +266,11 @@ def _build_preview(
         for item in [*source_members, *target_members]
     }
     source_keys = {
-        (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+        (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
         for item in source_members
     }
     target_keys = {
-        (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+        (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
         for item in target_members
     }
     if source_keys == target_keys:
@@ -324,7 +324,7 @@ def preview_remediation_group_merge(
 
 def _dispositions_for_members(conn: Any, members: list[dict[str, str]]) -> list[dict[str, Any]]:
     keys = {
-        (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+        (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
         for item in members
     }
     rows: list[Any] = []
@@ -332,12 +332,12 @@ def _dispositions_for_members(conn: Any, members: list[dict[str, str]]) -> list[
     for offset in range(0, len(ordered), 80):
         chunk = ordered[offset:offset + 80]
         clauses = " OR ".join(
-            "(session_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
+            "(personal_workspace_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
             for _ in chunk
         )
         # The clause shape is fixed; every owner and identity value remains bound.
         rows.extend(conn.execute(
-            "SELECT session_id, team_id, affected_subject, identity_value, review_state, "
+            "SELECT personal_workspace_id, team_id, affected_subject, identity_value, review_state, "
             "remediation, created_at, updated_at, remediation_updated_at "
             "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
@@ -407,7 +407,7 @@ def merge_remediation_groups(
             raise ProjectWorkspaceError("remediation merge preview is stale; preview it again")
         members = preview.pop("_members")
         member_keys = {
-            (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+            (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
             for item in members
         }
         existing = _rows_by_keys(conn, member_keys)
@@ -421,7 +421,7 @@ def merge_remediation_groups(
             return None
         target_member = _primary_member(target_finding)
         target_key = (
-            target_member["session_id"],
+            target_member["personal_workspace_id"],
             target_member["team_id"],
             target_member["affected_subject"],
             target_member["identity_value"],
@@ -430,7 +430,7 @@ def merge_remediation_groups(
             str(row["merge_id"] or "")
             for row in existing
             if (
-                str(row["session_id"] or ""), str(row["team_id"] or ""),
+                str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""),
                 str(row["affected_subject"] or ""), str(row["identity_value"] or ""),
             ) == target_key
         ), "")
@@ -438,7 +438,7 @@ def merge_remediation_groups(
         created_at = _now()
         conn.executemany(_MEMBER_UPSERT_SQL, [
             (
-                item["session_id"], item["team_id"], merge_id,
+                item["personal_workspace_id"], item["team_id"], merge_id,
                 item["affected_subject"], item["identity_kind"], item["identity_value"],
                 item["vulnerability_id"], item["rule_identity"], session_id, created_at,
             )
@@ -451,12 +451,12 @@ def merge_remediation_groups(
         for stale_merge_id in sorted(stale_merge_ids):
             conn.execute(
                 "UPDATE finding_remediation_merge_members SET merge_id = ? "
-                "WHERE session_id = ? AND team_id = ? AND merge_id = ?",
+                "WHERE personal_workspace_id = ? AND team_id = ? AND merge_id = ?",
                 (merge_id, target_key[0], target_key[1], stale_merge_id),
             )
         final_rows = _rows_by_merge_ids(conn, {(target_key[0], target_key[1], merge_id)})
         final_members = [{
-            "session_id": str(row["session_id"] or ""),
+            "personal_workspace_id": str(row["personal_workspace_id"] or ""),
             "team_id": str(row["team_id"] or ""),
             "affected_subject": str(row["affected_subject"] or ""),
             "identity_kind": str(row["identity_kind"] or "rule"),
@@ -471,7 +471,7 @@ def merge_remediation_groups(
         )
         conn.executemany(_DISPOSITION_UPSERT_SQL, [
             (
-                item["session_id"], item["team_id"], item["affected_subject"],
+                item["personal_workspace_id"], item["team_id"], item["affected_subject"],
                 item["identity_kind"], item["identity_value"], item["vulnerability_id"],
                 item["rule_identity"], winner["review_state"], winner["remediation"],
                 created_at, created_at, winner["remediation_updated_at"],
@@ -512,7 +512,7 @@ def search_remediation_merge_candidates(
         source_member = _primary_member(source)
         source_rows = _member_rows_for_primary(conn, source_member)
         source_keys = {
-            (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+            (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
             for item in source_rows
         }
         scope_sql = finding_source_scope_sql("f", team_id)
@@ -558,7 +558,7 @@ def search_remediation_merge_candidates(
             member = _primary_member(finding)
             candidate_rows = _member_rows_for_primary(conn, member)
             candidate_keys = {
-                (item["session_id"], item["team_id"], item["affected_subject"], item["identity_value"])
+                (item["personal_workspace_id"], item["team_id"], item["affected_subject"], item["identity_value"])
                 for item in candidate_rows
             }
             if candidate_keys == source_keys:

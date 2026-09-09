@@ -18,12 +18,12 @@ def applies_to(_command_text: str, run: dict[str, Any], conn=None) -> bool:
     if conn is None:
         return False
     run_id = str(run.get("id") or "")
-    session_id = str(run.get("session_id") or "")
+    session_id = str(run.get("personal_workspace_id") or "")
     if not run_id or not session_id:
         return False
     owner = composite_owner_predicate(
         personal_owner_context(session_id),
-        owner_column="f.session_id",
+        owner_column="f.personal_workspace_id",
         key_values=(("fo.run_id", run_id),),
     )
     row = conn.execute(
@@ -35,13 +35,13 @@ def applies_to(_command_text: str, run: dict[str, Any], conn=None) -> bool:
 
 
 def _items(conn, run: dict[str, Any]) -> list[dict[str, Any]]:
-    session_id = str(run.get("session_id") or "")
+    session_id = str(run.get("personal_workspace_id") or "")
     run_id = str(run.get("id") or "")
     if not session_id or not run_id:
         return []
     owner = composite_owner_predicate(
         personal_owner_context(session_id),
-        owner_column="f.session_id",
+        owner_column="f.personal_workspace_id",
         key_values=(("fo.run_id", run_id),),
     )
     rows = conn.execute(

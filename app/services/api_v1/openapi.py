@@ -500,7 +500,7 @@ OPENAPI_SPEC: dict = {
                 "required": ["id", "type", "canonical_value", "occurrence_count", "run_count"],
                 "properties": {
                     "id": {"type": "string"},
-                    "session_id": {"type": "string"},
+                    "personal_workspace_id": {"type": "string"},
                     "type": {"type": "string"},
                     "canonical_value": {"type": "string"},
                     "host_entity_id": {"type": "string", "nullable": True},
@@ -633,10 +633,20 @@ OPENAPI_SPEC: dict = {
             },
             "Project": {
                 "type": "object",
-                "required": ["id", "session_id", "name", "slug", "description", "status", "color", "created", "updated"],
+                "required": [
+                    "id",
+                    "personal_workspace_id",
+                    "name",
+                    "slug",
+                    "description",
+                    "status",
+                    "color",
+                    "created",
+                    "updated",
+                ],
                 "properties": {
                     "id": {"type": "string"},
-                    "session_id": {"type": "string"},
+                    "personal_workspace_id": {"type": "string"},
                     "name": {"type": "string"},
                     "slug": {"type": "string"},
                     "description": {"type": "string"},
@@ -796,7 +806,7 @@ OPENAPI_SPEC: dict = {
                 "type": "object",
                 "required": [
                     "id",
-                    "session_id",
+                    "personal_workspace_id",
                     "project_id",
                     "name",
                     "description",
@@ -809,7 +819,7 @@ OPENAPI_SPEC: dict = {
                 ],
                 "properties": {
                     "id": {"type": "string"},
-                    "session_id": {"type": "string"},
+                    "personal_workspace_id": {"type": "string"},
                     "project_id": {"type": "string"},
                     "name": {"type": "string"},
                     "description": {"type": "string"},
@@ -968,10 +978,7 @@ OPENAPI_SPEC: dict = {
             "WatcherOptions": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": {
-                    key: {"type": "boolean"}
-                    for key in WATCHER_OPTION_KEYS
-                },
+                "properties": {key: {"type": "boolean"} for key in WATCHER_OPTION_KEYS},
             },
             "WatcherPolicy": {
                 "type": "object",
@@ -1518,1006 +1525,1010 @@ OPENAPI_SPEC: dict = {
         | run_evidence.run_evidence_paths()
         | action_paths()
         | {
-        "/health": {
-            "get": {
-                "security": [],
-                "responses": {
-                    "200": _json_response("Liveness payload", _ref("Health")),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-        },
-        "/openapi.json": {
-            "get": {
-                "security": [],
-                "responses": {
-                    "200": _json_response("OpenAPI contract", {"type": "object", "additionalProperties": True}),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-        },
-        "/whoami": {
-            "get": {
-                "responses": {
-                    "200": _json_response("Current API token metadata", _ref("Whoami")),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/teams": {
-            "get": {
-                "responses": {
-                    "200": _json_response("Teams for the current token", _ref("TeamList")),
-                    **_common_errors(),
-                },
-            },
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamCreateRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Team created", _ref("TeamCreateResponse")),
-                    "400": _error_response("Invalid team request"),
-                    "409": _error_response("Team slug unavailable"),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/teams/join": {
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Invite redeemed", _ref("TeamDetail")),
-                    "400": _error_response("Invalid invite code"),
-                    "409": _error_response("Team is archived"),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/teams/recovery/redeem": {
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Recovery code redeemed", _ref("TeamDetail")),
-                    "400": _error_response("Invalid recovery code"),
-                    "409": _error_response("Team is archived"),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/teams/{team_id}": {
-            "get": {
-                "parameters": [TEAM_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Team detail", _ref("TeamDetail")),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-            "patch": {
-                "parameters": [TEAM_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamUpdateRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Team updated", _ref("TeamDetail")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team state conflict"),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-        },
-        "/teams/{team_id}/invites": {
-            "post": {
-                "parameters": [TEAM_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamInviteCreateRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Team invite created", _ref("TeamInviteResponse")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team is archived"),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-        },
-        "/teams/{team_id}/invites/{invite_id}": {
-            "delete": {
-                "parameters": [TEAM_ID_PARAM, TEAM_INVITE_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Team invite revoked", _ref("DeleteResponse")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team is archived"),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-        },
-        "/teams/{team_id}/members/{member_id}": {
-            "patch": {
-                "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("TeamMemberUpdateRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Team member updated", _ref("TeamMemberResponse")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team is archived or must retain an owner"),
-                    **_common_errors(not_found="Team member not found"),
-                },
-            },
-            "delete": {
-                "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Team member removed", _ref("DeleteResponse")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team is archived or must retain an owner"),
-                    **_common_errors(not_found="Team member not found"),
-                },
-            },
-        },
-        "/teams/{team_id}/leave": {
-            "post": {
-                "parameters": [TEAM_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Left team", _ref("DeleteResponse")),
-                    "409": _error_response("Team must retain an owner"),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-        },
-        "/teams/{team_id}/recovery/rotate": {
-            "post": {
-                "parameters": [TEAM_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Recovery code rotated", _ref("TeamRecoveryRotateResponse")),
-                    "403": _error_response("Role lacks required team capability"),
-                    "409": _error_response("Team is archived"),
-                    **_common_errors(not_found="Team not found"),
-                },
-            },
-        },
-        "/history": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {"name": "q", "in": "query", "schema": {"type": "string"}},
-                    *STRUCTURED_OUTPUT_PARAMS,
-                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "run_kind",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["external", "real", "builtin", "missing"]},
+            "/health": {
+                "get": {
+                    "security": [],
+                    "responses": {
+                        "200": _json_response("Liveness payload", _ref("Health")),
+                        "429": _error_response("Rate limit exceeded"),
                     },
-                    {"name": "exit_code", "in": "query", "schema": {"type": "string"}},
-                    {"name": "since", "in": "query", "schema": {"type": "string", "format": "date-time"}},
-                    {"name": "until", "in": "query", "schema": {"type": "string", "format": "date-time"}},
-                ],
-                "responses": {
-                    "200": _json_response("Paginated run history", _ref("RunPage")),
-                    **_common_errors(),
                 },
             },
-        },
-        "/history/search": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {
-                        "name": "q",
-                        "in": "query",
+            "/openapi.json": {
+                "get": {
+                    "security": [],
+                    "responses": {
+                        "200": _json_response("OpenAPI contract", {"type": "object", "additionalProperties": True}),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+            },
+            "/whoami": {
+                "get": {
+                    "responses": {
+                        "200": _json_response("Current API token metadata", _ref("Whoami")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/teams": {
+                "get": {
+                    "responses": {
+                        "200": _json_response("Teams for the current token", _ref("TeamList")),
+                        **_common_errors(),
+                    },
+                },
+                "post": {
+                    "requestBody": {
                         "required": True,
-                        "description": (
-                            "Literal text to locate in saved run output. Structured selector tokens such as "
-                            "signal:findings are also accepted."
+                        "content": {"application/json": {"schema": _ref("TeamCreateRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Team created", _ref("TeamCreateResponse")),
+                        "400": _error_response("Invalid team request"),
+                        "409": _error_response("Team slug unavailable"),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/teams/join": {
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Invite redeemed", _ref("TeamDetail")),
+                        "400": _error_response("Invalid invite code"),
+                        "409": _error_response("Team is archived"),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/teams/recovery/redeem": {
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("TeamJoinRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Recovery code redeemed", _ref("TeamDetail")),
+                        "400": _error_response("Invalid recovery code"),
+                        "409": _error_response("Team is archived"),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/teams/{team_id}": {
+                "get": {
+                    "parameters": [TEAM_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Team detail", _ref("TeamDetail")),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+                "patch": {
+                    "parameters": [TEAM_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("TeamUpdateRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Team updated", _ref("TeamDetail")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team state conflict"),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+            },
+            "/teams/{team_id}/invites": {
+                "post": {
+                    "parameters": [TEAM_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("TeamInviteCreateRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Team invite created", _ref("TeamInviteResponse")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team is archived"),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+            },
+            "/teams/{team_id}/invites/{invite_id}": {
+                "delete": {
+                    "parameters": [TEAM_ID_PARAM, TEAM_INVITE_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Team invite revoked", _ref("DeleteResponse")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team is archived"),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+            },
+            "/teams/{team_id}/members/{member_id}": {
+                "patch": {
+                    "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("TeamMemberUpdateRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Team member updated", _ref("TeamMemberResponse")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team is archived or must retain an owner"),
+                        **_common_errors(not_found="Team member not found"),
+                    },
+                },
+                "delete": {
+                    "parameters": [TEAM_ID_PARAM, TEAM_MEMBER_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Team member removed", _ref("DeleteResponse")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team is archived or must retain an owner"),
+                        **_common_errors(not_found="Team member not found"),
+                    },
+                },
+            },
+            "/teams/{team_id}/leave": {
+                "post": {
+                    "parameters": [TEAM_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Left team", _ref("DeleteResponse")),
+                        "409": _error_response("Team must retain an owner"),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+            },
+            "/teams/{team_id}/recovery/rotate": {
+                "post": {
+                    "parameters": [TEAM_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Recovery code rotated", _ref("TeamRecoveryRotateResponse")),
+                        "403": _error_response("Role lacks required team capability"),
+                        "409": _error_response("Team is archived"),
+                        **_common_errors(not_found="Team not found"),
+                    },
+                },
+            },
+            "/history": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {"name": "q", "in": "query", "schema": {"type": "string"}},
+                        *STRUCTURED_OUTPUT_PARAMS,
+                        {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "run_kind",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["external", "real", "builtin", "missing"]},
+                        },
+                        {"name": "exit_code", "in": "query", "schema": {"type": "string"}},
+                        {"name": "since", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                        {"name": "until", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                    ],
+                    "responses": {
+                        "200": _json_response("Paginated run history", _ref("RunPage")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/history/search": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {
+                            "name": "q",
+                            "in": "query",
+                            "required": True,
+                            "description": (
+                                "Literal text to locate in saved run output. Structured selector tokens such as "
+                                "signal:findings are also accepted."
+                            ),
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "context",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 2, "minimum": 0, "maximum": 10},
+                        },
+                        *STRUCTURED_OUTPUT_PARAMS,
+                        {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "run_kind",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["external", "real", "builtin", "missing"]},
+                        },
+                        {"name": "exit_code", "in": "query", "schema": {"type": "string"}},
+                        {"name": "since", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                        {"name": "until", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                    ],
+                    "responses": {
+                        "200": _json_response("Paginated output search matches", _ref("HistorySearchPage")),
+                        "400": _error_response("Missing query or invalid filter"),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas": {
+                "get": {
+                    "parameters": [
+                        {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                        {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "orphan_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                        {
+                            "name": "suppression_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Atlas summary", _ref("AtlasSummary")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas/runs": {
+                "get": {
+                    "parameters": [
+                        {"name": "q", "in": "query", "schema": {"type": "string"}},
+                        {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 30, "minimum": 1, "maximum": 50},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Atlas source runs", _ref("AtlasRunList")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas/entities": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {"name": "q", "in": "query", "schema": {"type": "string"}},
+                        {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                        {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "entity_type",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
+                        },
+                        {
+                            "name": "orphan_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                        {
+                            "name": "suppression_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Atlas entities", _ref("AtlasEntityPage")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas/lookup": {
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": _ref("AtlasEntityLookupRequest"),
+                            },
+                        },
+                    },
+                    "responses": {
+                        "200": _json_response("Exact Atlas entity lookup", _ref("AtlasEntityLookupResponse")),
+                        "400": _error_response("Invalid lookup value, type, or project scope"),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas/entities/{entity_id}": {
+                "get": {
+                    "parameters": [
+                        _path_param("entity_id", "Atlas entity id"),
+                        *atlas_profile_query_parameters(),
+                    ],
+                    "responses": {
+                        "200": _json_response("Atlas entity detail", _ref("AtlasEntityDetail")),
+                        **_common_errors(not_found="Atlas entity not found"),
+                    },
+                },
+            },
+            "/atlas/findings": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {"name": "q", "in": "query", "schema": {"type": "string"}},
+                        {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                        {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "review_state",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "orphan_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                        {
+                            "name": "suppression_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Atlas findings", _ref("AtlasFindingPage")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/atlas/findings/{finding_id}": {
+                "get": {
+                    "parameters": [_path_param("finding_id", "Atlas finding id")],
+                    "responses": {
+                        "200": _json_response("Atlas finding detail", _ref("AtlasFindingDetail")),
+                        **_common_errors(not_found="Atlas finding not found"),
+                    },
+                },
+            },
+            "/history/{run_id}": {
+                "get": {
+                    "parameters": [RUN_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Run detail", _ref("RunDetail")),
+                        **_common_errors(not_found="Run not found"),
+                    },
+                },
+            },
+            "/history/{run_id}/output": {
+                "get": {
+                    "parameters": [
+                        RUN_ID_PARAM,
+                        {
+                            "name": "format",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
+                        },
+                        {
+                            "name": "range",
+                            "in": "query",
+                            "description": "1-based inclusive line range, such as 10-40.",
+                            "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
+                        },
+                        *STRUCTURED_OUTPUT_PARAMS,
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Run output",
+                            "content": {
+                                "text/plain": {"schema": {"type": "string"}},
+                                "application/json": {"schema": _ref("RunOutput")},
+                            },
+                        },
+                        "400": _error_response("Invalid range"),
+                        **_common_errors(not_found="Run not found"),
+                    },
+                },
+            },
+            "/runs/{run_id}/output": {
+                "get": {
+                    "parameters": [
+                        RUN_ID_PARAM,
+                        {
+                            "name": "format",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
+                        },
+                        {
+                            "name": "range",
+                            "in": "query",
+                            "description": "1-based inclusive line range, such as 10-40.",
+                            "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
+                        },
+                        *STRUCTURED_OUTPUT_PARAMS,
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Run output",
+                            "content": {
+                                "text/plain": {"schema": {"type": "string"}},
+                                "application/json": {"schema": _ref("RunOutput")},
+                            },
+                        },
+                        "400": _error_response("Invalid range"),
+                        **_common_errors(not_found="Run not found"),
+                    },
+                },
+            },
+            "/history/{run_id}/artifacts": {
+                "get": {
+                    "parameters": [RUN_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Run artifacts", _ref("ArtifactList")),
+                        **_common_errors(not_found="Run not found"),
+                    },
+                },
+            },
+            "/history/{run_id}/artifacts/{artifact_id}": {
+                "get": {
+                    "parameters": [RUN_ID_PARAM, ARTIFACT_ID_PARAM],
+                    "responses": {
+                        "200": {
+                            "description": "Artifact download",
+                            "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+                        },
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "403": _error_response("Artifact unavailable"),
+                        "404": _error_response("Run or artifact not found"),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+            },
+            "/projects": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {"name": "include_archived", "in": "query", "schema": {"type": "boolean", "default": False}},
+                    ],
+                    "responses": {
+                        "200": _json_response("Projects", _ref("ProjectPage")),
+                        **_common_errors(),
+                    },
+                },
+            },
+            "/projects/{project_id}": {
+                "get": {
+                    "parameters": [PROJECT_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Project detail", _ref("ProjectDetail")),
+                        **_common_errors(not_found="Project not found"),
+                    },
+                },
+            },
+            "/projects/{project_id}/findings": {
+                "get": {
+                    "parameters": [
+                        PROJECT_ID_PARAM,
+                        *PAGE_PARAMS,
+                        {
+                            "name": "run_id",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "target_id",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "review_state",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "scope",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "severity",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "command_root",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "orphan_filter",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["hide", "only", "all"], "default": "hide"},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Project findings", _ref("ProjectFindingPage")),
+                        **_common_errors(not_found="Project not found"),
+                    },
+                },
+                "post": manual.manual_finding_create_operation(),
+            },
+            "/projects/{project_id}/runs": {
+                "get": {
+                    "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Project runs", _ref("ProjectRunPage")),
+                        **_common_errors(not_found="Project not found"),
+                    },
+                },
+            },
+            "/projects/{project_id}/entities": {
+                "get": {
+                    "parameters": [
+                        PROJECT_ID_PARAM,
+                        *PAGE_PARAMS,
+                        {
+                            "name": "entity_type",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
+                        },
+                        {
+                            "name": "run_id",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                        {
+                            "name": "target_id",
+                            "in": "query",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                            "style": "form",
+                            "explode": True,
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response("Project entities", _ref("ProjectEntityPage")),
+                        **_common_errors(not_found="Project not found"),
+                    },
+                },
+            },
+            "/projects/{project_id}/packages": {
+                "get": {
+                    "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Evidence packages", _ref("PackagePage")),
+                        **_common_errors(not_found="Project not found"),
+                    },
+                },
+            },
+            "/schedules": {
+                "get": {
+                    "parameters": [*PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Scheduled commands", _ref("SchedulePage")),
+                        **_common_errors(),
+                    },
+                },
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("ScheduleCreateRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Schedule created", _ref("ScheduleResponse")),
+                        "400": _error_response("Invalid schedule or command"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "409": _error_response("Schedule quota exceeded"),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+            },
+            "/schedules/{schedule_id}": {
+                "get": {
+                    "parameters": [SCHEDULE_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Schedule detail", _ref("ScheduleResponse")),
+                        **_common_errors(not_found="Schedule not found"),
+                    },
+                },
+                "patch": {
+                    "parameters": [SCHEDULE_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("ScheduleUpdateRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Schedule updated", _ref("ScheduleResponse")),
+                        "400": _error_response("Invalid schedule or command"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Schedule not found"),
+                        "409": _error_response("Schedule quota exceeded"),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+                "delete": {
+                    "parameters": [SCHEDULE_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Schedule deleted", _ref("DeleteResponse")),
+                        **_common_errors(not_found="Schedule not found"),
+                    },
+                },
+            },
+            "/schedules/{schedule_id}/run-now": {
+                "post": {
+                    "parameters": [SCHEDULE_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Schedule fired immediately", _ref("ScheduleRunNowResponse")),
+                        "400": _error_response("Invalid schedule"),
+                        **_common_errors(not_found="Schedule not found"),
+                    },
+                },
+            },
+            "/schedules/{schedule_id}/fires": {
+                "get": {
+                    "parameters": [SCHEDULE_ID_PARAM, *PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Schedule fire audit rows", _ref("ScheduleFirePage")),
+                        **_common_errors(not_found="Schedule not found"),
+                    },
+                },
+            },
+            "/watchers": {
+                "get": {
+                    "parameters": [*PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Change-detection watchers", _ref("WatcherPage")),
+                        **_common_errors(),
+                    },
+                },
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("WatcherCreateRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Watcher created", _ref("WatcherResponse")),
+                        "400": _error_response("Invalid watcher or command"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Baseline run not found"),
+                        "409": _error_response("Watcher quota exceeded"),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+            },
+            "/watchers/{watcher_id}": {
+                "get": {
+                    "parameters": [WATCHER_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Watcher detail", _ref("WatcherResponse")),
+                        **_common_errors(not_found="Watcher not found"),
+                    },
+                },
+                "patch": {
+                    "parameters": [WATCHER_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("WatcherUpdateRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Watcher updated", _ref("WatcherResponse")),
+                        "400": _error_response("Invalid watcher or command"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Watcher not found"),
+                        "409": _error_response("Watcher quota exceeded"),
+                        "429": _error_response("Rate limit exceeded"),
+                    },
+                },
+                "delete": {
+                    "parameters": [WATCHER_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Watcher deleted", _ref("DeleteResponse")),
+                        **_common_errors(not_found="Watcher not found"),
+                    },
+                },
+            },
+            "/watchers/{watcher_id}/run-now": {
+                "post": {
+                    "parameters": [WATCHER_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Watcher fired immediately", _ref("WatcherRunNowResponse")),
+                        "400": _error_response("Invalid watcher"),
+                        **_common_errors(not_found="Watcher not found"),
+                    },
+                },
+            },
+            "/watchers/{watcher_id}/fires": {
+                "get": {
+                    "parameters": [WATCHER_ID_PARAM, *PAGE_PARAMS],
+                    "responses": {
+                        "200": _json_response("Watcher fire audit rows", _ref("WatcherFirePage")),
+                        **_common_errors(not_found="Watcher not found"),
+                    },
+                },
+            },
+            "/watchers/{watcher_id}/accept-baseline": {
+                "post": {
+                    "parameters": [WATCHER_ID_PARAM],
+                    "requestBody": {
+                        "required": False,
+                        "content": {"application/json": {"schema": _ref("WatcherAcceptBaselineRequest")}},
+                    },
+                    "responses": {
+                        "200": _json_response("Watcher baseline accepted", _ref("WatcherResponse")),
+                        "400": _error_response("Invalid baseline"),
+                        **_common_errors(not_found="Watcher not found"),
+                    },
+                },
+            },
+            "/notification-channels": {
+                "get": {
+                    "responses": {
+                        "200": _json_response("Notification channels", _ref("NotificationChannelList")),
+                        **_common_errors(),
+                    },
+                },
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("NotificationChannelCreateRequest")}},
+                    },
+                    "responses": {
+                        "201": _json_response("Notification channel created", _ref("NotificationChannelResponse")),
+                        "400": _error_response("Invalid notification channel"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "429": _error_response("Rate limit exceeded"),
+                        "503": _error_response("Vault unavailable"),
+                    },
+                },
+            },
+            "/notification-channel-kinds": {
+                "get": {
+                    "responses": {
+                        "200": _json_response(
+                            "Notification channel kind contract",
+                            _ref("NotificationChannelKindList"),
                         ),
-                        "schema": {"type": "string"},
+                        **_common_errors(),
                     },
-                    {
-                        "name": "context",
-                        "in": "query",
-                        "schema": {"type": "integer", "default": 2, "minimum": 0, "maximum": 10},
-                    },
-                    *STRUCTURED_OUTPUT_PARAMS,
-                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "run_kind",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["external", "real", "builtin", "missing"]},
-                    },
-                    {"name": "exit_code", "in": "query", "schema": {"type": "string"}},
-                    {"name": "since", "in": "query", "schema": {"type": "string", "format": "date-time"}},
-                    {"name": "until", "in": "query", "schema": {"type": "string", "format": "date-time"}},
-                ],
-                "responses": {
-                    "200": _json_response("Paginated output search matches", _ref("HistorySearchPage")),
-                    "400": _error_response("Missing query or invalid filter"),
-                    **_common_errors(),
                 },
             },
-        },
-        "/atlas": {
-            "get": {
-                "parameters": [
-                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
-                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "orphan_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+            "/notification-channels/{channel_id}": {
+                "patch": {
+                    "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("NotificationChannelUpdateRequest")}},
                     },
-                    {
-                        "name": "suppression_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    "responses": {
+                        "200": _json_response("Notification channel updated", _ref("NotificationChannelResponse")),
+                        "400": _error_response("Invalid notification channel"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Notification channel not found"),
+                        "429": _error_response("Rate limit exceeded"),
+                        "503": _error_response("Vault unavailable"),
                     },
-                ],
-                "responses": {
-                    "200": _json_response("Atlas summary", _ref("AtlasSummary")),
-                    **_common_errors(),
+                },
+                "delete": {
+                    "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Notification channel deleted", _ref("DeleteResponse")),
+                        **_common_errors(not_found="Notification channel not found"),
+                    },
                 },
             },
-        },
-        "/atlas/runs": {
-            "get": {
-                "parameters": [
-                    {"name": "q", "in": "query", "schema": {"type": "string"}},
-                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
-                    {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 30, "minimum": 1, "maximum": 50}},
-                ],
-                "responses": {
-                    "200": _json_response("Atlas source runs", _ref("AtlasRunList")),
-                    **_common_errors(),
+            "/notification-channels/{channel_id}/test": {
+                "post": {
+                    "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                    "responses": {
+                        "200": _json_response(
+                            "Test notification queued and delivered when possible",
+                            _ref("NotificationTestResponse"),
+                        ),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Notification channel not found"),
+                        "429": _error_response("Rate limit exceeded"),
+                        "503": _error_response("Vault unavailable"),
+                    },
                 },
             },
-        },
-        "/atlas/entities": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {"name": "q", "in": "query", "schema": {"type": "string"}},
-                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
-                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "entity_type",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
-                    },
-                    {
-                        "name": "orphan_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
-                    },
-                    {
-                        "name": "suppression_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Atlas entities", _ref("AtlasEntityPage")),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/atlas/lookup": {
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {
-                        "application/json": {
-                            "schema": _ref("AtlasEntityLookupRequest"),
+            "/notification-events": {
+                "get": {
+                    "parameters": [
+                        *PAGE_PARAMS,
+                        {"name": "channel_id", "in": "query", "schema": {"type": "string"}},
+                        {
+                            "name": "trigger",
+                            "in": "query",
+                            "schema": {
+                                "type": "string",
+                                "enum": [
+                                    "run_complete",
+                                    "pty_session_ended",
+                                    "watcher_changed",
+                                    "watcher_error",
+                                    "watcher_recovered",
+                                    "scheduled_run_failed",
+                                    "test",
+                                ],
+                            },
                         },
-                    },
-                },
-                "responses": {
-                    "200": _json_response("Exact Atlas entity lookup", _ref("AtlasEntityLookupResponse")),
-                    "400": _error_response("Invalid lookup value, type, or project scope"),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/atlas/entities/{entity_id}": {
-            "get": {
-                "parameters": [
-                    _path_param("entity_id", "Atlas entity id"),
-                    *atlas_profile_query_parameters(),
-                ],
-                "responses": {
-                    "200": _json_response("Atlas entity detail", _ref("AtlasEntityDetail")),
-                    **_common_errors(not_found="Atlas entity not found"),
-                },
-            },
-        },
-        "/atlas/findings": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {"name": "q", "in": "query", "schema": {"type": "string"}},
-                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
-                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "review_state",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
-                    },
-                    {
-                        "name": "orphan_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
-                    },
-                    {
-                        "name": "suppression_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Atlas findings", _ref("AtlasFindingPage")),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/atlas/findings/{finding_id}": {
-            "get": {
-                "parameters": [_path_param("finding_id", "Atlas finding id")],
-                "responses": {
-                    "200": _json_response("Atlas finding detail", _ref("AtlasFindingDetail")),
-                    **_common_errors(not_found="Atlas finding not found"),
-                },
-            },
-        },
-        "/history/{run_id}": {
-            "get": {
-                "parameters": [RUN_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Run detail", _ref("RunDetail")),
-                    **_common_errors(not_found="Run not found"),
-                },
-            },
-        },
-        "/history/{run_id}/output": {
-            "get": {
-                "parameters": [
-                    RUN_ID_PARAM,
-                    {
-                        "name": "format",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
-                    },
-                    {
-                        "name": "range",
-                        "in": "query",
-                        "description": "1-based inclusive line range, such as 10-40.",
-                        "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
-                    },
-                    *STRUCTURED_OUTPUT_PARAMS,
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Run output",
-                        "content": {
-                            "text/plain": {"schema": {"type": "string"}},
-                            "application/json": {"schema": _ref("RunOutput")},
+                        {
+                            "name": "status",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["pending", "retry_wait", "sent", "dead"]},
                         },
+                    ],
+                    "responses": {
+                        "200": _json_response("Notification delivery audit events", _ref("NotificationEventPage")),
+                        "400": _error_response("Invalid notification event filter"),
+                        **_common_errors(),
                     },
-                    "400": _error_response("Invalid range"),
-                    **_common_errors(not_found="Run not found"),
                 },
             },
-        },
-        "/runs/{run_id}/output": {
-            "get": {
-                "parameters": [
-                    RUN_ID_PARAM,
-                    {
-                        "name": "format",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
+            "/runs": {
+                "get": {
+                    "responses": {
+                        "200": _json_response("Active runs for the current token", _ref("ActiveRunList")),
+                        **_common_errors(),
                     },
-                    {
-                        "name": "range",
-                        "in": "query",
-                        "description": "1-based inclusive line range, such as 10-40.",
-                        "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
+                },
+                "post": {
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": _ref("RunStartRequest")}},
                     },
-                    *STRUCTURED_OUTPUT_PARAMS,
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Run output",
-                        "content": {
-                            "text/plain": {"schema": {"type": "string"}},
-                            "application/json": {"schema": _ref("RunOutput")},
+                    "responses": {
+                        "202": _json_response("Run started", _ref("RunStarted")),
+                        "400": _error_response("Invalid or missing command"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "409": _error_response("Unsupported run mode or archived project"),
+                        "429": _error_response("Rate limit exceeded"),
+                        "503": _error_response("Broker unavailable"),
+                    },
+                },
+            },
+            "/runs/{run_id}": {
+                "get": {
+                    "parameters": [RUN_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Run status", _ref("RunStatus")),
+                        **_common_errors(not_found="Run not found"),
+                    },
+                },
+            },
+            "/runs/{run_id}/wait": {
+                "post": {
+                    "parameters": [
+                        RUN_ID_PARAM,
+                        {
+                            "name": "timeout",
+                            "in": "query",
+                            "schema": {"type": "number", "default": 30, "minimum": 0, "maximum": 3600},
                         },
+                    ],
+                    "responses": {
+                        "200": _json_response("Terminal run status", _ref("RunStatus")),
+                        "408": _error_response("Run is still running"),
+                        **_common_errors(not_found="Run not found"),
                     },
-                    "400": _error_response("Invalid range"),
-                    **_common_errors(not_found="Run not found"),
                 },
             },
-        },
-        "/history/{run_id}/artifacts": {
-            "get": {
-                "parameters": [RUN_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Run artifacts", _ref("ArtifactList")),
-                    **_common_errors(not_found="Run not found"),
-                },
-            },
-        },
-        "/history/{run_id}/artifacts/{artifact_id}": {
-            "get": {
-                "parameters": [RUN_ID_PARAM, ARTIFACT_ID_PARAM],
-                "responses": {
-                    "200": {
-                        "description": "Artifact download",
-                        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+            "/runs/{run_id}/ai-assists": {
+                "get": {
+                    "parameters": [RUN_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Cached and in-flight AI assists", _ref("AIAssistList")),
+                        **_common_errors(not_found="Run not found"),
                     },
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "403": _error_response("Artifact unavailable"),
-                    "404": _error_response("Run or artifact not found"),
-                    "429": _error_response("Rate limit exceeded"),
                 },
             },
-        },
-        "/projects": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {"name": "include_archived", "in": "query", "schema": {"type": "boolean", "default": False}},
-                ],
-                "responses": {
-                    "200": _json_response("Projects", _ref("ProjectPage")),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/projects/{project_id}": {
-            "get": {
-                "parameters": [PROJECT_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Project detail", _ref("ProjectDetail")),
-                    **_common_errors(not_found="Project not found"),
-                },
-            },
-        },
-        "/projects/{project_id}/findings": {
-            "get": {
-                "parameters": [
-                    PROJECT_ID_PARAM,
-                    *PAGE_PARAMS,
-                    {
-                        "name": "run_id",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+            "/runs/{run_id}/ai-summary": {
+                "post": {
+                    "parameters": [RUN_ID_PARAM],
+                    "requestBody": {
+                        "required": False,
+                        "content": {"application/json": {"schema": _ref("AIAssistRequest")}},
                     },
-                    {
-                        "name": "target_id",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+                    "responses": {
+                        "200": _json_response("Cached summary assist", _ref("AIAssistResponse")),
+                        "202": _json_response("Queued or in-progress summary assist", _ref("AIAssistResponse")),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "403": _error_response("AI disabled or team role denied"),
+                        "404": _error_response("Run not found"),
+                        "409": _error_response("Run still active"),
+                        "422": _error_response("No useful AI context"),
+                        "429": _error_response("AI queue full or rate limit exceeded"),
+                        "503": _error_response("AI coordination or provider unavailable"),
                     },
-                    {
-                        "name": "review_state",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+                },
+            },
+            "/runs/{run_id}/ai-next-commands": {
+                "post": {
+                    "parameters": [RUN_ID_PARAM],
+                    "requestBody": {
+                        "required": False,
+                        "content": {"application/json": {"schema": _ref("AIAssistRequest")}},
                     },
-                    {
-                        "name": "scope",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+                    "responses": {
+                        "200": _json_response("Cached next-command assist", _ref("AIAssistResponse")),
+                        "202": _json_response("Queued or in-progress next-command assist", _ref("AIAssistResponse")),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "403": _error_response("AI disabled or team role denied"),
+                        "404": _error_response("Run not found"),
+                        "409": _error_response("Run still active"),
+                        "422": _error_response("No useful AI context"),
+                        "429": _error_response("AI queue full or rate limit exceeded"),
+                        "503": _error_response("AI coordination or provider unavailable"),
                     },
-                    {
-                        "name": "severity",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+                },
+            },
+            "/runs/{run_id}/projects/{project_id}": {
+                "post": {
+                    "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
+                    "responses": {
+                        "201": _json_response("Run linked to project", _ref("ProjectRunLinkResponse")),
+                        "400": _error_response("Invalid project link"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Run or project not found"),
+                        "409": _error_response("Archived project or quota exceeded"),
+                        "429": _error_response("Rate limit exceeded"),
                     },
-                    {
-                        "name": "command_root",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
+                },
+                "delete": {
+                    "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Run unlinked from project", _ref("OkResponse")),
+                        "400": _error_response("Invalid project link"),
+                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "404": _error_response("Run, project, or project link not found"),
+                        "409": _error_response("Archived project"),
+                        "429": _error_response("Rate limit exceeded"),
                     },
-                    {
-                        "name": "orphan_filter",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["hide", "only", "all"], "default": "hide"},
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Project findings", _ref("ProjectFindingPage")),
-                    **_common_errors(not_found="Project not found"),
                 },
             },
-            "post": manual.manual_finding_create_operation(),
-        },
-        "/projects/{project_id}/runs": {
-            "get": {
-                "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Project runs", _ref("ProjectRunPage")),
-                    **_common_errors(not_found="Project not found"),
-                },
-            },
-        },
-        "/projects/{project_id}/entities": {
-            "get": {
-                "parameters": [
-                    PROJECT_ID_PARAM,
-                    *PAGE_PARAMS,
-                    {
-                        "name": "entity_type",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve", "port"]},
-                    },
-                    {
-                        "name": "run_id",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
-                    },
-                    {
-                        "name": "target_id",
-                        "in": "query",
-                        "schema": {"type": "array", "items": {"type": "string"}},
-                        "style": "form",
-                        "explode": True,
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Project entities", _ref("ProjectEntityPage")),
-                    **_common_errors(not_found="Project not found"),
-                },
-            },
-        },
-        "/projects/{project_id}/packages": {
-            "get": {
-                "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Evidence packages", _ref("PackagePage")),
-                    **_common_errors(not_found="Project not found"),
-                },
-            },
-        },
-        "/schedules": {
-            "get": {
-                "parameters": [*PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Scheduled commands", _ref("SchedulePage")),
-                    **_common_errors(),
-                },
-            },
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("ScheduleCreateRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Schedule created", _ref("ScheduleResponse")),
-                    "400": _error_response("Invalid schedule or command"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "409": _error_response("Schedule quota exceeded"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-        },
-        "/schedules/{schedule_id}": {
-            "get": {
-                "parameters": [SCHEDULE_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Schedule detail", _ref("ScheduleResponse")),
-                    **_common_errors(not_found="Schedule not found"),
-                },
-            },
-            "patch": {
-                "parameters": [SCHEDULE_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("ScheduleUpdateRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Schedule updated", _ref("ScheduleResponse")),
-                    "400": _error_response("Invalid schedule or command"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Schedule not found"),
-                    "409": _error_response("Schedule quota exceeded"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-            "delete": {
-                "parameters": [SCHEDULE_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Schedule deleted", _ref("DeleteResponse")),
-                    **_common_errors(not_found="Schedule not found"),
-                },
-            },
-        },
-        "/schedules/{schedule_id}/run-now": {
-            "post": {
-                "parameters": [SCHEDULE_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Schedule fired immediately", _ref("ScheduleRunNowResponse")),
-                    "400": _error_response("Invalid schedule"),
-                    **_common_errors(not_found="Schedule not found"),
-                },
-            },
-        },
-        "/schedules/{schedule_id}/fires": {
-            "get": {
-                "parameters": [SCHEDULE_ID_PARAM, *PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Schedule fire audit rows", _ref("ScheduleFirePage")),
-                    **_common_errors(not_found="Schedule not found"),
-                },
-            },
-        },
-        "/watchers": {
-            "get": {
-                "parameters": [*PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Change-detection watchers", _ref("WatcherPage")),
-                    **_common_errors(),
-                },
-            },
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("WatcherCreateRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Watcher created", _ref("WatcherResponse")),
-                    "400": _error_response("Invalid watcher or command"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Baseline run not found"),
-                    "409": _error_response("Watcher quota exceeded"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-        },
-        "/watchers/{watcher_id}": {
-            "get": {
-                "parameters": [WATCHER_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Watcher detail", _ref("WatcherResponse")),
-                    **_common_errors(not_found="Watcher not found"),
-                },
-            },
-            "patch": {
-                "parameters": [WATCHER_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("WatcherUpdateRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Watcher updated", _ref("WatcherResponse")),
-                    "400": _error_response("Invalid watcher or command"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Watcher not found"),
-                    "409": _error_response("Watcher quota exceeded"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-            "delete": {
-                "parameters": [WATCHER_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Watcher deleted", _ref("DeleteResponse")),
-                    **_common_errors(not_found="Watcher not found"),
-                },
-            },
-        },
-        "/watchers/{watcher_id}/run-now": {
-            "post": {
-                "parameters": [WATCHER_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Watcher fired immediately", _ref("WatcherRunNowResponse")),
-                    "400": _error_response("Invalid watcher"),
-                    **_common_errors(not_found="Watcher not found"),
-                },
-            },
-        },
-        "/watchers/{watcher_id}/fires": {
-            "get": {
-                "parameters": [WATCHER_ID_PARAM, *PAGE_PARAMS],
-                "responses": {
-                    "200": _json_response("Watcher fire audit rows", _ref("WatcherFirePage")),
-                    **_common_errors(not_found="Watcher not found"),
-                },
-            },
-        },
-        "/watchers/{watcher_id}/accept-baseline": {
-            "post": {
-                "parameters": [WATCHER_ID_PARAM],
-                "requestBody": {
-                    "required": False,
-                    "content": {"application/json": {"schema": _ref("WatcherAcceptBaselineRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Watcher baseline accepted", _ref("WatcherResponse")),
-                    "400": _error_response("Invalid baseline"),
-                    **_common_errors(not_found="Watcher not found"),
-                },
-            },
-        },
-        "/notification-channels": {
-            "get": {
-                "responses": {
-                    "200": _json_response("Notification channels", _ref("NotificationChannelList")),
-                    **_common_errors(),
-                },
-            },
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("NotificationChannelCreateRequest")}},
-                },
-                "responses": {
-                    "201": _json_response("Notification channel created", _ref("NotificationChannelResponse")),
-                    "400": _error_response("Invalid notification channel"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "429": _error_response("Rate limit exceeded"),
-                    "503": _error_response("Vault unavailable"),
-                },
-            },
-        },
-        "/notification-channel-kinds": {
-            "get": {
-                "responses": {
-                    "200": _json_response(
-                        "Notification channel kind contract",
-                        _ref("NotificationChannelKindList"),
-                    ),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/notification-channels/{channel_id}": {
-            "patch": {
-                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("NotificationChannelUpdateRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Notification channel updated", _ref("NotificationChannelResponse")),
-                    "400": _error_response("Invalid notification channel"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Notification channel not found"),
-                    "429": _error_response("Rate limit exceeded"),
-                    "503": _error_response("Vault unavailable"),
-                },
-            },
-            "delete": {
-                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Notification channel deleted", _ref("DeleteResponse")),
-                    **_common_errors(not_found="Notification channel not found"),
-                },
-            },
-        },
-        "/notification-channels/{channel_id}/test": {
-            "post": {
-                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
-                "responses": {
-                    "200": _json_response(
-                        "Test notification queued and delivered when possible",
-                        _ref("NotificationTestResponse"),
-                    ),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Notification channel not found"),
-                    "429": _error_response("Rate limit exceeded"),
-                    "503": _error_response("Vault unavailable"),
-                },
-            },
-        },
-        "/notification-events": {
-            "get": {
-                "parameters": [
-                    *PAGE_PARAMS,
-                    {"name": "channel_id", "in": "query", "schema": {"type": "string"}},
-                    {
-                        "name": "trigger",
-                        "in": "query",
-                        "schema": {
-                            "type": "string",
-                            "enum": [
-                                "run_complete",
-                                "pty_session_ended",
-                                "watcher_changed",
-                                "watcher_error",
-                                "watcher_recovered",
-                                "scheduled_run_failed",
-                                "test",
-                            ],
+            "/runs/{run_id}/stream": {
+                "get": {
+                    "parameters": [
+                        RUN_ID_PARAM,
+                        {
+                            "name": "format",
+                            "in": "query",
+                            "schema": {"type": "string", "enum": ["sse", "ndjson"], "default": "sse"},
                         },
-                    },
-                    {
-                        "name": "status",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["pending", "retry_wait", "sent", "dead"]},
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Notification delivery audit events", _ref("NotificationEventPage")),
-                    "400": _error_response("Invalid notification event filter"),
-                    **_common_errors(),
-                },
-            },
-        },
-        "/runs": {
-            "get": {
-                "responses": {
-                    "200": _json_response("Active runs for the current token", _ref("ActiveRunList")),
-                    **_common_errors(),
-                },
-            },
-            "post": {
-                "requestBody": {
-                    "required": True,
-                    "content": {"application/json": {"schema": _ref("RunStartRequest")}},
-                },
-                "responses": {
-                    "202": _json_response("Run started", _ref("RunStarted")),
-                    "400": _error_response("Invalid or missing command"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "409": _error_response("Unsupported run mode or archived project"),
-                    "429": _error_response("Rate limit exceeded"),
-                    "503": _error_response("Broker unavailable"),
-                },
-            },
-        },
-        "/runs/{run_id}": {
-            "get": {
-                "parameters": [RUN_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Run status", _ref("RunStatus")),
-                    **_common_errors(not_found="Run not found"),
-                },
-            },
-        },
-        "/runs/{run_id}/wait": {
-            "post": {
-                "parameters": [
-                    RUN_ID_PARAM,
-                    {
-                        "name": "timeout",
-                        "in": "query",
-                        "schema": {"type": "number", "default": 30, "minimum": 0, "maximum": 3600},
-                    },
-                ],
-                "responses": {
-                    "200": _json_response("Terminal run status", _ref("RunStatus")),
-                    "408": _error_response("Run is still running"),
-                    **_common_errors(not_found="Run not found"),
-                },
-            },
-        },
-        "/runs/{run_id}/ai-assists": {
-            "get": {
-                "parameters": [RUN_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Cached and in-flight AI assists", _ref("AIAssistList")),
-                    **_common_errors(not_found="Run not found"),
-                },
-            },
-        },
-        "/runs/{run_id}/ai-summary": {
-            "post": {
-                "parameters": [RUN_ID_PARAM],
-                "requestBody": {
-                    "required": False,
-                    "content": {"application/json": {"schema": _ref("AIAssistRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Cached summary assist", _ref("AIAssistResponse")),
-                    "202": _json_response("Queued or in-progress summary assist", _ref("AIAssistResponse")),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "403": _error_response("AI disabled or team role denied"),
-                    "404": _error_response("Run not found"),
-                    "409": _error_response("Run still active"),
-                    "422": _error_response("No useful AI context"),
-                    "429": _error_response("AI queue full or rate limit exceeded"),
-                    "503": _error_response("AI coordination or provider unavailable"),
-                },
-            },
-        },
-        "/runs/{run_id}/ai-next-commands": {
-            "post": {
-                "parameters": [RUN_ID_PARAM],
-                "requestBody": {
-                    "required": False,
-                    "content": {"application/json": {"schema": _ref("AIAssistRequest")}},
-                },
-                "responses": {
-                    "200": _json_response("Cached next-command assist", _ref("AIAssistResponse")),
-                    "202": _json_response("Queued or in-progress next-command assist", _ref("AIAssistResponse")),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "403": _error_response("AI disabled or team role denied"),
-                    "404": _error_response("Run not found"),
-                    "409": _error_response("Run still active"),
-                    "422": _error_response("No useful AI context"),
-                    "429": _error_response("AI queue full or rate limit exceeded"),
-                    "503": _error_response("AI coordination or provider unavailable"),
-                },
-            },
-        },
-        "/runs/{run_id}/projects/{project_id}": {
-            "post": {
-                "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
-                "responses": {
-                    "201": _json_response("Run linked to project", _ref("ProjectRunLinkResponse")),
-                    "400": _error_response("Invalid project link"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Run or project not found"),
-                    "409": _error_response("Archived project or quota exceeded"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-            "delete": {
-                "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Run unlinked from project", _ref("OkResponse")),
-                    "400": _error_response("Invalid project link"),
-                    "401": _error_response("Missing, invalid, or revoked token"),
-                    "404": _error_response("Run, project, or project link not found"),
-                    "409": _error_response("Archived project"),
-                    "429": _error_response("Rate limit exceeded"),
-                },
-            },
-        },
-        "/runs/{run_id}/stream": {
-            "get": {
-                "parameters": [
-                    RUN_ID_PARAM,
-                    {
-                        "name": "format",
-                        "in": "query",
-                        "schema": {"type": "string", "enum": ["sse", "ndjson"], "default": "sse"},
-                    },
-                    {"name": "after", "in": "query", "schema": {"type": "string"}},
-                    {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}},
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Run stream",
-                        "content": {
-                            "text/event-stream": {"schema": {"type": "string"}},
-                            "application/x-ndjson": {"schema": _ref("NdjsonStream")},
+                        {"name": "after", "in": "query", "schema": {"type": "string"}},
+                        {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}},
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Run stream",
+                            "content": {
+                                "text/event-stream": {"schema": {"type": "string"}},
+                                "application/x-ndjson": {"schema": _ref("NdjsonStream")},
+                            },
                         },
+                        **_common_errors(not_found="Run not found"),
                     },
-                    **_common_errors(not_found="Run not found"),
                 },
             },
-        },
-        "/runs/{run_id}/cancel": {
-            "post": {
-                "parameters": [RUN_ID_PARAM],
-                "responses": {
-                    "200": _json_response("Run cancelled", _ref("RunCancelResponse")),
-                    **_common_errors(not_found="Run not found"),
+            "/runs/{run_id}/cancel": {
+                "post": {
+                    "parameters": [RUN_ID_PARAM],
+                    "responses": {
+                        "200": _json_response("Run cancelled", _ref("RunCancelResponse")),
+                        **_common_errors(not_found="Run not found"),
+                    },
                 },
             },
-        },
         }
     ),
 }

@@ -19,7 +19,7 @@ from services.projects.finding_identity import stable_rule_identity
 def entity_row_to_dict(row) -> dict[str, Any]:
     return {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "type": row["type"],
         "canonical_value": row["canonical_value"],
         "host_entity_id": (row["host_entity_id"] if "host_entity_id" in row.keys() else "") or "",

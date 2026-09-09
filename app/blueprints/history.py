@@ -766,7 +766,7 @@ def get_run(run_id):
             )))
     include_private_metadata = (
         not run_team_id
-        and str(run.get("session_id") or "") == str(session_id or "")
+        and str(run.get("personal_workspace_id") or "") == str(session_id or "")
     )
     if run_team_id:
         include_private_metadata = team_scope_allowed
@@ -816,7 +816,7 @@ def get_run(run_id):
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,
         "session": get_log_session_id(session_id),
-        "run_session": get_log_session_id(run.get("session_id")),
+        "run_session": get_log_session_id(run.get("personal_workspace_id")),
         "cmd": run["command"], "full_output": is_full_view,
     })
 

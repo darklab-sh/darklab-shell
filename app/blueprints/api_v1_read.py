@@ -262,7 +262,7 @@ def api_history_run_artifact_download(run_id, artifact_id):
             status,
         )
     try:
-        artifact_session_id = str(artifact.get("session_id") or "")
+        artifact_session_id = str(artifact.get("personal_workspace_id") or "")
         owner_context = artifact_owner_context(artifact_session_id, artifact)
         handle = open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:

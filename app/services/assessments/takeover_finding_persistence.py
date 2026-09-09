@@ -66,7 +66,7 @@ def _owned_domain_entity(
             ("e.canonical_value", hostname),
             ("link.run_id", run_id),
         ),
-        owner_column="e.session_id",
+        owner_column="e.personal_workspace_id",
         team_column="e.team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )
@@ -98,7 +98,7 @@ def _upsert_confirmation_finding(
     title = f"Subdomain takeover confirmed for {hostname}"
     observed_at = str(confirmation["observed_at"])
     result = conn.execute(
-        "INSERT INTO findings (id, session_id, team_id, run_id, target_id, scope, line_number, "
+        "INSERT INTO findings (id, personal_workspace_id, team_id, run_id, target_id, scope, line_number, "
         "review_state, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
         "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
         "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method, "

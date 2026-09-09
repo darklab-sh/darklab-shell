@@ -43,7 +43,7 @@ def batch_factory():
         timestamp = "2026-08-17 12:00:00"
         with get_db_connect()() as conn:
             conn.execute(
-                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     project_id,
@@ -56,7 +56,7 @@ def batch_factory():
             )
             conn.execute(
                 "INSERT INTO project_assessments "
-                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "(id, personal_workspace_id, project_id, title, profile_key, profile_version, "
                 "status, started_at, created_at, updated_at) "
                 "VALUES (?, ?, ?, 'Claim test', 'network', '1.0', 'active', ?, ?, ?)",
                 (

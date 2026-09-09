@@ -54,7 +54,7 @@ def _session_hint(session_token: Any) -> str:
 
 
 def build_run_complete_payload(run: Any, findings_summary: dict[str, Any] | None = None) -> dict[str, Any]:
-    session_token = _value(run, "session_token", _value(run, "session_id", ""))
+    session_token = _value(run, "session_token", _value(run, "personal_workspace_id", ""))
     return {
         "trigger": TRIGGER_RUN_COMPLETE,
         "app_name": notification_app_name(),

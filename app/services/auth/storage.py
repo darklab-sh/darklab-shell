@@ -52,6 +52,7 @@ from .contracts import (
     validate_identifier,
 )
 from .verifier_keys import credential_verifier_digest, ensure_active_verifier_root
+from .ownership_cutover import attach_anonymous_ownership
 from .workspace_storage import (
     anonymous_workspace_storage_key,
     new_workspace_storage_key,
@@ -449,6 +450,15 @@ def create_principal_with_credential(
                     verifier_root_version=verifier_version,
                     verifier_root=verifier_root,
                 )
+                if anonymous_id is not None:
+                    attach_anonymous_ownership(
+                        active_conn,
+                        backend=_database_backend(active_conn),
+                        anonymous_id=anonymous_id,
+                        workspace_id=workspace_id,
+                        principal_id=principal_id,
+                        credential_id=issued.metadata.id,
+                    )
             except BaseException as exc:
                 _rollback_savepoint(active_conn, "principal_create")
                 if not _is_integrity_error(active_conn, exc):
@@ -479,6 +489,35 @@ def create_principal_with_credential(
         raise IdentityStorageError("could not allocate unique principal storage") from last_error
 
     return _run_transaction(operation, conn=conn, connect=connect)
+
+
+def personal_workspace_storage_key(
+    workspace_id: str,
+    *,
+    conn: Any | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> str:
+    """Return the immutable directory key for a validated personal workspace."""
+    validated = validate_identifier(workspace_id, "workspace")
+
+    def operation(active_conn: Any) -> str:
+        row = active_conn.execute(
+            "SELECT storage_key FROM personal_workspaces WHERE id = ?",
+            (validated,),
+        ).fetchone()
+        if row is None:
+            raise WorkspaceStorageError("personal workspace was not found")
+        storage_key = str(_row_dict(row).get("storage_key") or "")
+        validate_workspace_storage_key(
+            storage_key,
+            workspace_settings(),
+            conn=active_conn,
+            workspace_id=validated,
+            allow_existing_directory=True,
+        )
+        return storage_key
+
+    return _run_read(operation, conn=conn, connect=connect)
 
 
 def issue_credential(

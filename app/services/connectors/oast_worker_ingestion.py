@@ -34,7 +34,7 @@ def process_oast_provider_batch(
     for interaction in batch.interactions:
         try:
             outcome = ingest_oast_interaction(
-                str(correlation.get("session_id") or ""),
+                str(correlation.get("personal_workspace_id") or ""),
                 correlation_id,
                 interaction,
                 team_id=str(correlation.get("team_id") or ""),

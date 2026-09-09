@@ -46,12 +46,12 @@ def correlation_db():
     run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
     timestamp = NOW.isoformat()
     conn.execute(
-        "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+        "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
         "VALUES ('project-oast', ?, 'OAST', 'oast', ?, ?)",
         (OWNER_A, timestamp, timestamp),
     )
     conn.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('entity-oast', ?, 'domain', 'app.example.test', 'target-hash', "
         "?, ?, 1, ?)",
@@ -69,7 +69,7 @@ def correlation_db():
     )
     conn.execute(
         "INSERT INTO project_assessments ("
-        "id, session_id, project_id, title, profile_key, profile_version, "
+        "id, personal_workspace_id, project_id, title, profile_key, profile_version, "
         "started_at, created_at, updated_at) VALUES "
         "('assessment-oast', ?, 'project-oast', 'OAST cycle', "
         "'web', '1.0', ?, ?, ?)",
@@ -87,7 +87,7 @@ def correlation_db():
     )
     conn.execute(
         "INSERT INTO runs "
-        "(id, session_id, run_kind, command, started, finished, exit_code) "
+        "(id, personal_workspace_id, run_kind, command, started, finished, exit_code) "
         "VALUES (?, ?, 'external', 'private OAST probe', ?, ?, 0)",
         (RUN_ID, OWNER_A, timestamp, (NOW + timedelta(seconds=30)).isoformat()),
     )
@@ -524,12 +524,12 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
         conn=correlation_db,
     )
     correlation_db.execute(
-        "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
+        "INSERT INTO findings (id, personal_workspace_id, entity_id, target_id, created) "
         "VALUES ('finding-oast', ?, 'entity-oast', 'entity-oast', ?)",
         (OWNER_A, NOW.isoformat()),
     )
     correlation_db.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('entity-other', ?, 'domain', 'other.example.test', 'other-hash', "
         "?, ?, 1, ?)",
@@ -541,7 +541,7 @@ def test_interaction_finding_attachment_requires_exact_target_and_adds_source_li
         (NOW.isoformat(),),
     )
     correlation_db.execute(
-        "INSERT INTO findings (id, session_id, entity_id, target_id, created) "
+        "INSERT INTO findings (id, personal_workspace_id, entity_id, target_id, created) "
         "VALUES ('finding-other', ?, 'entity-other', 'entity-other', ?)",
         (OWNER_A, NOW.isoformat()),
     )

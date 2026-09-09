@@ -407,6 +407,12 @@ _ALTER_ADD_COLUMN_RE = re.compile(
     r"(?P<column>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)\s+(?P<definition>.+)",
     re.IGNORECASE | re.DOTALL,
 )
+_ALTER_RENAME_COLUMN_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?P<table>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"RENAME\s+COLUMN\s+(?P<old>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"TO\s+(?P<new>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
 _ALTER_ADD_CONSTRAINT_RE = re.compile(
     r"ALTER\s+TABLE\s+(?P<table>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)\s+"
     r"ADD\s+CONSTRAINT\s+(?P<name>\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)\s+(?P<definition>.+?)(?:;|$)",
@@ -519,6 +525,39 @@ def postgres_migration_schema_inventory(statements: list[str] | tuple[str, ...])
         parsed_table = _parse_create_table_statement(statement)
         if parsed_table is not None:
             tables[parsed_table.name] = parsed_table
+            continue
+        rename_column_match = _ALTER_RENAME_COLUMN_RE.search(normalized)
+        if rename_column_match:
+            table_name = _clean_identifier(rename_column_match.group("table"))
+            old_name = _clean_identifier(rename_column_match.group("old"))
+            new_name = _clean_identifier(rename_column_match.group("new"))
+            existing = tables.get(table_name, SchemaTableInventory(name=table_name))
+            columns = dict(existing.columns)
+            if old_name in columns:
+                columns[new_name] = columns.pop(old_name)
+            identifier_re = re.compile(rf"\b{re.escape(old_name)}\b")
+            tables[table_name] = SchemaTableInventory(
+                name=table_name,
+                columns=columns,
+                constraints=tuple(
+                    identifier_re.sub(new_name, constraint)
+                    for constraint in existing.constraints
+                ),
+                create_sql=identifier_re.sub(new_name, existing.create_sql),
+            )
+            indexes = {
+                name: (
+                    SchemaObjectInventory(
+                        name=item.name,
+                        table_name=item.table_name,
+                        sql=identifier_re.sub(new_name, item.sql),
+                        kind=item.kind,
+                    )
+                    if item.table_name == table_name
+                    else item
+                )
+                for name, item in indexes.items()
+            }
             continue
         column_match = _ALTER_ADD_COLUMN_RE.search(normalized)
         if column_match:

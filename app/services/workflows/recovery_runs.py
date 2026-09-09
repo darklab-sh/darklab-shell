@@ -17,7 +17,7 @@ def run_is_still_active(execution: Mapping[str, object], run_id: str) -> bool:
         return pid_for_team(run_id, team_id) is not None
     return pid_for_session(
         run_id,
-        str(execution.get("session_id") or ""),
+        str(execution.get("personal_workspace_id") or ""),
     ) is not None
 
 

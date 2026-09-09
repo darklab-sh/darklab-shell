@@ -201,7 +201,7 @@ def _owner_where(session_id: str, *, team_id: str = "", table_alias: str = "") -
     prefix = f"{table_alias}." if table_alias else ""
     owner = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         owner_column_first=False,
@@ -254,7 +254,7 @@ def create_execution(
             raise WorkflowActiveExecutionLimitExceeded(max(1, int(max_active)))
         conn.execute(
             "INSERT INTO workflow_executions "
-            "(id, execution_kind, session_id, team_id, workflow_id, workflow_source, title, definition_snapshot, "
+            "(id, execution_kind, personal_workspace_id, team_id, workflow_id, workflow_source, title, definition_snapshot, "
             "input_values, variables, status, current_step_id, workspace_cwd, project_id, actor_member_id, "
             "actor_role, owner_client_id, owner_tab_id, created, updated) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -681,13 +681,13 @@ def apply_workflow_provenance(run: dict[str, Any], provenance: dict[str, Any] | 
 def execution_launch_pointer(execution_id: str) -> tuple[str, str, str] | None:
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT session_id, team_id, current_step_id FROM workflow_executions "
+            "SELECT personal_workspace_id, team_id, current_step_id FROM workflow_executions "
             "WHERE id = ? AND execution_kind = ?",
             (execution_id, WORKFLOW_EXECUTION_KIND),
         ).fetchone()
     if not row:
         return None
-    return str(row["session_id"] or ""), str(row["team_id"] or ""), str(row["current_step_id"] or "")
+    return str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""), str(row["current_step_id"] or "")
 
 
 def claim_step_for_launch(execution_id: str, step_id: str) -> dict[str, Any] | None:

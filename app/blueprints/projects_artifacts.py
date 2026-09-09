@@ -61,7 +61,7 @@ def projects_artifacts_preview(project_id, artifact_id):
             "artifact": artifact,
         }), status
     try:
-        artifact_session_id = str(artifact.get("session_id") or session_id)
+        artifact_session_id = str(artifact.get("personal_workspace_id") or session_id)
         owner_context = artifact_owner_context(artifact_session_id, artifact)
         text = read_owner_workspace_text_file(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
@@ -96,7 +96,7 @@ def projects_artifacts_download(project_id, artifact_id):
             "artifact": artifact,
         }), status
     try:
-        artifact_session_id = str(artifact.get("session_id") or session_id)
+        artifact_session_id = str(artifact.get("personal_workspace_id") or session_id)
         owner_context = artifact_owner_context(artifact_session_id, artifact)
         handle = open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
@@ -126,7 +126,7 @@ def projects_artifacts_download_ticket(project_id, artifact_id):
             "artifact": artifact,
         }), status
     try:
-        artifact_session_id = str(artifact.get("session_id") or session_id)
+        artifact_session_id = str(artifact.get("personal_workspace_id") or session_id)
         owner_context = artifact_owner_context(artifact_session_id, artifact)
         with open_owner_workspace_file_for_download(owner_context, artifact["workspace_path"], CFG):
             pass
@@ -134,7 +134,7 @@ def projects_artifacts_download_ticket(project_id, artifact_id):
         return project_routes._workspace_project_artifact_error_response(exc)
     ticket = create_download_ticket({
         "kind": "project_artifact",
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "team_id": team_id,
         "project_id": project_id,
         "artifact_id": artifact_id,

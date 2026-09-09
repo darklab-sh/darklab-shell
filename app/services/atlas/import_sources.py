@@ -43,7 +43,7 @@ def insert_import_draft(
     conn.execute(
         """
         INSERT INTO atlas_import_drafts
-        (id, session_id, team_id, actor_session_id, actor_member_id, source_tool,
+        (id, personal_workspace_id, team_id, actor_session_id, actor_member_id, source_tool,
          format_id, import_name, filename, original_file_sha256, normalized_rows_sha256,
          normalized_rows_json, preview_counts_json, warning_summary_json, created, expires_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -101,7 +101,7 @@ def insert_import_batch(
     conn.execute(
         """
         INSERT INTO atlas_import_batches
-        (id, draft_id, session_id, team_id, actor_session_id, actor_member_id, source_tool,
+        (id, draft_id, personal_workspace_id, team_id, actor_session_id, actor_member_id, source_tool,
          format_id, import_name, filename, original_file_sha256, normalized_rows_sha256,
          counts_json, warning_summary_json, created, applied_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

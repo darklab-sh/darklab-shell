@@ -216,7 +216,7 @@ def _seed_linked_run(
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, exit_code) "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code) "
             "VALUES (?, ?, ?, 'external', ?, ?, ?, ?)",
             (
                 run_id,
@@ -621,7 +621,7 @@ def _seed_run_finding(
     finding_id = "fnd-assessment-delta-" + uuid.uuid4().hex
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, subject_key, signature_hash, severity, tool_root, "
+        "(id, personal_workspace_id, run_id, subject_key, signature_hash, severity, tool_root, "
         "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, "
         "fingerprint, title, raw_line, cve_ids_json, created) "
         "VALUES (?, ?, ?, ?, ?, 'high', 'nuclei', ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
@@ -652,7 +652,7 @@ def _seed_run_finding(
 
 def _link_finding_to_run(conn, session_id: str, run_id: str, cve_id: str) -> str:
     row = conn.execute(
-        "SELECT id FROM findings WHERE session_id = ? AND signature_hash = ?",
+        "SELECT id FROM findings WHERE personal_workspace_id = ? AND signature_hash = ?",
         (session_id, "sig-" + cve_id),
     ).fetchone()
     assert row is not None
@@ -901,7 +901,7 @@ def test_run_fact_loader_reports_parser_fallback_and_uses_materialized_evidence(
     with db_connect() as conn, caplog.at_level(logging.DEBUG, logger="shell"):
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, "
+            "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, first_seen_at, "
             "last_seen_at, occurrence_count, attributes_json, created) "
             "VALUES (?, ?, '', 'port', 'quiet.example:443/tcp', ?, ?, ?, 1, ?, ?)",
             (
@@ -922,7 +922,7 @@ def test_run_fact_loader_reports_parser_fallback_and_uses_materialized_evidence(
         )
         conn.execute(
             "INSERT INTO scan_target_observations "
-            "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, "
+            "(personal_workspace_id, team_id, run_id, entity_id, entity_type, canonical_value, "
             "scan_kind, command_root, observed_at, port_entity_count, created) "
             "VALUES (?, '', ?, ?, 'domain', 'quiet.example', 'port_scan', 'nmap', ?, 1, ?)",
             (
@@ -1239,7 +1239,7 @@ def test_reconcile_moves_finding_rules_to_needs_review(assessment_factory):
     run_id = _seed_linked_run(cleanup, session_id, project_id, "nuclei -u https://api.example.com")
     with db_connect() as conn:
         conn.execute(
-            "INSERT INTO findings (id, session_id, run_id, fingerprint, title, raw_line, created) "
+            "INSERT INTO findings (id, personal_workspace_id, run_id, fingerprint, title, raw_line, created) "
             "VALUES (?, ?, ?, ?, 'Template match', 'matched', ?)",
             (
                 "fnd-assessment-" + uuid.uuid4().hex,
@@ -1302,7 +1302,7 @@ def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_cove
         ).fetchone()
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, content_sha256, created) "
             "VALUES (?, ?, ?, 'reports/openapi.json', 'openapi.json', 'json', ?, "
             "'workspace', 'application/json', ?, ?)",
@@ -1408,7 +1408,7 @@ def test_reviewed_schemathesis_report_persists_safe_idempotent_evidence_and_cove
         ).fetchone()
         finding = conn.execute(
             "SELECT id, origin, validation_method, cwe_ids_json, raw_line "
-            "FROM findings WHERE session_id = ? AND tool_root = 'schemathesis'",
+            "FROM findings WHERE personal_workspace_id = ? AND tool_root = 'schemathesis'",
             (session_id,),
         ).fetchone()
         evidence_links = conn.execute(
@@ -1603,7 +1603,7 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO finding_triage_details "
-            "(id, session_id, finding_id, remediation, verification_steps, "
+            "(id, personal_workspace_id, finding_id, remediation, verification_steps, "
             "verification_status, verification_notes, verification_updated_at, created, updated) "
             "VALUES (?, ?, ?, '', '', 'verified', '', ?, ?, ?)",
             (
@@ -1742,7 +1742,7 @@ def test_finding_reconciliation_persists_and_cleans_cycle_delta_by_remediation(
         for finding_id in queued_finding_ids:
             conn.execute(
                 "INSERT INTO finding_triage_details "
-                "(id, session_id, finding_id, remediation, verification_steps, "
+                "(id, personal_workspace_id, finding_id, remediation, verification_steps, "
                 "verification_status, verification_notes, created, updated) "
                 "VALUES (?, ?, ?, '', '', 'ready_to_verify', '', ?, ?)",
                 (
