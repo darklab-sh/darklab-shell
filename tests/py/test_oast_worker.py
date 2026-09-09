@@ -55,7 +55,7 @@ def _correlation(status: str = "reserved", **changes: object) -> dict[str, objec
     settings = _settings()
     value: dict[str, object] = {
         "id": _CORRELATION_ID,
-        "session_id": "owner-a",
+        "personal_workspace_id": "owner-a",
         "team_id": "",
         "status": status,
         "callback_label": _CALLBACK_LABEL,

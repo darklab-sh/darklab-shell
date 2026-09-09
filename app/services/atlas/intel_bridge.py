@@ -201,10 +201,10 @@ def _persist_lookup_snapshots(
             data_json = dialect_for_backend(get_db_backend()).decode_json_dict(data_json_text)
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
-                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '') "
                 "ON CONFLICT(entity_id, provider) DO UPDATE SET "
-                "session_id = excluded.session_id, status = excluded.status, summary = excluded.summary, "
+                "personal_workspace_id = excluded.personal_workspace_id, status = excluded.status, summary = excluded.summary, "
                 "data_json = excluded.data_json, "
                 "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
                 (

@@ -489,7 +489,7 @@ def list_findings(
     total = int(conn.execute(total_sql, params).fetchone()["count"] or 0) if include_total else 0
     fetch_limit = page_limit if include_total else page_limit + 1
     rows_sql = _sql_join((
-        "SELECT f.id, f.session_id, f.team_id, f.entity_id, "
+        "SELECT f.id, f.personal_workspace_id, f.team_id, f.entity_id, "
         "e.type AS entity_type, e.canonical_value AS entity_value, ",
         "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, "
         "f.first_run_id, f.last_run_id, ",
@@ -563,7 +563,7 @@ def list_findings(
         ).fetchall()
     findings = [_row_to_finding(row) for row in rows]
     owner_by_finding_id = {
-        str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+        str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""))
         for row in rows
     }
     sources_by_finding = _finding_import_sources_by_id(conn, session_id, [finding["id"] for finding in findings], team_id=team_id)
@@ -620,7 +620,7 @@ def finding_detail(conn, session_id: str, finding_id: str, *, team_id: str = "")
         [finding_payload],
         conn=conn,
         owner_by_finding_id={
-            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or "")),
+            str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or "")),
         },
     )
     return {
@@ -767,7 +767,7 @@ def list_entities(
         _orphan_entity_clause("e", team_id),
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
         ") ",
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "SELECT e.id, e.personal_workspace_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
         "e.first_seen_at, e.last_seen_at, ",
         "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created, "
         "(SELECT COUNT(DISTINCT entity_run.id) ",
@@ -834,7 +834,7 @@ def entity_detail(
     run_scope_sql = _run_scope_sql("r", team_id)
     run_scope_params = _run_scope_params(session_id, team_id)
     row = conn.execute(
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
+        "SELECT e.id, e.personal_workspace_id, e.type, e.canonical_value, e.host_entity_id, e.attributes_json, "
         "e.first_seen_at, e.last_seen_at, "
         "e.occurrence_count, e.suppressed, e.suppressed_reason, e.suppressed_at, e.created "
         "FROM entities e WHERE " + entity_scope_sql + " AND e.id = ?",  # nosec
@@ -887,7 +887,7 @@ def entity_detail(
     ).fetchall()
     snapshot_rows = conn.execute(
         "SELECT id, provider, status, summary, data_json, fetched_at, expires_at "
-        "FROM entity_intel_snapshots WHERE session_id = ? AND entity_id = ? "
+        "FROM entity_intel_snapshots WHERE personal_workspace_id = ? AND entity_id = ? "
         "ORDER BY fetched_at DESC, provider ASC",
         (metadata_owner_id(session_id, team_id), entity_id),
     ).fetchall()

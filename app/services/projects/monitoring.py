@@ -90,7 +90,7 @@ def _value(row: Any, key: str, default: Any = "") -> Any:
 def _project_row(conn, session_id: str, project_id: str, *, team_id: str = "") -> dict[str, Any] | None:
     owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
     row = conn.execute(
-        "SELECT p.id, p.session_id, p.team_id, p.name, p.slug, p.description, "
+        "SELECT p.id, p.personal_workspace_id, p.team_id, p.name, p.slug, p.description, "
         "p.status, p.color, p.created, p.updated "
         "FROM projects p WHERE " + owner_sql + " AND p.id = ? LIMIT 1",  # nosec
         (*owner_params, project_id),
@@ -271,7 +271,7 @@ def _unresolved_summary_fires_for_project(
         session_id,
         team_id=team_id,
         table_alias="w",
-        session_column="session_token",
+        session_column="personal_workspace_id",
     )
     rows = conn.execute(
         "SELECT f.* FROM watcher_fires f "
@@ -297,7 +297,7 @@ def _window_summary_fires_for_project(
         session_id,
         team_id=team_id,
         table_alias="w",
-        session_column="session_token",
+        session_column="personal_workspace_id",
     )
     where = [" " + owner_sql, "w.project_id = ?"]
     params: list[Any] = [*owner_params, project_id]
@@ -545,7 +545,7 @@ def get_project_monitoring(
             session_id,
             team_id=team_id,
             table_alias="w",
-            session_column="session_token",
+            session_column="personal_workspace_id",
         )
         rows = conn.execute(
             "SELECT w.* FROM watchers w "
@@ -853,7 +853,7 @@ def update_project_monitoring_fire_ack(
             session_id,
             team_id=team_id,
             table_alias="w",
-            session_column="session_token",
+            session_column="personal_workspace_id",
         )
         row = conn.execute(
             "SELECT w.id, f.ack_state FROM watcher_fires f "

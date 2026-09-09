@@ -252,11 +252,11 @@ def upsert_entity(
     conflict_target = (
         "ON CONFLICT(team_id, type, signature_hash) WHERE team_id != '' DO UPDATE SET "
         if team_id
-        else "ON CONFLICT(session_id, type, signature_hash) WHERE team_id = '' DO UPDATE SET "
+        else "ON CONFLICT(personal_workspace_id, type, signature_hash) WHERE team_id = '' DO UPDATE SET "
     )
     conn.execute(
         "INSERT INTO entities "
-        "(id, session_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
+        "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, "
         "occurrence_count, host_entity_id, attributes_json, created) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         f"{conflict_target}"  # nosec
@@ -406,7 +406,7 @@ def _record_scan_target_observations(
     for entity_id, (entity_type, canonical_value) in sorted(targets.items()):
         conn.execute(
             "INSERT INTO scan_target_observations "
-            "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+            "(personal_workspace_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
             "command_root, observed_at, port_entity_count, created) "
             "VALUES (?, ?, ?, ?, ?, ?, 'port_scan', ?, ?, ?, ?) "
             "ON CONFLICT(run_id, entity_id, scan_kind) DO UPDATE SET "

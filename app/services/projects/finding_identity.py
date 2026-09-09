@@ -13,7 +13,7 @@ from services.projects.finding_provenance import normalize_finding_validation_me
 
 def owner_scope_key(finding: dict[str, Any]) -> tuple[str, str]:
     team_id = str(finding.get("team_id") or "")
-    session_id = "" if team_id else str(finding.get("session_id") or "")
+    session_id = "" if team_id else str(finding.get("personal_workspace_id") or "")
     return session_id, team_id
 
 

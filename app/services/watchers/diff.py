@@ -15,7 +15,7 @@ from services.teams.scope import personal_owner_context
 def run_row(conn, session_token: str, run_id: str) -> dict[str, Any] | None:
     owner = composite_owner_predicate(
         personal_owner_context(session_token),
-        owner_column="runs.session_id",
+        owner_column="runs.personal_workspace_id",
         key_values=(("runs.id", run_id),),
     )
     row = conn.execute(

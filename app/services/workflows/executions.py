@@ -414,7 +414,7 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
             original_command=command,
             display_command=display_command,
             private_values=private_values,
-            session_id=str(execution.get("session_id") or ""),
+            session_id=str(execution.get("personal_workspace_id") or ""),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
             client_ip="",

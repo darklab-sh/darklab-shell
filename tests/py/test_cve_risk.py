@@ -126,7 +126,7 @@ def test_nessus_import_observation_loader_is_bounded_and_fails_closed(risk_db, m
     target_key = entity_signature("domain", target)
     risk_db.execute(
         "INSERT INTO atlas_import_batches "
-        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "(id, personal_workspace_id, source_tool, format_id, import_name, created, applied_at, status) "
         "VALUES ('batch-nessus-bounded', ?, 'Nessus', 'nessus_xml', "
         "'Bounded', ?, ?, 'applied')",
         (_NESSUS_OWNER, observed_at, observed_at),
@@ -254,12 +254,12 @@ def _insert_project_finding(
 ) -> None:
     now = "2026-08-04T00:00:00+00:00"
     conn.execute(
-        "INSERT INTO projects (id, session_id, team_id, name, slug, created, updated) "
+        "INSERT INTO projects (id, personal_workspace_id, team_id, name, slug, created, updated) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (project_id, session_id, team_id, project_id, project_id, now, now),
     )
     conn.execute(
-        "INSERT INTO findings (id, session_id, team_id, target_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, team_id, target_id, title, created) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         (finding_id, session_id, team_id, target_id, f"Affected by {cve_id}", now),
     )
@@ -1307,7 +1307,7 @@ def test_feed_status_marks_old_bundled_data_stale_and_discloses_refresh_state(
     assert risk_db.total_changes == before_changes
 
     risk_db.execute(
-        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, target_id, title, created) "
         "VALUES ('finding-bundled-feed', 'session-one', 'target-one', "
         "'CVE-2026-12345', '2026-08-10')"
     )
@@ -1533,7 +1533,7 @@ def test_redirect_validation_rejects_non_https_and_unlisted_hosts():
 def test_risk_enrichment_and_sql_order_share_kev_epss_age_contract(risk_db):
     for finding_id, created in (("finding-old", "2026-01-01"), ("finding-new", "2026-02-01")):
         risk_db.execute(
-            "INSERT INTO findings (id, session_id, target_id, title, created) VALUES (?, 's', ?, ?, ?)",
+            "INSERT INTO findings (id, personal_workspace_id, target_id, title, created) VALUES (?, 's', ?, ?, ?)",
             (finding_id, finding_id, f"CVE-2026-{12345 if finding_id.endswith('old') else 23456}", created),
         )
     risk_db.executemany(
@@ -1569,7 +1569,7 @@ def test_risk_order_uses_newer_finding_as_final_shared_tie_breaker(risk_db):
         ("finding-newer", "ent_newer", "2026-02-01"),
     ):
         risk_db.execute(
-            "INSERT INTO findings (id, session_id, target_id, title, created) "
+            "INSERT INTO findings (id, personal_workspace_id, target_id, title, created) "
             "VALUES (?, 'session-one', ?, 'CVE-2026-12345', ?)",
             (finding_id, target_id, created),
         )
@@ -1585,13 +1585,13 @@ def test_risk_order_uses_newer_finding_as_final_shared_tie_breaker(risk_db):
     ).fetchall()
     worklist = build_remediation_worklist([{
         "id": "finding-newer",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_newer",
         "title": "CVE-2026-12345",
         "created": "2026-02-01",
     }, {
         "id": "finding-older",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_older",
         "title": "CVE-2026-12345",
         "created": "2026-01-01",
@@ -1616,7 +1616,7 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
     )
     findings = [{
         "id": "finding-confirmed",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared",
         "title": "CVE-2026-12345 confirmed",
         "first_seen_at": "2026-08-02",
@@ -1627,7 +1627,7 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
         "asset_context": {"criticality": "high", "environment": "production"},
     }, {
         "id": "finding-inferred",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared",
         "title": "CVE-2026-12345 inferred",
         "first_seen_at": "2026-08-01",
@@ -1638,21 +1638,21 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
         "asset_context": {"criticality": "high", "environment": "production"},
     }, {
         "id": "finding-other-target",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_other",
         "title": "CVE-2026-12345 on another target",
         "first_seen_at": "2026-08-03",
         "run_id": "run-other",
     }, {
         "id": "finding-high-epss",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared",
         "title": "CVE-2026-23456",
         "first_seen_at": "2026-08-04",
         "run_id": "run-high-epss",
     }, {
         "id": "finding-false-positive",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared",
         "title": "CVE-2026-23456",
         "review_state": "false_positive",
@@ -1696,7 +1696,7 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
 
     risk_db.executemany(
         "INSERT INTO finding_remediation_merge_members "
-        "(session_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
         "vulnerability_id, rule_identity, created_by_session_id, created_at) "
         "VALUES ('session-one', '', 'rmg_explicit', ?, 'vulnerability', "
         "'CVE-2026-12345', 'CVE-2026-12345', ?, 'session-one', '2026-08-05')",
@@ -1724,7 +1724,7 @@ def test_remediation_worklist_collapses_observations_without_losing_context(risk
 def test_imported_inference_and_active_confirmation_share_only_remediation_identity(risk_db):
     findings = [{
         "id": "finding-nessus-inferred",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared_service",
         "origin": "import",
         "validation_method": "version_inference",
@@ -1736,7 +1736,7 @@ def test_imported_inference_and_active_confirmation_share_only_remediation_ident
         "first_seen_at": "2026-08-06T12:00:00+00:00",
     }, {
         "id": "finding-nuclei-confirmed",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared_service",
         "origin": "run",
         "validation_method": "active_confirmation",
@@ -1776,21 +1776,21 @@ def test_imported_inference_and_active_confirmation_share_only_remediation_ident
 def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     findings = [{
         "id": "personal-one",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "subject_key": "domain\x1fexample.test",
         "title": "CVE-2026-12345",
     }, {
         "id": "personal-two",
-        "session_id": "session-two",
+        "personal_workspace_id": "session-two",
         "subject_key": "domain\x1fexample.test",
         "title": "CVE-2026-12345",
     }, {
         "id": "unresolved-one",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "title": "CVE-2026-12345",
     }, {
         "id": "unresolved-two",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "title": "CVE-2026-12345",
     }]
 
@@ -1805,13 +1805,13 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
 
     team_findings = [{
         "id": "team-one",
-        "session_id": "member-one",
+        "personal_workspace_id": "member-one",
         "team_id": "team-shared",
         "entity_id": "ent_team",
         "title": "CVE-2026-12345",
     }, {
         "id": "team-two",
-        "session_id": "member-two",
+        "personal_workspace_id": "member-two",
         "team_id": "team-shared",
         "entity_id": "ent_team",
         "title": "CVE-2026-12345",
@@ -1822,7 +1822,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
 
     rule_observations: list[dict[str, Any]] = [{
         "id": "rule-confirmed",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_rule",
         "signature_hash": "stable-rule-signature",
         "tool_root": "nuclei",
@@ -1832,7 +1832,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
         "validation_method": "active_confirmation",
     }, {
         "id": "rule-inferred",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_rule",
         "signature_hash": "stable-rule-signature",
         "tool_root": "nuclei",
@@ -1855,7 +1855,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
     assert rule_observations[0]["remediation_id"] == confirmed_reference["remediation_id"]
     risk_db.execute(
         "INSERT INTO finding_remediation_dispositions "
-        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
         "rule_identity, review_state, created_at, updated_at) "
         "VALUES ('session-one', '', 'entity:ent_rule', 'rule', "
         "'RULE:signature:stable-rule-signature', 'signature:stable-rule-signature', "
@@ -1887,7 +1887,7 @@ def test_remediation_identity_uses_owner_and_exact_subject_boundaries(risk_db):
 
     uncertain_rules: list[dict[str, Any]] = [{
         "id": finding_id,
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_rule",
         "tool_root": "nuclei",
         "kind": "finding",
@@ -1916,7 +1916,7 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
     )
     findings: list[dict[str, Any]] = [{
         "id": "finding-multiple-cves",
-        "session_id": "session-one",
+        "personal_workspace_id": "session-one",
         "entity_id": "ent_shared",
         "title": "CVE-2026-12345 and CVE-2026-23456",
     }]
@@ -1941,7 +1941,7 @@ def test_primary_remediation_reference_tracks_highest_priority_cve(risk_db):
     assert primary_merge_member["vulnerability_id"] == "CVE-2026-23456"
     risk_db.execute(
         "INSERT INTO finding_remediation_dispositions "
-        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
         "vulnerability_id, review_state, created_at, updated_at) "
         "VALUES ('session-one', '', 'entity:ent_shared', 'vulnerability', "
         "'CVE-2026-12345', 'CVE-2026-12345', 'important', '2026-08-05', '2026-08-05')"
@@ -1980,7 +1980,7 @@ def test_enrichment_accepts_private_owner_context_without_exposing_it(risk_db):
 
     assert finding["remediation_id"] == remediation_identity({
         **finding,
-        "session_id": "member-session",
+        "personal_workspace_id": "member-session",
         "team_id": "team-private-owner",
     }, "CVE-2026-12345")
     assert "session_id" not in finding
@@ -2373,12 +2373,12 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert incomplete_httpx["observations"][0]["unmaterialized_match_count"] == 1
     assert risk_db.total_changes == changes_before_read
     risk_db.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
         "VALUES ('run-nmap-xml-1', ?, 'nmap -sV 192.0.2.10', ?, ?, 0)",
         (_VERSION_OWNER, "2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
     )
     risk_db.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('entity-version-port', ?, 'port', '192.0.2.10:443/tcp', "
         "'signature-version-port', ?, ?, 1, ?)",
@@ -2424,12 +2424,12 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
         "truncated": False,
     }
     risk_db.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
         "VALUES ('run-httpx-json-1', ?, 'httpx -u https://api.example.test -json', ?, ?, 0)",
         (_VERSION_OWNER, "2026-08-05T12:00:00+00:00", "2026-08-05T12:30:00+00:00"),
     )
     risk_db.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('entity-version-url', ?, 'url', 'https://api.example.test', "
         "'signature-version-url', ?, ?, 1, ?)",
@@ -2611,13 +2611,13 @@ def test_external_nvd_lookup_persists_positive_and_negative_cache_without_identi
     assert risk_db.total_changes == changes_before_read
     risk_db.execute(
         "INSERT INTO atlas_import_batches "
-        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "(id, personal_workspace_id, source_tool, format_id, import_name, created, applied_at, status) "
         "VALUES ('batch-version-import', ?, 'Nessus', 'nessus_xml', "
         "'Version import', ?, ?, 'applied')",
         (_VERSION_OWNER,) + ("2026-08-05T12:30:00+00:00",) * 2,
     )
     risk_db.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('entity-version-import', ?, 'domain', 'api.example.test', "
         "'signature-version-import', ?, ?, 1, ?)",
@@ -2843,7 +2843,7 @@ def test_local_nvd_dataset_replaces_prior_local_snapshot_and_enriches_ranking(ri
         now=datetime.fromisoformat("2026-08-04T00:00:00+00:00"),
     )
     risk_db.execute(
-        "INSERT INTO findings (id, session_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, title, created) "
         "VALUES ('finding-cvss', 'session-one', 'CVE-2026-12345', '2026-08-04')"
     )
     findings: list[dict[str, Any]] = [
@@ -3067,7 +3067,7 @@ def test_failed_local_nvd_reload_preserves_last_known_good_dataset(risk_db, tmp_
 def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
     _insert_project_finding(risk_db, finding_id="finding-one", project_id="project-one")
     risk_db.execute(
-        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, target_id, title, created) "
         "VALUES ('finding-no-project', 'session-one', 'target-no-project', "
         "'Unassigned CVE observation', '2026-08-04')"
     )
@@ -3076,7 +3076,7 @@ def test_feed_crossings_use_hysteresis_deduplicate_and_project_once(risk_db):
         "VALUES ('finding-no-project', 'CVE-2026-12345', '2026-08-04')"
     )
     risk_db.execute(
-        "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+        "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
         "VALUES ('project-two', 'session-one', 'Two', 'two', '2026-08-04', '2026-08-04')"
     )
     risk_db.execute(
@@ -3246,7 +3246,7 @@ def test_archived_team_rejects_risk_acknowledgement(risk_db):
 
 def test_report_snapshot_captures_selected_records_and_source_provenance(risk_db):
     risk_db.execute(
-        "INSERT INTO findings (id, session_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, title, created) "
         "VALUES ('finding-one', 'session-one', 'CVE-2026-12345', '2026-08-04')"
     )
     risk_db.execute(

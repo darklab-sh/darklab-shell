@@ -64,7 +64,7 @@ def enqueue_run_complete(
     payload = build_run_complete_payload(
         {
             "id": run_id,
-            "session_id": session_id,
+            "personal_workspace_id": session_id,
             "command": command,
             "exit_code": exit_code,
         },

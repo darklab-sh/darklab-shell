@@ -280,7 +280,7 @@ def _backfill_watcher_monitoring_fields(conn):
                     (watchers.team_id != '' AND p.team_id = watchers.team_id)
                     OR ((watchers.team_id IS NULL OR watchers.team_id = '')
                         AND (p.team_id IS NULL OR p.team_id = '')
-                        AND p.session_id = watchers.session_token)
+                        AND p.personal_workspace_id = watchers.personal_workspace_id)
                   )
             )
             WHERE (project_id IS NULL OR project_id = '')
@@ -295,7 +295,7 @@ def _backfill_watcher_monitoring_fields(conn):
                     (watchers.team_id != '' AND p.team_id = watchers.team_id)
                     OR ((watchers.team_id IS NULL OR watchers.team_id = '')
                         AND (p.team_id IS NULL OR p.team_id = '')
-                        AND p.session_id = watchers.session_token)
+                        AND p.personal_workspace_id = watchers.personal_workspace_id)
                   )
               ) = 1
             """
@@ -712,7 +712,7 @@ def _backfill_url_host_entity_links(conn) -> None:
         return
     try:
         rows = conn.execute(
-            "SELECT id, session_id, team_id, canonical_value, first_seen_at, last_seen_at "
+            "SELECT id, personal_workspace_id, team_id, canonical_value, first_seen_at, last_seen_at "
             "FROM entities "
             "WHERE type = 'url' AND COALESCE(host_entity_id, '') = ''"
         ).fetchall()
@@ -733,7 +733,7 @@ def _backfill_url_host_entity_links(conn) -> None:
             continue
         host_type, host_canonical = identity
         seen_at = str(row["first_seen_at"] or row["last_seen_at"] or "")
-        session_id = str(row["session_id"] or "")
+        session_id = str(row["personal_workspace_id"] or "")
         team_id = str(row["team_id"] or "")
         try:
             host_entity_id = upsert_entity(

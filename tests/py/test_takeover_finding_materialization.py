@@ -70,7 +70,7 @@ def _seed_takeover_evidence(
     started = "2026-08-07T22:00:00+00:00"
     with get_db_connect()() as conn:
         conn.executemany(
-            "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, "
+            "INSERT INTO runs (id, personal_workspace_id, team_id, run_kind, command, started, finished, "
             "exit_code, output_preview, output_line_count) VALUES (?, ?, '', 'external', ?, ?, ?, 0, ?, 5)",
             (
                 (source_run_id, session_id, "dnsx -d example.test -cname -json", started,
@@ -167,7 +167,7 @@ def test_takeover_confirmation_rejects_missing_dns_scope_failed_runs_and_command
             seeded["command"] + " -tags takeover", 0, [seeded["entry"]],
         ) is None
         assert conn.execute(
-            "SELECT COUNT(*) AS count FROM findings WHERE session_id = ?",
+            "SELECT COUNT(*) AS count FROM findings WHERE personal_workspace_id = ?",
             (seeded["session_id"],),
         ).fetchone()["count"] == 0
     stale = _seed_takeover_evidence(nuclei_timestamp="2026-08-09T22:02:00Z")
@@ -211,7 +211,7 @@ def test_completed_run_finalization_materializes_the_confirmed_takeover_finding(
     assert summary["finding_count"] == 1
     with get_db_connect()() as conn:
         finding = conn.execute(
-            "SELECT validation_method, title FROM findings WHERE session_id = ?",
+            "SELECT validation_method, title FROM findings WHERE personal_workspace_id = ?",
             (seeded["session_id"],),
         ).fetchone()
         assert dict(finding) == {

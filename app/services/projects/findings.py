@@ -95,7 +95,7 @@ def row_to_finding(row):
     })
     return {
         "id": value("id"),
-        "session_id": value("session_id"),
+        "personal_workspace_id": value("personal_workspace_id"),
         "team_id": value("team_id"),
         "run_id": run_id,
         "target_id": target_id,
@@ -240,11 +240,11 @@ def _project_finding_source_exists_sql():
         "EXISTS ("
         "  SELECT 1 FROM findings_occurrences source_fo "
         "  JOIN runs source_run ON source_run.id = source_fo.run_id "
-        "  WHERE source_fo.finding_id = f.id AND source_run.session_id = f.session_id"
+        "  WHERE source_fo.finding_id = f.id AND source_run.personal_workspace_id = f.personal_workspace_id"
         ") "
         "OR EXISTS ("
         "  SELECT 1 FROM runs source_direct "
-        "  WHERE source_direct.session_id = f.session_id "
+        "  WHERE source_direct.personal_workspace_id = f.personal_workspace_id "
         "  AND ("
         "    source_direct.id = f.run_id "
         "    OR source_direct.id = f.first_run_id "
@@ -322,7 +322,7 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             query_params.extend([safe_limit, safe_offset])
         rows = conn.execute(
             base_sql
-            + "SELECT f.id, f.session_id, f.team_id, f.entity_id, "  # nosec
+            + "SELECT f.id, f.personal_workspace_id, f.team_id, f.entity_id, "  # nosec
             "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
@@ -346,7 +346,7 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
     attach_risk_to_findings(
         findings,
         owner_by_finding_id={
-            str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""))
             for row in rows
         },
     )
@@ -380,7 +380,7 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
         if finding_id not in disposition_update["affected_finding_ids"]:
             return None
         row = conn.execute(
-            "SELECT id, session_id, team_id, entity_id, subject_key, signature_hash, origin, validation_method, "
+            "SELECT id, personal_workspace_id, team_id, entity_id, subject_key, signature_hash, origin, validation_method, "
             "severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
             "fingerprint, title, raw_line, created, summary, impact, reproduction_steps, confidence, "
@@ -396,7 +396,7 @@ def update_finding_review_state(session_id, finding_id, data, *, team_id=""):
                 [finding],
                 conn=conn,
                 owner_by_finding_id={
-                    str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or "")),
+                    str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or "")),
                 },
             )
         conn.commit()
@@ -729,7 +729,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                 "  FROM findings f "
                 "  LEFT JOIN runs r ON r.id = "
                 + source_run_expr
-                + " AND r.session_id = f.session_id "
+                + " AND r.personal_workspace_id = f.personal_workspace_id "
                 "  WHERE "
                 + " AND ".join(active_where_clauses)
                 + ") "
@@ -759,7 +759,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             query_params.extend([fetch_limit, safe_offset])
         rows = conn.execute(  # nosec
             base_sql  # nosec
-            + "SELECT f.id, f.session_id, f.team_id, "
+            + "SELECT f.id, f.personal_workspace_id, f.team_id, "
             "COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.origin, f.validation_method, "
             "f.severity, f.kind, f.tool_root, "
@@ -783,7 +783,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             "JOIN findings f ON f.id = pf.id "
             "LEFT JOIN runs r ON r.id = "
             + page_source_run_expr
-            + " AND r.session_id = f.session_id "
+            + " AND r.personal_workspace_id = f.personal_workspace_id "
             "ORDER BY "
             + cve_risk_order_sql(
                 "f", age_expression="COALESCE(NULLIF(f.first_seen_at, ''), f.created)"
@@ -827,7 +827,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                     "JOIN findings f ON f.id = pf.id "
                     "LEFT JOIN runs r ON r.id = "
                     + source_run_expr
-                    + " AND r.session_id = f.session_id "
+                    + " AND r.personal_workspace_id = f.personal_workspace_id "
                     "WHERE "
                     + group_label_expr
                     + f" IN ({placeholders}) "  # nosec
@@ -875,7 +875,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             findings,
             conn=conn,
             owner_by_finding_id={
-                str(row["id"]): (str(row["session_id"] or ""), str(row["team_id"] or ""))
+                str(row["id"]): (str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""))
                 for row in rows
             },
         )
@@ -1365,7 +1365,7 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             ).hexdigest()[:32]
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
+                "(id, personal_workspace_id, team_id, run_id, target_id, scope, line_number, review_state, "
                 "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
                 "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
                 "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method) "
@@ -1405,7 +1405,7 @@ def record_run_findings(conn, session_id, run_id, entries, *, team_id=""):
             )
         recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
-            "SELECT f.id, f.session_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
+            "SELECT f.id, f.personal_workspace_id, f.team_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "

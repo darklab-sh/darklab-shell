@@ -13,7 +13,14 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hmac
 import re
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+
+if TYPE_CHECKING:
+    from werkzeug.datastructures import Headers
+
+    HeaderValues: TypeAlias = Mapping[str, Any] | Headers
+else:
+    HeaderValues = Any
 
 from services.storage.transactions import run_read, run_transaction
 
@@ -52,6 +59,7 @@ AuthenticationMethod = Literal[
 class AuthenticatedContext:
     principal_id: str
     personal_workspace_id: str
+    workspace_storage_key: str
     credential_id: str
     credential_type: Literal["portable", "pat"]
     authentication_method: AuthenticationMethod
@@ -150,7 +158,7 @@ def _decode_secret(value: str, *, credential_type: Literal["portable", "pat"], m
     )
 
 
-def _bearer(headers: Mapping[str, Any]) -> tuple[str, AuthenticationResult | None]:
+def _bearer(headers: HeaderValues) -> tuple[str, AuthenticationResult | None]:
     raw = str(headers.get("Authorization") or "")
     if "Authorization" not in headers:
         return "", None
@@ -171,7 +179,7 @@ def _bearer(headers: Mapping[str, Any]) -> tuple[str, AuthenticationResult | Non
 
 
 def _parse_transport(
-    headers: Mapping[str, Any],
+    headers: HeaderValues,
 ) -> tuple[
     _ParsedCredential | LegacySessionContext | AnonymousContext | None,
     AuthenticationResult | None,
@@ -278,7 +286,8 @@ def _resolve_legacy(conn: Any, parsed: LegacySessionContext, *, now: datetime, t
 
 def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, touch_last_used: bool) -> AuthenticationResult:
     row = conn.execute(
-        "SELECT c.*, p.status AS principal_status, w.id AS personal_workspace_id "
+        "SELECT c.*, p.status AS principal_status, w.id AS personal_workspace_id, "
+        "w.storage_key AS workspace_storage_key "
         "FROM credentials c JOIN principals p ON p.id = c.principal_id "
         "JOIN personal_workspaces w ON w.principal_id = p.id WHERE c.id = ?",
         (parsed.credential_id,),
@@ -349,6 +358,7 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
         context=AuthenticatedContext(
             principal_id=str(data["principal_id"]),
             personal_workspace_id=str(data["personal_workspace_id"]),
+            workspace_storage_key=str(data["workspace_storage_key"]),
             credential_id=parsed.credential_id,
             credential_type=parsed.credential_type,
             authentication_method=parsed.method,
@@ -359,7 +369,7 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
 
 
 def resolve_authentication(
-    headers: Mapping[str, Any],
+    headers: HeaderValues,
     *,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
@@ -406,7 +416,7 @@ def redeem_portable_credential(
     )
 
 
-def public_lookup_id_from_headers(headers: Mapping[str, Any]) -> str:
+def public_lookup_id_from_headers(headers: HeaderValues) -> str:
     """Return only a syntactically visible public id for an ephemeral rate key."""
     authorization = str(headers.get("Authorization") or "")
     authorization_parts = authorization.split(" ", 1)

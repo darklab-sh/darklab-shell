@@ -112,7 +112,7 @@ def build_batch_child_launch_spec(
     stored: Mapping[str, object],
 ) -> ChildLaunchSpec:
     """Regenerate one exact plan, then materialize its ordinary run inputs."""
-    session_id = str(execution.get("session_id") or "")
+    session_id = str(execution.get("personal_workspace_id") or "")
     team_id = str(execution.get("team_id") or "")
     project_id = str(execution.get("project_id") or "")
     try:

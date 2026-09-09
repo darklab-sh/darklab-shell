@@ -126,7 +126,7 @@ def _state_row(
     cve_id: str,
 ) -> Any:
     return conn.execute(
-        "SELECT * FROM risk_escalation_states WHERE owner_session_id = ? AND owner_team_id = ? "
+        "SELECT * FROM risk_escalation_states WHERE personal_workspace_id = ? AND owner_team_id = ? "
         "AND remediation_id = ? AND cve_id = ?",
         (owner_session_id, owner_team_id, remediation_id, cve_id),
     ).fetchone()
@@ -148,10 +148,10 @@ def _upsert_state(
 ) -> None:
     conn.execute(
         "INSERT INTO risk_escalation_states ("
-        "owner_session_id, owner_team_id, remediation_id, cve_id, kev_listed, epss_active, "
+        "personal_workspace_id, owner_team_id, remediation_id, cve_id, kev_listed, epss_active, "
         "epss_probability, epss_model_version, last_feed_version, updated_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT("
-        "owner_session_id, owner_team_id, remediation_id, cve_id) DO UPDATE SET "
+        "personal_workspace_id, owner_team_id, remediation_id, cve_id) DO UPDATE SET "
         "kev_listed = excluded.kev_listed, epss_active = excluded.epss_active, "
         "epss_probability = excluded.epss_probability, "
         "epss_model_version = excluded.epss_model_version, "
@@ -187,11 +187,11 @@ def _create_escalation(
     escalation_id = "rsk_" + uuid.uuid4().hex
     conn.execute(
         "INSERT INTO risk_escalations ("
-        "id, owner_session_id, owner_team_id, remediation_id, cve_id, source, transition_kind, "
+        "id, personal_workspace_id, owner_team_id, remediation_id, cve_id, source, transition_kind, "
         "feed_version, old_value, new_value, old_source_version, new_source_version, "
         "source_published_at, model_version, model_changed, observation_count, created_at, updated_at"
         ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(owner_session_id, owner_team_id, remediation_id, source, feed_version, transition_kind) "
+        "ON CONFLICT(personal_workspace_id, owner_team_id, remediation_id, source, feed_version, transition_kind) "
         "DO NOTHING",
         (
             escalation_id,
@@ -215,7 +215,7 @@ def _create_escalation(
         ),
     )
     row = conn.execute(
-        "SELECT id FROM risk_escalations WHERE owner_session_id = ? AND owner_team_id = ? "
+        "SELECT id FROM risk_escalations WHERE personal_workspace_id = ? AND owner_team_id = ? "
         "AND remediation_id = ? AND source = ? AND feed_version = ? AND transition_kind = ?",
         (
             owner_session_id,
@@ -570,7 +570,7 @@ def acknowledge_escalation(
             raise ValueError("archived teams cannot change risk escalation acknowledgement")
     owner = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column="r.owner_session_id",
+        owner_column="r.personal_workspace_id",
         team_column="r.owner_team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
         owner_column_first=False,

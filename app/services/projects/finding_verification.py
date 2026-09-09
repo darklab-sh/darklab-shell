@@ -58,7 +58,7 @@ def _finding_row(
         "SELECT f.id, f.run_id, f.first_run_id, f.last_run_id, f.target_id, f.entity_id, "
         "COALESCE(target.type, entity.type, '') AS target_type, "
         "COALESCE(target.canonical_value, entity.canonical_value, f.subject_key, '') "
-        "AS target_value, f.session_id, f.team_id, f.subject_key, f.signature_hash, "
+        "AS target_value, f.personal_workspace_id, f.team_id, f.subject_key, f.signature_hash, "
         "f.origin, f.validation_method, f.title, f.raw_line, f.fingerprint, f.cve_ids_json "
         "FROM findings f "
         "LEFT JOIN entities target ON target.id = f.target_id "
@@ -262,7 +262,7 @@ def _remediation_ids(finding: Any) -> set[str]:
 
 def _run_remediation_ids(conn: Any, run_id: str) -> set[str]:
     rows = conn.execute(
-        "SELECT DISTINCT f.id, f.session_id, f.team_id, f.target_id, f.entity_id, "
+        "SELECT DISTINCT f.id, f.personal_workspace_id, f.team_id, f.target_id, f.entity_id, "
         "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.title, "
         "f.raw_line, f.fingerprint, f.cve_ids_json FROM findings_occurrences occurrence "
         "JOIN findings f ON f.id = occurrence.finding_id WHERE occurrence.run_id = ?",

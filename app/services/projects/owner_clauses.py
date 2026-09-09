@@ -15,7 +15,7 @@ def project_entity_owner_clause(session_id, team_id="", *, table_alias="e"):
     prefix = f"{table_alias}." if table_alias else ""
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(session_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )
@@ -28,7 +28,7 @@ def project_finding_owner_clause(session_id, team_id="", *, table_alias="f"):
     prefix = f"{table_alias}." if table_alias else ""
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(session_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )

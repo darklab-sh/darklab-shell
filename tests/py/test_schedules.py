@@ -30,15 +30,17 @@ def _line_text(line: dict[str, object]) -> str:
 def _schedule_client(monkeypatch, tmp_path):
     db_path = str(tmp_path / "schedules.db")
     lock_path = str(tmp_path / "schedules.lock")
-    cfg = build_test_config({
-        "permalink_retention_days": 0,
-        "scheduler": {
-            "default_timezone": "UTC",
-            "max_per_session": 32,
-            "max_catchup_window_seconds": 3600,
-            "tick_seconds": 5,
-        },
-    })
+    cfg = build_test_config(
+        {
+            "permalink_retention_days": 0,
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_per_session": 32,
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+        }
+    )
     monkeypatch.setattr("core.database.DB_PATH", db_path)
     monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
     monkeypatch.setattr("core.database.CFG", cfg)
@@ -73,9 +75,7 @@ def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict
     where_sql = " WHERE " + " AND ".join(where) if where else ""
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT event_type, target_type, target_id, details FROM audit_events"
-            + where_sql
-            + " ORDER BY created, id",
+            "SELECT event_type, target_type, target_id, details FROM audit_events" + where_sql + " ORDER BY created, id",
             params,
         ).fetchall()
     return [
@@ -121,7 +121,8 @@ def _insert_completed_run(
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+            "exit_code, output_preview, output_line_count) "
             "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
             (
                 run_id,
@@ -395,7 +396,7 @@ class TestSchedulesRoutes:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
                 (
                     run_id,
@@ -470,15 +471,18 @@ class TestSchedulesRoutes:
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"
         _register_token(token)
-        with mock.patch.dict("config.CFG", {
-            "permalink_retention_days": 0,
-            "scheduler": {
-                "default_timezone": "UTC",
-                "max_per_session": 1,
-                "max_catchup_window_seconds": 3600,
-                "tick_seconds": 5,
+        with mock.patch.dict(
+            "config.CFG",
+            {
+                "permalink_retention_days": 0,
+                "scheduler": {
+                    "default_timezone": "UTC",
+                    "max_per_session": 1,
+                    "max_catchup_window_seconds": 3600,
+                    "tick_seconds": 5,
+                },
             },
-        }):
+        ):
             first = _create_schedule(client, token)
             second = _create_schedule(client, token, label="Too many")
 
@@ -944,7 +948,7 @@ class TestWatchBuiltin:
             row = conn.execute(
                 "SELECT w.id, w.schedule_id, w.baseline_run_id, s.owner_kind, s.enabled "
                 "FROM watchers w JOIN schedules s ON s.id = w.schedule_id "
-                "WHERE w.session_token = ?",
+                "WHERE w.personal_workspace_id = ?",
                 (token,),
             ).fetchone()
         watcher_id = row["id"]
@@ -1006,7 +1010,7 @@ class TestWatchBuiltin:
         assert _line_text(unfinished[0]) == "watch: baseline run must be completed"
         assert "Command not allowed" in _line_text(disallowed[0])
         with db_connect() as conn:
-            count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE session_token = ?", (token,)).fetchone()
+            count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE personal_workspace_id = ?", (token,)).fetchone()
         assert count["count"] == 0
 
         first_run_lines, first_run_exit = execute_builtin_command(
@@ -1017,7 +1021,7 @@ class TestWatchBuiltin:
         assert any("pending first run" in _line_text(line) for line in first_run_lines)
         with db_connect() as conn:
             pending = conn.execute(
-                "SELECT baseline_run_id, state_reason, command_text FROM watchers WHERE session_token = ?",
+                "SELECT baseline_run_id, state_reason, command_text FROM watchers WHERE personal_workspace_id = ?",
                 (token,),
             ).fetchone()
         assert pending["baseline_run_id"] == ""
@@ -1037,9 +1041,9 @@ class TestWatchBuiltin:
             "_launch_user_schedule_run",
             lambda schedule, **_kwargs: f"run_fire_{schedule.owner_id[-8:]}",
         )
-        execute_builtin_command(f"watch create {baseline_run_id} --cron \"0 * * * *\"", token)
+        execute_builtin_command(f'watch create {baseline_run_id} --cron "0 * * * *"', token)
         with db_connect() as conn:
-            watcher_id = conn.execute("SELECT id FROM watchers WHERE session_token = ?", (token,)).fetchone()["id"]
+            watcher_id = conn.execute("SELECT id FROM watchers WHERE personal_workspace_id = ?", (token,)).fetchone()["id"]
 
         fired, exit_code = execute_builtin_command(f"watch run {watcher_id}", token)
 
@@ -1096,7 +1100,7 @@ class TestScheduleBuiltin:
         assert exit_code == 0
         assert "schedule: created sch_" in _line_text(lines[0])
         with db_connect() as conn:
-            row = conn.execute("SELECT id, enabled FROM schedules WHERE session_token = ?", (token,)).fetchone()
+            row = conn.execute("SELECT id, enabled FROM schedules WHERE personal_workspace_id = ?", (token,)).fetchone()
         schedule_id = row["id"]
         assert row["enabled"] == 1
 
@@ -1154,7 +1158,7 @@ class TestScheduleBuiltin:
         assert exit_code == 0
         assert "Command not allowed" in _line_text(lines[0])
         with db_connect() as conn:
-            count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE session_token = ?", (token,)).fetchone()
+            count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE personal_workspace_id = ?", (token,)).fetchone()
         assert count["count"] == 0
 
     def test_schedule_builtin_run_records_fire(self, monkeypatch, tmp_path):
@@ -1164,9 +1168,9 @@ class TestScheduleBuiltin:
         token = "tok_schedule_builtin_run"
         _register_token(token)
         monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_builtin_schedule")
-        execute_builtin_command("schedule create --cron \"0 * * * *\" -- ping -c 1 darklab.sh", token)
+        execute_builtin_command('schedule create --cron "0 * * * *" -- ping -c 1 darklab.sh', token)
         with db_connect() as conn:
-            schedule_id = conn.execute("SELECT id FROM schedules WHERE session_token = ?", (token,)).fetchone()["id"]
+            schedule_id = conn.execute("SELECT id FROM schedules WHERE personal_workspace_id = ?", (token,)).fetchone()["id"]
 
         lines, exit_code = execute_builtin_command(f"schedule run {schedule_id}", token)
 

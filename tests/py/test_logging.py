@@ -1429,7 +1429,7 @@ class TestDbPrunedEvent:
         old_run_id = "log-prune-test-run-001"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started) "
+            "INSERT INTO runs (id, personal_workspace_id, command, started) "
             "VALUES (?, 'test', 'ping prune-test', datetime('now', '-10 days'))",
             (old_run_id,)
         )
@@ -1456,13 +1456,13 @@ class TestDbPrunedEvent:
         link_id = "log-prune-project-link-002"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started) "
+            "INSERT INTO runs (id, personal_workspace_id, command, started) "
             "VALUES (?, 'test', 'ping prune-test', datetime('now', '-10 days'))",
             (old_run_id,)
         )
         conn.execute(
             "INSERT OR REPLACE INTO projects "
-            "(id, session_id, name, slug, created, updated) "
+            "(id, personal_workspace_id, name, slug, created, updated) "
             "VALUES (?, 'test', 'Prune Project', 'prune-project', datetime('now'), datetime('now'))",
             (project_id,),
         )
@@ -1675,7 +1675,7 @@ class TestRunViewedEvent:
     def _insert_run(self, run_id, command):
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, anonymous_session_id("rv-session"), command, "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
             )
@@ -1735,7 +1735,7 @@ class TestHistoryDeletedEvent:
         session_id = session_id or anonymous_session_id("hd-session")
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, session_id, "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
             )
@@ -1787,7 +1787,7 @@ class TestHistoryClearedEvent:
         with db_connect() as conn:
             for i in range(2):
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (f"hc-run-{i}", session, "ping test", "2026-01-01T00:00:00",
                      "2026-01-01T00:00:01", 0, "[]"),
@@ -1815,7 +1815,7 @@ class TestHistoryViewedEvent:
         session_id = session_id or anonymous_session_id("hv-session")
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, session_id, "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
             )
@@ -1865,7 +1865,7 @@ class TestHistoryCommandsViewedEvent:
         run_id = "hcv-test-run-" + uuid.uuid4().hex[:8]
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, token, "dig darklab.sh", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
             )
@@ -2036,7 +2036,7 @@ class TestNotFoundEvents:
         run_id = "pnf-test-run"
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, anonymous_session_id("pnf-session"), "ping test", "2026-01-01T00:00:00",
                  "2026-01-01T00:00:01", 0, "[]"),
@@ -2152,7 +2152,7 @@ class TestSessionStateEvents:
         session_id = anonymous_session_id("prefs-invalid-" + uuid.uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO session_preferences (session_id, preferences, updated) "
+                "INSERT OR REPLACE INTO session_preferences (personal_workspace_id, preferences, updated) "
                 "VALUES (?, ?, datetime('now'))",
                 (session_id, "{not-json"),
             )
@@ -2174,7 +2174,7 @@ class TestSessionStateEvents:
             assert token_id not in str(token_extra)
         finally:
             with sqlite3.connect(DB_PATH) as conn:
-                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session_id,))
+                conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session_id,))
                 conn.commit()
 
     def test_starred_command_add_logs_command_root_not_full_command(self):
@@ -2195,7 +2195,7 @@ class TestSessionStateEvents:
         session_id = anonymous_session_id("star-clear-log-" + uuid.uuid4().hex[:8])
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO starred_commands (session_id, command) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
                 (session_id, "dig darklab.sh"),
             )
             conn.commit()

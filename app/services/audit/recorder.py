@@ -178,7 +178,11 @@ def record_event(
     target_type: str | AuditTargetType | None = None,
     target_id: str = "",
     session_id: str = "",
+    personal_workspace_id: str = "",
     team_id: str = "",
+    actor_principal_id: str = "",
+    actor_credential_id: str = "",
+    actor_credential_label: str = "",
     actor_session_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
@@ -211,12 +215,21 @@ def record_event(
     )
     sanitized_details = _sanitize_details(details, event_type=normalized_event_type)
     audit_id = _event_id()
+    workspace_id = _safe_text(personal_workspace_id or session_id, limit=128)
+    principal_id = _safe_text(actor_principal_id, limit=128)
+    credential_id = _safe_text(actor_credential_id, limit=128)
+    legacy_actor = actor_session_id or (session_id if not principal_id else "")
     params = (
         audit_id,
         _session_hash(session_id),
+        _session_hash(workspace_id),
         _safe_text(team_id),
-        _session_hash(actor_session_id or session_id),
-        _safe_text(get_log_session_id(actor_session_id or session_id)),
+        _session_hash(legacy_actor),
+        _safe_text(get_log_session_id(legacy_actor)),
+        principal_id or None,
+        _session_hash(principal_id),
+        credential_id or None,
+        _safe_text(actor_credential_label, limit=128),
         _safe_text(actor_member_id),
         _safe_text(actor_role, limit=64),
         _safe_text(actor_display_name, limit=128),
@@ -242,12 +255,15 @@ def record_event(
                 active_conn.execute(
                     """
                     INSERT INTO audit_events (
-                        id, owner_session_hash, team_id, actor_session_hash, actor_session_label,
+                        id, owner_session_hash, owner_workspace_hash, team_id,
+                        actor_session_hash, actor_session_label,
+                        actor_principal_id, actor_principal_hash,
+                        actor_credential_id, actor_credential_label,
                         actor_member_id, actor_role, actor_display_name, event_type, target_type,
                         target_id, project_id, request_id, correlation_id, job_id, details_version,
                         created, client_ip, user_agent, details
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     params,
                 )

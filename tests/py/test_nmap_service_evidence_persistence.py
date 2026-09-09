@@ -47,7 +47,7 @@ def _seed_run(
     exit_code: int = 0,
 ):
     conn.execute(
-        "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, "
+        "INSERT INTO runs (id, personal_workspace_id, team_id, run_kind, command, started, finished, "
         "exit_code, output_preview) VALUES (?, ?, ?, 'external', ?, ?, ?, ?, '[]')",
         (
             run_id,
@@ -102,7 +102,7 @@ def test_persistence_is_owner_scoped_idempotent_and_omits_free_form_output(evide
     }
     row = dict(evidence_db.execute("SELECT * FROM nmap_service_observations").fetchone())
     assert row["id"].startswith("obs_")
-    assert row["session_id"] == _NMAP_OWNER
+    assert row["personal_workspace_id"] == _NMAP_OWNER
     assert row["team_id"] == ""
     assert row["run_id"] == "run-nmap-service"
     assert row["target"] == "192.0.2.10:445/tcp"

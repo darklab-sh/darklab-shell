@@ -69,7 +69,7 @@ def row_to_evidence_package(row):
     manifest = normalize_evidence_package_manifest(manifest)
     return {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "project_id": row["project_id"],
         "name": row["name"],
         "description": row["description"] or "",

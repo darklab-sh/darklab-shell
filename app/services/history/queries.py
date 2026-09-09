@@ -174,7 +174,7 @@ def history_base_clause(
     if project_id:
         project_owner = personal_only_owner_predicate(
             personal_owner_context(session_id),
-            owner_column="p.session_id",
+            owner_column="p.personal_workspace_id",
         )
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "
@@ -186,7 +186,7 @@ def history_base_clause(
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
-            "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
+            "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command)"
         )
     match_sql, match_params, fts_q = history_match_clause(query, scope, force_like=force_like)
     offloaded_ids = [str(run_id) for run_id in (offloaded_match_run_ids or [])]
@@ -348,7 +348,7 @@ def entity_labels_by_entity_ids(conn, entity_type: str, entity_ids) -> dict[str,
         return {entity_id: [] for entity_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
+        "SELECT id, personal_workspace_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
         "WHERE entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
         "ORDER BY " + dialect_for_backend(get_db_backend()).case_insensitive_order("label") + ", created ASC",
@@ -358,7 +358,7 @@ def entity_labels_by_entity_ids(conn, entity_type: str, entity_ids) -> dict[str,
     for row in rows:
         grouped.setdefault(str(row["entity_id"]), []).append({
             "id": row["id"],
-            "session_id": row["session_id"],
+            "personal_workspace_id": row["personal_workspace_id"],
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "label": row["label"],
@@ -376,7 +376,7 @@ def entity_notes_by_entity_ids(conn, entity_type: str, entity_ids) -> dict[str, 
         return {entity_id: [] for entity_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "  # nosec
+        "SELECT id, personal_workspace_id, entity_type, entity_id, body, created, updated FROM entity_notes "  # nosec
         "WHERE entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
         "ORDER BY updated ASC, id ASC",
@@ -386,7 +386,7 @@ def entity_notes_by_entity_ids(conn, entity_type: str, entity_ids) -> dict[str, 
     for row in rows:
         grouped.setdefault(str(row["entity_id"]), []).append({
             "id": row["id"],
-            "session_id": row["session_id"],
+            "personal_workspace_id": row["personal_workspace_id"],
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "body": row["body"],
@@ -407,8 +407,8 @@ def project_links_by_run(conn, session_id: str, run_ids) -> dict[str, list[dict[
         return {run_id: [] for run_id in ids}
     placeholders = ",".join("?" for _ in ids)
     owner = personal_owner_context(session_id)
-    project_owner = personal_only_owner_predicate(owner, owner_column="p.session_id")
-    run_owner = personal_only_owner_predicate(owner, owner_column="r.session_id")
+    project_owner = personal_only_owner_predicate(owner, owner_column="p.personal_workspace_id")
+    run_owner = personal_only_owner_predicate(owner, owner_column="r.personal_workspace_id")
     rows = conn.execute(
         "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "  # nosec
         "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
@@ -447,7 +447,7 @@ def run_findings_by_run(conn, run_ids) -> dict[str, list[dict[str, object]]]:
         return {}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT f.id, f.session_id, fo.run_id, COALESCE(f.entity_id, f.target_id) AS target_id, f.kind AS scope, "  # nosec
+        "SELECT f.id, f.personal_workspace_id, fo.run_id, COALESCE(f.entity_id, f.target_id) AS target_id, f.kind AS scope, "  # nosec
         "f.title, COALESCE(fo.snippet, f.raw_line) AS raw_line, fo.line_number, "
         "f.severity, f.fingerprint, f.status AS review_state, f.created "
         "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "

@@ -30,7 +30,7 @@ def save_snapshot(
 ) -> None:
     with get_db_connect()() as conn:
         conn.execute(
-            "INSERT INTO snapshots (id, session_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO snapshots (id, personal_workspace_id, team_id, label, created, content) VALUES (?, ?, ?, ?, ?, ?)",
             (share_id, session_id, team_id, label, created, stored_content),
         )
         record_event(

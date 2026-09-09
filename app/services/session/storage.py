@@ -224,8 +224,8 @@ def load_session_preferences_from_conn(conn: Any, session_id: str) -> dict[str, 
 
 def save_session_preferences_to_conn(conn: Any, session_id: str, preferences: dict[str, object], updated: str) -> None:
     conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
+        "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) VALUES (?, ?, ?) "
+        "ON CONFLICT(personal_workspace_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
         (session_id, dialect_for_backend(get_db_backend()).json_param(preferences), updated),
     )
 
@@ -477,9 +477,9 @@ def upsert_recent_values_for_conn(conn: Any, session_id: str, team_id: str, valu
     for index, entry in enumerate(entries):
         last_used = (base_time - timedelta(microseconds=index)).strftime("%Y-%m-%d %H:%M:%S.%f")
         conn.execute(
-            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
+            "INSERT INTO recent_values (personal_workspace_id, team_id, kind, value, last_used, use_count) "
             "VALUES (?, ?, ?, ?, ?, 1) "
-            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
+            "ON CONFLICT(personal_workspace_id, team_id, kind, value) DO UPDATE SET "
             "last_used = excluded.last_used, "
             "use_count = recent_values.use_count + 1",
             (session_id, team_id, entry["kind"], entry["value"], last_used),
@@ -512,9 +512,9 @@ def migrate_recent_values_for_conn(conn: Any, from_session_id: str, to_session_i
         if not kind or not value:
             continue
         conn.execute(
-            "INSERT INTO recent_values (session_id, team_id, kind, value, last_used, use_count) "
+            "INSERT INTO recent_values (personal_workspace_id, team_id, kind, value, last_used, use_count) "
             "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_id, team_id, kind, value) DO UPDATE SET "
+            "ON CONFLICT(personal_workspace_id, team_id, kind, value) DO UPDATE SET "
             "last_used = CASE "
             "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
             "  ELSE recent_values.last_used "
@@ -551,38 +551,38 @@ def migrate_session_records(
     )
     with get_db_connect()() as conn:
         runs_result = conn.execute(
-            "UPDATE runs SET session_id = ? WHERE " + source_owner.sql,  # nosec B608
+            "UPDATE runs SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
             (to_session_id, *source_owner.params),
         )
         snaps_result = conn.execute(
-            "UPDATE snapshots SET session_id = ? WHERE " + source_owner.sql,  # nosec B608
+            "UPDATE snapshots SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
             (to_session_id, *source_owner.params),
         )
         dialect = dialect_for_backend(get_db_backend())
         stars_insert = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) "  # nosec
+            "INSERT INTO starred_commands (personal_workspace_id, command) "  # nosec
             "SELECT ?, command FROM starred_commands WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("session_id", "command")),
+            + dialect.insert_or_ignore_clause(("personal_workspace_id", "command")),
             (to_session_id, *source_owner.params),
         )
         prefs_insert = conn.execute(
-            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec
+            "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) "  # nosec
             "SELECT ?, preferences, updated FROM session_preferences WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("session_id",)),
+            + dialect.insert_or_ignore_clause(("personal_workspace_id",)),
             (to_session_id, *source_owner.params),
         )
         vars_insert = conn.execute(
-            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec
+            "INSERT INTO session_variables (personal_workspace_id, name, value, updated) "  # nosec
             "SELECT ?, name, value, updated FROM session_variables WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("session_id", "name")),
+            + dialect.insert_or_ignore_clause(("personal_workspace_id", "name")),
             (to_session_id, *source_owner.params),
         )
         workflows_result = conn.execute(
-            "UPDATE user_workflows SET session_id = ? WHERE " + source_owner.sql,  # nosec B608
+            "UPDATE user_workflows SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
             (to_session_id, *source_owner.params),
         )
         workflow_executions_result = conn.execute(
-            "UPDATE workflow_executions SET session_id = ? WHERE " + source_personal_execution.sql,  # nosec B608
+            "UPDATE workflow_executions SET personal_workspace_id = ? WHERE " + source_personal_execution.sql,  # nosec B608
             (to_session_id, *source_personal_execution.params),
         )
         project_migration = migrate_project_workspace_session(
@@ -702,8 +702,8 @@ def list_starred_commands(session_id: str) -> list[str]:
 def add_starred_command(session_id: str, command: str) -> int:
     with get_db_connect()() as conn:
         result = conn.execute(
-            "INSERT INTO starred_commands (session_id, command) VALUES (?, ?) "
-            "ON CONFLICT(session_id, command) DO NOTHING",
+            "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?) "
+            "ON CONFLICT(personal_workspace_id, command) DO NOTHING",
             (session_id, command),
         )
         conn.commit()

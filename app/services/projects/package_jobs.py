@@ -144,7 +144,7 @@ def _matches(job, session_id, project_id, package_id, *, team_id=""):
     job_team_id = str(job.get("team_id") or "")
     if team_id:
         return job_team_id == str(team_id or "")
-    return not job_team_id and job.get("session_id") == session_id
+    return not job_team_id and job.get("personal_workspace_id") == session_id
 
 
 def get_evidence_package_archive_job(session_id, project_id, package_id, job_id, *, team_id=""):
@@ -245,8 +245,8 @@ def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
             project_id=str(job.get("project_id") or ""),
             job_id=str(job.get("id") or ""),
             correlation_id=str(job.get("id") or ""),
-            session_id=str(job.get("session_id") or ""),
-            actor_session_id=str(job.get("session_id") or ""),
+            session_id=str(job.get("personal_workspace_id") or ""),
+            actor_session_id=str(job.get("personal_workspace_id") or ""),
             team_id=str(job.get("team_id") or ""),
             actor_member_id=str(job.get("actor_member_id") or ""),
             details=details,
@@ -277,7 +277,7 @@ def _run_job(job_id, cfg_snapshot):
     _update("running", "loading", "Loading package")
     try:
         archive = build_evidence_package_archive(
-            job["session_id"],
+            job["personal_workspace_id"],
             job["project_id"],
             job["package_id"],
             cfg=cfg_snapshot,
@@ -289,7 +289,7 @@ def _run_job(job_id, cfg_snapshot):
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - started)
         log.warning("PACKAGE_BUILD_FAILED", extra={
-            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "session": get_log_session_id(str(job.get("personal_workspace_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
@@ -305,7 +305,7 @@ def _run_job(job_id, cfg_snapshot):
     except Exception as exc:
         app_metrics.record_evidence_package_build("error", time.perf_counter() - started)
         log.error("PACKAGE_JOB_FAILED", exc_info=True, extra={
-            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "session": get_log_session_id(str(job.get("personal_workspace_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
@@ -361,7 +361,7 @@ def start_evidence_package_archive_job(session_id, project_id, package_id, *, cf
     created = _iso(_now())
     job = {
         "id": _job_id(),
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "team_id": str(team_id or ""),
         "actor_member_id": str(actor_member_id or ""),
         "project_id": project_id,

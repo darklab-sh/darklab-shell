@@ -49,149 +49,287 @@ NAMED_RELATIONAL_EXCEPTIONS = {
         "app/services/history/queries.py",
         "history_base_clause",
     ): (
-        "starred command ownership is correlated to the selected run by session and command",
-        "AND EXISTS (SELECT 1 FROM starred_commands sc WHERE sc.session_id = r.session_id AND sc.command = r.command)",
+        "starred command ownership is correlated to the selected run by workspace and command",
+        "AND EXISTS (SELECT 1 FROM starred_commands sc "
+        "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command)",
     ),
     (
         "app/services/history/run_metadata.py",
         "history_offloaded_search_run_ids",
     ): (
-        "starred command ownership is correlated to the selected run by session and command",
-        "AND EXISTS (SELECT 1 FROM starred_commands sc WHERE sc.session_id = r.session_id AND sc.command = r.command)",
+        "starred command ownership is correlated to the selected run by workspace and command",
+        "AND EXISTS (SELECT 1 FROM starred_commands sc "
+        "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command)",
     ),
     (
         "app/services/history/run_metadata.py",
         "run_metadata_counts_by_run",
     ): (
-        "finding ownership is correlated to the already selected runs' session ids",
+        "finding ownership is correlated to the already selected runs' workspace ids",
         "SELECT fo.run_id, COUNT(*) AS count FROM findings_occurrences fo "
-        "JOIN findings f ON f.id = fo.finding_id WHERE f.session_id IN "
-        "(SELECT session_id FROM runs WHERE id IN ({placeholders})) "
+        "JOIN findings f ON f.id = fo.finding_id WHERE f.personal_workspace_id IN "
+        "(SELECT personal_workspace_id FROM runs WHERE id IN ({placeholders})) "
         "AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
     ),
     (
         "app/services/history/run_metadata.py",
         "run_finding_counts_by_run",
     ): (
-        "finding ownership is correlated to the already selected runs' session ids",
+        "finding ownership is correlated to the already selected runs' workspace ids",
         "SELECT fo.run_id, COUNT(*) AS count FROM findings_occurrences fo "
-        "JOIN findings f ON f.id = fo.finding_id WHERE f.session_id IN "
-        "(SELECT session_id FROM runs WHERE id IN ({placeholders})) "
+        "JOIN findings f ON f.id = fo.finding_id WHERE f.personal_workspace_id IN "
+        "(SELECT personal_workspace_id FROM runs WHERE id IN ({placeholders})) "
         "AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
     ),
     (
         "app/services/history/selections.py",
         "matching_history_runs._query",
     ): (
-        "starred command ownership is correlated to the selected run by session and command",
+        "starred command ownership is correlated to the selected run by workspace and command",
         "SELECT r.id, EXISTS (SELECT 1 FROM starred_commands sc "
-        "WHERE sc.session_id = r.session_id AND sc.command = r.command) AS starred",
+        "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command) AS starred",
     ),
     (
         "app/services/runs/structured_filters.py",
         "entity_run_exists_clause",
     ): (
-        "Atlas entity ownership is correlated to the selected run's session id",
-        "sfe_e.session_id = {run_alias}.session_id",
+        "Atlas entity ownership is correlated to the selected run's workspace id",
+        "sfe_e.personal_workspace_id = {run_alias}.personal_workspace_id",
     ),
 }
 NAMED_SOURCE_HASH_EXCEPTIONS = {
-    ("app/core/database.py", "_backfill_watcher_monitoring_fields", "4e50e61ea2"):
-        "watcher project inference preserves its cross-table run, project, and owner correlation",
-    ("app/services/audit/queries.py", "list_events", "56857e73f3"):
-        "audit browsing filters attribution hashes and labels rather than authorizing row ownership",
-    ("app/services/workspace/metadata.py", "_workspace_metadata_owner_where", "73d6422a2d"):
-        "team workspace metadata preserves direct and legacy flattened-owner representations",
-    ("app/services/assessments/coverage_candidates.py", "candidate_checks_for_run", "c7fd2fc2d9"):
-        "assessment candidates preserve cross-table project, run, and owner correlations",
-    ("app/services/assessments/reconciliation_read.py", "_finding_summaries", "eb843d375d"):
-        "team triage ownership is correlated to the already scoped finding",
-    ("app/services/assessments/reconciliation_read.py", "_finding_summaries", "94fbdc3bb5"):
-        "personal triage ownership is correlated to the already scoped finding",
-    ("app/services/assessments/retest_queue.py", "_queue_rows", "0258b4b5fa"):
-        "personal triage ownership is correlated to the already scoped project link",
-    ("app/services/assessments/schemathesis_evidence_persistence.py", "_load_storage_contract", "19ecf96e62"):
-        "Schemathesis evidence validates one cross-table assessment and run storage contract",
-    ("app/services/atlas/cleanup.py", "_same_owner_sql", "b482127f7c"):
-        "team cleanup ownership compares two already scoped rows",
-    ("app/services/atlas/cleanup.py", "_same_owner_sql", "f097524c1d"):
-        "personal cleanup ownership compares two already scoped rows",
-    ("app/services/atlas/cleanup.py", "_metadata_same_owner_sql", "8e5f832214"):
-        "metadata cleanup correlates its flattened owner to an already scoped row",
-    ("app/services/atlas/cleanup.py", "_metadata_same_owner_sql", "f097524c1d"):
-        "personal metadata cleanup compares two already scoped rows",
-    ("app/services/atlas/cleanup.py", "delete_atlas_entities", "49ebb07011"):
-        "snapshot cleanup reads metadata owners derived from the already scoped entity set",
-    ("app/services/atlas/cleanup.py", "delete_atlas_entities", "42211639c4"):
-        "snapshot cleanup deletes metadata owners derived from the already scoped entity set",
-    ("app/services/atlas/intel_bridge.py", "_persist_lookup_snapshots", "1c650e689b"):
-        "snapshot upsert assigns the flattened metadata owner rather than filtering access",
-    ("app/services/atlas/lookup.py", "entity_detail", "ccc99f154e"):
-        "snapshot detail uses the legacy flattened metadata-owner key",
-    ("app/services/atlas/lookup_export.py", "_query_export_entities", "6bfe94e58d"):
-        "snapshot export uses the legacy flattened metadata-owner key",
-    ("app/services/atlas/lookup_query.py", "exact_lookup_candidate_query", "26af7a7b3c"):
-        "team ownership expression ranks exact lookup candidates and does not grant access",
-    ("app/services/atlas/materializer.py", "upsert_entity", "d71c60e173"):
-        "team entity upsert mirrors the matching partial unique index conflict target",
-    ("app/services/atlas/materializer.py", "upsert_entity", "1492b8a812"):
-        "personal entity upsert mirrors the matching partial unique index conflict target",
-    ("app/services/atlas/scope.py", "metadata_owner_sql", "125da7700f"):
-        "team metadata reads retain the legacy flattened-owner fallback",
-    ("app/services/projects/actors.py", "team_actor_map", "448a23d94d"):
-        "team-member lookup resolves display attribution from legacy token hashes",
-    ("app/services/projects/digests.py", "_schedule_for_digest", "410598c68a"):
-        "digest schedules retain their exact legacy owner-kind, owner-id, token, and team key",
-    ("app/services/projects/digests.py", "get_digest_settings", "1b6d8b84ba"):
-        "digest settings retain their exact project, session, and team key",
-    ("app/services/projects/digests.py", "mark_digest_evaluated", "53eb53f8cc"):
-        "digest evaluation updates retain their exact project, session, and team key",
-    ("app/services/projects/digests.py", "mark_digest_sent", "860d6b4d36"):
-        "digest delivery updates retain their exact project, session, and team key",
-    ("app/services/projects/finding_dispositions.py", "attach_remediation_dispositions", "002fea1afc"):
-        "batched remediation reads retain each exact legacy compound owner and identity key",
-    ("app/services/projects/finding_dispositions.py", "remediation_guidance_by_finding_id", "002fea1afc"):
-        "batched guidance reads retain each exact legacy compound owner and identity key",
-    ("app/services/projects/finding_remediation_merge_store.py", "rows_by_keys", "002fea1afc"):
-        "batched merge-member reads retain each exact legacy compound owner and identity key",
-    ("app/services/projects/finding_remediation_merge_store.py", "rows_by_merge_ids", "85dc0e14e9"):
-        "batched merge-member expansion retains each exact legacy compound owner and merge key",
-    ("app/services/projects/finding_remediation_merges.py", "_dispositions_for_members", "002fea1afc"):
-        "batched disposition reads retain each exact legacy compound owner and identity key",
-    ("app/services/projects/finding_remediation_merges.py", "merge_remediation_groups", "725ec7132e"):
-        "merge consolidation retains the exact legacy session, team, and merge key",
-    ("app/services/projects/findings.py", "_project_finding_source_exists_sql", "23d9e932a6"):
-        "finding source validation correlates source runs to an already scoped finding",
-    ("app/services/projects/findings.py", "list_project_findings", "faaeb6eb88"):
-        "finding run ordering correlates an already scoped run to its finding",
-    ("app/services/projects/metadata.py", "upsert_finding_triage_details_on_conn", "bc10b5b842"):
-        "team triage upsert mirrors the matching partial unique index conflict target",
-    ("app/services/projects/metadata.py", "upsert_finding_triage_details_on_conn", "3cdb59023c"):
-        "personal triage upsert mirrors the matching partial unique index conflict target",
-    ("app/services/projects/overview.py", "_overview_snapshots_by_entity", "c708a24663"):
-        "overview snapshots use the legacy flattened metadata-owner key",
-    ("app/services/projects/overview.py", "_overview_audit_owner_scope", "e1470342fb"):
-        "team overview activity reads the audit attribution scope",
-    ("app/services/projects/overview.py", "_overview_audit_owner_scope", "82538e52b2"):
-        "personal overview activity reads the legacy hashed audit attribution scope",
-    ("app/services/projects/queries.py", "_project_atlas_entity_select_sql", "fda06733bd"):
-        "project target snapshot counts use the legacy flattened metadata-owner key",
-    ("app/services/projects/queries.py", "_project_atlas_entity_select_sql", "688176140f"):
-        "project target snapshot summaries use the legacy flattened metadata-owner key",
-    ("app/services/projects/targets.py", "list_project_targets", "3ec08f6e02"):
-        "target snapshot counts use the legacy flattened metadata-owner key",
-    ("app/services/projects/targets.py", "list_project_targets", "d2f4109545"):
-        "target snapshot summaries use the legacy flattened metadata-owner key",
-    ("app/services/connectors/zap_jobs.py", "create_zap_job", "1c67e9f4df"):
-        "ZAP creation preserves its cross-table assessment, profile, and owner correlations",
-    ("app/services/cve_risk/escalation.py", "_state_row", "d18a95dbb5"):
-        "risk state loading preserves the exact stored legacy owner and remediation key",
-    ("app/services/cve_risk/escalation.py", "_create_escalation", "4311164b17"):
-        "risk deduplication preserves the exact stored legacy compound owner and feed key",
-    ("app/services/teams/storage.py", "list_teams_for_token", "b09bcda6c4"):
-        "team discovery resolves membership from the legacy one-way session-token hash",
-    ("app/services/teams/storage.py", "get_team_membership", "8c475540c2"):
-        "team authorization resolves one membership from its team id and legacy token hash",
+    (
+        "app/core/database.py",
+        "_backfill_watcher_monitoring_fields",
+        "05322e9192",
+    ): "watcher project inference preserves its cross-table run, project, and owner correlation",
+    (
+        "app/services/audit/queries.py",
+        "list_events",
+        "b466b2d19a",
+    ): "audit browsing filters attribution hashes and labels rather than authorizing row ownership",
+    (
+        "app/services/workspace/metadata.py",
+        "_workspace_metadata_owner_where",
+        "e2a1e663d8",
+    ): "team workspace metadata preserves direct and flattened-owner representations",
+    (
+        "app/services/assessments/coverage_candidates.py",
+        "candidate_checks_for_run",
+        "0979364385",
+    ): "assessment candidates preserve cross-table project, run, and owner correlations",
+    (
+        "app/services/assessments/reconciliation_read.py",
+        "_finding_summaries",
+        "eb843d375d",
+    ): "team triage ownership is correlated to the already scoped finding",
+    (
+        "app/services/assessments/reconciliation_read.py",
+        "_finding_summaries",
+        "8fc17543d3",
+    ): "personal triage ownership is correlated to the already scoped finding",
+    (
+        "app/services/assessments/retest_queue.py",
+        "_queue_rows",
+        "1c63cabab2",
+    ): "personal triage ownership is correlated to the already scoped project link",
+    (
+        "app/services/assessments/schemathesis_evidence_persistence.py",
+        "_load_storage_contract",
+        "642e922262",
+    ): "Schemathesis evidence validates one cross-table assessment and run storage contract",
+    ("app/services/atlas/cleanup.py", "_same_owner_sql", "b482127f7c"): "team cleanup ownership compares two already scoped rows",
+    (
+        "app/services/atlas/cleanup.py",
+        "_same_owner_sql",
+        "8fc30a12e4",
+    ): "personal cleanup ownership compares two already scoped rows",
+    (
+        "app/services/atlas/cleanup.py",
+        "_metadata_same_owner_sql",
+        "2a05c3d387",
+    ): "metadata cleanup correlates its flattened owner to an already scoped row",
+    (
+        "app/services/atlas/cleanup.py",
+        "_metadata_same_owner_sql",
+        "8fc30a12e4",
+    ): "personal metadata cleanup compares two already scoped rows",
+    (
+        "app/services/atlas/cleanup.py",
+        "delete_atlas_entities",
+        "35e54df1af",
+    ): "snapshot cleanup reads metadata owners derived from the already scoped entity set",
+    (
+        "app/services/atlas/cleanup.py",
+        "delete_atlas_entities",
+        "9d31a1d450",
+    ): "snapshot cleanup deletes metadata owners derived from the already scoped entity set",
+    (
+        "app/services/atlas/intel_bridge.py",
+        "_persist_lookup_snapshots",
+        "b974859156",
+    ): "snapshot upsert assigns the flattened metadata owner rather than filtering access",
+    ("app/services/atlas/lookup.py", "entity_detail", "90f03fde3c"): "snapshot detail uses the flattened metadata-owner key",
+    (
+        "app/services/atlas/lookup_export.py",
+        "_query_export_entities",
+        "5dfaf03dac",
+    ): "snapshot export uses the flattened metadata-owner key",
+    (
+        "app/services/atlas/lookup_query.py",
+        "exact_lookup_candidate_query",
+        "26af7a7b3c",
+    ): "team ownership expression ranks exact lookup candidates and does not grant access",
+    (
+        "app/services/atlas/materializer.py",
+        "upsert_entity",
+        "d71c60e173",
+    ): "team entity upsert mirrors the matching partial unique index conflict target",
+    (
+        "app/services/atlas/materializer.py",
+        "upsert_entity",
+        "719cb7c635",
+    ): "personal entity upsert mirrors the matching partial unique index conflict target",
+    (
+        "app/services/atlas/scope.py",
+        "metadata_owner_sql",
+        "0b64cb7bc6",
+    ): "team metadata reads retain the flattened-owner fallback",
+    (
+        "app/services/projects/actors.py",
+        "team_actor_map",
+        "448a23d94d",
+    ): "team-member lookup resolves display attribution from legacy token hashes",
+    (
+        "app/services/projects/digests.py",
+        "_schedule_for_digest",
+        "01fc77e12d",
+    ): "digest schedules retain their exact owner-kind, owner-id, workspace, and team key",
+    (
+        "app/services/projects/digests.py",
+        "get_digest_settings",
+        "7e5d5e7dde",
+    ): "digest settings retain their exact project, workspace, and team key",
+    (
+        "app/services/projects/digests.py",
+        "mark_digest_evaluated",
+        "3e6272f02c",
+    ): "digest evaluation updates retain their exact project, workspace, and team key",
+    (
+        "app/services/projects/digests.py",
+        "mark_digest_sent",
+        "e43d0d1de9",
+    ): "digest delivery updates retain their exact project, workspace, and team key",
+    (
+        "app/services/projects/finding_dispositions.py",
+        "attach_remediation_dispositions",
+        "466c60d9a8",
+    ): "batched remediation reads retain each exact compound owner and identity key",
+    (
+        "app/services/projects/finding_dispositions.py",
+        "remediation_guidance_by_finding_id",
+        "466c60d9a8",
+    ): "batched guidance reads retain each exact compound owner and identity key",
+    (
+        "app/services/projects/finding_remediation_merge_store.py",
+        "rows_by_keys",
+        "466c60d9a8",
+    ): "batched merge-member reads retain each exact compound owner and identity key",
+    (
+        "app/services/projects/finding_remediation_merge_store.py",
+        "rows_by_merge_ids",
+        "1eb94b100c",
+    ): "batched merge-member expansion retains each exact compound owner and merge key",
+    (
+        "app/services/projects/finding_remediation_merges.py",
+        "_dispositions_for_members",
+        "466c60d9a8",
+    ): "batched disposition reads retain each exact compound owner and identity key",
+    (
+        "app/services/projects/finding_remediation_merges.py",
+        "merge_remediation_groups",
+        "123d2042b9",
+    ): "merge consolidation retains the exact workspace, team, and merge key",
+    (
+        "app/services/projects/findings.py",
+        "_project_finding_source_exists_sql",
+        "77f999d562",
+    ): "finding source validation correlates source runs to an already scoped finding",
+    (
+        "app/services/projects/findings.py",
+        "list_project_findings",
+        "8854681618",
+    ): "finding run ordering correlates an already scoped run to its finding",
+    (
+        "app/services/projects/metadata.py",
+        "upsert_finding_triage_details_on_conn",
+        "bc10b5b842",
+    ): "team triage upsert mirrors the matching partial unique index conflict target",
+    (
+        "app/services/projects/metadata.py",
+        "upsert_finding_triage_details_on_conn",
+        "6b600740a2",
+    ): "personal triage upsert mirrors the matching partial unique index conflict target",
+    (
+        "app/services/projects/overview.py",
+        "_overview_snapshots_by_entity",
+        "419ea361b0",
+    ): "overview snapshots use the flattened metadata-owner key",
+    (
+        "app/services/projects/overview.py",
+        "_overview_audit_owner_scope",
+        "e1470342fb",
+    ): "team overview activity reads the audit attribution scope",
+    (
+        "app/services/projects/overview.py",
+        "_overview_audit_owner_scope",
+        "82538e52b2",
+    ): "personal overview activity reads the legacy hashed audit attribution scope",
+    (
+        "app/services/projects/queries.py",
+        "_project_atlas_entity_select_sql",
+        "f251db104f",
+    ): "project target snapshot counts use the flattened metadata-owner key",
+    (
+        "app/services/projects/queries.py",
+        "_project_atlas_entity_select_sql",
+        "965260ade4",
+    ): "project target snapshot summaries use the flattened metadata-owner key",
+    (
+        "app/services/projects/targets.py",
+        "list_project_targets",
+        "ef7665b93a",
+    ): "target snapshot counts use the flattened metadata-owner key",
+    (
+        "app/services/projects/targets.py",
+        "list_project_targets",
+        "ffef2524f3",
+    ): "target snapshot summaries use the flattened metadata-owner key",
+    (
+        "app/services/connectors/zap_jobs.py",
+        "create_zap_job",
+        "46f1a0c8ad",
+    ): "ZAP creation preserves its cross-table assessment, profile, and owner correlations",
+    (
+        "app/services/cve_risk/escalation.py",
+        "_state_row",
+        "95cf5490fd",
+    ): "risk state loading preserves the exact stored owner and remediation key",
+    (
+        "app/services/cve_risk/escalation.py",
+        "_create_escalation",
+        "152b75ddb1",
+    ): "risk deduplication preserves the exact stored compound owner and feed key",
+    (
+        "app/services/teams/storage.py",
+        "list_teams_for_token",
+        "b09bcda6c4",
+    ): "team discovery resolves membership from the legacy one-way session-token hash",
+    (
+        "app/services/teams/storage.py",
+        "get_team_membership",
+        "5efb331f53",
+    ): "team authorization resolves one membership from its team id and principal or legacy token adapter",
 }
 OWNER_COLUMN_RE = re.compile(
     r"(?i)\b(?:[a-z_][a-z0-9_]*\.)?"
@@ -270,10 +408,7 @@ def _normalized_source(value: str) -> str:
 
 def _predicate_slice(value: str) -> str:
     normalized = _normalized_source(value)
-    marker_positions = [
-        match.start()
-        for match in re.finditer(r"(?i)\b(?:WHERE|ON|HAVING)\b", normalized)
-    ]
+    marker_positions = [match.start() for match in re.finditer(r"(?i)\b(?:WHERE|ON|HAVING)\b", normalized)]
     if marker_positions:
         return normalized[min(marker_positions) :]
     if OPERATION_RE.search(normalized):
@@ -297,11 +432,7 @@ def _operation(value: str) -> str:
 
 
 def _tables(value: str) -> tuple[str, ...]:
-    tables = {
-        match.group(1).lower()
-        for match in TABLE_RE.finditer(value)
-        if match.group(1).lower() != "set"
-    }
+    tables = {match.group(1).lower() for match in TABLE_RE.finditer(value) if match.group(1).lower() != "set"}
     return tuple(sorted(tables)) or ("<caller-selected>",)
 
 
@@ -322,10 +453,7 @@ def _key_shape(columns: Iterable[str], bound_columns: Iterable[str]) -> str:
     has_token_hash = any(column.endswith("token_hash") for column in owner_columns)
     has_session_hash = any(column.endswith("session_hash") for column in owner_columns)
     has_session = any(column.endswith("session_id") for column in owner_columns)
-    has_principal = any(
-        column.endswith(("principal_id", "workspace_id", "credential_id"))
-        for column in owner_columns
-    )
+    has_principal = any(column.endswith(("principal_id", "workspace_id", "credential_id")) for column in owner_columns)
     if has_token:
         base = "session-token"
     elif has_token_hash:
@@ -472,7 +600,8 @@ def _named_relational_exception(path: str, scope: str, source: str) -> str:
 
 def _named_source_hash_exception(path: str, scope: str, site_id: str) -> str:
     parts = site_id.rsplit(":", 2)
-    fingerprint = parts[-2] if parts[-1].isdigit() else parts[-1]
+    tail = parts[-1]
+    fingerprint = tail if re.fullmatch(r"[0-9a-f]{10}", tail) else parts[-2]
     return NAMED_SOURCE_HASH_EXCEPTIONS.get((path, scope, fingerprint), "")
 
 
@@ -494,7 +623,7 @@ def _reviewed_exception(path: str, scope: str, source: str) -> str:
     named = _named_relational_exception(path, scope, source)
     if named:
         return f"named relational owner-correlation exception: {named}"
-    return "temporary Phase 3A direct predicate"
+    return "unreviewed direct ownership predicate"
 
 
 def _table_shapes() -> dict[str, str]:
@@ -606,9 +735,7 @@ def generate_sites() -> list[InventorySite]:
                     bound_key_columns=tuple(sorted(set(bound_columns))),
                     adapter_shape=_adapter_shape(key_shape, team_behavior),
                     predicate_team_behavior=team_behavior,
-                    table_team_columns={
-                        table: table_shapes.get(table, "unknown") for table in tables
-                    },
+                    table_team_columns={table: table_shapes.get(table, "unknown") for table in tables},
                     current_result_set=_current_result_set(key_shape, team_behavior),
                     conversion_classification=_classification(relative, scope, normalized),
                     planned_branch=_planned_branch(relative),
@@ -652,33 +779,24 @@ def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) 
             str(site["path"]),
             str(site["scope"]),
             str(site["site_id"]),
-        ) or _named_relational_exception(
-            str(site["path"]), str(site["scope"]), str(site["source"])
-        )
+        ) or _named_relational_exception(str(site["path"]), str(site["scope"]), str(site["source"]))
         if named_exception:
             site["conversion_classification"] = "equivalent"
-            site["reviewed_exception"] = (
-                f"named relational owner-correlation exception: {named_exception}"
-            )
+            site["reviewed_exception"] = f"named relational owner-correlation exception: {named_exception}"
     return {
         "format_version": 1,
         "contract": (
-            "This reviewed list is the temporary exception boundary for direct legacy ownership "
-            "predicates. Personal owner values remain current session identities during Phase 3A."
+            "This reviewed list is the exception boundary for direct ownership predicates after "
+            "the principal ownership cutover. Personal owner values are personal-workspace ids for "
+            "authenticated principals and validated UUIDs for anonymous workspaces."
         ),
         "scan_roots": [path.relative_to(REPO_ROOT).as_posix() for path in SCANNED_ROOTS],
         "excluded_paths": sorted(EXCLUDED_PATHS),
         "summary": {
             "site_count": len(sites),
-            "by_adapter_shape": dict(
-                sorted(Counter(str(site["adapter_shape"]) for site in sites).items())
-            ),
-            "by_branch": dict(
-                sorted(Counter(str(site["planned_branch"]) for site in sites).items())
-            ),
-            "by_classification": dict(
-                sorted(Counter(str(site["conversion_classification"]) for site in sites).items())
-            ),
+            "by_adapter_shape": dict(sorted(Counter(str(site["adapter_shape"]) for site in sites).items())),
+            "by_branch": dict(sorted(Counter(str(site["planned_branch"]) for site in sites).items())),
+            "by_classification": dict(sorted(Counter(str(site["conversion_classification"]) for site in sites).items())),
             "production_helper_calls": _production_helper_calls(),
         },
         "sites": sites,
@@ -719,8 +837,7 @@ def main() -> int:
         return 1
     if inventory_path.read_text(encoding="utf-8") != rendered:
         print(
-            "ownership-query inventory has drifted; run "
-            "python scripts/development/owner_query_inventory.py --write",
+            "ownership-query inventory has drifted; run python scripts/development/owner_query_inventory.py --write",
             file=sys.stderr,
         )
         return 1

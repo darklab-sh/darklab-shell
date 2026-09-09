@@ -20,10 +20,10 @@ def _mixed_project_rows(conn: sqlite3.Connection) -> tuple[str, str]:
     owner_a = anonymous_session_id("project-owner-a")
     owner_b = anonymous_session_id("project-owner-b")
     conn.execute(
-        "CREATE TABLE owner_project_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE owner_project_rows (id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     conn.executemany(
-        "INSERT INTO owner_project_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO owner_project_rows (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),

@@ -145,7 +145,7 @@ def store_batch_preview(
         delete_expired_batch_previews_on_conn(conn, draft.session_id, draft.team_id, created)
         conn.execute(
             "INSERT INTO assessment_batch_previews "
-            "(id, session_id, team_id, project_id, assessment_id, source_execution_id, profile_key, profile_version, "
+            "(id, personal_workspace_id, team_id, project_id, assessment_id, source_execution_id, profile_key, profile_version, "
             "selection_json, summary_json, plan_digest, candidate_item_count, "
             "selected_item_count, mapping_count, safe_item_count, standard_item_count, "
             "unavailable_check_count, skipped_check_count, estimated_min_seconds, "

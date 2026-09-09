@@ -52,7 +52,7 @@ def _profile_checks(snapshot: object) -> dict[str, Mapping[str, Any]]:
 
 def _assessment(conn: Any, assessment_id: str) -> Any:
     return conn.execute(
-        "SELECT id, session_id, team_id, project_id, profile_snapshot, status, "
+        "SELECT id, personal_workspace_id, team_id, project_id, profile_snapshot, status, "
         "started_at, created_at FROM project_assessments WHERE id = ?",
         (assessment_id,),
     ).fetchone()
@@ -216,7 +216,7 @@ def _verified_before_cycle(
     dialect = dialect_for_backend(get_db_backend())
     in_sql, in_params = dialect.in_clause("finding_id", sorted(finding_ids))
     owner_sql, owner_params = shared_nullable_owner_where(
-        str(assessment["session_id"]), team_id=str(assessment["team_id"] or "")
+        str(assessment["personal_workspace_id"]), team_id=str(assessment["team_id"] or "")
     )
     query = "".join((
         "SELECT finding_id FROM finding_triage_details WHERE ",
@@ -234,7 +234,7 @@ def _verified_before_cycle(
         try:
             context = finding_verification_context_on_conn(
                 conn,
-                str(assessment["session_id"]),
+                str(assessment["personal_workspace_id"]),
                 str(assessment["project_id"]),
                 str(row["finding_id"]),
                 team_id=str(assessment["team_id"] or ""),

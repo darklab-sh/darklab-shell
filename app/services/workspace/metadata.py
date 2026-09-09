@@ -27,7 +27,7 @@ def _workspace_metadata_owner_where(scope: Any, table_alias: str = "") -> tuple[
         team_id = str(getattr(scope, "team_id", "") or "")
         return (
             f"({prefix}team_id = ? OR "
-            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))",
+            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}personal_workspace_id = ?))",
             (team_id, team_id),
         )
     return scope.predicate(table_alias=table_alias)
@@ -60,14 +60,14 @@ def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, d
             [*project_owner_params, *run_owner_params, *clean_paths],
         ).fetchall()
         label_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
+            "SELECT id, personal_workspace_id, entity_type, entity_id, label, source, created "  # nosec
             "FROM entity_labels WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "
             f"AND entity_id IN ({placeholders}) "
             f"ORDER BY {label_order_sql}",
             [*metadata_owner_params, *clean_paths],
         ).fetchall()
         note_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
+            "SELECT id, personal_workspace_id, entity_type, entity_id, body, created, updated "  # nosec
             "FROM entity_notes WHERE " + metadata_owner_sql + " AND entity_type = 'workspace_file' "
             f"AND entity_id IN ({placeholders})",
             [*metadata_owner_params, *clean_paths],
@@ -89,7 +89,7 @@ def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, d
         item = metadata.setdefault(path, {})
         item.setdefault("labels", []).append({
             "id": row["id"],
-            "session_id": row["session_id"],
+            "personal_workspace_id": row["personal_workspace_id"],
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "label": row["label"],
@@ -101,7 +101,7 @@ def workspace_file_metadata_by_path(scope: Any, paths: list[Any]) -> dict[str, d
         item = metadata.setdefault(path, {})
         item["note"] = {
             "id": row["id"],
-            "session_id": row["session_id"],
+            "personal_workspace_id": row["personal_workspace_id"],
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "body": row["body"],

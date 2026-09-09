@@ -31,7 +31,7 @@ def load_protected_workspace_paths(
         return set()
     owner = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column="a.session_id",
+        owner_column="a.personal_workspace_id",
         team_column="r.team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )

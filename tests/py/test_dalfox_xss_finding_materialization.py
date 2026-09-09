@@ -118,7 +118,7 @@ def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, Any]:
         )))
     with get_db_connect()() as conn:
         conn.execute(
-            "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, "
+            "INSERT INTO runs (id, personal_workspace_id, team_id, run_kind, command, started, finished, "
             "exit_code, output_preview, output_line_count) "
             "VALUES (?, ?, '', 'external', ?, ?, ?, 0, ?, ?)",
             (
@@ -130,7 +130,7 @@ def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, Any]:
         link_run_to_project_on_conn(conn, session_id, project_id, source_run_id)
         if seed_active_run:
             conn.execute(
-                "INSERT INTO runs (id, session_id, team_id, run_kind, command, started, finished, "
+                "INSERT INTO runs (id, personal_workspace_id, team_id, run_kind, command, started, finished, "
                 "exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, '', 'external', ?, ?, ?, 0, ?, ?)",
                 (
@@ -189,7 +189,7 @@ def test_reviewed_xss_observations_materialize_separate_safe_idempotent_findings
         }
         assert all(item["cwe_ids"] == ["CWE-79"] for item in first)
         rows = conn.execute(
-            "SELECT raw_line, occurrence_count FROM findings WHERE session_id = ?",
+            "SELECT raw_line, occurrence_count FROM findings WHERE personal_workspace_id = ?",
             (seeded["session_id"],),
         ).fetchall()
         assert len(rows) == 3
@@ -197,7 +197,7 @@ def test_reviewed_xss_observations_materialize_separate_safe_idempotent_findings
         assert all("secret-" not in row["raw_line"] for row in rows)
         links = conn.execute(
             "SELECT finding_id, evidence_type, evidence_id FROM finding_evidence_links "
-            "WHERE session_id = ?",
+            "WHERE personal_workspace_id = ?",
             (seeded["session_id"],),
         ).fetchall()
         assert len(links) == 6
@@ -233,7 +233,7 @@ def test_reviewed_xss_materialization_rejects_drift_tampering_and_failed_runs():
             seeded["command"], 0, seeded["entries"],
         ) == []
         count = conn.execute(
-            "SELECT COUNT(*) AS count FROM findings WHERE session_id = ?",
+            "SELECT COUNT(*) AS count FROM findings WHERE personal_workspace_id = ?",
             (seeded["session_id"],),
         ).fetchone()["count"]
         assert count == 0
@@ -273,13 +273,13 @@ def test_completed_run_materializes_reviewed_xss_findings_without_raw_duplicates
     assert summary["finding_count"] == 3
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT tool_root, COUNT(*) AS count FROM findings WHERE session_id = ? "
+            "SELECT tool_root, COUNT(*) AS count FROM findings WHERE personal_workspace_id = ? "
             "GROUP BY tool_root",
             (seeded["session_id"],),
         ).fetchall()
         assert [dict(row) for row in rows] == [{"tool_root": "dalfox", "count": 3}]
         entity = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND type = 'url' AND canonical_value = ?",
+            "SELECT id FROM entities WHERE personal_workspace_id = ? AND type = 'url' AND canonical_value = ?",
             (seeded["session_id"], seeded["target"]),
         ).fetchone()
         assert entity is not None

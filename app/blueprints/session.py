@@ -103,7 +103,7 @@ def _session_identity_details(session_id, *, prefix="session"):
 def _session_audit_fields(actor_session_id):
     session_id = str(actor_session_id or "").strip()
     return {
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "actor_session_id": session_id,
         **request_audit_fields(request),
     }

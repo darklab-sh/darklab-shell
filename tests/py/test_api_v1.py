@@ -132,7 +132,7 @@ def _seed_run(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output, output_preview, "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, output_search_text) "
             "VALUES (?, ?, ?, 'external', ?, '2026-05-19T00:00:00+00:00', "
             "'2026-05-19T00:00:01+00:00', 0, '', ?, 0, ?, 0, 0, ?)",
@@ -206,7 +206,7 @@ def _seed_assessment_target(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, team_id, type, canonical_value, signature_hash, "
+            "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, "
             "first_seen_at, last_seen_at, created) "
             "VALUES (?, ?, ?, 'domain', ?, ?, ?, ?, ?)",
             (
@@ -222,7 +222,7 @@ def _seed_assessment_target(
         )
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
             "exit_code, output_preview, output_line_count, output_search_text) "
             "VALUES (?, ?, ?, 'external', ?, ?, ?, 0, '[]', 0, '')",
             (
@@ -405,18 +405,18 @@ def test_api_v1_team_scoped_route_contracts_are_explicit():
 
     for route_name in _API_V1_TEAM_SCOPED_READ_ROUTES:
         source = inspect.getsource(getattr(api_blueprint, route_name))
-        assert (
-            "_api_request_scope(" in source
-            or "_request_context(" in source
-        ), route_name
+        assert "_api_request_scope(" in source or "_request_context(" in source, route_name
 
     for route_name, capability_token in _API_V1_TEAM_SCOPED_WRITE_ROUTES.items():
         source = inspect.getsource(getattr(api_blueprint, route_name))
-        assert any(token in source for token in (
-            "_api_request_scope(",
-            "_require_notification_manage_scope(",
-            "_request_context(",
-        )), route_name
+        assert any(
+            token in source
+            for token in (
+                "_api_request_scope(",
+                "_require_notification_manage_scope(",
+                "_request_context(",
+            )
+        ), route_name
         assert capability_token in source, route_name
 
     app = reusable_test_app(__name__)
@@ -437,10 +437,7 @@ def test_api_v1_team_scoped_route_contracts_are_explicit():
         source = inspect.getsource(view)
         declared = f"Capability.{capability}" in source
         if not declared and capability in helper_capabilities:
-            declared = (
-                "_request_context(" in source
-                and f"Capability.{capability}" in helper_capabilities[capability]
-            )
+            declared = "_request_context(" in source and f"Capability.{capability}" in helper_capabilities[capability]
         assert declared, rule.endpoint
 
 
@@ -595,12 +592,15 @@ def test_api_v1_osv_lookup_reports_disabled_failure_and_invalid_requests(
         )
     invalid_purl = "private-package-without-a-purl"
     invalid_version = "2.30.0-private"
-    with mock.patch.dict(
-        "config.CFG",
-        {"cve_risk": {"osv_advisory_mode": "external"}},
-    ), mock.patch(
-        "services.cve_risk.osv_external.download_osv_query",
-        side_effect=AssertionError("invalid package opened the provider boundary"),
+    with (
+        mock.patch.dict(
+            "config.CFG",
+            {"cve_risk": {"osv_advisory_mode": "external"}},
+        ),
+        mock.patch(
+            "services.cve_risk.osv_external.download_osv_query",
+            side_effect=AssertionError("invalid package opened the provider boundary"),
+        ),
     ):
         malformed = client.post(
             endpoint,
@@ -649,32 +649,37 @@ def test_api_v1_osv_lookup_requires_team_triage_capability():
     _add_api_team_member(client, owner_token, operator_token, team_id, role="operator")
     endpoint = "/api/v1/advisories/osv/lookup"
     body = {"purl": "pkg:pypi/requests", "version": "2.30.0"}
-    feed_status = [{
-        "source": "epss",
-        "status": "stale",
-        "origin": "bundled",
-        "source_version": "v2026.08.01:2026-08-01",
-        "model_version": "v2026.08.01",
-        "published_at": "2026-08-01T00:00:00Z",
-        "retrieved_at": "2026-08-01T00:00:00Z",
-        "accepted_at": "2026-08-01T00:00:00Z",
-        "age_hours": 504.0,
-        "record_count": 100,
-        "last_attempt_at": "",
-        "last_error": "",
-        "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
-        "attribution": "FIRST EPSS",
-        "terms_url": "https://www.first.org/epss/model",
-        "live_refresh_enabled": False,
-    }]
+    feed_status = [
+        {
+            "source": "epss",
+            "status": "stale",
+            "origin": "bundled",
+            "source_version": "v2026.08.01:2026-08-01",
+            "model_version": "v2026.08.01",
+            "published_at": "2026-08-01T00:00:00Z",
+            "retrieved_at": "2026-08-01T00:00:00Z",
+            "accepted_at": "2026-08-01T00:00:00Z",
+            "age_hours": 504.0,
+            "record_count": 100,
+            "last_attempt_at": "",
+            "last_error": "",
+            "source_url": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+            "attribution": "FIRST EPSS",
+            "terms_url": "https://www.first.org/epss/model",
+            "live_refresh_enabled": False,
+        }
+    ]
 
-    with mock.patch(
-        "blueprints.api_v1_cve_risk.get_configured_feed_status",
-        return_value=feed_status,
-    ) as status_read, mock.patch(
-        "blueprints.api_v1_osv_lookup.query_external_osv",
-        return_value={"source": "osv", "outcome": "negative_cached", "record_count": 0},
-    ) as lookup:
+    with (
+        mock.patch(
+            "blueprints.api_v1_cve_risk.get_configured_feed_status",
+            return_value=feed_status,
+        ) as status_read,
+        mock.patch(
+            "blueprints.api_v1_osv_lookup.query_external_osv",
+            return_value={"source": "osv", "outcome": "negative_cached", "record_count": 0},
+        ) as lookup,
+    ):
         status_response = client.get(
             "/api/v1/risk/feeds",
             headers=_team_headers(viewer_token, team_id),
@@ -811,20 +816,22 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     search_data = json.loads(search.data)
     assert search_data["query"] == "scoped"
     assert search_data["context"] == 1
-    assert search_data["matches"] == [{
-        "run_id": run_id,
-        "command": "echo api scoped",
-        "started": "2026-05-19T00:00:00+00:00",
-        "finished": "2026-05-19T00:00:01+00:00",
-        "line_number": 2,
-        "line": "api scoped output",
-        "kind": "info",
-        "role": "body",
-        "signals": [],
-        "entities": [],
-        "context_before": ["before"],
-        "context_after": ["after"],
-    }]
+    assert search_data["matches"] == [
+        {
+            "run_id": run_id,
+            "command": "echo api scoped",
+            "started": "2026-05-19T00:00:00+00:00",
+            "finished": "2026-05-19T00:00:01+00:00",
+            "line_number": 2,
+            "line": "api scoped output",
+            "kind": "info",
+            "role": "body",
+            "signals": [],
+            "entities": [],
+            "context_before": ["before"],
+            "context_after": ["after"],
+        }
+    ]
     assert missing_query.status_code == 400
     assert json.loads(missing_query.data)["error"]["code"] == "missing_query"
 
@@ -971,16 +978,22 @@ def test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links(monkeyp
         headers={"X-Session-ID": owner_token},
         json={"role": "viewer", "label": "API capability viewer"},
     )
-    assert client.post(
-        "/session/teams/join",
-        headers={"X-Session-ID": operator_token},
-        json={"code": json.loads(operator_invite.data)["invite"]["code"], "display_name": "Operator"},
-    ).status_code == 201
-    assert client.post(
-        "/session/teams/join",
-        headers={"X-Session-ID": viewer_token},
-        json={"code": json.loads(viewer_invite.data)["invite"]["code"], "display_name": "Viewer"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": operator_token},
+            json={"code": json.loads(operator_invite.data)["invite"]["code"], "display_name": "Operator"},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/session/teams/join",
+            headers={"X-Session-ID": viewer_token},
+            json={"code": json.loads(viewer_invite.data)["invite"]["code"], "display_name": "Viewer"},
+        ).status_code
+        == 201
+    )
 
     project_resp = client.post(
         "/projects",
@@ -1050,8 +1063,10 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     owner_token = _token(client)
     operator_token = _token(client)
 
-    with mock.patch.object(api_blueprint.log, "info") as mock_info, \
-         mock.patch.object(api_blueprint.log, "warning") as mock_warning:
+    with (
+        mock.patch.object(api_blueprint.log, "info") as mock_info,
+        mock.patch.object(api_blueprint.log, "warning") as mock_warning,
+    ):
         created = client.post(
             "/api/v1/teams",
             headers=_headers(owner_token),
@@ -1074,10 +1089,7 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
             headers=_headers(operator_token),
             json={"code": invite_payload["code"], "display_name": "API operator"},
         )
-        operator_member = next(
-            item for item in json.loads(joined.data)["members"]
-            if item["display_name"] == "API operator"
-        )
+        operator_member = next(item for item in json.loads(joined.data)["members"] if item["display_name"] == "API operator")
         denied_owner_invite = client.post(
             f"/api/v1/teams/{team_id}/invites",
             headers=_headers(operator_token),
@@ -1149,11 +1161,7 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert json.loads(reactivated.data)["team"]["status"] == "active"
     assert left.status_code == 200
     assert json.loads(left.data)["removed"] is True
-    team_actions = [
-        call.kwargs["extra"]
-        for call in mock_info.call_args_list
-        if call.args and call.args[0] == "TEAM_ACTION"
-    ]
+    team_actions = [call.kwargs["extra"] for call in mock_info.call_args_list if call.args and call.args[0] == "TEAM_ACTION"]
     assert [event["action"] for event in team_actions] == [
         "create",
         "invite_create",
@@ -1208,17 +1216,18 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
     assert rotated_code not in audit_rows_json
     assert invite_payload["code"] not in audit_rows_json
     rejected = [
-        call.kwargs["extra"]
-        for call in mock_warning.call_args_list
-        if call.args and call.args[0] == "TEAM_ACTION_REJECTED"
+        call.kwargs["extra"] for call in mock_warning.call_args_list if call.args and call.args[0] == "TEAM_ACTION_REJECTED"
     ]
     assert [event["action"] for event in rejected] == ["invite_create"]
     assert rejected[0]["reason"] == "team_forbidden"
     assert rejected[0]["actor_role"] == "operator"
 
-    with mock.patch.object(api_blueprint.log, "error") as mock_error, mock.patch(
-        "services.teams.storage.rotate_team_recovery_code",
-        side_effect=RuntimeError("recovery unavailable"),
+    with (
+        mock.patch.object(api_blueprint.log, "error") as mock_error,
+        mock.patch(
+            "services.teams.storage.rotate_team_recovery_code",
+            side_effect=RuntimeError("recovery unavailable"),
+        ),
     ):
         failed = client.post(
             "/api/v1/teams",
@@ -1251,8 +1260,7 @@ def test_api_v1_team_routes_manage_members_invites_and_recovery():
             (rollback_slug,),
         ).fetchone()[0]
         member_count = conn.execute(
-            "SELECT COUNT(*) FROM team_members WHERE team_id IN "
-            "(SELECT id FROM teams WHERE slug = ?)",
+            "SELECT COUNT(*) FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE slug = ?)",
             (rollback_slug,),
         ).fetchone()[0]
     assert failed_create.status_code == 400
@@ -1366,14 +1374,14 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+            "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
             "output_preview, output_line_count, output_search_text) "
             "VALUES (?, ?, ?, 'external', 'httpx api-cross.example', ?, ?, 0, '[]', 0, '')",
             (run_id, owner_token, team_id, seen_at, seen_at),
         )
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+            "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
             "VALUES (?, ?, 'domain', 'api-cross.example', ?, ?, ?, ?)",
             (entity_id, owner_token, "sig_" + entity_id, seen_at, seen_at, seen_at),
         )
@@ -1384,7 +1392,7 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
         )
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
             "VALUES (?, ?, ?, ?, ?, ?, 'high', 'finding', 'httpx', ?, ?, ?, ?, 1, 'new', ?, ?, ?)",
             (
@@ -1458,10 +1466,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     created = json.loads(created_response.data)
     assessment = created["assessment"]
     assessment_id = assessment["id"]
-    service_check = next(
-        check for check in created["checks"]["checks"]
-        if check["check_key"] == "service_discovery"
-    )
+    service_check = next(check for check in created["checks"]["checks"] if check["check_key"] == "service_discovery")
     check_id = service_check["id"]
     serialized = json.dumps(created, sort_keys=True)
     assert token not in serialized
@@ -1568,8 +1573,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
             "one failed evidence link doesn't remove successful links."
         ),
         "disposition_contract": (
-            "Retest evidence can suggest verified or needs retest, but a person must save "
-            "the final finding disposition."
+            "Retest evidence can suggest verified or needs retest, but a person must save the final finding disposition."
         ),
     }
     assert cross_scope.status_code == 404
@@ -1653,8 +1657,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     assert browser_evidence_response.status_code == 200
     assert browser_evidence_response.get_json() == run_evidence
     assessment_check = next(
-        item for item in assessment_evidence_response.get_json()["checks"]["checks"]
-        if item["id"] == check_id
+        item for item in assessment_evidence_response.get_json()["checks"]["checks"] if item["id"] == check_id
     )
     assert assessment_check["state"] == "covered"
     assert assessment_check["nmap_service_evidence"] == {
@@ -1666,43 +1669,49 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     }
     assert assessment_check["nmap_service_evidence"]["observations"] == run_evidence["observations"]
     assert assessment_check["evidence_previews"] == {
-        "evidence": [{
-            **assessment_check["evidence_previews"]["evidence"][0],
-            "id": linked["evidence"]["id"],
-            "evidence_type": "run",
-            "evidence_id": run_id,
-            "source_state": "available",
-            "linked_by": "manual",
-        }],
+        "evidence": [
+            {
+                **assessment_check["evidence_previews"]["evidence"][0],
+                "id": linked["evidence"]["id"],
+                "evidence_type": "run",
+                "evidence_id": run_id,
+                "source_state": "available",
+                "linked_by": "manual",
+            }
+        ],
         "total": 1,
         "limit": 3,
         "offset": 0,
         "has_more": False,
     }
     assert assessment_check["manual_evidence"] == {
-        "evidence": [{
-            **assessment_check["manual_evidence"]["evidence"][0],
-            "id": linked["evidence"]["id"],
-            "evidence_type": "run",
-            "evidence_id": run_id,
-            "source_state": "available",
-            "linked_by": "manual",
-        }],
+        "evidence": [
+            {
+                **assessment_check["manual_evidence"]["evidence"][0],
+                "id": linked["evidence"]["id"],
+                "evidence_type": "run",
+                "evidence_id": run_id,
+                "source_state": "available",
+                "linked_by": "manual",
+            }
+        ],
         "total": 1,
         "limit": 20,
         "offset": 0,
         "has_more": False,
     }
     assert assessment_evidence_response.get_json()["recent_evidence"] == {
-        "evidence": [{
-            **assessment_evidence_response.get_json()["recent_evidence"]["evidence"][0],
-            "id": linked["evidence"]["id"],
-            "check_key": "service_discovery",
-            "evidence_type": "run",
-            "evidence_id": run_id,
-            "source_state": "available",
-            "linked_by": "manual",
-        }],
+        "evidence": [
+            {
+                **assessment_evidence_response.get_json()["recent_evidence"]["evidence"][0],
+                "id": linked["evidence"]["id"],
+                "check_key": "service_discovery",
+                "evidence_type": "run",
+                "evidence_id": run_id,
+                "source_state": "available",
+                "linked_by": "manual",
+            }
+        ],
         "total": 1,
         "limit": 20,
         "offset": 0,
@@ -1713,8 +1722,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
 
     evidence_link_id = linked["evidence"]["id"]
     unlinked_response = client.delete(
-        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}/"
-        f"evidence/{evidence_link_id}",
+        f"/api/v1/projects/{project['id']}/assessments/{assessment_id}/checks/{check_id}/evidence/{evidence_link_id}",
         headers=headers,
     )
     assert unlinked_response.status_code == 200
@@ -1791,11 +1799,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     tls_cycle = tls_response.get_json()
     assert tls_cycle["assessment"]["profile_key"] == "tls"
     assert tls_cycle["checks"]["total"] == 2
-    certificate_check = next(
-        item
-        for item in tls_cycle["checks"]["checks"]
-        if item["check_key"] == "certificate_chain"
-    )
+    certificate_check = next(item for item in tls_cycle["checks"]["checks"] if item["check_key"] == "certificate_chain")
     tls_action_path = (
         f"/api/v1/projects/{project['id']}/assessments/"
         f"{tls_cycle['assessment']['id']}/checks/{certificate_check['id']}/"
@@ -1809,25 +1813,32 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
         "kind": "command",
         "id": "sslyze",
     }
-    assert tls_plan["display_command"] == (
-        f"sslyze --certinfo {certificate_check['target_value']}"
-    )
+    assert tls_plan["display_command"] == (f"sslyze --certinfo {certificate_check['target_value']}")
     assert tls_plan["launchable"] is True
     tls_id = tls_cycle["assessment"]["id"]
-    assert client.patch(
-        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
-        headers=headers,
-        json={"status": "completed"},
-    ).status_code == 200
-    assert client.patch(
-        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
-        headers=headers,
-        json={"status": "archived"},
-    ).status_code == 200
-    assert client.delete(
-        f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
-        headers=headers,
-    ).status_code == 200
+    assert (
+        client.patch(
+            f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+            headers=headers,
+            json={"status": "completed"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+            headers=headers,
+            json={"status": "archived"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.delete(
+            f"/api/v1/projects/{project['id']}/assessments/{tls_id}",
+            headers=headers,
+        ).status_code
+        == 200
+    )
 
     combined_response = client.post(
         f"/api/v1/projects/{project['id']}/assessments",
@@ -1864,15 +1875,12 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
         headers=_headers(token),
         json={"profile_key": "network", "title": "Verification source"},
     ).get_json()
-    check = next(
-        item for item in created["checks"]["checks"]
-        if item["check_key"] == "service_discovery"
-    )
+    check = next(item for item in created["checks"]["checks"] if item["check_key"] == "service_discovery")
     finding_id = "fnd_verification_action_" + uuid.uuid4().hex[:12]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, entity_id, signature_hash, tool_root, title, raw_line, created) "
+            "(id, personal_workspace_id, entity_id, signature_hash, tool_root, title, raw_line, created) "
             "VALUES (?, ?, ?, ?, 'nmap', 'Service needs verification', "
             "'saved service evidence', '2026-08-05T12:00:00+00:00')",
             (finding_id, token, entity_id, "sig_" + finding_id),
@@ -1885,10 +1893,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     )
     assert evidence_response.status_code == 201
 
-    path = (
-        f"/api/v1/projects/{project['id']}/findings/{finding_id}/"
-        f"verification-actions/{check['id']}"
-    )
+    path = f"/api/v1/projects/{project['id']}/findings/{finding_id}/verification-actions/{check['id']}"
     preview_response = client.get(path, headers=_headers(token))
     cross_scope_response = client.get(path, headers=_headers(other_token))
     browser_preview = client.get(
@@ -1934,9 +1939,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
         "request_limit": 100,
         "time_limit_seconds": 600,
         "credential_use": "none",
-        "summary": (
-            "One approved host, the top 100 TCP ports, and a 10-minute host timeout."
-        ),
+        "summary": ("One approved host, the top 100 TCP ports, and a 10-minute host timeout."),
     }
     assert len(plan["plan_digest"]) == 64
 
@@ -1985,12 +1988,14 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     assert unsupported.get_json()["error"]["code"] == "unsupported_fields"
 
     started = SimpleNamespace(run_id="run_verification_action", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=started,
-         ) as start_run, \
-         mock.patch("blueprints.api_v1.log.info") as info_log:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run,
+        mock.patch("blueprints.api_v1.log.info") as info_log,
+    ):
         launched_response = client.post(
             path,
             headers=_headers(token),
@@ -2017,7 +2022,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     assert callable(start_kwargs["run_finalized_hook"])
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code) "
+            "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code) "
             "VALUES ('run_verification_action', ?, 'external', ?, "
             "'2026-08-05T12:01:00+00:00', '2026-08-05T12:02:00+00:00', 0)",
             (token, plan["display_command"]),
@@ -2029,10 +2034,13 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
             ("plr_" + uuid.uuid4().hex[:16], project["id"]),
         )
         conn.commit()
-    start_kwargs["run_finalized_hook"]("run_verification_action", {
-        "active_project_link": {"project_id": project["id"]},
-        "finalize_summary": {"persisted": True},
-    })
+    start_kwargs["run_finalized_hook"](
+        "run_verification_action",
+        {
+            "active_project_link": {"project_id": project["id"]},
+            "finalize_summary": {"persisted": True},
+        },
+    )
     with sqlite3.connect(DB_PATH) as conn:
         retained = conn.execute(
             "SELECT evidence_type, evidence_id FROM finding_evidence_links "
@@ -2040,10 +2048,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
             (project["id"], finding_id),
         ).fetchone()
     assert tuple(retained) == ("retest_run", "run_verification_action")
-    launch_log = next(
-        call for call in info_log.call_args_list
-        if call.args == ("API_PROJECT_VERIFICATION_ACTION_LAUNCHED",)
-    )
+    launch_log = next(call for call in info_log.call_args_list if call.args == ("API_PROJECT_VERIFICATION_ACTION_LAUNCHED",))
     launch_log_fields = dict(launch_log.kwargs["extra"])
     assert launch_log_fields.pop("ip")
     assert launch_log_fields == {
@@ -2062,9 +2067,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
         "run_id": "run_verification_action",
         "source": "api_v1",
     }
-    audit = _audit_event_rows(
-        target_id=check["id"], event_type="assessment.action_launch"
-    )
+    audit = _audit_event_rows(target_id=check["id"], event_type="assessment.action_launch")
     assert len(audit) == 1
     assert audit[0]["details"] == {
         "action": "command:nmap",
@@ -2094,14 +2097,8 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
         headers=_headers(token),
         json={"profile_key": "network", "title": "Direct action source"},
     ).get_json()
-    check = next(
-        item for item in created["checks"]["checks"]
-        if item["check_key"] == "service_discovery"
-    )
-    path = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{created['assessment']['id']}/checks/{check['id']}/recommended-action"
-    )
+    check = next(item for item in created["checks"]["checks"] if item["check_key"] == "service_discovery")
+    path = f"/api/v1/projects/{project['id']}/assessments/{created['assessment']['id']}/checks/{check['id']}/recommended-action"
     browser_path = path.removeprefix("/api/v1")
 
     preview_response = client.get(path, headers=_headers(token))
@@ -2144,12 +2141,14 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
         run_id="run_browser_assessment_action",
         status="running",
     )
-    with mock.patch("blueprints.run.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.run._start_brokered_run_service",
-             return_value=browser_started,
-         ) as browser_start_run, \
-         mock.patch("blueprints.projects.log.info") as browser_info_log:
+    with (
+        mock.patch("blueprints.run.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.run._start_brokered_run_service",
+            return_value=browser_started,
+        ) as browser_start_run,
+        mock.patch("blueprints.projects.log.info") as browser_info_log,
+    ):
         browser_launched_response = client.post(
             browser_path,
             headers={"X-Session-ID": token},
@@ -2157,32 +2156,27 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
         )
 
     assert browser_launched_response.status_code == 202
-    assert browser_launched_response.get_json()["run"]["run_id"] == (
-        "run_browser_assessment_action"
-    )
+    assert browser_launched_response.get_json()["run"]["run_id"] == ("run_browser_assessment_action")
     browser_start_kwargs = browser_start_run.call_args.kwargs
     assert browser_start_kwargs["original_command"] == plan["display_command"]
     assert browser_start_kwargs["link_project_id"] == project["id"]
     assert "run_finalized_hook" not in browser_start_kwargs
     assert "output_signal_context" not in browser_start_kwargs
     browser_launch_log = next(
-        call for call in browser_info_log.call_args_list
-        if call.args == ("PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
+        call for call in browser_info_log.call_args_list if call.args == ("PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
     )
-    assert check["target_value"] not in json.dumps(
-        browser_launch_log.kwargs["extra"]
-    )
-    assert plan["display_command"] not in json.dumps(
-        browser_launch_log.kwargs["extra"]
-    )
+    assert check["target_value"] not in json.dumps(browser_launch_log.kwargs["extra"])
+    assert plan["display_command"] not in json.dumps(browser_launch_log.kwargs["extra"])
 
     started = SimpleNamespace(run_id="run_assessment_action", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=started,
-         ) as start_run, \
-         mock.patch("blueprints.api_v1.log.info") as info_log:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run,
+        mock.patch("blueprints.api_v1.log.info") as info_log,
+    ):
         launched_response = client.post(
             path,
             headers=_headers(token),
@@ -2197,10 +2191,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     assert start_kwargs["link_project_id"] == project["id"]
     assert "run_finalized_hook" not in start_kwargs
     assert "output_signal_context" not in start_kwargs
-    launch_log = next(
-        call for call in info_log.call_args_list
-        if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
-    )
+    launch_log = next(call for call in info_log.call_args_list if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",))
     launch_fields = dict(launch_log.kwargs["extra"])
     assert launch_fields.pop("ip")
     assert launch_fields == {
@@ -2242,36 +2233,38 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
         "The reviewed takeover template is unavailable.",
         status_code=503,
     )
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
             "services.assessments.run_launch.materialize_http_profile_launch",
-             return_value=protected,
-         ), \
-         mock.patch(
-             "services.assessments.run_launch.assessment_run_launch_context",
-             side_effect=launch_error,
-         ):
+            return_value=protected,
+        ),
+        mock.patch(
+            "services.assessments.run_launch.assessment_run_launch_context",
+            side_effect=launch_error,
+        ),
+    ):
         failed_api_launch = client.post(
             path,
             headers=_headers(token),
             json={"confirmed": True, "plan_digest": plan["plan_digest"]},
         )
     assert failed_api_launch.status_code == 503
-    assert failed_api_launch.get_json()["error"]["code"] == (
-        "takeover_template_unavailable"
-    )
+    assert failed_api_launch.get_json()["error"]["code"] == ("takeover_template_unavailable")
     cleanup.assert_called_once_with()
 
     cleanup.reset_mock()
-    with mock.patch("blueprints.run.broker_available", return_value=True), \
-         mock.patch(
+    with (
+        mock.patch("blueprints.run.broker_available", return_value=True),
+        mock.patch(
             "services.assessments.run_launch.materialize_http_profile_launch",
-             return_value=protected,
-         ), \
-         mock.patch(
-             "services.assessments.run_launch.assessment_run_launch_context",
-             side_effect=launch_error,
-         ):
+            return_value=protected,
+        ),
+        mock.patch(
+            "services.assessments.run_launch.assessment_run_launch_context",
+            side_effect=launch_error,
+        ),
+    ):
         failed_browser_launch = client.post(
             browser_path,
             headers={"X-Session-ID": token},
@@ -2297,10 +2290,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
         headers=_headers(token),
         json={"profile_key": "web", "title": "Protected web checks"},
     ).get_json()
-    check = next(
-        item for item in assessment["checks"]["checks"]
-        if item["check_key"] == "http_profile"
-    )
+    check = next(item for item in assessment["checks"]["checks"] if item["check_key"] == "http_profile")
     secret_value = "protected-profile-value"
     stored = client.post(
         "/session/secrets",
@@ -2317,10 +2307,12 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
             "role": "user",
             "base_url": f"https://{check['target_value']}",
             "allowed_hosts": [check["target_value"]],
-            "headers": [{
-                "name": "X-Assessment-Token",
-                "secret_name": "ASSESSMENT_HTTP_TOKEN",
-            }],
+            "headers": [
+                {
+                    "name": "X-Assessment-Token",
+                    "secret_name": "ASSESSMENT_HTTP_TOKEN",
+                }
+            ],
             "rate_limit_per_second": 3,
             "concurrency": 2,
         },
@@ -2328,8 +2320,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert profile_response.status_code == 201
     profile_id = profile_response.get_json()["profile"]["id"]
     action_path = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+        f"/api/v1/projects/{project['id']}/assessments/{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
     )
     preview = client.get(
         action_path,
@@ -2363,18 +2354,20 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     started = SimpleNamespace(run_id="run_protected_http", status="running")
     profile_row = mock.Mock(wraps=http_profile_execution._profile_row)
     plan_context = mock.Mock(wraps=http_profile_execution.load_http_profile_plan_context)
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=started,
-         ) as start_run, \
-         mock.patch.object(http_profile_execution, "_profile_row", profile_row), \
-         mock.patch.object(http_profile_execution, "load_http_profile_plan_context", plan_context), \
-         mock.patch(
-             "services.assessments.recommended_action_profiles.load_http_profile_plan_context",
-             plan_context,
-         ), \
-         mock.patch("blueprints.api_v1.log.info") as info_log:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run,
+        mock.patch.object(http_profile_execution, "_profile_row", profile_row),
+        mock.patch.object(http_profile_execution, "load_http_profile_plan_context", plan_context),
+        mock.patch(
+            "services.assessments.recommended_action_profiles.load_http_profile_plan_context",
+            plan_context,
+        ),
+        mock.patch("blueprints.api_v1.log.info") as info_log,
+    ):
         launched = client.post(
             action_path,
             headers=_headers(token),
@@ -2406,10 +2399,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert callable(start_kwargs["run_cleanup_hook"])
     serialized_launch = launched.get_data(as_text=True)
     assert secret_value not in serialized_launch
-    launch_log = next(
-        call for call in info_log.call_args_list
-        if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",)
-    )
+    launch_log = next(call for call in info_log.call_args_list if call.args == ("API_PROJECT_ASSESSMENT_ACTION_LAUNCHED",))
     assert secret_value not in json.dumps(launch_log.kwargs["extra"])
     assert str(secret_path) not in json.dumps(launch_log.kwargs["extra"])
     audit = _audit_event_rows(
@@ -2428,17 +2418,14 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
             (assessment["assessment"]["id"],),
         ).fetchone()
         snapshot = json.loads(snapshot_row[0])
-        frozen_check = next(
-            item for item in snapshot["checks"] if item["key"] == check["check_key"]
-        )
+        frozen_check = next(item for item in snapshot["checks"] if item["key"] == check["check_key"])
         frozen_check["recommended_action"] = "command:curl"
         conn.execute(
             "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
             (json.dumps(snapshot), assessment["assessment"]["id"]),
         )
         conn.execute(
-            "UPDATE project_assessment_checks SET recommended_action_key = 'command:curl' "
-            "WHERE id = ?",
+            "UPDATE project_assessment_checks SET recommended_action_key = 'command:curl' WHERE id = ?",
             (check["id"],),
         )
         conn.commit()
@@ -2451,19 +2438,19 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert curl_preview.status_code == 200
     curl_plan = curl_preview.get_json()["plan"]
     assert curl_plan["action"]["id"] == "curl"
-    assert curl_plan["display_command"].startswith(
-        "curl -q --silent --show-error --head --no-location"
-    )
+    assert curl_plan["display_command"].startswith("curl -q --silent --show-error --head --no-location")
     assert curl_plan["display_command"].endswith("--config [protected]")
     assert curl_plan["bounds"]["request_limit"] == 1
     assert curl_plan["bounds"]["time_limit_seconds"] == 30
 
     curl_started = SimpleNamespace(run_id="run_protected_curl", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=curl_started,
-         ) as curl_start_run:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=curl_started,
+        ) as curl_start_run,
+    ):
         curl_launched = client.post(
             action_path,
             headers=_headers(token),
@@ -2476,14 +2463,10 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
 
     assert curl_launched.status_code == 202
     curl_start_kwargs = curl_start_run.call_args.kwargs
-    assert curl_start_kwargs["original_command"].endswith(
-        f"https://{check['target_value']}"
-    )
+    assert curl_start_kwargs["original_command"].endswith(f"https://{check['target_value']}")
     assert curl_start_kwargs["trusted_execution_args"][:1] == ("--config",)
     curl_config_path = Path(curl_start_kwargs["trusted_execution_args"][1])
-    assert curl_config_path.read_text(encoding="utf-8") == (
-        f'header = "X-Assessment-Token: {secret_value}"\n'
-    )
+    assert curl_config_path.read_text(encoding="utf-8") == (f'header = "X-Assessment-Token: {secret_value}"\n')
     assert secret_value in curl_start_kwargs["private_values"]
     assert str(curl_config_path) in curl_start_kwargs["private_values"]
     assert secret_value not in curl_launched.get_data(as_text=True)
@@ -2496,17 +2479,14 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
             (assessment["assessment"]["id"],),
         ).fetchone()
         snapshot = json.loads(snapshot_row[0])
-        frozen_check = next(
-            item for item in snapshot["checks"] if item["key"] == check["check_key"]
-        )
+        frozen_check = next(item for item in snapshot["checks"] if item["key"] == check["check_key"])
         frozen_check["recommended_action"] = "command:dalfox"
         conn.execute(
             "UPDATE project_assessments SET profile_snapshot = ? WHERE id = ?",
             (json.dumps(snapshot), assessment["assessment"]["id"]),
         )
         conn.execute(
-            "UPDATE project_assessment_checks SET recommended_action_key = 'command:dalfox' "
-            "WHERE id = ?",
+            "UPDATE project_assessment_checks SET recommended_action_key = 'command:dalfox' WHERE id = ?",
             (check["id"],),
         )
         conn.commit()
@@ -2519,21 +2499,19 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert dalfox_preview.status_code == 200
     dalfox_plan = dalfox_preview.get_json()["plan"]
     assert dalfox_plan["action"]["id"] == "dalfox"
-    assert "--only-discovery --skip-mining-dict --format jsonl" in (
-        dalfox_plan["display_command"]
-    )
-    assert "--scan-timeout 60 --rate-limit 3 --workers 2" in (
-        dalfox_plan["display_command"]
-    )
+    assert "--only-discovery --skip-mining-dict --format jsonl" in (dalfox_plan["display_command"])
+    assert "--scan-timeout 60 --rate-limit 3 --workers 2" in (dalfox_plan["display_command"])
     assert dalfox_plan["display_command"].endswith("--config [protected]")
     assert dalfox_plan["bounds"]["time_limit_seconds"] == 60
 
     dalfox_started = SimpleNamespace(run_id="run_protected_dalfox", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=dalfox_started,
-         ) as dalfox_start_run:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=dalfox_started,
+        ) as dalfox_start_run,
+    ):
         dalfox_launched = client.post(
             action_path,
             headers=_headers(token),
@@ -2583,10 +2561,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
         headers=_team_headers(token, team_id),
         json={"profile_key": "web"},
     ).get_json()
-    team_check = next(
-        item for item in team_assessment["checks"]["checks"]
-        if item["check_key"] == "http_profile"
-    )
+    team_check = next(item for item in team_assessment["checks"]["checks"] if item["check_key"] == "http_profile")
     team_secret = client.post(
         "/session/secrets",
         headers={"X-Session-ID": token, "X-Team-ID": team_id},
@@ -2600,10 +2575,12 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
             "name": "Team administrator",
             "base_url": f"https://{team_check['target_value']}",
             "allowed_hosts": [team_check["target_value"]],
-            "headers": [{
-                "name": "X-Assessment-Token",
-                "secret_name": "TEAM_ASSESSMENT_TOKEN",
-            }],
+            "headers": [
+                {
+                    "name": "X-Assessment-Token",
+                    "secret_name": "TEAM_ASSESSMENT_TOKEN",
+                }
+            ],
         },
     )
     assert team_profile_response.status_code == 201
@@ -2636,11 +2613,10 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert demoted.status_code == 200
     assert demoted.get_json()["member"]["role"] == "operator"
     protected_paths_before_launch = set(tmp_path.rglob("*"))
-    with mock.patch(
-        "blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan"
-    ) as confirm, mock.patch(
-        "blueprints.api_v1_assessment_action_launch.materialize_assessment_run_launch"
-    ) as materialize:
+    with (
+        mock.patch("blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan") as confirm,
+        mock.patch("blueprints.api_v1_assessment_action_launch.materialize_assessment_run_launch") as materialize,
+    ):
         revoked_launch = client.post(
             team_action_path,
             headers=_team_headers(admin_token, team_id),
@@ -2666,14 +2642,17 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     entity_id, run_id = _seed_assessment_target(token, project["id"])
     target = f"https://api-{uuid.uuid4().hex[:12]}.example/v1"
     artifact_id = "rfa_" + uuid.uuid4().hex[:16]
-    content = json.dumps({
-        "openapi": "3.1.0",
-        "info": {"title": "Saved API", "version": "1"},
-        "paths": {
-            "/items": {"get": {"responses": {"200": {"description": "OK"}}}},
-            "/health": {"head": {"responses": {"200": {"description": "OK"}}}},
+    content = json.dumps(
+        {
+            "openapi": "3.1.0",
+            "info": {"title": "Saved API", "version": "1"},
+            "paths": {
+                "/items": {"get": {"responses": {"200": {"description": "OK"}}}},
+                "/health": {"head": {"responses": {"200": {"description": "OK"}}}},
+            },
         },
-    }, separators=(",", ":")).encode()
+        separators=(",", ":"),
+    ).encode()
     reviewed = review_local_openapi_json(
         content,
         source_artifact_id=artifact_id,
@@ -2681,8 +2660,7 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     )
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? "
-            "WHERE id = ?",
+            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? WHERE id = ?",
             (target, "sig_url_" + uuid.uuid4().hex, entity_id),
         )
         conn.execute(
@@ -2691,7 +2669,7 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
         )
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, content_sha256, created) VALUES "
             "(?, ?, ?, 'reports/openapi.json', 'openapi.json', 'output', ?, "
             "'test', 'application/json', ?, '2026-08-08T00:00:00+00:00')",
@@ -2705,8 +2683,7 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     ).get_json()
     check = assessment["checks"]["checks"][0]
     action_path = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+        f"/api/v1/projects/{project['id']}/assessments/{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
     )
     choose = client.get(action_path, headers=_headers(token)).get_json()["plan"]
 
@@ -2727,15 +2704,19 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
         read_report=lambda: b"",
         cleanup=cleanup,
     )
-    with mock.patch(
-        "services.assessments.schemathesis_actions.review_project_openapi_artifact",
-        return_value=reviewed,
-    ), mock.patch(
-        "services.assessments.schemathesis_launch.review_project_openapi_artifact",
-        return_value=reviewed,
-    ), mock.patch(
-        "services.assessments.schemathesis_launch.materialize_reviewed_schemathesis_schema",
-        return_value=material,
+    with (
+        mock.patch(
+            "services.assessments.schemathesis_actions.review_project_openapi_artifact",
+            return_value=reviewed,
+        ),
+        mock.patch(
+            "services.assessments.schemathesis_launch.review_project_openapi_artifact",
+            return_value=reviewed,
+        ),
+        mock.patch(
+            "services.assessments.schemathesis_launch.materialize_reviewed_schemathesis_schema",
+            return_value=material,
+        ),
     ):
         selected_response = client.get(
             action_path,
@@ -2744,10 +2725,13 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
         )
         plan = selected_response.get_json()["plan"]
         started = SimpleNamespace(run_id="run_api_negative", status="running")
-        with mock.patch("blueprints.api_v1.broker_available", return_value=True), mock.patch(
-            "blueprints.api_v1._start_brokered_run_service",
-            return_value=started,
-        ) as start_run:
+        with (
+            mock.patch("blueprints.api_v1.broker_available", return_value=True),
+            mock.patch(
+                "blueprints.api_v1._start_brokered_run_service",
+                return_value=started,
+            ) as start_run,
+        ):
             launched = client.post(
                 action_path,
                 headers=_headers(token),
@@ -2761,15 +2745,15 @@ def test_api_v1_assessment_schemathesis_action_selects_and_protects_saved_schema
     assert selected_response.status_code == 200
     assert plan["launchable"] is True
     assert plan["artifact_selection"]["selected"]["operation_count"] == 2
-    assert plan["display_command"].startswith(
-        "schemathesis --config-file [protected-config] run [protected-schema]"
-    )
+    assert plan["display_command"].startswith("schemathesis --config-file [protected-config] run [protected-schema]")
     assert launched.status_code == 202
     start_kwargs = start_run.call_args.kwargs
     assert start_kwargs["original_command"] == "schemathesis --help"
     assert start_kwargs["display_command"] == plan["display_command"]
     assert start_kwargs["private_values"] == (
-        str(schema_path), str(config_path), str(report_path),
+        str(schema_path),
+        str(config_path),
+        str(report_path),
     )
     assert start_kwargs["reviewed_execution"].execution_command.startswith(
         f"schemathesis --config-file {config_path} run {schema_path}"
@@ -2794,13 +2778,20 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     from services.runs.signal_context import RunOutputSignalContext
 
     snapshot = NucleiTemplateCacheSnapshot(
-        "ready", "v10.4.3", "sha256:" + ("b" * 64), 11997,
+        "ready",
+        "v10.4.3",
+        "sha256:" + ("b" * 64),
+        11997,
     )
     monkeypatch.setattr(
-        action_plan_nuclei, "managed_nuclei_template_snapshot", lambda: snapshot,
+        action_plan_nuclei,
+        "managed_nuclei_template_snapshot",
+        lambda: snapshot,
     )
     monkeypatch.setattr(
-        nuclei_takeover_launch, "managed_nuclei_template_snapshot", lambda: snapshot,
+        nuclei_takeover_launch,
+        "managed_nuclei_template_snapshot",
+        lambda: snapshot,
     )
     client = get_client()
     token = _token(client)
@@ -2811,13 +2802,9 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
         headers=_headers(token),
         json={"profile_key": "web", "title": "Intrusive template review"},
     ).get_json()
-    check = next(
-        item for item in assessment["checks"]["checks"]
-        if item["check_key"] == "intrusive_template_validation"
-    )
+    check = next(item for item in assessment["checks"]["checks"] if item["check_key"] == "intrusive_template_validation")
     action_path = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+        f"/api/v1/projects/{project['id']}/assessments/{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
     )
 
     disabled = client.get(action_path, headers=_headers(token)).get_json()["plan"]
@@ -2831,9 +2818,7 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
     assert plan["launchable"] is True
     assert plan["policy_level"] == "intrusive"
     assert plan["nuclei_profile"]["key"] == "intrusive"
-    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (
-        plan["display_command"]
-    )
+    assert "-headless -system-chrome -headless-options --no-sandbox -dast" in (plan["display_command"])
 
     monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", False)
     stale = client.post(
@@ -2846,13 +2831,17 @@ def test_api_v1_intrusive_nuclei_action_requires_gate_and_fresh_confirmation(
 
     monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", True)
     refreshed_plan = client.get(
-        action_path, headers=_headers(token),
+        action_path,
+        headers=_headers(token),
     ).get_json()["plan"]
     started = SimpleNamespace(run_id="run_intrusive_nuclei", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), mock.patch(
-        "blueprints.api_v1._start_brokered_run_service",
-        return_value=started,
-    ) as start_run:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run,
+    ):
         launched = client.post(
             action_path,
             headers=_headers(token),
@@ -2890,8 +2879,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
     target = f"https://oast-{uuid.uuid4().hex[:12]}.example.test/search?q=one"
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? "
-            "WHERE id = ?",
+            "UPDATE entities SET type = 'url', canonical_value = ?, signature_hash = ? WHERE id = ?",
             (target, "sig_oast_" + uuid.uuid4().hex, entity_id),
         )
         conn.commit()
@@ -2900,10 +2888,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         headers=_headers(token),
         json={"profile_key": "web", "title": "Private OAST review"},
     ).get_json()
-    check = next(
-        item for item in created["checks"]["checks"]
-        if item["check_key"] == "blind_xss_validation"
-    )
+    check = next(item for item in created["checks"]["checks"] if item["check_key"] == "blind_xss_validation")
     observation_id = dalfox_parameter_observation_id(
         source_run_id,
         target,
@@ -2920,25 +2905,25 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         parser_version=DALFOX_DISCOVERY_PARSER_VERSION,
     )
     monkeypatch.setattr(
-        "services.assessments.dalfox_oast_actions."
-        "list_project_dalfox_parameter_options",
+        "services.assessments.dalfox_oast_actions.list_project_dalfox_parameter_options",
         lambda *_args, **_kwargs: DalfoxParameterOptions((evidence,)),
     )
     monkeypatch.setitem(config.CFG, "data_dir", str(tmp_path))
     monkeypatch.setitem(config.CFG, "assessment_intrusive_actions_enabled", True)
-    monkeypatch.setitem(config.CFG, "oast_connector", {
-        "enabled": True,
-        "base_url": "https://private-oast.internal.example",
-        "token_secret_id": "DARKLAB_PRIVATE_OAST_TOKEN",
-        "allowed_domain": "callbacks.example.test",
-        "tls_verify": True,
-        "callback_retention_seconds": 3600,
-        "privacy_acknowledged": True,
-    })
-    check_base = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{created['assessment']['id']}/checks/{check['id']}"
+    monkeypatch.setitem(
+        config.CFG,
+        "oast_connector",
+        {
+            "enabled": True,
+            "base_url": "https://private-oast.internal.example",
+            "token_secret_id": "DARKLAB_PRIVATE_OAST_TOKEN",
+            "allowed_domain": "callbacks.example.test",
+            "tls_verify": True,
+            "callback_retention_seconds": 3600,
+            "privacy_acknowledged": True,
+        },
     )
+    check_base = f"/api/v1/projects/{project['id']}/assessments/{created['assessment']['id']}/checks/{check['id']}"
     action_path = check_base + "/recommended-action"
     correlation_path = check_base + "/oast-correlations"
     selection = {
@@ -2946,20 +2931,17 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         "parameter_observation_id": observation_id,
     }
 
-    with mock.patch(
-        "services.connectors.oast_config.resolve_oast_token"
-    ) as resolve_token, mock.patch(
-        "services.connectors.oast_provider_transport.register_oast_provider_session"
-    ) as register_provider:
+    with (
+        mock.patch("services.connectors.oast_config.resolve_oast_token") as resolve_token,
+        mock.patch("services.connectors.oast_provider_transport.register_oast_provider_session") as register_provider,
+    ):
         preview = client.get(
             action_path,
             headers=_headers(token),
             query_string=selection,
         )
         plan = preview.get_json()["plan"]
-        with mock.patch(
-            "blueprints.api_v1._start_brokered_run_service"
-        ) as start_run:
+        with mock.patch("blueprints.api_v1._start_brokered_run_service") as start_run:
             blocked_launch = client.post(
                 action_path,
                 headers=_headers(token),
@@ -3044,8 +3026,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         "plan_digest": plan["plan_digest"],
     }
     with mock.patch(
-        "services.assessments.assessment_oast_launch_confirmation."
-        "oast_connector_settings",
+        "services.assessments.assessment_oast_launch_confirmation.oast_connector_settings",
         return_value=OastConnectorSettings(
             enabled=True,
             base_url="https://private-oast.internal.example",
@@ -3062,21 +3043,15 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
             json=launch_body,
         )
     assert scope_changed_launch.status_code == 409
-    assert scope_changed_launch.get_json()["error"]["code"] == (
-        "oast_provider_scope_changed"
-    )
-    with mock.patch(
-        "blueprints.api_v1._start_brokered_run_service"
-    ) as start_run:
+    assert scope_changed_launch.get_json()["error"]["code"] == ("oast_provider_scope_changed")
+    with mock.patch("blueprints.api_v1._start_brokered_run_service") as start_run:
         not_ready_launch = client.post(
             launch_path,
             headers=_headers(token),
             json=launch_body,
         )
     assert not_ready_launch.status_code == 409
-    assert not_ready_launch.get_json()["error"]["code"] == (
-        "oast_provider_not_ready"
-    )
+    assert not_ready_launch.get_json()["error"]["code"] == ("oast_provider_not_ready")
     start_run.assert_not_called()
 
     launched_run_id = str(uuid.uuid4())
@@ -3087,27 +3062,28 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         reviewed_command = kwargs["reviewed_execution"].execution_command
         assert "callbacks.example.test" in reviewed_command
         assert kwargs["output_signal_context"].dalfox_oast_validation is True
-        assert any(
-            value.endswith(".callbacks.example.test")
-            for value in kwargs["private_values"]
-        )
+        assert any(value.endswith(".callbacks.example.test") for value in kwargs["private_values"])
         kwargs["run_created_hook"](launched_run_id, None)
         return SimpleNamespace(run_id=launched_run_id, status="running")
 
-    with mock.patch(
-        "services.connectors.oast_readiness.oast_provider_session_is_staged",
-        return_value=True,
-    ), mock.patch(
-        "services.assessments.assessment_oast_run_launch."
-        "resolve_project_dalfox_parameter_evidence",
-        return_value=evidence,
-    ), mock.patch(
-        "blueprints.api_v1.broker_available",
-        return_value=True,
-    ), mock.patch(
-        "blueprints.api_v1._start_brokered_run_service",
-        side_effect=_start_ready_oast,
-    ) as start_run:
+    with (
+        mock.patch(
+            "services.connectors.oast_readiness.oast_provider_session_is_staged",
+            return_value=True,
+        ),
+        mock.patch(
+            "services.assessments.assessment_oast_run_launch.resolve_project_dalfox_parameter_evidence",
+            return_value=evidence,
+        ),
+        mock.patch(
+            "blueprints.api_v1.broker_available",
+            return_value=True,
+        ),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            side_effect=_start_ready_oast,
+        ) as start_run,
+    ):
         ready = client.get(exact_path, headers=_headers(token))
         ready_list = client.get(correlation_path, headers=_headers(token))
         launched = client.post(
@@ -3124,28 +3100,27 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
     assert ready_correlation["provider_ready"] is True
     assert ready_correlation["callback_url"].startswith("https://")
     assert ready_correlation["callback_url"].endswith(".callbacks.example.test")
-    assert ready_list.get_json()["correlations"][0]["callback_url"] == (
-        "https://[private-oast-callback]"
-    )
+    assert ready_list.get_json()["correlations"][0]["callback_url"] == ("https://[private-oast-callback]")
     assert launched.status_code == 202, launched.get_json()
     assert launched.get_json()["correlation_id"] == correlation["id"]
     assert launched.get_json()["run"]["run_id"] == launched_run_id
     assert launched.get_json()["run"]["command"] == plan["display_command"]
     assert "callbacks.example.test" not in launched.get_data(as_text=True)
     assert repeated_launch.status_code == 409
-    assert repeated_launch.get_json()["error"]["code"] == (
-        "oast_correlation_unavailable"
-    )
+    assert repeated_launch.get_json()["error"]["code"] == ("oast_correlation_unavailable")
     assert start_run.call_count == 1
     active = client.get(exact_path, headers=_headers(token)).get_json()["correlation"]
     assert active["status"] == "active"
     assert active["run_id"] == launched_run_id
     assert client.get(exact_path, headers=_headers(other_token)).status_code == 404
     assert client.get(correlation_path, headers=_headers(other_token)).status_code == 404
-    assert client.get(
-        exact_path.replace(check["id"], "ach_wrong_oast_scope"),
-        headers=_headers(token),
-    ).status_code == 404
+    assert (
+        client.get(
+            exact_path.replace(check["id"], "ach_wrong_oast_scope"),
+            headers=_headers(token),
+        ).status_code
+        == 404
+    )
     audit = _audit_event_rows(
         target_id=check["id"],
         event_type="assessment.oast_reserve",
@@ -3213,7 +3188,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, "
+            "(id, personal_workspace_id, type, canonical_value, signature_hash, "
             "first_seen_at, last_seen_at, created) "
             "VALUES (?, ?, 'url', ?, ?, ?, ?, ?)",
             (
@@ -3249,21 +3224,25 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     assert profile_response.status_code == 201
     profile_id = profile_response.get_json()["profile"]["id"]
     monkeypatch.setitem(config.CFG, "data_dir", str(tmp_path))
-    monkeypatch.setitem(config.CFG, "zap_connector", {
-        "enabled": True,
-        "base_url": "http://zap:8080",
-        "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
-        "tls_verify": True,
-        "allowed_target_cidrs": ["203.0.113.0/24"],
-        "scope_policy_url": "https://zap-policy.example.test/v1/zap-scope/review",
-        "scope_policy_token_secret_id": "DARKLAB_ZAP_SCOPE_TOKEN",
-        "scope_policy_id": "assessment-egress-v1",
-        "egress_proxy_host": "zap-egress.example.test",
-        "egress_proxy_port": 8080,
-        "max_concurrent_jobs": 1,
-        "job_timeout_seconds": 900,
-        "max_report_bytes": 1048576,
-    })
+    monkeypatch.setitem(
+        config.CFG,
+        "zap_connector",
+        {
+            "enabled": True,
+            "base_url": "http://zap:8080",
+            "api_key_secret_id": "DARKLAB_ZAP_API_KEY",
+            "tls_verify": True,
+            "allowed_target_cidrs": ["203.0.113.0/24"],
+            "scope_policy_url": "https://zap-policy.example.test/v1/zap-scope/review",
+            "scope_policy_token_secret_id": "DARKLAB_ZAP_SCOPE_TOKEN",
+            "scope_policy_id": "assessment-egress-v1",
+            "egress_proxy_host": "zap-egress.example.test",
+            "egress_proxy_port": 8080,
+            "max_concurrent_jobs": 1,
+            "job_timeout_seconds": 900,
+            "max_report_bytes": 1048576,
+        },
+    )
     original_review = zap_connector.review_zap_target
     monkeypatch.setattr(
         zap_connector,
@@ -3289,10 +3268,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
             scanner_addresses=tuple((host, ("203.0.113.10",)) for host in hosts),
         )
 
-    base = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{created['assessment']['id']}/checks/{check['id']}"
-    )
+    base = f"/api/v1/projects/{project['id']}/assessments/{created['assessment']['id']}/checks/{check['id']}"
     selection = {
         "http_profile_id": profile_id,
         "target_entity_ids": [target_id],
@@ -3302,10 +3278,12 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     monkeypatch.setattr(
         zap_connector,
         "review_zap_scope_policy",
-        mock.Mock(side_effect=ZapScopePolicyError(
-            "zap_scanner_target_out_of_scope",
-            "ZAP scanner-side DNS resolved a target outside the allowed networks",
-        )),
+        mock.Mock(
+            side_effect=ZapScopePolicyError(
+                "zap_scanner_target_out_of_scope",
+                "ZAP scanner-side DNS resolved a target outside the allowed networks",
+            )
+        ),
     )
     split_horizon = client.post(
         base + "/zap-plan",
@@ -3362,7 +3340,11 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     assert job["cancelable"] is True
     assert job["plan_summary"] == plan["summary"]
     assert {
-        "session_id", "team_id", "actor_member_id", "actor_role", "import_source_id",
+        "session_id",
+        "team_id",
+        "actor_member_id",
+        "actor_role",
+        "import_source_id",
     }.isdisjoint(job)
     listed = client.get(base + "/zap-jobs", headers=_headers(token))
     assert listed.status_code == 200
@@ -3377,10 +3359,13 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     job_path = base + f"/zap-jobs/{job['id']}"
     assert client.get(job_path, headers=_headers(token)).get_json()["job"] == job
     assert client.get(job_path, headers=_headers(other_token)).status_code == 404
-    assert client.get(
-        job_path.replace(check["id"], "ach_wrong_scope"),
-        headers=_headers(token),
-    ).status_code == 404
+    assert (
+        client.get(
+            job_path.replace(check["id"], "ach_wrong_scope"),
+            headers=_headers(token),
+        ).status_code
+        == 404
+    )
 
     canceled = client.delete(job_path, headers=_headers(token))
     assert canceled.status_code == 200
@@ -3388,9 +3373,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     assert canceled_job["status"] == "canceled"
     assert canceled_job["cancelable"] is False
     cancel_record = next(
-        record
-        for record in caplog.records
-        if record.message == "API_PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
+        record for record in caplog.records if record.message == "API_PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
     )
     assert cancel_record.job_status == "canceled"
     assert not hasattr(cancel_record, "status")
@@ -3412,9 +3395,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     )
     assert browser_canceled.status_code == 200
     browser_cancel_record = next(
-        record
-        for record in caplog.records
-        if record.message == "PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
+        record for record in caplog.records if record.message == "PROJECT_ASSESSMENT_ZAP_JOB_CANCEL_REQUESTED"
     )
     assert browser_cancel_record.job_status == "canceled"
     assert not hasattr(browser_cancel_record, "status")
@@ -3445,14 +3426,9 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
         headers=_headers(token),
         json={"profile_key": "web", "title": "Takeover confirmation"},
     ).get_json()
-    check = next(
-        item
-        for item in assessment["checks"]["checks"]
-        if item["check_key"] == "subdomain_takeover_confirmation"
-    )
+    check = next(item for item in assessment["checks"]["checks"] if item["check_key"] == "subdomain_takeover_confirmation")
     action_path = (
-        f"/api/v1/projects/{project['id']}/assessments/"
-        f"{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
+        f"/api/v1/projects/{project['id']}/assessments/{assessment['assessment']['id']}/checks/{check['id']}/recommended-action"
     )
     preview = client.get(action_path, headers=_headers(token))
     assert preview.status_code == 200
@@ -3471,17 +3447,17 @@ def test_api_v1_assessment_takeover_action_uses_only_reviewed_template_context()
             "request, no redirects, no resource claim, and no takeover action."
         ),
     }
-    assert plan["display_command"].endswith(
-        "-t [reviewed-takeover-template] -jsonl -dr -ni"
-    )
+    assert plan["display_command"].endswith("-t [reviewed-takeover-template] -jsonl -dr -ni")
     assert "-severity" not in plan["display_command"]
 
     started = SimpleNamespace(run_id="run_reviewed_takeover", status="running")
-    with mock.patch("blueprints.api_v1.broker_available", return_value=True), \
-         mock.patch(
-             "blueprints.api_v1._start_brokered_run_service",
-             return_value=started,
-         ) as start_run:
+    with (
+        mock.patch("blueprints.api_v1.broker_available", return_value=True),
+        mock.patch(
+            "blueprints.api_v1._start_brokered_run_service",
+            return_value=started,
+        ) as start_run,
+    ):
         launched = client.post(
             action_path,
             headers=_headers(token),
@@ -3548,7 +3524,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, first_run_id, last_run_id, signature_hash, "
+            "(id, personal_workspace_id, run_id, first_run_id, last_run_id, signature_hash, "
             "tool_root, title, raw_line, line_number, created) "
             "VALUES (?, ?, ?, ?, ?, ?, 'nuclei', 'Saved evidence finding', "
             "'vulnerable response', 1, '2026-08-05T00:00:00+00:00')",
@@ -3563,7 +3539,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         )
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, created) VALUES "
             "(?, ?, ?, 'evidence/notes.txt', 'notes.txt', 'output', 16, 'test', "
             "'text/plain', '2026-08-05T00:00:02+00:00'), "
@@ -3573,7 +3549,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         )
         conn.execute(
             "INSERT INTO project_assessments "
-            "(id, session_id, project_id, title, profile_key, profile_version, profile_snapshot, "
+            "(id, personal_workspace_id, project_id, title, profile_key, profile_version, profile_snapshot, "
             "status, started_at, created_at, updated_at) VALUES "
             "(?, ?, ?, 'Evidence cycle', 'network', '1', ?, 'active', "
             "'2026-08-05T00:00:00+00:00', '2026-08-05T00:00:00+00:00', "
@@ -3582,21 +3558,27 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
                 assessment_id,
                 token,
                 project["id"],
-                json.dumps({
-                    "checks": [{
-                        "key": "manual-evidence",
-                        "evidence_rules": [{
-                            "evidence_types": ["run"],
-                            "command_roots": ["nuclei"],
-                            "workflow_actions": [],
-                            "structured_output_kinds": [],
-                            "target_match": "host_or_descendant",
-                            "completion": "succeeded",
-                            "compatible_versions": ["*"],
-                            "negative_evidence": True,
-                        }],
-                    }],
-                }),
+                json.dumps(
+                    {
+                        "checks": [
+                            {
+                                "key": "manual-evidence",
+                                "evidence_rules": [
+                                    {
+                                        "evidence_types": ["run"],
+                                        "command_roots": ["nuclei"],
+                                        "workflow_actions": [],
+                                        "structured_output_kinds": [],
+                                        "target_match": "host_or_descendant",
+                                        "completion": "succeeded",
+                                        "compatible_versions": ["*"],
+                                        "negative_evidence": True,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
             ),
         )
         conn.execute(
@@ -3701,10 +3683,13 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         ("assessment_check", check_id),
         ("retest_run", retest_run_id),
     ]
-    with mock.patch.dict(config.CFG, {
-        "max_finding_evidence_links_per_owner": 0,
-        "max_finding_evidence_links_per_finding": 0,
-    }):
+    with mock.patch.dict(
+        config.CFG,
+        {
+            "max_finding_evidence_links_per_owner": 0,
+            "max_finding_evidence_links_per_finding": 0,
+        },
+    ):
         unlimited_responses = [
             client.post(
                 route,
@@ -3746,9 +3731,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         "left_run_id": run_id,
         "right_run_id": retest_run_id,
     }
-    candidate_by_id = {
-        item["id"]: item for item in verification["candidate_runs"]
-    }
+    candidate_by_id = {item["id"]: item for item in verification["candidate_runs"]}
     assert candidate_by_id[incomparable_run_id]["compatibility"]["state"] == "incomparable"
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -3773,10 +3756,13 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     )
     assert browser_duplicate.status_code == 200
     assert browser_duplicate.get_json()["created"] is False
-    with mock.patch.dict(config.CFG, {
-        "max_finding_evidence_links_per_owner": 0,
-        "max_finding_evidence_links_per_finding": 8,
-    }):
+    with mock.patch.dict(
+        config.CFG,
+        {
+            "max_finding_evidence_links_per_owner": 0,
+            "max_finding_evidence_links_per_finding": 8,
+        },
+    ):
         quota_response = client.post(
             route,
             headers=_headers(token),
@@ -3793,9 +3779,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         conn.execute("DELETE FROM run_file_artifacts WHERE id = ?", (screenshot_id,))
         conn.commit()
     unavailable_page = client.get(route, headers=_headers(token)).get_json()
-    unavailable_screenshot = next(
-        item for item in unavailable_page["evidence"] if item["evidence_type"] == "screenshot"
-    )
+    unavailable_screenshot = next(item for item in unavailable_page["evidence"] if item["evidence_type"] == "screenshot")
     assert unavailable_screenshot["source_state"] == "unavailable"
     assert unavailable_screenshot["evidence_id"] == screenshot_id
 
@@ -3919,14 +3903,12 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     )
     assert project_response.status_code == 201
     project_id = json.loads(project_response.data)["project"]["id"]
-    _entity_id, evidence_run_id = _seed_assessment_target(
-        owner_token, project_id, team_id=team_id
-    )
+    _entity_id, evidence_run_id = _seed_assessment_target(owner_token, project_id, team_id=team_id)
     finding_id = "fnd_team_evidence_" + uuid.uuid4().hex[:12]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, team_id, run_id, first_run_id, last_run_id, "
+            "(id, personal_workspace_id, team_id, run_id, first_run_id, last_run_id, "
             "signature_hash, title, created) VALUES (?, ?, ?, ?, ?, ?, ?, "
             "'Team evidence finding', '2026-08-04T12:00:00+00:00')",
             (
@@ -3978,11 +3960,10 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         f"/projects/{project_id}/assessments",
         headers=browser_viewer_headers,
     )
-    with mock.patch(
-        "blueprints.api_v1_assessments.update_assessment_cycle"
-    ) as api_update, mock.patch(
-        "blueprints.projects_assessments.update_assessment_cycle"
-    ) as browser_update:
+    with (
+        mock.patch("blueprints.api_v1_assessments.update_assessment_cycle") as api_update,
+        mock.patch("blueprints.projects_assessments.update_assessment_cycle") as browser_update,
+    ):
         viewer_update = client.patch(
             assessment_route,
             headers=viewer_headers,
@@ -4000,10 +3981,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         headers=viewer_headers,
         json={"state": "skipped", "reason": "Viewer cannot decide this"},
     )
-    oast_route = (
-        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/"
-        f"{check_id}/oast-correlations"
-    )
+    oast_route = f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations"
     viewer_oast_reserve = client.post(
         oast_route,
         headers=viewer_headers,
@@ -4018,16 +3996,12 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         headers=viewer_headers,
         json={},
     )
-    action_route = (
-        f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/"
-        f"{check_id}/recommended-action"
-    )
+    action_route = f"/api/v1/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/recommended-action"
     browser_action_route = action_route.removeprefix("/api/v1")
-    with mock.patch(
-        "blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan"
-    ) as api_confirm, mock.patch(
-        "blueprints.projects_assessment_action_launch.confirm_recommended_action_plan"
-    ) as browser_confirm:
+    with (
+        mock.patch("blueprints.api_v1_assessment_action_launch.confirm_recommended_action_plan") as api_confirm,
+        mock.patch("blueprints.projects_assessment_action_launch.confirm_recommended_action_plan") as browser_confirm,
+    ):
         viewer_action_launch = client.post(
             action_route,
             headers=viewer_headers,
@@ -4040,9 +4014,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         )
     api_confirm.assert_not_called()
     browser_confirm.assert_not_called()
-    finding_evidence_route = (
-        f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
-    )
+    finding_evidence_route = f"/api/v1/projects/{project_id}/findings/{finding_id}/evidence"
     viewer_evidence_list = client.get(finding_evidence_route, headers=viewer_headers)
     viewer_evidence_write = client.post(
         finding_evidence_route,
@@ -4071,9 +4043,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
         assert response.status_code == 403
         payload = json.loads(response.data)
         error = payload.get("error")
-        code = payload.get("code") or (
-            error.get("code") if isinstance(error, dict) else error
-        )
+        code = payload.get("code") or (error.get("code") if isinstance(error, dict) else error)
         assert code == "team_forbidden"
 
     operator_update = client.patch(
@@ -4126,14 +4096,14 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
             (team_id, token_hash(owner_token)),
         ).fetchone()[0]
     assert actor == {"kind": "team_member", "member_id": operator_member_id}
+    assert owner_evidence_write.get_json()["evidence"]["created_by_member_id"] == owner_member_id
     assert (
-        owner_evidence_write.get_json()["evidence"]["created_by_member_id"]
-        == owner_member_id
+        client.get(
+            finding_evidence_route,
+            headers=viewer_headers,
+        ).get_json()["total"]
+        == 1
     )
-    assert client.get(
-        finding_evidence_route,
-        headers=viewer_headers,
-    ).get_json()["total"] == 1
 
     outsider_api_read = client.get(assessment_route, headers=outsider_headers)
     outsider_browser_read = client.get(
@@ -4145,16 +4115,22 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     assert outsider_browser_read.status_code == 403
     assert outsider_browser_read.get_json()["error"] == "team_forbidden"
 
-    assert client.patch(
-        assessment_route,
-        headers=owner_headers,
-        json={"status": "completed"},
-    ).status_code == 200
-    assert client.patch(
-        assessment_route,
-        headers=owner_headers,
-        json={"status": "archived"},
-    ).status_code == 200
+    assert (
+        client.patch(
+            assessment_route,
+            headers=owner_headers,
+            json={"status": "completed"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            assessment_route,
+            headers=owner_headers,
+            json={"status": "archived"},
+        ).status_code
+        == 200
+    )
     archived_api_list = client.get(
         f"/api/v1/projects/{project_id}/assessments",
         headers=viewer_headers,
@@ -4193,7 +4169,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO secrets "
-            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+            "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
             "VALUES (?, 'HTTP_PROFILE_TOKEN', ?, ?, '[]', ?, ?)",
             (
                 token,
@@ -4215,9 +4191,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
             "base_url": f"https://{target}/admin",
             "scope_roots": [f"https://{target}/admin"],
             "allowed_hosts": [target],
-            "headers": [
-                {"name": "X-Assessment-Token", "secret_name": "HTTP_PROFILE_TOKEN"}
-            ],
+            "headers": [{"name": "X-Assessment-Token", "secret_name": "HTTP_PROFILE_TOKEN"}],
             "secret_refs": {"bearer_token": "HTTP_PROFILE_TOKEN"},
             "token_capture_rules": [
                 {
@@ -4238,14 +4212,14 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     created = create_response.get_json()["profile"]
     profile_id = created["id"]
     assert created["protected_references_visible"] is True
-    assert created["secret_refs"] == {
-        "bearer_token": {"name": "HTTP_PROFILE_TOKEN", "available": True}
-    }
-    assert created["headers"] == [{
-        "name": "X-Assessment-Token",
-        "secret_name": "HTTP_PROFILE_TOKEN",
-        "available": True,
-    }]
+    assert created["secret_refs"] == {"bearer_token": {"name": "HTTP_PROFILE_TOKEN", "available": True}}
+    assert created["headers"] == [
+        {
+            "name": "X-Assessment-Token",
+            "secret_name": "HTTP_PROFILE_TOKEN",
+            "available": True,
+        }
+    ]
     assert secret_value not in create_response.get_data(as_text=True)
 
     available_files = {"client/cert.pem", "client/key.pem"}
@@ -4371,7 +4345,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO secrets "
-            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+            "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
             "VALUES (?, 'TEAM_HTTP_TOKEN', ?, ?, '[]', ?, ?)",
             (
                 team_id,
@@ -4419,10 +4393,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
         headers=owner_headers,
         json={"profile_key": "web", "title": "Team protected web checks"},
     ).get_json()
-    team_http_check = next(
-        item for item in team_assessment["checks"]["checks"]
-        if item["check_key"] == "http_profile"
-    )
+    team_http_check = next(item for item in team_assessment["checks"]["checks"] if item["check_key"] == "http_profile")
     team_action_path = (
         f"/api/v1/projects/{team_project_id}/assessments/"
         f"{team_assessment['assessment']['id']}/checks/{team_http_check['id']}/"
@@ -4448,6 +4419,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     deleted_audit = _audit_event_rows(target_id=profile_id)[-1]
     assert deleted_audit["event_type"] == "http_profile.delete"
     assert deleted_audit["details"]["deleted_count"] == 1
+
 
 def test_api_v1_project_assessment_errors_use_the_public_error_shape():
     client = get_client()
@@ -4530,7 +4502,7 @@ def test_api_v1_history_detail_output_and_cross_session_404():
         ):
             conn.execute(
                 "INSERT INTO entities "
-                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "(id, personal_workspace_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
                 "VALUES (?, ?, ?, ?, ?, '2026-05-19T00:00:00+00:00', "
                 "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00')",
                 (entity_id, token, entity_type, canonical_value, "sig_" + entity_id),
@@ -4542,12 +4514,12 @@ def test_api_v1_history_detail_output_and_cross_session_404():
                 (entity_id, run_id),
             )
         conn.execute(
-            "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+            "INSERT INTO entity_labels (id, personal_workspace_id, entity_type, entity_id, label, source, created) "
             "VALUES (?, ?, 'run', ?, 'baseline', 'manual', '2026-05-19T00:00:00+00:00')",
             ("lbl_" + uuid.uuid4().hex[:16], token, run_id),
         )
         conn.execute(
-            "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+            "INSERT INTO entity_notes (id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, ?, 'run', ?, 'private note', '2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00')",
             ("note_" + uuid.uuid4().hex[:16], token, run_id),
         )
@@ -4726,34 +4698,53 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
             "ai_feature_disabled",
         ),
     ):
-        with mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False), \
-             mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+        with (
+            mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False),
+            mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+        ):
             guard_cases.append((expected_status, expected_error, client.post(path, json={}, headers=_headers(token))))
     busy_lock = mock.MagicMock()
     busy_lock.__enter__.return_value = False
     busy_lock.__exit__.return_value = False
-    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-         mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
-         mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock):
-        guard_cases.append((429, "ai_busy", client.post(
-            f"/api/v1/runs/{guard_run_id}/ai-summary",
-            json={},
-            headers=_headers(token),
-        )))
-    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-         mock.patch.object(process, "redis_client", None):
-        guard_cases.append((503, "ai_unavailable", client.post(
-            f"/api/v1/runs/{guard_run_id}/ai-summary",
-            json={},
-            headers=_headers(token),
-        )))
-    with mock.patch.dict(config.CFG, {**base_guard_cfg, "ai_rate_limit_per_session_hour": 1}, clear=False), \
-         mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+    with (
+        mock.patch.dict(config.CFG, base_guard_cfg, clear=False),
+        mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+        mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock),
+    ):
+        guard_cases.append(
+            (
+                429,
+                "ai_busy",
+                client.post(
+                    f"/api/v1/runs/{guard_run_id}/ai-summary",
+                    json={},
+                    headers=_headers(token),
+                ),
+            )
+        )
+    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), mock.patch.object(process, "redis_client", None):
+        guard_cases.append(
+            (
+                503,
+                "ai_unavailable",
+                client.post(
+                    f"/api/v1/runs/{guard_run_id}/ai-summary",
+                    json={},
+                    headers=_headers(token),
+                ),
+            )
+        )
+    with (
+        mock.patch.dict(config.CFG, {**base_guard_cfg, "ai_rate_limit_per_session_hour": 1}, clear=False),
+        mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+    ):
         rate_first = client.post(f"/api/v1/runs/{guard_run_id}/ai-summary", json={}, headers=_headers(token))
         rate_limited = client.post(f"/api/v1/runs/{guard_run_id}/ai-summary", json={}, headers=_headers(token))
-    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
-         mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
-         mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)):
+    with (
+        mock.patch.dict(config.CFG, base_guard_cfg, clear=False),
+        mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+        mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)),
+    ):
         no_context = client.post(f"/api/v1/runs/{no_context_run_id}/ai-summary", json={}, headers=_headers(token))
 
     queued_payload = json.loads(queued.data)
@@ -4853,7 +4844,7 @@ def test_api_v1_ai_assists_honor_team_scope(monkeypatch):
     queued_payload = json.loads(queued.data)
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute(
-            "SELECT session_id, team_id FROM ai_run_assists WHERE id = ?",
+            "SELECT personal_workspace_id, team_id FROM ai_run_assists WHERE id = ?",
             (queued_payload["assist"]["id"],),
         ).fetchone()
 
@@ -4924,14 +4915,14 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
             "VALUES (?, ?, ?, 'reports/artifact.txt', 'artifact.txt', 'output', 13, 'test', "
             "'2026-05-19T00:00:01+00:00')",
             (artifact_id, token, run_id),
         )
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
             "VALUES (?, ?, ?, 'reports/team-artifact.txt', 'team-artifact.txt', 'output', 18, 'test', "
             "'2026-05-19T00:00:02+00:00')",
             (team_artifact_id, token, team_run_id),
@@ -4989,7 +4980,7 @@ def test_api_v1_artifact_download_rejects_cross_run_artifact_id():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
+            "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, output_search_text) "
             "VALUES (?, ?, 'external', 'echo second', '2026-05-19T00:00:00+00:00', "
             "'2026-05-19T00:00:01+00:00', 0, '', '[]', 0, 0, 0, 0, '')",
@@ -4997,7 +4988,7 @@ def test_api_v1_artifact_download_rejects_cross_run_artifact_id():
         )
         conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
             "VALUES (?, ?, ?, 'reports/second.txt', 'second.txt', 'output', 12, 'test', '2026-05-19T00:00:01+00:00')",
             (artifact_id, token, other_run_id),
         )
@@ -5055,9 +5046,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
             headers=_headers(token),
             json={"mode": "hostname", "value": private_lookup_value},
         )
-    api_private_lookup_value = (
-        "https://missing-api.example/private/path?token=api-super-secret#fragment"
-    )
+    api_private_lookup_value = "https://missing-api.example/private/path?token=api-super-secret#fragment"
     protected_tables = (
         "entities",
         "project_links",
@@ -5148,10 +5137,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     personal = json.loads(personal_response.data)
     assert personal["match_state"] == "found"
     assert personal["detail"]["entity"]["id"] == personal_id
-    lookup_completed = next(
-        call for call in lookup_info.call_args_list
-        if call.args == ("API_ATLAS_LOOKUP_COMPLETED",)
-    )
+    lookup_completed = next(call for call in lookup_info.call_args_list if call.args == ("API_ATLAS_LOOKUP_COMPLETED",))
     lookup_fields = lookup_completed.kwargs["extra"]
     assert lookup_fields["surface"] == "api_v1"
     assert lookup_fields["requested_type"] == "hostname"
@@ -5169,12 +5155,14 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     assert "canonical_value" not in lookup_fields
     assert private_response.status_code == 200
     assert json.loads(private_response.data)["match_state"] == "not_found"
-    private_lookup_logs = repr({
-        "debug": private_lookup_debug.call_args_list,
-        "info": private_lookup_info.call_args_list,
-        "warning": private_lookup_warning.call_args_list,
-        "error": private_lookup_error.call_args_list,
-    })
+    private_lookup_logs = repr(
+        {
+            "debug": private_lookup_debug.call_args_list,
+            "info": private_lookup_info.call_args_list,
+            "warning": private_lookup_warning.call_args_list,
+            "error": private_lookup_error.call_args_list,
+        }
+    )
     assert api_private_lookup_value not in private_lookup_logs
     assert before_private_lookup == after_private_lookup
     cached_response.assert_not_called()
@@ -5198,15 +5186,10 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     assert foreign_project_response.status_code == 400
     assert json.loads(foreign_project_response.data)["error"]["code"] == "invalid_project"
     rejected_reasons = {
-        call.kwargs["extra"]["reason"]
-        for call in lookup_debug.call_args_list
-        if call.args == ("ATLAS_LOOKUP_REJECTED",)
+        call.kwargs["extra"]["reason"] for call in lookup_debug.call_args_list if call.args == ("ATLAS_LOOKUP_REJECTED",)
     }
     assert rejected_reasons == {"invalid_lookup_type", "invalid_body", "invalid_request"}
-    rejected_warning = next(
-        call for call in lookup_warning.call_args_list
-        if call.args == ("ATLAS_LOOKUP_REJECTED",)
-    )
+    rejected_warning = next(call for call in lookup_warning.call_args_list if call.args == ("ATLAS_LOOKUP_REJECTED",))
     assert rejected_warning.kwargs["extra"]["surface"] == "api_v1"
     assert rejected_warning.kwargs["extra"]["reason"] == "invalid_project"
     assert rejected_warning.kwargs["extra"]["project_id"] == foreign_project["id"]
@@ -5226,7 +5209,7 @@ def test_api_v1_project_readers_are_token_scoped():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO evidence_packages "
-            "(id, session_id, project_id, name, description, redaction_mode, "
+            "(id, personal_workspace_id, project_id, name, description, redaction_mode, "
             "include_artifacts, manifest, status, created, updated) "
             "VALUES (?, ?, ?, 'API Package', '', 'redacted', 0, '{}', 'draft', "
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00')",
@@ -5239,7 +5222,8 @@ def test_api_v1_project_readers_are_token_scoped():
         )
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+            "(id, personal_workspace_id, type, canonical_value, signature_hash, "
+            "first_seen_at, last_seen_at, occurrence_count, created) "
             "VALUES (?, ?, 'domain', 'api.darklab.sh', ?, "
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 2, '2026-05-19T00:00:00+00:00')",
             (entity_id, token, "sig_" + uuid.uuid4().hex),
@@ -5251,7 +5235,7 @@ def test_api_v1_project_readers_are_token_scoped():
         )
         conn.execute(
             "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
+            "(id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id, attributes_json, "
             "first_seen_at, last_seen_at, occurrence_count, created) "
             "VALUES (?, ?, 'port', 'api.darklab.sh:443/tcp', ?, ?, ?, "
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1, '2026-05-19T00:00:00+00:00')",
@@ -5274,7 +5258,7 @@ def test_api_v1_project_readers_are_token_scoped():
         )
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "(id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
             "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, "
             "summary, impact, reproduction_steps, confidence, cve_ids_json, cwe_ids_json, cvss_vector, "
             "cvss_score, references_json, created) "
@@ -5296,12 +5280,14 @@ def test_api_v1_project_readers_are_token_scoped():
                 json.dumps(["CVE-2026-12345", "not-a-cve", "CVE-2026-12345"]),
                 json.dumps(["CWE-306", "CWE-invalid", "CWE-306"]),
                 "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-                json.dumps([
-                    "https://example.com/advisories/CVE-2026-12345",
-                    "javascript:alert(1)",
-                    "https://user:secret@example.com/private",
-                    "https://example.com\\@evil.test/advisory",
-                ]),
+                json.dumps(
+                    [
+                        "https://example.com/advisories/CVE-2026-12345",
+                        "javascript:alert(1)",
+                        "https://user:secret@example.com/private",
+                        "https://example.com\\@evil.test/advisory",
+                    ]
+                ),
             ),
         )
         conn.execute(
@@ -5311,7 +5297,7 @@ def test_api_v1_project_readers_are_token_scoped():
         )
         conn.execute(
             "INSERT INTO scan_target_observations "
-            "(session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
+            "(personal_workspace_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind, "
             "command_root, observed_at, port_entity_count, created) "
             "VALUES (?, '', ?, ?, 'domain', 'api.darklab.sh', 'port_scan', 'nmap', "
             "'2026-05-19T00:00:01+00:00', 1, '2026-05-19T00:00:01+00:00')",
@@ -5389,29 +5375,29 @@ def test_api_v1_project_readers_are_token_scoped():
     assert {key: owner_finding_payload[key] for key in expected_details} == expected_details
     assert owner_finding_payload["observation_id"].startswith("obs_")
     assert owner_finding_payload["remediation_id"].startswith("rmd_")
-    remediation_updated_at = owner_finding_payload["observation_references"][0][
-        "remediation_updated_at"
-    ]
+    remediation_updated_at = owner_finding_payload["observation_references"][0]["remediation_updated_at"]
     assert remediation_updated_at
-    assert owner_finding_payload["observation_references"] == [{
-        "observation_id": owner_finding_payload["observation_id"],
-        "remediation_id": owner_finding_payload["remediation_id"],
-        "remediation_group_id": owner_finding_payload["remediation_id"],
-        "remediation_group_merged": False,
-        "remediation_group_member_count": 1,
-        "identity_kind": "vulnerability",
-        "vulnerability_id": "CVE-2026-12345",
-        "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
-        "affected_subject": f"entity:{port_entity_id}",
-        "review_state": "new",
-        "review_state_source": "remediation_group",
-        "disposition_updated_at": remediation_updated_at,
-        "has_remediation": True,
-        "remediation_preview": "Restrict the administrative service and require authentication.",
-        "remediation_source": "remediation_group",
-        "remediation_updated_at": remediation_updated_at,
-        "validation_method": "captured_observation",
-    }]
+    assert owner_finding_payload["observation_references"] == [
+        {
+            "observation_id": owner_finding_payload["observation_id"],
+            "remediation_id": owner_finding_payload["remediation_id"],
+            "remediation_group_id": owner_finding_payload["remediation_id"],
+            "remediation_group_merged": False,
+            "remediation_group_member_count": 1,
+            "identity_kind": "vulnerability",
+            "vulnerability_id": "CVE-2026-12345",
+            "rule_identity": owner_finding_payload["observation_references"][0]["rule_identity"],
+            "affected_subject": f"entity:{port_entity_id}",
+            "review_state": "new",
+            "review_state_source": "remediation_group",
+            "disposition_updated_at": remediation_updated_at,
+            "has_remediation": True,
+            "remediation_preview": "Restrict the administrative service and require authentication.",
+            "remediation_source": "remediation_group",
+            "remediation_updated_at": remediation_updated_at,
+            "validation_method": "captured_observation",
+        }
+    ]
     assert owner_finding_payload["triage"] == {
         "verification_status": "ready_to_verify",
         "has_remediation": True,
@@ -5465,10 +5451,7 @@ def test_api_v1_project_readers_are_token_scoped():
     assert [finding["id"] for finding in atlas_related_port_payload["findings"]] == [finding_id]
     assert atlas_related_port_payload["findings"][0]["origin"] == "run"
     assert atlas_related_port_payload["findings"][0]["validation_method"] == "captured_observation"
-    assert {
-        key: atlas_related_port_payload["findings"][0][key]
-        for key in expected_details
-    } == expected_details
+    assert {key: atlas_related_port_payload["findings"][0][key] for key in expected_details} == expected_details
     assert atlas_related_port_payload["detail_limits"]["findings"] == {
         "bucket": "related_ports",
         "limit": 50,
@@ -5483,32 +5466,40 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_entity_payload["overview"]["observed"]["app_evidence"]["app_port_count"] == 1
     assert atlas_entity_payload["overview"]["observed"]["project_monitoring"]["applicable"] is False
     assert atlas_entity_payload["overview"]["observed"]["project_monitoring"]["state"] == "not_applicable"
-    assert atlas_entity_payload["overview"]["observed"]["app_ports"] == [{
-        "port": 443,
-        "proto": "tcp",
-        "service": "https",
-        "version": "",
-        "banner_available": False,
-        "occurrence_count": 1,
-        "last_seen_at": "2026-05-19T00:00:00+00:00",
-        "source_run_count": 1,
-        "service_evidence_state": "identified",
-        "assessment_actions": [{
-            "key": "https_profile",
-            "label": "Review HTTPS surface",
-            "rationale": "The service identified an HTTPS endpoint.",
-            "command": "command:httpx",
-            "policy_level": "standard",
-            "target_types": ["domain", "ip", "url"],
-            "required_features": ["confirmed_project_target", "httpx"],
-            "expected_evidence": [
-                "atlas_service_entity", "http_metadata", "tls_metadata",
+    assert atlas_entity_payload["overview"]["observed"]["app_ports"] == [
+        {
+            "port": 443,
+            "proto": "tcp",
+            "service": "https",
+            "version": "",
+            "banner_available": False,
+            "occurrence_count": 1,
+            "last_seen_at": "2026-05-19T00:00:00+00:00",
+            "source_run_count": 1,
+            "service_evidence_state": "identified",
+            "assessment_actions": [
+                {
+                    "key": "https_profile",
+                    "label": "Review HTTPS surface",
+                    "rationale": "The service identified an HTTPS endpoint.",
+                    "command": "command:httpx",
+                    "policy_level": "standard",
+                    "target_types": ["domain", "ip", "url"],
+                    "required_features": ["confirmed_project_target", "httpx"],
+                    "expected_evidence": [
+                        "atlas_service_entity",
+                        "http_metadata",
+                        "tls_metadata",
+                    ],
+                    "unsupported_conditions": [
+                        "ambiguous_service",
+                        "conflicting_service_evidence",
+                        "port_only_inference",
+                    ],
+                }
             ],
-            "unsupported_conditions": [
-                "ambiguous_service", "conflicting_service_evidence", "port_only_inference",
-            ],
-        }],
-    }]
+        }
+    ]
     assert atlas_entity_payload["overview"]["observed"]["app_services"] == ["https"]
     assert atlas_entity_payload["overview"]["observed"]["app_ports_truncated"] is False
     assert atlas_entity_payload["overview"]["finding_summary"] == atlas_entity_payload["finding_summary"]
@@ -5581,10 +5572,7 @@ def test_api_v1_project_readers_are_token_scoped():
     assert atlas_finding_payload["finding"]["validation_method"] == "captured_observation"
     assert atlas_finding_payload["finding"]["observation_id"] == owner_finding_payload["observation_id"]
     assert atlas_finding_payload["finding"]["remediation_id"] == owner_finding_payload["remediation_id"]
-    assert {
-        key: atlas_finding_payload["finding"][key]
-        for key in expected_details
-    } == expected_details
+    assert {key: atlas_finding_payload["finding"][key] for key in expected_details} == expected_details
     assert atlas_finding_payload["occurrences"][0]["run_id"] == run_id
     assert cross_project.status_code == 404
     assert cross_findings.status_code == 404
@@ -5614,11 +5602,7 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
     events = [json.loads(line) for line in stream.get_data(as_text=True).splitlines() if line]
     assert events[0] == {"type": "schema", "event": "schema", "v": 1, "kind": "line_event"}
     assert any(
-        event.get("type") == "output"
-        and event.get("v") == 1
-        and event.get("kind")
-        and event.get("role")
-        for event in events
+        event.get("type") == "output" and event.get("v") == 1 and event.get("kind") and event.get("role") for event in events
     )
     assert any(event.get("type") == "exit" and event.get("event_id") for event in events)
 
@@ -5647,8 +5631,10 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
         yield 'id: 1-0\nevent: output\ndata: {"type":"output","text":"before"}\n\n'
         raise RuntimeError("stream broke")
 
-    with mock.patch("blueprints.api_v1.stream_run_events", return_value=broken_stream()), \
-         mock.patch.object(api_blueprint.log, "error") as mock_error:
+    with (
+        mock.patch("blueprints.api_v1.stream_run_events", return_value=broken_stream()),
+        mock.patch.object(api_blueprint.log, "error") as mock_error,
+    ):
         broken = client.get(f"/api/v1/runs/{run_id}/stream?format=ndjson", headers=_headers(token))
         broken_events = [json.loads(line) for line in broken.get_data(as_text=True).splitlines() if line]
         assert broken_events[-1]["code"] == "stream_error"
@@ -5791,9 +5777,7 @@ def test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interact
     monkeypatch.setattr(
         api_blueprint,
         "_prepare_command_input",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            api_blueprint._RunPreparationError("later validation", status_code=418)
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(api_blueprint._RunPreparationError("later validation", status_code=418)),
     )
     interactive_prefix = client.post(
         "/api/v1/runs",
@@ -5888,7 +5872,7 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+            "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
             "VALUES (?, ?, 'external', 'echo done', '2026-05-19T00:00:00+00:00', "
             "'2026-05-19T00:00:01+00:00', 7, '[]', 0)",
             (completed_run_id, token),
@@ -6575,9 +6559,7 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
 
     assert muted_tested.status_code == 200
     assert muted_test_payload["queued"] == 1
-    assert muted_test_payload["events"] == [
-        {"event_id": muted_test_payload["event_ids"][0], "status": "sent", "last_error": ""}
-    ]
+    assert muted_test_payload["events"] == [{"event_id": muted_test_payload["event_ids"][0], "status": "sent", "last_error": ""}]
     assert sent_payloads[-1][1]["trigger"] == "test"
     assert sent_payloads[-1][1]["channel_id"] == created["id"]
 
@@ -6770,21 +6752,26 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert "--secret " not in cli_main._parser()._subparsers._group_actions[0].choices["notify"].format_help()
-    assert cli_main.main([
-        "notify",
-        "create",
-        "webhook",
-        "--label",
-        "CLI Hook",
-        "--trigger",
-        "run_complete",
-        "--config",
-        "timeout_seconds=5",
-        "--secret-file",
-        str(secret_file),
-        "--format",
-        "json",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "notify",
+                "create",
+                "webhook",
+                "--label",
+                "CLI Hook",
+                "--trigger",
+                "run_complete",
+                "--config",
+                "timeout_seconds=5",
+                "--secret-file",
+                str(secret_file),
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     create_output = capsys.readouterr().out
     assert json.loads(create_output)["channel"] == {
         "id": "ntc_cli",
@@ -6796,17 +6783,22 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     list_output = capsys.readouterr().out
     assert "ID       KIND     MUTED  LABEL" in list_output
     assert "CLI Hook" in list_output
-    assert cli_main.main([
-        "notify",
-        "update",
-        "ntc_cli",
-        "--label",
-        "Updated Hook",
-        "--trigger",
-        "run_complete",
-        "--trigger",
-        "watcher_changed",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "notify",
+                "update",
+                "ntc_cli",
+                "--label",
+                "Updated Hook",
+                "--trigger",
+                "run_complete",
+                "--trigger",
+                "watcher_changed",
+            ]
+        )
+        == 0
+    )
     assert "Updated Hook" in capsys.readouterr().out
     assert cli_main.main(["notify", "mute", "ntc_cli"]) == 0
     assert "yes" in capsys.readouterr().out
@@ -6814,18 +6806,23 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     assert "no" in capsys.readouterr().out
     assert cli_main.main(["notify", "test", "ntc_cli"]) == 0
     assert "nte_cli" in capsys.readouterr().out
-    assert cli_main.main([
-        "notify",
-        "events",
-        "--channel",
-        "ntc_cli",
-        "--trigger",
-        "test",
-        "--status",
-        "sent",
-        "--limit",
-        "10",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "notify",
+                "events",
+                "--channel",
+                "ntc_cli",
+                "--trigger",
+                "test",
+                "--status",
+                "sent",
+                "--limit",
+                "10",
+            ]
+        )
+        == 0
+    )
     events_output = capsys.readouterr().out
     assert "CREATED" in events_output
     assert "nte_cli" in events_output
@@ -6856,13 +6853,15 @@ def test_darklab_cli_team_commands_manage_api_teams(monkeypatch, capsys, tmp_pat
             del params, stream
             if path == "/teams" and method == "GET":
                 return {
-                    "teams": [{
-                        "id": "team_cli",
-                        "name": "CLI Team",
-                        "slug": "cli-team",
-                        "status": "active",
-                        "member": {"id": "tmem_owner", "role": "owner", "display_name": "Owner", "joined_at": ""},
-                    }]
+                    "teams": [
+                        {
+                            "id": "team_cli",
+                            "name": "CLI Team",
+                            "slug": "cli-team",
+                            "status": "active",
+                            "member": {"id": "tmem_owner", "role": "owner", "display_name": "Owner", "joined_at": ""},
+                        }
+                    ]
                 }
             if path == "/teams" and method == "POST":
                 assert body == {"name": "CLI Team", "slug": "cli-team", "display_name": "Owner"}
@@ -7017,12 +7016,14 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
             if path == "/schedules/sch_cli/fires":
                 assert params == {"limit": 5, "offset": 0}
                 return {
-                    "fires": [{
-                        "fired_at": "2026-05-20T00:00:00+00:00",
-                        "status": "fired",
-                        "run_id": "",
-                        "reason": "dispatch pending run integration",
-                    }]
+                    "fires": [
+                        {
+                            "fired_at": "2026-05-20T00:00:00+00:00",
+                            "status": "fired",
+                            "run_id": "",
+                            "reason": "dispatch pending run integration",
+                        }
+                    ]
                 }
             if path == "/schedules/sch_cli" and method == "DELETE":
                 return {"removed": True}
@@ -7031,18 +7032,23 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
-    assert cli_main.main([
-        "schedule",
-        "create",
-        "--every",
-        "hourly",
-        "--label",
-        "Hourly Echo",
-        "--",
-        "echo",
-        "hello world",
-        "semi;colon",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "schedule",
+                "create",
+                "--every",
+                "hourly",
+                "--label",
+                "Hourly Echo",
+                "--",
+                "echo",
+                "hello world",
+                "semi;colon",
+            ]
+        )
+        == 0
+    )
     assert "sch_cli" in capsys.readouterr().out
     assert cli_main.main(["schedule", "create", "--every", "hourly", "echo", "missing separator"]) == 1
     assert "needs -- before the command" in capsys.readouterr().err
@@ -7178,15 +7184,17 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
             if path == "/watchers/wtr_cli/fires":
                 assert params == {"limit": 5, "offset": 0}
                 return {
-                    "fires": [{
-                        "created": "2026-05-20T00:00:00+00:00",
-                        "fire_kind": "changed",
-                        "state_reason": "diff_detected",
-                        "ack_state": "new",
-                        "diff_kind": "textual",
-                        "state_at_fire": "changed",
-                        "run_id": "run_fire",
-                    }]
+                    "fires": [
+                        {
+                            "created": "2026-05-20T00:00:00+00:00",
+                            "fire_kind": "changed",
+                            "state_reason": "diff_detected",
+                            "ack_state": "new",
+                            "diff_kind": "textual",
+                            "state_at_fire": "changed",
+                            "run_id": "run_fire",
+                        }
+                    ]
                 }
             if path == "/watchers/wtr_cli/accept-baseline":
                 assert body == {"run_id": "run_fire"}
@@ -7198,28 +7206,33 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
-    assert cli_main.main([
-        "watch",
-        "create",
-        "run_base",
-        "--every",
-        "hourly",
-        "--label",
-        "Hourly Watch",
-        "--project",
-        "prj_cli",
-        "--suppress-removals",
-        "--ignore-line-pattern",
-        "^Host is up",
-        "--alert-after-repeated-changes",
-        "2",
-        "--alert-signal-class",
-        "ports",
-        "--",
-        "nmap",
-        "-sV",
-        "darklab.sh",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "watch",
+                "create",
+                "run_base",
+                "--every",
+                "hourly",
+                "--label",
+                "Hourly Watch",
+                "--project",
+                "prj_cli",
+                "--suppress-removals",
+                "--ignore-line-pattern",
+                "^Host is up",
+                "--alert-after-repeated-changes",
+                "2",
+                "--alert-signal-class",
+                "ports",
+                "--",
+                "nmap",
+                "-sV",
+                "darklab.sh",
+            ]
+        )
+        == 0
+    )
     assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "create", "run_base", "--every", "hourly", "--label", "Hourly Watch"]) == 0
     assert "wtr_cli" in capsys.readouterr().out
@@ -7270,21 +7283,26 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "run_fire" in capsys.readouterr().out
     assert cli_main.main(["watch", "set-project", "wtr_cli", "--clear"]) == 0
     assert "wtr_cli" in capsys.readouterr().out
-    assert cli_main.main([
-        "watch",
-        "set-policy",
-        "wtr_cli",
-        "--ignore-line-pattern",
-        "^Host is up",
-        "--ignore-line-pattern",
-        "^RTT jitter",
-        "--alert-after-repeated-changes",
-        "3",
-        "--alert-signal-class",
-        "findings",
-        "--alert-signal-class",
-        "ports",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "watch",
+                "set-policy",
+                "wtr_cli",
+                "--ignore-line-pattern",
+                "^Host is up",
+                "--ignore-line-pattern",
+                "^RTT jitter",
+                "--alert-after-repeated-changes",
+                "3",
+                "--alert-signal-class",
+                "findings",
+                "--alert-signal-class",
+                "ports",
+            ]
+        )
+        == 0
+    )
     assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "delete", "wtr_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
@@ -7333,7 +7351,10 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
             (entity_id,),
         ).fetchone()[0]
     snapshot = NucleiTemplateCacheSnapshot(
-        "ready", "v10.4.3", "sha256:" + "a" * 64, 12,
+        "ready",
+        "v10.4.3",
+        "sha256:" + "a" * 64,
+        12,
     )
     monkeypatch.setattr(
         "services.assessments.probe_runtime.template_cache.managed_nuclei_template_snapshot",
@@ -7341,9 +7362,7 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
     )
     monkeypatch.setattr(
         "services.assessments.probe_runtime.template_health.managed_nuclei_template_health",
-        lambda **_kwargs: NucleiTemplateHealth(
-            "ready", snapshot, "passed", "v3.4.10"
-        ),
+        lambda **_kwargs: NucleiTemplateHealth("ready", snapshot, "passed", "v3.4.10"),
     )
     monkeypatch.setattr(
         "services.assessments.probe_runtime.resolve_runtime_command",
@@ -7372,8 +7391,10 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
         f"{base}/run",
         headers=headers,
         json={
-            "action_id": "ping", "entity_id": entity_id,
-            "confirmed": True, "plan_digest": plan["plan_digest"],
+            "action_id": "ping",
+            "entity_id": entity_id,
+            "confirmed": True,
+            "plan_digest": plan["plan_digest"],
         },
     ).get_json()
     monkeypatch.setattr(
@@ -7388,18 +7409,16 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
 
     spec = openapi_spec()
     schemas = spec["components"]["schemas"]
-    assert schemas["ProbeCatalog"]["properties"]["actions"]["items"] == {
-        "$ref": "#/components/schemas/ProbeCatalogAction"
-    }
-    assert schemas["ProbePlan"]["properties"]["bounds"] == {
-        "$ref": "#/components/schemas/ProbeBounds"
-    }
-    assert schemas["ProbeRunResponse"]["properties"]["run"] == {
-        "$ref": "#/components/schemas/ProbeStartedRun"
-    }
+    assert schemas["ProbeCatalog"]["properties"]["actions"]["items"] == {"$ref": "#/components/schemas/ProbeCatalogAction"}
+    assert schemas["ProbePlan"]["properties"]["bounds"] == {"$ref": "#/components/schemas/ProbeBounds"}
+    assert schemas["ProbeRunResponse"]["properties"]["run"] == {"$ref": "#/components/schemas/ProbeStartedRun"}
     for schema_name in (
-        "ProbeCatalogAction", "ProbeServiceRecommendation", "ProbeTarget",
-        "ProbeHttpScope", "ProbeBounds", "ProbeStartedRun",
+        "ProbeCatalogAction",
+        "ProbeServiceRecommendation",
+        "ProbeTarget",
+        "ProbeHttpScope",
+        "ProbeBounds",
+        "ProbeStartedRun",
     ):
         assert schemas[schema_name]["required"]
         assert schemas[schema_name]["additionalProperties"] is False
@@ -7413,14 +7432,14 @@ def test_probe_openapi_schemas_validate_real_api_payloads(monkeypatch):
         _assert_openapi_payload(payload, schemas[schema_name], schemas)
 
     paths = spec["paths"]
-    plan_examples = paths["/projects/{project_id}/probes/plan"]["post"]["responses"]["200"][
-        "content"
-    ]["application/json"]["examples"]
+    plan_examples = paths["/projects/{project_id}/probes/plan"]["post"]["responses"]["200"]["content"]["application/json"][
+        "examples"
+    ]
     for example in plan_examples.values():
         _assert_openapi_payload(example["value"], schemas["ProbePlanResponse"], schemas)
-    stable_error = paths["/projects/{project_id}/probes/run"]["post"]["responses"]["409"][
-        "content"
-    ]["application/json"]["example"]
+    stable_error = paths["/projects/{project_id}/probes/run"]["post"]["responses"]["409"]["content"]["application/json"][
+        "example"
+    ]
     _assert_openapi_payload(stable_error, schemas["ApiError"], schemas)
 
 
@@ -7455,18 +7474,18 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "NdjsonStream",
         "OsvLookupRequest",
         "OsvLookupResponse",
-            "NotificationChannel",
-            "NotificationChannelCreateRequest",
-            "NotificationChannelKind",
-            "NotificationChannelKindField",
-            "NotificationChannelKindList",
-            "NotificationChannelList",
-            "NotificationChannelResponse",
-            "NotificationChannelUpdateRequest",
-            "NotificationEvent",
-            "NotificationEventPage",
-            "NotificationSecretField",
-            "NotificationTriggerOption",
+        "NotificationChannel",
+        "NotificationChannelCreateRequest",
+        "NotificationChannelKind",
+        "NotificationChannelKindField",
+        "NotificationChannelKindList",
+        "NotificationChannelList",
+        "NotificationChannelResponse",
+        "NotificationChannelUpdateRequest",
+        "NotificationEvent",
+        "NotificationEventPage",
+        "NotificationSecretField",
+        "NotificationTriggerOption",
         "NotificationTestResponse",
         "Project",
         "ProjectCounts",
@@ -7523,9 +7542,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "$ref": "#/components/schemas/RunStartRequest"
     }
     osv_lookup = spec["paths"]["/advisories/osv/lookup"]["post"]
-    assert osv_lookup["requestBody"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/OsvLookupRequest"
-    }
+    assert osv_lookup["requestBody"]["content"]["application/json"]["schema"] == {"$ref": "#/components/schemas/OsvLookupRequest"}
     assert osv_lookup["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/OsvLookupResponse"
     }
@@ -7538,7 +7555,10 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     }
     assert "never refreshes a feed" in risk_feeds["description"]
     assert schemas["CveRiskFeedStatus"]["properties"]["status"]["enum"] == [
-        "unavailable", "current", "stale", "failed",
+        "unavailable",
+        "current",
+        "stale",
+        "failed",
     ]
     assert spec["paths"]["/runs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ActiveRunList"
@@ -7555,9 +7575,9 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/teams/{team_id}/invites"]["post"]["responses"]["403"]["description"] == (
         "Role lacks required team capability"
     )
-    assert spec["paths"]["/teams/{team_id}/members/{member_id}"]["patch"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/TeamMemberUpdateRequest"}
+    assert spec["paths"]["/teams/{team_id}/members/{member_id}"]["patch"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/TeamMemberUpdateRequest"}
     assert "capabilities" in schemas["TeamMembership"]["required"]
     assert schemas["TeamMembership"]["properties"]["capabilities"]["items"] == {"type": "string"}
     assert "capabilities" in schemas["TeamMember"]["required"]
@@ -7654,9 +7674,9 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/schedules"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ScheduleCreateRequest"
     }
-    schedule_patch_schema = spec["paths"]["/schedules/{schedule_id}"]["patch"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"]
+    schedule_patch_schema = spec["paths"]["/schedules/{schedule_id}"]["patch"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ]
     assert schedule_patch_schema == {"$ref": "#/components/schemas/ScheduleUpdateRequest"}
     schedule_fire_params = {param["name"] for param in spec["paths"]["/schedules/{schedule_id}/fires"]["get"]["parameters"]}
     assert {"schedule_id", "limit", "offset"}.issubset(schedule_fire_params)
@@ -7670,15 +7690,13 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/watchers"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WatcherCreateRequest"
     }
-    watcher_patch_schema = spec["paths"]["/watchers/{watcher_id}"]["patch"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"]
+    watcher_patch_schema = spec["paths"]["/watchers/{watcher_id}"]["patch"]["requestBody"]["content"]["application/json"][
+        "schema"
+    ]
     assert watcher_patch_schema == {"$ref": "#/components/schemas/WatcherUpdateRequest"}
     watcher_fire_params = {param["name"] for param in spec["paths"]["/watchers/{watcher_id}/fires"]["get"]["parameters"]}
     assert {"watcher_id", "limit", "offset"}.issubset(watcher_fire_params)
-    assert {"id", "run_id", "workspace_path", "display_name", "file_status"}.issubset(
-        set(schemas["ArtifactSummary"]["required"])
-    )
+    assert {"id", "run_id", "workspace_path", "display_name", "file_status"}.issubset(set(schemas["ArtifactSummary"]["required"]))
     history_params = {param["name"]: param for param in spec["paths"]["/history"]["get"]["parameters"]}
     assert {"q", "project_id", "run_kind", "limit", "offset"}.issubset(history_params)
     assert history_params["since"]["schema"]["format"] == "date-time"
@@ -7697,9 +7715,9 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/atlas/lookup"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AtlasEntityLookupRequest"
     }
-    assert spec["paths"]["/atlas/lookup"]["post"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AtlasEntityLookupResponse"}
+    assert spec["paths"]["/atlas/lookup"]["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AtlasEntityLookupResponse"
+    }
     assert schemas["AtlasEntityLookupRequest"]["required"] == ["value"]
     assert schemas["AtlasEntityLookupRequest"]["additionalProperties"] is False
     assert schemas["AtlasEntityLookupRequest"]["properties"]["value"]["minLength"] == 1
@@ -7791,12 +7809,8 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     batch_preview_items_path = batch_preview_read_path + "/items"
     batch_list_path = "/projects/{project_id}/assessment-batches"
     batch_start_path = assessment_path + "/assessment-batches"
-    batch_cancel_path = (
-        "/projects/{project_id}/assessment-batches/{batch_id}/cancel"
-    )
-    batch_retry_preview_path = (
-        "/projects/{project_id}/assessment-batches/{batch_id}/retry-previews"
-    )
+    batch_cancel_path = "/projects/{project_id}/assessment-batches/{batch_id}/cancel"
+    batch_retry_preview_path = "/projects/{project_id}/assessment-batches/{batch_id}/retry-previews"
     batch_retry_path = "/projects/{project_id}/assessment-batches/{batch_id}/retry"
     batch_path = "/assessment-batches/{batch_id}"
     batch_items_path = batch_path + "/items"
@@ -7837,12 +7851,10 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert set(paths[evidence_path]) == {"post"}
     assert set(paths[evidence_link_path]) == {"delete"}
     assert set(paths[run_evidence_path]) == {"get"}
-    assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentCreateRequest"}
-    assert paths["/projects/{project_id}/assessments"]["get"]["responses"]["200"][
-        "content"
-    ]["application/json"]["schema"] == {
+    assert paths["/projects/{project_id}/assessments"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentCreateRequest"
+    }
+    assert paths["/projects/{project_id}/assessments"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AssessmentCyclePage"
     }
     assert schemas["AssessmentCyclePage"]["properties"]["profiles"]["items"] == {
@@ -7856,82 +7868,66 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert batch_request["properties"]["max_owner_parallel"]["maximum"] == 32
     assert batch_request["properties"]["max_instance_parallel"]["maximum"] == 64
     assert "source_batch_id" in schemas["AssessmentBatchPreview"]["required"]
-    assert schemas["AssessmentBatchPreview"]["properties"]["source_batch_id"] == {
-        "type": "string"
+    assert schemas["AssessmentBatchPreview"]["properties"]["source_batch_id"] == {"type": "string"}
+    assert schemas["AssessmentBatchPreviewSummary"]["properties"]["source_retry_eligible_item_count"] == {
+        "type": "integer",
+        "minimum": 0,
     }
-    assert schemas["AssessmentBatchPreviewSummary"]["properties"][
-        "source_retry_eligible_item_count"
-    ] == {"type": "integer", "minimum": 0}
-    assert paths[batch_preview_path]["post"]["responses"]["201"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
-    assert schemas["AssessmentBatchPreviewItemPage"]["properties"]["items"][
-        "maxItems"
-    ] == 100
+    assert paths[batch_preview_path]["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchPreviewResponse"
+    }
+    assert schemas["AssessmentBatchPreviewItemPage"]["properties"]["items"]["maxItems"] == 100
     assert schemas["AssessmentBatchProgress"]["properties"]["skipped"] == {
         "type": "integer",
         "minimum": 0,
     }
-    assert paths[batch_list_path]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchList"}
+    assert paths[batch_list_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchList"
+    }
     assert schemas["AssessmentBatchStartRequest"]["additionalProperties"] is False
     assert schemas["AssessmentBatchStartRequest"]["properties"]["confirmed"] == {
         "type": "boolean",
         "enum": [True],
     }
-    assert paths[batch_start_path]["post"]["responses"]["202"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchStartResponse"}
-    assert paths[batch_cancel_path]["post"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchCancelResponse"}
-    assert paths[batch_retry_preview_path]["post"]["responses"]["201"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchPreviewResponse"}
-    assert paths[batch_retry_path]["post"]["responses"]["202"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentBatchStartResponse"}
-    assert schemas["AssessmentBatchItemPage"]["properties"]["items"][
-        "maxItems"
-    ] == 100
-    assert schemas["AssessmentBatchEventPage"]["properties"]["events"][
-        "maxItems"
-    ] == 100
-    assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AssessmentDetail"}
-    assert paths[evidence_path]["post"]["responses"]["201"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"}
-    assert paths[action_path]["get"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AssessmentActionPreview"}
-    action_preview_params = {
-        parameter["name"]: parameter
-        for parameter in paths[action_path]["get"]["parameters"]
+    assert paths[batch_start_path]["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchStartResponse"
     }
+    assert paths[batch_cancel_path]["post"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchCancelResponse"
+    }
+    assert paths[batch_retry_preview_path]["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchPreviewResponse"
+    }
+    assert paths[batch_retry_path]["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentBatchStartResponse"
+    }
+    assert schemas["AssessmentBatchItemPage"]["properties"]["items"]["maxItems"] == 100
+    assert schemas["AssessmentBatchEventPage"]["properties"]["events"]["maxItems"] == 100
+    assert paths[assessment_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentDetail"
+    }
+    assert paths[evidence_path]["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentEvidenceLinkResponse"
+    }
+    assert paths[action_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentActionPreview"
+    }
+    action_preview_params = {parameter["name"]: parameter for parameter in paths[action_path]["get"]["parameters"]}
     assert "http_profile_id" in action_preview_params
     assert "source_run_id" in action_preview_params
     assert "parameter_observation_id" in action_preview_params
     assert "schema_artifact_id" in action_preview_params
-    assert paths[action_path]["post"]["requestBody"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AssessmentActionLaunchRequest"}
-    assert schemas["AssessmentActionPlan"]["properties"]["oast"] == {
-        "$ref": "#/components/schemas/AssessmentOastPlanState"
+    assert paths[action_path]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentActionLaunchRequest"
     }
-    assert paths[oast_correlations_path]["post"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentOastReserveRequest"}
-    assert paths[oast_correlations_path]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {
+    assert schemas["AssessmentActionPlan"]["properties"]["oast"] == {"$ref": "#/components/schemas/AssessmentOastPlanState"}
+    assert paths[oast_correlations_path]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentOastReserveRequest"
+    }
+    assert paths[oast_correlations_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AssessmentOastCorrelationListResponse"
     }
-    assert paths[oast_correlation_path]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {
+    assert paths[oast_correlation_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AssessmentOastCorrelationResponse"
     }
     assert schemas["AssessmentOastReserveRequest"]["required"] == [
@@ -7940,22 +7936,18 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "source_run_id",
         "parameter_observation_id",
     ]
-    assert schemas["AssessmentOastCorrelation"]["properties"]["callback_url"] == {
-        "type": "string"
+    assert schemas["AssessmentOastCorrelation"]["properties"]["callback_url"] == {"type": "string"}
+    assert paths[zap_plan_path]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentZapPlanRequest"
     }
-    assert paths[zap_plan_path]["post"]["requestBody"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/AssessmentZapPlanRequest"}
-    assert paths[zap_jobs_path]["post"]["responses"]["202"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentZapJobResponse"}
-    assert paths[zap_jobs_path]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/AssessmentZapJobListResponse"}
+    assert paths[zap_jobs_path]["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentZapJobResponse"
+    }
+    assert paths[zap_jobs_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AssessmentZapJobListResponse"
+    }
     assert schemas["AssessmentZapPlanRequest"]["additionalProperties"] is False
-    assert schemas["AssessmentZapPlanRequest"]["properties"]["target_entity_ids"][
-        "maxItems"
-    ] == 8
+    assert schemas["AssessmentZapPlanRequest"]["properties"]["target_entity_ids"]["maxItems"] == 8
     assert schemas["AssessmentZapSubmitRequest"]["properties"]["confirmed"] == {
         "type": "boolean",
         "enum": [True],
@@ -8012,17 +8004,13 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "unavailable",
     ]
     assert "nuclei_snapshot_confirmed" in schemas["AssessmentBatchStartRequest"]["properties"]
-    assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"][
-        "maxItems"
-    ] == 64
-    assert schemas["FindingVerificationActionPlan"]["properties"]["bounds"]["properties"][
-        "credential_use"
-    ]["enum"] == ["none", "protected_http_profile"]
+    assert schemas["AssessmentOpenApiArtifactSelection"]["properties"]["options"]["maxItems"] == 64
+    assert schemas["FindingVerificationActionPlan"]["properties"]["bounds"]["properties"]["credential_use"]["enum"] == [
+        "none",
+        "protected_http_profile",
+    ]
 
-    detail_params = {
-        parameter["name"]
-        for parameter in paths[assessment_path]["get"]["parameters"]
-    }
+    detail_params = {parameter["name"] for parameter in paths[assessment_path]["get"]["parameters"]}
     assert {
         "project_id",
         "assessment_id",
@@ -8066,9 +8054,9 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "type": "array",
         "items": {"$ref": "#/components/schemas/AssessmentEvidence"},
     }
-    assert paths[run_evidence_path]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/NmapServiceEvidencePage"}
+    assert paths[run_evidence_path]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/NmapServiceEvidencePage"
+    }
     assert schemas["NmapServiceObservation"]["properties"]["classification"]["enum"] == [
         "informational",
     ]
@@ -8094,9 +8082,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
     assert schemas["AssessmentDetail"]["properties"]["finding_worklist"] == {
         "$ref": "#/components/schemas/AssessmentFindingWorklistPage"
     }
-    assert schemas["AssessmentDetail"]["properties"]["retest_queue"] == {
-        "$ref": "#/components/schemas/AssessmentRetestQueue"
-    }
+    assert schemas["AssessmentDetail"]["properties"]["retest_queue"] == {"$ref": "#/components/schemas/AssessmentRetestQueue"}
     assert schemas["AssessmentRetestQueue"]["properties"]["groups"] == {
         "type": "array",
         "maxItems": 50,
@@ -8132,11 +8118,7 @@ def test_api_v1_openapi_contract_describes_project_assessments():
         "schemathesis_reports",
         "schemathesis_operations",
     }.issubset(schemas["AssessmentDeletionCounts"]["required"])
-    assessment_contract = json.dumps({
-        key: value
-        for key, value in schemas.items()
-        if key.startswith("Assessment")
-    })
+    assessment_contract = json.dumps({key: value for key, value in schemas.items() if key.startswith("Assessment")})
     for private_field in (
         "created_by_session_id",
         "updated_by_session_id",
@@ -8166,30 +8148,37 @@ def test_api_v1_openapi_contract_describes_guarded_verification_actions():
 
     spec = openapi_spec()
     schemas = spec["components"]["schemas"]
-    path = (
-        "/projects/{project_id}/findings/{finding_id}/"
-        "verification-actions/{check_id}"
-    )
+    path = "/projects/{project_id}/findings/{finding_id}/verification-actions/{check_id}"
     operations = spec["paths"][path]
 
     assert set(operations) == {"get", "post"}
-    assert operations["get"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FindingVerificationActionPreview"}
-    assert operations["post"]["requestBody"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"}
-    assert operations["post"]["responses"]["202"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FindingVerificationActionLaunchResponse"}
+    assert operations["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/FindingVerificationActionPreview"
+    }
+    assert operations["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/FindingVerificationActionLaunchRequest"
+    }
+    assert operations["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/FindingVerificationActionLaunchResponse"
+    }
     assert set(operations["post"]["responses"]) == {
-        "202", "400", "401", "403", "404", "409", "429", "500", "503",
+        "202",
+        "400",
+        "401",
+        "403",
+        "404",
+        "409",
+        "429",
+        "500",
+        "503",
     }
     request_schema = schemas["FindingVerificationActionLaunchRequest"]
     assert request_schema["required"] == ["confirmed", "plan_digest"]
     assert request_schema["additionalProperties"] is False
     assert set(request_schema["properties"]) == {
-        "confirmed", "plan_digest", "workspace_cwd",
+        "confirmed",
+        "plan_digest",
+        "workspace_cwd",
     }
     assert request_schema["properties"]["confirmed"] == {
         "type": "boolean",
@@ -8197,8 +8186,16 @@ def test_api_v1_openapi_contract_describes_guarded_verification_actions():
     }
     plan_schema = schemas["FindingVerificationActionPlan"]
     assert {
-        "action", "target", "policy_level", "http_profile", "scope", "bounds",
-        "display_command", "launchable", "requires_confirmation", "plan_digest",
+        "action",
+        "target",
+        "policy_level",
+        "http_profile",
+        "scope",
+        "bounds",
+        "display_command",
+        "launchable",
+        "requires_confirmation",
+        "plan_digest",
     }.issubset(plan_schema["required"])
     assert plan_schema["additionalProperties"] is False
 
@@ -8212,18 +8209,18 @@ def test_api_v1_openapi_contract_describes_manual_finding_mutations():
     collection_path = "/projects/{project_id}/findings"
     item_path = collection_path + "/{finding_id}"
 
-    assert paths[collection_path]["post"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingCreateRequest"}
-    assert paths[item_path]["patch"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingUpdateRequest"}
-    assert paths[collection_path]["post"]["responses"]["201"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingMutationResponse"}
-    assert paths[item_path]["patch"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/ManualFindingMutationResponse"}
+    assert paths[collection_path]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ManualFindingCreateRequest"
+    }
+    assert paths[item_path]["patch"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ManualFindingUpdateRequest"
+    }
+    assert paths[collection_path]["post"]["responses"]["201"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ManualFindingMutationResponse"
+    }
+    assert paths[item_path]["patch"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ManualFindingMutationResponse"
+    }
 
     create_schema = schemas["ManualFindingCreateRequest"]
     update_schema = schemas["ManualFindingUpdateRequest"]
@@ -8245,11 +8242,9 @@ def test_api_v1_openapi_contract_describes_manual_finding_mutations():
         "manual_updated_by_member_id",
         "manual_updated_at",
     }.issubset(public_finding["required"])
-    manual_contract = json.dumps({
-        name: schema
-        for name, schema in schemas.items()
-        if name.startswith("ManualFinding") or name == "ProjectFinding"
-    })
+    manual_contract = json.dumps(
+        {name: schema for name, schema in schemas.items() if name.startswith("ManualFinding") or name == "ProjectFinding"}
+    )
     assert "manual_created_by_session_id" not in manual_contract
     assert "manual_updated_by_session_id" not in manual_contract
 
@@ -8290,9 +8285,7 @@ def test_darklab_cli_sse_parser_reads_events():
             yield b'data: {"type":"output","text":"ok"}\n'
             yield b"\n"
 
-    assert list(iter_sse_events(FakeResponse())) == [
-        {"type": "output", "text": "ok", "event_id": "1-0"}
-    ]
+    assert list(iter_sse_events(FakeResponse())) == [{"type": "output", "text": "ok", "event_id": "1-0"}]
 
 
 def test_darklab_cli_config_flags_win_over_environment(monkeypatch):
@@ -8455,10 +8448,21 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
     assert cli_main.main(["--team", "team_notify", "notify", "list", "--format", "json"]) == 0
     json.loads(capsys.readouterr().out)
 
-    assert cli_main.main([
-        "--team", "team_assessment", "assessment", "create", "prj_cli", "network",
-        "--format", "json",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "--team",
+                "team_assessment",
+                "assessment",
+                "create",
+                "prj_cli",
+                "network",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     json.loads(capsys.readouterr().out)
 
     assert seen == [
@@ -8509,10 +8513,7 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                 404,
                 "Not Found",
                 Message(),
-                io.BytesIO(
-                    b'{"error":{"code":"not_found","message":"missing",'
-                    b'"details":{"batch_ids":["wfx_cli"]}}}'
-                ),
+                io.BytesIO(b'{"error":{"code":"not_found","message":"missing","details":{"batch_ids":["wfx_cli"]}}}'),
             )
         if req.full_url.endswith("/conflict"):
             raise urllib.error.HTTPError(
@@ -8520,10 +8521,7 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                 409,
                 "Conflict",
                 Message(),
-                io.BytesIO(
-                    b'{"ok":false,"updated":false,"conflict":"stale_revision",'
-                    b'"current_revision":3}'
-                ),
+                io.BytesIO(b'{"ok":false,"updated":false,"conflict":"stale_revision","current_revision":3}'),
             )
         return FakeResponse()
 
@@ -8607,12 +8605,12 @@ def test_darklab_cli_config_save_enforces_owner_only_permissions(monkeypatch, tm
     path = tmp_path / ".config" / "darklab" / "config.toml"
     path.parent.mkdir(parents=True)
     path.write_text(
-        '# local darklab settings\n'
+        "# local darklab settings\n"
         'token = "tok_existing" # keep this comment\n'
         'unknown = "preserved"\n'
-        '\n'
-        '[nested]\n'
-        'ignored = true\n',
+        "\n"
+        "[nested]\n"
+        "ignored = true\n",
         encoding="utf-8",
     )
     path.chmod(0o644)
@@ -8621,7 +8619,7 @@ def test_darklab_cli_config_save_enforces_owner_only_permissions(monkeypatch, tm
     save_config_value("team", "team_cli")
     saved = path.read_text(encoding="utf-8")
 
-    assert '# local darklab settings\n' in saved
+    assert "# local darklab settings\n" in saved
     assert 'token = "tok_existing" # keep this comment\n' in saved
     assert 'unknown = "preserved"\n' in saved
     assert 'team = "team_cli"\n[nested]\nignored = true\n' in saved
@@ -8703,7 +8701,10 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
             "credential_use": "protected_http_profile",
         },
         "http_profile": {
-            "id": "hpr_cli", "name": "User session", "role": "user", "revision": 1,
+            "id": "hpr_cli",
+            "name": "User session",
+            "role": "user",
+            "revision": 1,
             "scope": {
                 "allowed_hosts": ["probe.example"],
                 "scope_roots": ["https://probe.example/app"],
@@ -8737,33 +8738,43 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
             if method == "GET" and path == "/projects":
                 assert params == {"limit": 100, "offset": 0}
                 return {
-                    "projects": [{
-                        "id": "prj_probe",
-                        "slug": "probe-project",
-                        "name": "Probe Project",
-                        "status": "active",
-                    }],
+                    "projects": [
+                        {
+                            "id": "prj_probe",
+                            "slug": "probe-project",
+                            "name": "Probe Project",
+                            "status": "active",
+                        }
+                    ],
                     "has_more": False,
                 }
             if method == "GET" and path == "/projects/prj_probe/probes":
                 actions = [
                     {
-                        "id": "ping", "label": "Ping", "policy_level": "safe",
+                        "id": "ping",
+                        "label": "Ping",
+                        "policy_level": "safe",
                         "target_types": ["domain", "ip"],
                         "availability": {"available": True},
                     },
                     {
-                        "id": "dnsrecon", "label": "DNSRecon", "policy_level": "safe",
+                        "id": "dnsrecon",
+                        "label": "DNSRecon",
+                        "policy_level": "safe",
                         "target_types": ["domain"],
                         "availability": {"available": True},
                     },
                     {
-                        "id": "httpx", "label": "HTTPx", "policy_level": "safe",
+                        "id": "httpx",
+                        "label": "HTTPx",
+                        "policy_level": "safe",
                         "target_types": ["domain", "ip", "url"],
                         "availability": {"available": True},
                     },
                     {
-                        "id": "sqlmap", "label": "SQLmap", "policy_level": "standard",
+                        "id": "sqlmap",
+                        "label": "SQLmap",
+                        "policy_level": "standard",
                         "target_types": ["url"],
                         "exclusions": ["destructive_sql"],
                         "availability": {"available": True},
@@ -8771,29 +8782,34 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                 ]
                 target_type = str((params or {}).get("target_type") or "")
                 if target_type:
-                    actions = [
-                        action for action in actions
-                        if target_type in action["target_types"]
-                    ]
+                    actions = [action for action in actions if target_type in action["target_types"]]
                 service = str((params or {}).get("service") or "")
                 return {
                     "catalog": {
                         "actions": actions,
                         "nmap_profiles": [{"key": "safe"}],
-                        "nuclei_profiles": [{
-                            "key": "intrusive",
-                            "availability": {
-                                "available": False,
-                                "reason": "Intrusive probe actions aren't enabled.",
-                            },
-                        }],
-                        "service_recommendations": ([{
-                            "action_id": "nmap",
-                            "nmap_profile": "smb",
-                            "target_types": ["domain", "ip"],
-                            "label": "Review SMB services",
-                            "rationale": "Confirm the discovered SMB surface.",
-                        }] if service == "microsoft-ds" else []),
+                        "nuclei_profiles": [
+                            {
+                                "key": "intrusive",
+                                "availability": {
+                                    "available": False,
+                                    "reason": "Intrusive probe actions aren't enabled.",
+                                },
+                            }
+                        ],
+                        "service_recommendations": (
+                            [
+                                {
+                                    "action_id": "nmap",
+                                    "nmap_profile": "smb",
+                                    "target_types": ["domain", "ip"],
+                                    "label": "Review SMB services",
+                                    "rationale": "Confirm the discovered SMB surface.",
+                                }
+                            ]
+                            if service == "microsoft-ds"
+                            else []
+                        ),
                         "exclusions": ["zap", "oast_allocation"],
                     },
                 }
@@ -8803,45 +8819,58 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
             if method == "POST" and path.endswith("/plan"):
                 if body and body.get("http_profile_id"):
                     assert body == {
-                        "action_id": "httpx", "entity_id": "ent_probe",
-                        "http_profile_id": "User session", "nuclei_profile": "safe",
+                        "action_id": "httpx",
+                        "entity_id": "ent_probe",
+                        "http_profile_id": "User session",
+                        "nuclei_profile": "safe",
                     }
                     return {"plan": protected_plan}
                 if body and body.get("action_id") == "dnsrecon":
                     assert body == {
-                        "action_id": "dnsrecon", "entity_id": "ent_probe",
+                        "action_id": "dnsrecon",
+                        "entity_id": "ent_probe",
                         "nuclei_profile": "safe",
                     }
                     return {"plan": unavailable_plan}
                 assert body == {
-                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
+                    "action_id": "ping",
+                    "entity_id": "ent_probe",
+                    "nuclei_profile": "safe",
                 }
                 return {"plan": plan}
             if method == "POST" and path.endswith("/run"):
                 if body and body.get("http_profile_id"):
                     assert body == {
-                        "action_id": "httpx", "entity_id": "ent_probe",
-                        "http_profile_id": "User session", "nuclei_profile": "safe",
-                        "confirmed": True, "plan_digest": "b" * 64,
+                        "action_id": "httpx",
+                        "entity_id": "ent_probe",
+                        "http_profile_id": "User session",
+                        "nuclei_profile": "safe",
+                        "confirmed": True,
+                        "plan_digest": "b" * 64,
                     }
                     return {
                         "plan": protected_plan,
                         "project_id": "prj_probe",
                         "run": {
-                            "id": "run_protected_probe", "status": "queued",
+                            "id": "run_protected_probe",
+                            "status": "queued",
                             "command": protected_plan["display_command"],
                             "history_url": "/api/v1/history/run_protected_probe",
                         },
                     }
                 assert body == {
-                    "action_id": "ping", "entity_id": "ent_probe", "nuclei_profile": "safe",
-                    "confirmed": True, "plan_digest": "a" * 64,
+                    "action_id": "ping",
+                    "entity_id": "ent_probe",
+                    "nuclei_profile": "safe",
+                    "confirmed": True,
+                    "plan_digest": "a" * 64,
                 }
                 return {
                     "plan": plan,
                     "project_id": "prj_probe",
                     "run": {
-                        "id": "run_probe", "status": "queued",
+                        "id": "run_probe",
+                        "status": "queued",
                         "command": plan["display_command"],
                         "history_url": "/api/v1/history/run_probe",
                     },
@@ -8854,12 +8883,24 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert cli_main.main(["probe", "list", "--project", "probe-project"]) == 0
     assert "Ping" in capsys.readouterr().out
     assert calls[-2][1:] == (
-        "/projects", {"limit": 100, "offset": 0}, None,
+        "/projects",
+        {"limit": 100, "offset": 0},
+        None,
     )
 
-    assert cli_main.main([
-        "probe", "list", "--project", "prj_probe", "--target-type", "ip",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "list",
+                "--project",
+                "prj_probe",
+                "--target-type",
+                "ip",
+            ]
+        )
+        == 0
+    )
     ip_output = capsys.readouterr().out
     assert "Ping" in ip_output
     assert "HTTPx" in ip_output
@@ -8867,10 +8908,21 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "SQLmap" not in ip_output
     assert calls[-1][2] == {"service": None, "target_type": "ip"}
 
-    assert cli_main.main([
-        "probe", "list", "--project", "prj_probe", "--service", "microsoft-ds",
-        "--target-type", "ip",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "list",
+                "--project",
+                "prj_probe",
+                "--service",
+                "microsoft-ds",
+                "--target-type",
+                "ip",
+            ]
+        )
+        == 0
+    )
     service_output = capsys.readouterr().out
     assert "Service recommendations:" in service_output
     assert "nmap" in service_output
@@ -8880,65 +8932,158 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
     assert "Excluded from probes: zap,oast_allocation" in service_output
     assert calls[-1][2] == {"service": "microsoft-ds", "target_type": "ip"}
 
-    assert cli_main.main([
-        "probe", "list", "--project", "prj_probe", "--target-type", "url",
-        "--format", "json",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "list",
+                "--project",
+                "prj_probe",
+                "--target-type",
+                "url",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     url_payload = json.loads(capsys.readouterr().out)
     assert {action["id"] for action in url_payload["catalog"]["actions"]} == {
-        "httpx", "sqlmap",
+        "httpx",
+        "sqlmap",
     }
     assert calls[-1][2] == {"service": None, "target_type": "url"}
 
-    assert cli_main.main([
-        "probe", "plan", "ping", "probe.example", "--project", "prj_probe",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "plan",
+                "ping",
+                "probe.example",
+                "--project",
+                "prj_probe",
+            ]
+        )
+        == 0
+    )
     preview_output = capsys.readouterr().out
     assert "ping -c 4 probe.example" in preview_output
     assert f"Approval digest: {'a' * 12}" in preview_output
     assert "a" * 64 not in preview_output
 
-    assert cli_main.main([
-        "probe", "plan", "dnsrecon", "probe.example", "--project", "prj_probe",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "plan",
+                "dnsrecon",
+                "probe.example",
+                "--project",
+                "prj_probe",
+            ]
+        )
+        == 0
+    )
     unavailable_output = capsys.readouterr().out
     assert "Required probe features aren't available." in unavailable_output
     assert "Missing features: dnsrecon" in unavailable_output
 
-    assert cli_main.main([
-        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "run",
+                "ping",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+            ]
+        )
+        == 0
+    )
     assert "Preview only" in capsys.readouterr().out
 
-    assert cli_main.main([
-        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
-        "--confirm",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "run",
+                "ping",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+                "--confirm",
+            ]
+        )
+        == 0
+    )
     confirmed_output = capsys.readouterr().out
     assert confirmed_output.index("ping -c 4 probe.example") < confirmed_output.index("run_probe")
     assert "Follow this run with: darklab tail run_probe" in confirmed_output
 
-    assert cli_main.main([
-        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
-        "--confirm", "--format", "json",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "run",
+                "ping",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+                "--confirm",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     assert json.loads(capsys.readouterr().out)["run"]["id"] == "run_probe"
     assert [call[1].rsplit("/", 1)[-1] for call in calls[-2:]] == ["plan", "run"]
 
-    assert cli_main.main([
-        "probe", "plan", "httpx", "--entity-id", "ent_probe",
-        "--project", "prj_probe", "--http-profile", "User session",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "plan",
+                "httpx",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+                "--http-profile",
+                "User session",
+            ]
+        )
+        == 0
+    )
     protected_output = capsys.readouterr().out
     assert "[protected]" in protected_output
     assert "HTTP profile: User session (user)" in protected_output
     assert "HTTP scope: hosts probe.example; roots https://probe.example/app" in protected_output
 
-    assert cli_main.main([
-        "probe", "run", "httpx", "--entity-id", "ent_probe",
-        "--project", "prj_probe", "--http-profile", "User session",
-        "--confirm", "--format", "json",
-    ]) == 0
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "run",
+                "httpx",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+                "--http-profile",
+                "User session",
+                "--confirm",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
     protected_launch_output = capsys.readouterr().out
     protected_payload = json.loads(protected_launch_output)
     assert protected_payload["run"]["id"] == "run_protected_probe"
@@ -8956,10 +9101,21 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
         "reason": "Your Team role doesn't allow probe launches in this scope.",
     }
     denied_call_count = len(calls)
-    assert cli_main.main([
-        "probe", "run", "ping", "--entity-id", "ent_probe", "--project", "prj_probe",
-        "--confirm",
-    ]) == 1
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "run",
+                "ping",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+                "--confirm",
+            ]
+        )
+        == 1
+    )
     assert "doesn't allow probe launches" in capsys.readouterr().err
     assert [call[1].rsplit("/", 1)[-1] for call in calls[denied_call_count:]] == ["plan"]
 
@@ -8976,10 +9132,21 @@ def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, cap
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
-    assert cli_main.main([
-        "probe", "plan", "ping", "probe.example", "--entity-id", "ent_probe",
-        "--project", "prj_probe",
-    ]) == 1
+    assert (
+        cli_main.main(
+            [
+                "probe",
+                "plan",
+                "ping",
+                "probe.example",
+                "--entity-id",
+                "ent_probe",
+                "--project",
+                "prj_probe",
+            ]
+        )
+        == 1
+    )
     assert "either TARGET or --entity-id" in capsys.readouterr().err
 
 
@@ -9023,18 +9190,18 @@ def test_darklab_cli_tail_text_does_not_double_space_output(capsys):
 
     class FakeResponse:
         def __iter__(self):
-            yield b'id: 1-0\n'
+            yield b"id: 1-0\n"
             yield b'data: {"type":"output","text":"row one\\n"}\n'
-            yield b'\n'
-            yield b'id: 2-0\n'
+            yield b"\n"
+            yield b"id: 2-0\n"
             yield b'data: {"type":"output","text":"row two\\r\\n"}\n'
-            yield b'\n'
-            yield b'id: 3-0\n'
+            yield b"\n"
+            yield b"id: 3-0\n"
             yield b'data: {"type":"output_batch","lines":[{"text":"row three"},{"text":"row four\\n"}]}\n'
-            yield b'\n'
-            yield b'id: 4-0\n'
+            yield b"\n"
+            yield b"id: 4-0\n"
             yield b'data: {"type":"exit","code":0}\n'
-            yield b'\n'
+            yield b"\n"
 
     class FakeClient:
         def request(self, method, path, *, params=None, stream=False, **_kwargs):
@@ -9106,9 +9273,9 @@ def test_darklab_cli_tail_text_fails_when_stream_has_no_terminal_event(capsys):
 
     class FakeResponse:
         def __iter__(self):
-            yield b'id: 1-0\n'
+            yield b"id: 1-0\n"
             yield b'data: {"type":"output","text":"partial row"}\n'
-            yield b'\n'
+            yield b"\n"
 
     class FakeClient:
         def request(self, method, path, *, params=None, stream=False, **_kwargs):

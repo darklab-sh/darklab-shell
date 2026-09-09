@@ -26,7 +26,7 @@ def finding_detail_sql(run_scope_sql: str, finding_scope_sql: str) -> str:
     """Build the finding-detail query from trusted internal SQL fragments."""
     return "".join(
         (
-            "SELECT f.id, f.session_id, f.team_id, f.entity_id, ",
+            "SELECT f.id, f.personal_workspace_id, f.team_id, f.entity_id, ",
             "e.type AS entity_type, e.canonical_value AS entity_value, ",
             "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.severity, f.kind, f.tool_root, ",
             "f.first_run_id, f.last_run_id, ",

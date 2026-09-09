@@ -201,7 +201,7 @@ def _matches(job, session_id, project_id, *, team_id=""):
     job_team_id = str(job.get("team_id") or "")
     if team_id:
         return job_team_id == str(team_id or "")
-    return not job_team_id and job.get("session_id") == session_id
+    return not job_team_id and job.get("personal_workspace_id") == session_id
 
 
 def get_report_export_job(session_id, project_id, job_id, *, team_id=""):
@@ -355,8 +355,8 @@ def _record_job_audit(
                 details[key] = dict(value)
     try:
         event_fields = {
-            "session_id": str(job.get("session_id") or ""),
-            "actor_session_id": str(job.get("session_id") or ""),
+            "personal_workspace_id": str(job.get("personal_workspace_id") or ""),
+            "actor_session_id": str(job.get("personal_workspace_id") or ""),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
         }
@@ -398,7 +398,7 @@ def _run_job(job_id, cfg_snapshot):
     _update("running", "loading", "Loading report inputs")
     try:
         project = get_project(
-            str(job.get("session_id") or ""),
+            str(job.get("personal_workspace_id") or ""),
             str(job.get("project_id") or ""),
             team_id=str(job.get("team_id") or ""),
         )
@@ -417,7 +417,7 @@ def _run_job(job_id, cfg_snapshot):
         archive = build_report_export_archive(
             job.get("draft") if isinstance(job.get("draft"), dict) else {},
             project=project,
-            session_id=str(job.get("session_id") or ""),
+            session_id=str(job.get("personal_workspace_id") or ""),
             project_id=str(job.get("project_id") or ""),
             team_id=str(job.get("team_id") or ""),
             cfg=cfg_snapshot,
@@ -428,7 +428,7 @@ def _run_job(job_id, cfg_snapshot):
     except EvidencePackageTooLarge as exc:
         error = _job_error("size_limit")
         log.warning("REPORT_EXPORT_JOB_TOO_LARGE", extra={
-            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "session": get_log_session_id(str(job.get("personal_workspace_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
@@ -450,7 +450,7 @@ def _run_job(job_id, cfg_snapshot):
     except Exception as exc:
         error = _job_error("export_failed")
         log.error("REPORT_EXPORT_JOB_FAILED", exc_info=True, extra={
-            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "session": get_log_session_id(str(job.get("personal_workspace_id") or "")),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
             "project_id": job.get("project_id"),
@@ -486,7 +486,7 @@ def _run_job(job_id, cfg_snapshot):
     metrics = raw_metrics if isinstance(raw_metrics, dict) else {}
     archive_bytes = int(metrics.get("archive_bytes") or archive.get("byte_size") or destination.stat().st_size)
     log.info("REPORT_EXPORT_JOB_COMPLETE", extra={
-        "session": get_log_session_id(str(job.get("session_id") or "")),
+        "session": get_log_session_id(str(job.get("personal_workspace_id") or "")),
         "team_id": str(job.get("team_id") or ""),
         "actor_member_id": str(job.get("actor_member_id") or ""),
         "project_id": job.get("project_id"),
@@ -523,7 +523,7 @@ def start_report_export_job(
     created = _iso(_now())
     job = {
         "id": _job_id(),
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "team_id": str(team_id or ""),
         "actor_member_id": str(actor_member_id or ""),
         "project_id": project_id,

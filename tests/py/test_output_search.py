@@ -42,7 +42,7 @@ def _insert_run(session_id, command, output_lines, exit_code=0):
     output_search_text = "\n".join(output_lines)
     with db_connect() as conn:
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+            "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
             "output, output_preview, preview_truncated, output_line_count, "
             "full_output_available, full_output_truncated, output_search_text) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -235,7 +235,7 @@ class TestOutputSearch:
         full_search_text = "\n".join(all_lines)
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output, output_preview, preview_truncated, output_line_count, "
                 "full_output_available, full_output_truncated, output_search_text) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -267,7 +267,7 @@ class TestOutputSearch:
         ]
         with db_connect() as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, "
                 "output, output_preview, preview_truncated, output_line_count, "
                 "full_output_available, full_output_truncated, output_search_text) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -310,7 +310,7 @@ class TestOutputSearch:
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs ("
-                "id, session_id, command, started, output_preview, full_output_available, output_search_text"
+                "id, personal_workspace_id, command, started, output_preview, full_output_available, output_search_text"
                 ") VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_id, SESSION_A, "cat missing-output", "2026-01-01T12:00:00", preview, 1, None),
             )
@@ -354,7 +354,7 @@ class TestOutputSearch:
         conn = sqlite3.connect(no_fts_path)
         conn.execute("""
             CREATE TABLE runs (
-                id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT NOT NULL DEFAULT '', command TEXT NOT NULL,
+                id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT NOT NULL DEFAULT '', command TEXT NOT NULL,
                 started TEXT NOT NULL, finished TEXT, exit_code INTEGER,
                 output TEXT, output_preview TEXT,
                 preview_truncated INTEGER NOT NULL DEFAULT 0,
@@ -364,7 +364,7 @@ class TestOutputSearch:
                 output_search_text TEXT
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (personal_workspace_id)")
         conn.commit()
         conn.close()
 

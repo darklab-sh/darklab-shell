@@ -18,8 +18,8 @@ def _update_workspace_file_metadata(conn, from_session_id, to_session_id, table_
         return 0
     placeholders = ",".join("?" for _ in paths)
     result = conn.execute(
-        f"UPDATE {table_name} SET session_id = ? "  # nosec
-        "WHERE session_id = ? AND entity_type = 'workspace_file' "
+        f"UPDATE {table_name} SET personal_workspace_id = ? "  # nosec
+        "WHERE personal_workspace_id = ? AND entity_type = 'workspace_file' "
         "AND (team_id IS NULL OR team_id = '') "
         f"AND entity_id IN ({placeholders})",
         [to_session_id, from_session_id, *paths],
@@ -30,7 +30,7 @@ def _update_workspace_file_metadata(conn, from_session_id, to_session_id, table_
 def _count_workspace_file_metadata(conn, session_id, table_name):
     row = conn.execute(
         f"SELECT COUNT(*) AS count FROM {table_name} "  # nosec
-        "WHERE session_id = ? AND entity_type = 'workspace_file' "
+        "WHERE personal_workspace_id = ? AND entity_type = 'workspace_file' "
         "AND (team_id IS NULL OR team_id = '')",
         (session_id,),
     ).fetchone()
@@ -47,27 +47,27 @@ def migrate_project_workspace_session(
     """Move project workspace records between session IDs during token migration."""
     migrated_projects = 0
     project_rows = conn.execute(
-        "SELECT id, name FROM projects WHERE session_id = ? ORDER BY created ASC",
+        "SELECT id, name FROM projects WHERE personal_workspace_id = ? ORDER BY created ASC",
         (from_session_id,),
     ).fetchall()
     for row in project_rows:
         slug = allocate_slug(conn, to_session_id, row["name"], project_id=row["id"])
         result = conn.execute(
-            "UPDATE projects SET session_id = ?, slug = ? WHERE session_id = ? AND id = ?",
+            "UPDATE projects SET personal_workspace_id = ?, slug = ? WHERE personal_workspace_id = ? AND id = ?",
             (to_session_id, slug, from_session_id, row["id"]),
         )
         migrated_projects += result.rowcount
     artifact_result = conn.execute(
-        "UPDATE run_file_artifacts SET session_id = ? WHERE session_id = ?",
+        "UPDATE run_file_artifacts SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
         (to_session_id, from_session_id),
     )
     finding_result = conn.execute(
-        "UPDATE findings SET session_id = ?, "
+        "UPDATE findings SET personal_workspace_id = ?, "
         "manual_created_by_session_id = CASE WHEN manual_created_by_session_id = ? THEN ? "
         "ELSE manual_created_by_session_id END, "
         "manual_updated_by_session_id = CASE WHEN manual_updated_by_session_id = ? THEN ? "
         "ELSE manual_updated_by_session_id END "
-        "WHERE session_id = ?",
+        "WHERE personal_workspace_id = ?",
         (
             to_session_id,
             from_session_id,
@@ -82,16 +82,16 @@ def migrate_project_workspace_session(
         "rule_identity, review_state, remediation, created_at, updated_at, "
         "remediation_updated_at "
         "FROM finding_remediation_dispositions "
-        "WHERE session_id = ? AND team_id = ''",
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (from_session_id,),
     ).fetchall()
     conn.executemany(
         "INSERT INTO finding_remediation_dispositions "
-        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
         "vulnerability_id, rule_identity, review_state, remediation, created_at, "
         "updated_at, remediation_updated_at) "
         "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+        "ON CONFLICT(personal_workspace_id, team_id, affected_subject, identity_value) DO UPDATE SET "
         "identity_kind = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
         "THEN excluded.identity_kind ELSE finding_remediation_dispositions.identity_kind END, "
         "vulnerability_id = CASE WHEN excluded.updated_at >= finding_remediation_dispositions.updated_at "
@@ -133,7 +133,7 @@ def migrate_project_workspace_session(
     if disposition_rows:
         conn.execute(
             "DELETE FROM finding_remediation_dispositions "
-            "WHERE session_id = ? AND team_id = ''",
+            "WHERE personal_workspace_id = ? AND team_id = ''",
             (from_session_id,),
         )
     migrated_remediation_merge_members = migrate_remediation_merge_members(
@@ -142,17 +142,17 @@ def migrate_project_workspace_session(
         to_session_id,
     )
     entity_result = conn.execute(
-        "UPDATE entities SET session_id = ? WHERE session_id = ?",
+        "UPDATE entities SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
         (to_session_id, from_session_id),
     )
     intel_result = conn.execute(
-        "UPDATE entity_intel_snapshots SET session_id = ? WHERE session_id = ?",
+        "UPDATE entity_intel_snapshots SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
         (to_session_id, from_session_id),
     )
     source_workspace_file_labels = _count_workspace_file_metadata(conn, from_session_id, "entity_labels")
     source_workspace_file_notes = _count_workspace_file_metadata(conn, from_session_id, "entity_notes")
     label_result = conn.execute(
-        "UPDATE entity_labels SET session_id = ? WHERE session_id = ? AND entity_type != 'workspace_file'",
+        "UPDATE entity_labels SET personal_workspace_id = ? WHERE personal_workspace_id = ? AND entity_type != 'workspace_file'",
         (to_session_id, from_session_id),
     )
     migrated_workspace_file_labels = _update_workspace_file_metadata(
@@ -163,7 +163,7 @@ def migrate_project_workspace_session(
         migrated_workspace_file_paths,
     )
     note_result = conn.execute(
-        "UPDATE entity_notes SET session_id = ? WHERE session_id = ? AND entity_type != 'workspace_file'",
+        "UPDATE entity_notes SET personal_workspace_id = ? WHERE personal_workspace_id = ? AND entity_type != 'workspace_file'",
         (to_session_id, from_session_id),
     )
     migrated_workspace_file_notes = _update_workspace_file_metadata(
@@ -174,17 +174,17 @@ def migrate_project_workspace_session(
         migrated_workspace_file_paths,
     )
     package_result = conn.execute(
-        "UPDATE evidence_packages SET session_id = ? WHERE session_id = ?",
+        "UPDATE evidence_packages SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
         (to_session_id, from_session_id),
     )
     assessment_result = conn.execute(
-        "UPDATE project_assessments SET session_id = ? "
-        "WHERE session_id = ? AND team_id = ''",
+        "UPDATE project_assessments SET personal_workspace_id = ? "
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id),
     )
     schemathesis_result = conn.execute(
-        "UPDATE schemathesis_run_evidence SET session_id = ? "
-        "WHERE session_id = ? AND team_id = ''",
+        "UPDATE schemathesis_run_evidence SET personal_workspace_id = ? "
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id),
     )
     assessment_actor_result = conn.execute(
@@ -204,12 +204,12 @@ def migrate_project_workspace_session(
         ),
     )
     http_profile_result = conn.execute(
-        "UPDATE project_http_profiles SET session_id = ?, "
+        "UPDATE project_http_profiles SET personal_workspace_id = ?, "
         "created_by_session_id = CASE WHEN created_by_session_id = ? THEN ? "
         "ELSE created_by_session_id END, "
         "updated_by_session_id = CASE WHEN updated_by_session_id = ? THEN ? "
         "ELSE updated_by_session_id END "
-        "WHERE session_id = ? AND team_id = ''",
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (
             to_session_id,
             from_session_id,
@@ -220,13 +220,13 @@ def migrate_project_workspace_session(
         ),
     )
     zap_job_result = conn.execute(
-        "UPDATE zap_connector_jobs SET session_id = ? "
-        "WHERE session_id = ? AND team_id = ''",
+        "UPDATE zap_connector_jobs SET personal_workspace_id = ? "
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id),
     )
     oast_correlation_result = conn.execute(
-        "UPDATE oast_correlations SET session_id = ? "
-        "WHERE session_id = ? AND team_id = ''",
+        "UPDATE oast_correlations SET personal_workspace_id = ? "
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id),
     )
     check_actor_result = conn.execute(
@@ -235,18 +235,18 @@ def migrate_project_workspace_session(
         (to_session_id, from_session_id),
     )
     finding_evidence_result = conn.execute(
-        "UPDATE finding_evidence_links SET session_id = ?, "
+        "UPDATE finding_evidence_links SET personal_workspace_id = ?, "
         "created_by_session_id = CASE WHEN created_by_session_id = ? THEN ? "
         "ELSE created_by_session_id END "
-        "WHERE session_id = ? AND team_id = ''",
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id, to_session_id, from_session_id),
     )
     finding_triage_result = conn.execute(
-        "UPDATE finding_triage_details SET session_id = ?, "
+        "UPDATE finding_triage_details SET personal_workspace_id = ?, "
         "verification_updated_by_session_id = CASE "
         "WHEN verification_updated_by_session_id = ? THEN ? "
         "ELSE verification_updated_by_session_id END "
-        "WHERE session_id = ? AND team_id = ''",
+        "WHERE personal_workspace_id = ? AND team_id = ''",
         (to_session_id, from_session_id, to_session_id, from_session_id),
     )
     migrated_active_project_preference = migrate_active_project_preference(

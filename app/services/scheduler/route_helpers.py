@@ -95,7 +95,7 @@ def baseline_run_for_owner(run_id: str, session_id: str, *, team_id: str = "", c
     )
     owner_sql, owner_params = owner.as_tuple()
     row = conn.execute(
-        f"SELECT id, session_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec
+        f"SELECT id, personal_workspace_id, team_id, command, finished FROM runs WHERE id = ? AND {owner_sql}",  # nosec
         (baseline_id, *owner_params),
     ).fetchone()
     if row is None:

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Browser routes for session-owned outbound notification channels."""
+"""Browser routes for owner-scoped outbound notification channels."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from services.notifications.channels_store import (
     send_test_notification,
     update_notification_channel,
 )
+from services.notifications.models import is_durable_personal_owner
 from services.projects.utils import normalize_page_limit, normalize_page_offset
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.teams.capabilities import Capability, require_capability
@@ -41,7 +42,7 @@ def _required_token_session():
     session_id = get_session_id()
     if not session_id:
         return "", (jsonify({"error": "session_required"}), 401)
-    if not str(session_id).startswith("tok_"):
+    if not is_durable_personal_owner(session_id):
         return "", (jsonify({"error": "session_token_required"}), 401)
     return session_id, None
 

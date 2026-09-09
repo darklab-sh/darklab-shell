@@ -42,7 +42,7 @@ def row_to_project(row):
         return None
     return {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "team_id": row["team_id"] if "team_id" in row.keys() else "",
         "name": row["name"],
         "slug": row["slug"],

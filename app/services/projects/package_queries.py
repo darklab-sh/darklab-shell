@@ -27,7 +27,7 @@ def list_evidence_packages(session_id, project_id, *, team_id=""):
             package_where += (owner := personal_owner_suffix(session_id))[0]
             package_params.extend(owner[1])
         rows = conn.execute(
-            "SELECT id, session_id, project_id, name, description, redaction_mode, "
+            "SELECT id, personal_workspace_id, project_id, name, description, redaction_mode, "
             "include_artifacts, manifest, status, created, updated "
             "FROM evidence_packages WHERE " + package_where + " "  # nosec
             "ORDER BY updated DESC, created DESC",
@@ -39,9 +39,9 @@ def list_evidence_packages(session_id, project_id, *, team_id=""):
             if package:
                 packages.append(package)
         _attach_package_metadata(conn, session_id, packages, team_id=team_id)
-        actors = team_actor_map(conn, team_id, [package.get("session_id") for package in packages if package])
+        actors = team_actor_map(conn, team_id, [package.get("personal_workspace_id") for package in packages if package])
         for package in packages:
-            actor = actor_for_session(package.get("session_id"), actors) if package else None
+            actor = actor_for_session(package.get("personal_workspace_id"), actors) if package else None
             if actor:
                 package["created_by"] = actor
     return packages
@@ -56,7 +56,7 @@ def get_evidence_package(session_id, project_id, package_id, *, team_id=""):
             package_owner_sql, owner_params = personal_owner_suffix(session_id, table_alias="ep")
             package_params.extend(owner_params)
         row = conn.execute(
-            "SELECT ep.id, ep.session_id, ep.project_id, ep.name, ep.description, ep.redaction_mode, "
+            "SELECT ep.id, ep.personal_workspace_id, ep.project_id, ep.name, ep.description, ep.redaction_mode, "
             "ep.include_artifacts, ep.manifest, ep.status, ep.created, ep.updated "
             "FROM evidence_packages ep JOIN projects p ON p.id = ep.project_id "
             "WHERE " + owner_sql + " AND ep.project_id = ? AND ep.id = ?" + package_owner_sql,  # nosec
@@ -66,8 +66,8 @@ def get_evidence_package(session_id, project_id, package_id, *, team_id=""):
         _attach_package_metadata(conn, session_id, [package], team_id=team_id)
         if package:
             actor = actor_for_session(
-                package.get("session_id"),
-                team_actor_map(conn, team_id, [package.get("session_id")]),
+                package.get("personal_workspace_id"),
+                team_actor_map(conn, team_id, [package.get("personal_workspace_id")]),
             )
             if actor:
                 package["created_by"] = actor

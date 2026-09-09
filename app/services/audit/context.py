@@ -45,9 +45,17 @@ def request_audit_fields(request: Request) -> dict[str, Any]:
 def scope_audit_fields(session_id: str, scope: RequestScope | None = None) -> dict[str, Any]:
     """Return stable actor fields for a personal or team request scope."""
     member: Mapping[str, Any] = scope.member if scope and isinstance(scope.member, Mapping) else {}
+    context = scope.context if scope else None
+    workspace_id = (
+        context.owner_id
+        if context is not None and context.scope == "personal"
+        else str(session_id or "")
+    )
     return {
-        "session_id": session_id,
-        "actor_session_id": session_id,
+        "personal_workspace_id": workspace_id,
+        "actor_principal_id": str(getattr(context, "actor_principal_id", "") or ""),
+        "actor_credential_id": str(getattr(context, "actor_credential_id", "") or ""),
+        "actor_session_id": str(getattr(context, "actor_session_id", "") or ""),
         "team_id": scope.team_id if scope else "",
         "actor_member_id": str(member.get("id") or ""),
         "actor_role": str(member.get("role") or ""),

@@ -18,7 +18,7 @@ from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
-from services.notifications.models import is_durable_session_token
+from services.notifications.models import is_durable_personal_owner
 from services.teams import storage
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamError, TeamNotFound, TeamPermissionDenied
@@ -48,7 +48,7 @@ def _usage() -> list[dict[str, object]]:
 
 def _require_token(session_id: str) -> str:
     session_id = str(session_id or "").strip()
-    if not is_durable_session_token(session_id):
+    if not is_durable_personal_owner(session_id):
         raise BuiltinTeamError("team: persistent session token required. Run `session-token generate` first.")
     return session_id
 

@@ -144,7 +144,7 @@ def _channel_rows_for_trigger(
     )
     owner_sql, owner_params = owner.as_tuple()
     rows = conn.execute(
-        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
         "muted, created, updated "
         f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
         owner_params,
@@ -226,7 +226,7 @@ def enqueue(
             queued_ids.append(event_id)
             active_conn.execute(
                 "INSERT INTO notification_events "
-                "(id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+                "(id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
                 "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -279,7 +279,7 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
     if event_ids is not None:
         where_sql, params = _where_ids("id", event_ids)
         return conn.execute(
-            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+            "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
             "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
             "FROM notification_events "
             f"WHERE {where_sql} AND status IN (?, ?) "  # nosec
@@ -288,7 +288,7 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
             [*params, STATUS_PENDING, STATUS_RETRY_WAIT, now, int(limit)],
         ).fetchall()
     return conn.execute(
-        "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+        "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
         "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
         "FROM notification_events WHERE status IN (?, ?) "
         "AND (next_attempt_at = '' OR next_attempt_at <= ?) "
@@ -321,7 +321,8 @@ def _channel_sends_this_minute(conn, channel_id: str, *, now: str, exclude_event
 
 def _load_channel(conn, channel_id: str) -> NotificationChannel | None:
     row = conn.execute(
-        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
+        "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, "
+        "config_json, triggers_json, muted, created, updated "
         "FROM notification_channels WHERE id = ?",
         (channel_id,),
     ).fetchone()
@@ -368,7 +369,7 @@ def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
             )
         return
     project_id = str(identity.get("project_id") or "").strip()
-    session_id = str(identity.get("session_id") or event.session_token or "").strip()
+    session_id = str(identity.get("personal_workspace_id") or event.session_token or "").strip()
     team_id = str(identity.get("team_id") or event.team_id or "").strip()
     window_end = str(identity.get("window_end") or "").strip()
     if not project_id or not session_id:
@@ -481,9 +482,7 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
 def _defer_event(conn, event: NotificationEvent, now: str, *, reason: str, delay_seconds: int) -> None:
     next_attempt = (datetime.fromisoformat(now) + timedelta(seconds=max(1, int(delay_seconds)))).isoformat()
     conn.execute(
-        "UPDATE notification_events "
-        "SET status = ?, last_attempt_at = ?, next_attempt_at = ?, last_error = ? "
-        "WHERE id = ?",
+        "UPDATE notification_events SET status = ?, last_attempt_at = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
         (STATUS_RETRY_WAIT, now, next_attempt, reason[:500], event.id),
     )
     log.info(
@@ -565,11 +564,7 @@ def dispatch_due_events(
     """Deliver due notification events and return the number sent successfully."""
     now = _utc_now()
     delivered = 0
-    muted_channel_ids = {
-        str(channel_id)
-        for channel_id in include_muted_channel_ids or ()
-        if str(channel_id or "").strip()
-    }
+    muted_channel_ids = {str(channel_id) for channel_id in include_muted_channel_ids or () if str(channel_id or "").strip()}
     with _managed_connection(conn) as (active_conn, owns_conn):
         for row in _due_event_rows(active_conn, limit=limit, event_ids=event_ids, now=now):
             if not _claim_event(active_conn, row["id"], now=now):
@@ -610,6 +605,6 @@ def payload_from_row(row: Any) -> dict[str, Any]:
         return raw
     try:
         payload = json.loads(raw or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return payload if isinstance(payload, dict) else {}

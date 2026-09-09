@@ -250,7 +250,7 @@ def _api_actor_audit_fields(
         (actor or {}).get("display_name") or (actor or {}).get("name") or ""
     )
     return {
-        "session_id": session_token,
+        "personal_workspace_id": session_token,
         "actor_session_id": session_token,
         "team_id": team_id,
         "actor_member_id": actor_member_id,

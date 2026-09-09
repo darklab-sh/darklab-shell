@@ -53,7 +53,7 @@ def enforce_evidence_quotas(conn: Any, candidates: list[dict[str, Any]]) -> None
     project_additions: dict[str, int] = {}
     project_owner_kinds: dict[str, str] = {}
     for item in missing:
-        owner_key = (str(item["session_id"] or ""), str(item["team_id"] or ""))
+        owner_key = (str(item["personal_workspace_id"] or ""), str(item["team_id"] or ""))
         owner_additions[owner_key] = owner_additions.get(owner_key, 0) + 1
         project_id = str(item["project_id"] or "")
         project_additions[project_id] = project_additions.get(project_id, 0) + 1

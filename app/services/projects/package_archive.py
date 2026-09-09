@@ -129,7 +129,7 @@ def _raw_artifact_row_for_archive(session_id, project_id, artifact_id, *, team_i
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(
-            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "
+            "SELECT a.id, a.personal_workspace_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "
             "a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
             "r.team_id AS run_team_id "
             "FROM run_file_artifacts a "
@@ -179,7 +179,7 @@ def _evidence_package_estimated_archive_bytes(manifest):
     for key in ("estimated_archive_bytes", "estimated_uncompressed_bytes"):
         try:
             value = int(estimate.get(key) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             value = 0
         if value > 0:
             return value
@@ -199,7 +199,7 @@ def _package_transcript_manifest_entry(run, entries, archive_path, text_archive_
         try:
             raw_line_index = entry.get("line_index")
             line_index = fallback_index if raw_line_index is None else int(raw_line_index)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             line_index = fallback_index
         line = {
             "line_index": line_index,
@@ -287,12 +287,15 @@ def build_evidence_package_archive(
     package = get_evidence_package(session_id, project_id, package_id, team_id=team_id)
     if package is None:
         return None
-    log.info("PACKAGE_BUILD_STARTED", extra={
-        "session": get_log_session_id(session_id),
-        "project_id": project_id,
-        "package_id": package_id,
-        "redaction_mode": package.get("redaction_mode"),
-    })
+    log.info(
+        "PACKAGE_BUILD_STARTED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "redaction_mode": package.get("redaction_mode"),
+        },
+    )
     metadata_started = time.perf_counter()
     _progress("metadata", "Collecting package metadata")
     generated_at = _now()
@@ -401,7 +404,9 @@ def build_evidence_package_archive(
                         )
                         if raw_artifact:
                             archive_artifact = raw_artifact
-                    artifact_owner_session = str(archive_artifact.get("session_id") or artifact.get("session_id") or session_id)
+                    artifact_owner_session = str(
+                        archive_artifact.get("personal_workspace_id") or artifact.get("personal_workspace_id") or session_id
+                    )
                     owner_context = _artifact_owner_context(artifact_owner_session, archive_artifact)
                     public_workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
                     workspace_path = public_workspace_path
@@ -413,7 +418,7 @@ def build_evidence_package_archive(
                         continue
                     try:
                         declared_size = max(0, int(archive_artifact.get("byte_size") or 0))
-                    except (TypeError, ValueError):
+                    except TypeError, ValueError:
                         declared_size = 0
                     if (
                         max_uncompressed_archive_bytes
@@ -445,14 +450,16 @@ def build_evidence_package_archive(
                                 projected_bytes,
                                 max_uncompressed_archive_bytes,
                             )
-                            redacted_artifacts.append({
-                                "id": archive_artifact.get("id") or "",
-                                "workspace_path": public_workspace_path,
-                                "display_name": artifact.get("display_name") or public_workspace_path,
-                                "archive_path": zip_path,
-                                "source_byte_size": declared_size,
-                                "byte_size": len(derivative_bytes),
-                            })
+                            redacted_artifacts.append(
+                                {
+                                    "id": archive_artifact.get("id") or "",
+                                    "workspace_path": public_workspace_path,
+                                    "display_name": artifact.get("display_name") or public_workspace_path,
+                                    "archive_path": zip_path,
+                                    "source_byte_size": declared_size,
+                                    "byte_size": len(derivative_bytes),
+                                }
+                            )
                         else:
                             projected_bytes += resolved.stat().st_size
                             if max_uncompressed_archive_bytes and projected_bytes > max_uncompressed_archive_bytes:
@@ -471,9 +478,9 @@ def build_evidence_package_archive(
                         skipped_artifacts.append(skipped_artifact)
                         skipped_items.append(skipped_artifact)
             if redacted_artifacts:
-                redacted_artifact_bytes = (
-                    json.dumps({"artifacts": redacted_artifacts}, indent=2, sort_keys=True) + "\n"
-                ).encode("utf-8")
+                redacted_artifact_bytes = (json.dumps({"artifacts": redacted_artifacts}, indent=2, sort_keys=True) + "\n").encode(
+                    "utf-8"
+                )
                 projected_bytes = _write_bounded_archive_entry(
                     archive,
                     "redacted-artifacts.json",
@@ -482,9 +489,7 @@ def build_evidence_package_archive(
                     max_uncompressed_archive_bytes,
                 )
             if skipped_artifacts:
-                skipped_bytes = (
-                    json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n"
-                ).encode("utf-8")
+                skipped_bytes = (json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n").encode("utf-8")
                 projected_bytes = _write_bounded_archive_entry(
                     archive,
                     "skipped-artifacts.json",
@@ -515,12 +520,14 @@ def build_evidence_package_archive(
             for run_id in transcript_run_ids:
                 if run_id in found_run_ids:
                     continue
-                skipped_items.append({
-                    "kind": "run",
-                    "id": run_id,
-                    "label": run_id,
-                    "reason": "run is no longer available or no longer belongs to this session",
-                })
+                skipped_items.append(
+                    {
+                        "kind": "run",
+                        "id": run_id,
+                        "label": run_id,
+                        "reason": "run is no longer available or no longer belongs to this session",
+                    }
+                )
             for run in run_rows:
                 run_id = str(run.get("id") or "")
                 if not run_id:
@@ -532,20 +539,24 @@ def build_evidence_package_archive(
                 )
                 transcript_text_path = ""
                 if cap_notice:
-                    skipped_items.append({
-                        "kind": "transcript",
-                        "id": run_id,
-                        "label": run.get("command") or run_id,
-                        "reason": str(cap_notice.get("text") or "").strip("[]"),
-                    })
-                    companion_bytes = _package_run_text_bytes(companion_entries, redaction_rules)
-                    if max_uncompressed_archive_bytes and projected_bytes + len(companion_bytes) > max_uncompressed_archive_bytes:
-                        skipped_items.append({
-                            "kind": "transcript_companion",
+                    skipped_items.append(
+                        {
+                            "kind": "transcript",
                             "id": run_id,
                             "label": run.get("command") or run_id,
-                            "reason": "full text transcript companion exceeds configured package size limit",
-                        })
+                            "reason": str(cap_notice.get("text") or "").strip("[]"),
+                        }
+                    )
+                    companion_bytes = _package_run_text_bytes(companion_entries, redaction_rules)
+                    if max_uncompressed_archive_bytes and projected_bytes + len(companion_bytes) > max_uncompressed_archive_bytes:
+                        skipped_items.append(
+                            {
+                                "kind": "transcript_companion",
+                                "id": run_id,
+                                "label": run.get("command") or run_id,
+                                "reason": "full text transcript companion exceeds configured package size limit",
+                            }
+                        )
                     else:
                         transcript_text_path = f"runs/{run_id}.txt"
                         run_text_paths[run_id] = transcript_text_path
@@ -573,15 +584,15 @@ def build_evidence_package_archive(
                     if redaction_rules
                     else line_events_from_entries(line_entries)
                 )
-                manifest_entries = line_entries_from_events(
-                    [event for event in manifest_events if not is_noise_event(event)]
+                manifest_entries = line_entries_from_events([event for event in manifest_events if not is_noise_event(event)])
+                transcript_manifest_entries.append(
+                    _package_transcript_manifest_entry(
+                        run,
+                        manifest_entries,
+                        run_path,
+                        transcript_text_path,
+                    )
                 )
-                transcript_manifest_entries.append(_package_transcript_manifest_entry(
-                    run,
-                    manifest_entries,
-                    run_path,
-                    transcript_text_path,
-                ))
                 projected_bytes = _write_bounded_archive_entry(
                     archive,
                     run_path,
@@ -733,9 +744,7 @@ def build_evidence_package_archive(
             _record_timing("readme", readme_started)
             skipped_items_started = time.perf_counter()
             if skipped_items:
-                skipped_item_bytes = (
-                    json.dumps({"items": skipped_items}, indent=2, sort_keys=True) + "\n"
-                ).encode("utf-8")
+                skipped_item_bytes = (json.dumps({"items": skipped_items}, indent=2, sort_keys=True) + "\n").encode("utf-8")
                 projected_bytes = _write_bounded_archive_entry(
                     archive,
                     "skipped-items.json",
@@ -758,12 +767,16 @@ def build_evidence_package_archive(
             os.unlink(archive_path)
         except OSError:
             pass
-        log.error("PACKAGE_BUILD_FAILED", exc_info=True, extra={
-            "session": get_log_session_id(session_id),
-            "project_id": project_id,
-            "package_id": package_id,
-            "stage": "archive",
-        })
+        log.error(
+            "PACKAGE_BUILD_FAILED",
+            exc_info=True,
+            extra={
+                "session": get_log_session_id(session_id),
+                "project_id": project_id,
+                "package_id": package_id,
+                "stage": "archive",
+            },
+        )
         raise EvidencePackageBuildError("evidence package archive build failed") from exc
     final_archive_bytes = os.path.getsize(archive_path)
     if max_compressed_archive_bytes and final_archive_bytes > max_compressed_archive_bytes:
@@ -790,16 +803,19 @@ def build_evidence_package_archive(
         "selected_artifacts": _package_selected_id_count(manifest, "artifact_ids"),
         "selected_targets": _package_selected_id_count(manifest, "target_ids"),
     }
-    log.info("PACKAGE_BUILD_COMPLETED", extra={
-        "session": get_log_session_id(session_id),
-        "project_id": project_id,
-        "package_id": package_id,
-        "archive_bytes": final_archive_bytes,
-        "projected_bytes": projected_bytes,
-        "duration_ms": metrics["duration_ms"],
-        "skipped_items": len(skipped_items),
-        "redacted_artifacts": len(redacted_artifacts),
-    })
+    log.info(
+        "PACKAGE_BUILD_COMPLETED",
+        extra={
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "archive_bytes": final_archive_bytes,
+            "projected_bytes": projected_bytes,
+            "duration_ms": metrics["duration_ms"],
+            "skipped_items": len(skipped_items),
+            "redacted_artifacts": len(redacted_artifacts),
+        },
+    )
     return {
         "filename": _package_archive_name(render_package),
         "mimetype": "application/zip",
@@ -830,7 +846,7 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
             label_id = _new_entity_label_id()
             result = conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, team_id, entity_type, entity_id, label, source, created) "
+                "(id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, ?, 'package', ?, ?, 'manual', ?) "
                 "ON CONFLICT(id) DO NOTHING",
                 (label_id, metadata_session, metadata_team_id, package_id, label, _now()),
@@ -857,7 +873,7 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
         note_id = _new_entity_note_id()
         result = conn.execute(
             "INSERT INTO entity_notes "
-            "(id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+            "(id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, ?, ?, 'package', ?, ?, ?, ?) "
             "ON CONFLICT(id) DO NOTHING",
             (note_id, metadata_session, metadata_team_id, package_id, body, now, now),
@@ -893,17 +909,13 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         assessment_id=payload["assessment_id"],
         findings=manifest.get("findings", []),
         selected_artifact_ids=(
-            str(artifact.get("id") or "")
-            for artifact in manifest.get("artifacts", [])
-            if isinstance(artifact, dict)
+            str(artifact.get("id") or "") for artifact in manifest.get("artifacts", []) if isinstance(artifact, dict)
         ),
         team_id=team_id,
     )
     manifest["assessment_context"] = assessment_context
     manifest["assessment_finding_changes"] = (
-        assessment_context.get("finding_changes")
-        if isinstance(assessment_context, dict)
-        else None
+        assessment_context.get("finding_changes") if isinstance(assessment_context, dict) else None
     )
     redaction_rules = _package_redaction_rules(payload["redaction_mode"])
     if redaction_rules:
@@ -932,7 +944,7 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
             package_id = _new_evidence_package_id()
             result = conn.execute(
                 "INSERT INTO evidence_packages "
-                "(id, session_id, project_id, name, description, redaction_mode, "
+                "(id, personal_workspace_id, project_id, name, description, redaction_mode, "
                 "include_artifacts, manifest, status, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",

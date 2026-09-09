@@ -60,7 +60,7 @@ def review_project_openapi_artifact(
             "schema_artifact_digest_missing",
             "The selected OpenAPI artifact has no recorded integrity digest.",
         )
-    owner = artifact_owner_context(str(artifact.get("session_id") or session_id), artifact)
+    owner = artifact_owner_context(str(artifact.get("personal_workspace_id") or session_id), artifact)
     try:
         with open_owner_workspace_file_for_download(owner, str(artifact.get("workspace_path") or "")) as handle:
             descriptor_size = max(0, int(os.fstat(handle.fileno()).st_size))

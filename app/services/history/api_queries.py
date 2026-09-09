@@ -53,7 +53,7 @@ def run_owner_clause(session_id: str, team_id: str, *, alias: str = "r") -> tupl
     prefix = f"{alias}." if alias else ""
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -64,7 +64,7 @@ def project_owner_clause(session_id: str, team_id: str, *, alias: str = "p") -> 
     prefix = f"{alias}." if alias else ""
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -224,22 +224,23 @@ def history_search_candidate_runs(
             "SELECT r.*, ("  # nosec
             "SELECT art.rel_path FROM run_output_artifacts art "
             "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
-            ") AS rel_path FROM runs r"
-            + where_sql
-            + " ORDER BY r.started DESC, r.id DESC",
+            ") AS rel_path FROM runs r" + where_sql + " ORDER BY r.started DESC, r.id DESC",
             params,
         ).fetchall()
-    log.debug("API_HISTORY_DATA_ACCESS", extra={
-        "session": get_log_session_id(session_id),
-        "team_scope": bool(team_id),
-        "branch": "candidate_runs",
-        "has_query": bool(filters.get("q")),
-        "offloaded_id_count": len(offloaded_ids),
-        "structured_active": structured_filters.active,
-        "line_scan": False,
-        "candidate_count": len(rows),
-        "result_count": len(rows),
-    })
+    log.debug(
+        "API_HISTORY_DATA_ACCESS",
+        extra={
+            "session": get_log_session_id(session_id),
+            "team_scope": bool(team_id),
+            "branch": "candidate_runs",
+            "has_query": bool(filters.get("q")),
+            "offloaded_id_count": len(offloaded_ids),
+            "structured_active": structured_filters.active,
+            "line_scan": False,
+            "candidate_count": len(rows),
+            "result_count": len(rows),
+        },
+    )
     return [dict(row) for row in rows]
 
 
@@ -261,20 +262,22 @@ def run_output_search_matches(
             continue
         before_start = max(0, index - context)
         after_end = min(len(lines), index + context + 1)
-        matches.append({
-            "run_id": str(run.get("id") or ""),
-            "command": str(run.get("command") or ""),
-            "started": run.get("started"),
-            "finished": run.get("finished"),
-            "line_number": index + 1,
-            "line": line,
-            "kind": event.kind.value,
-            "role": event.role.value,
-            "signals": [signal.value for signal in event.signals],
-            "entities": [entity.to_wire() for entity in event.entities],
-            "context_before": lines[before_start:index],
-            "context_after": lines[index + 1:after_end],
-        })
+        matches.append(
+            {
+                "run_id": str(run.get("id") or ""),
+                "command": str(run.get("command") or ""),
+                "started": run.get("started"),
+                "finished": run.get("finished"),
+                "line_number": index + 1,
+                "line": line,
+                "kind": event.kind.value,
+                "role": event.role.value,
+                "signals": [signal.value for signal in event.signals],
+                "entities": [entity.to_wire() for entity in event.entities],
+                "context_before": lines[before_start:index],
+                "context_after": lines[index + 1 : after_end],
+            }
+        )
     return matches
 
 
@@ -337,9 +340,7 @@ def history_rows(
                     "SELECT r.*, ("  # nosec
                     "SELECT art.rel_path FROM run_output_artifacts art "
                     "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
-                    ") AS rel_path FROM runs r"
-                    + where_sql
-                    + " ORDER BY r.started DESC LIMIT 2000",
+                    ") AS rel_path FROM runs r" + where_sql + " ORDER BY r.started DESC LIMIT 2000",
                     params,
                 ).fetchall()
                 candidate_count = len(rows)
@@ -350,16 +351,14 @@ def history_rows(
                     if any(event_matches_structured_filters(event, structured_filters) for event in run_output_events(run))
                 ]
                 total = len(matching_runs)
-                runs = matching_runs[offset:offset + limit]
+                runs = matching_runs[offset : offset + limit]
             else:
                 total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec
                 total = int(total_row["count"] or 0) if total_row else 0
                 rows = conn.execute(
                     "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
                     "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-                    "FROM runs r"
-                    + where_sql
-                    + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
+                    "FROM runs r" + where_sql + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
                     (*params, limit, offset),
                 ).fetchall()
                 runs = [dict(row) for row in rows]
@@ -369,9 +368,7 @@ def history_rows(
             rows = conn.execute(
                 "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
                 "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-                "FROM runs r"
-                + where_sql
-                + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
+                "FROM runs r" + where_sql + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
             runs = [dict(row) for row in rows]
@@ -400,17 +397,20 @@ def history_rows(
         apply_schedule_ref(run, scheduled.get(run_id))
         apply_workflow_provenance(run, workflow_provenance.get(run_id))
         apply_assessment_batch_provenance(run, batch_provenance.get(run_id))
-    log.debug("API_HISTORY_DATA_ACCESS", extra={
-        "session": get_log_session_id(session_id),
-        "team_scope": bool(team_id),
-        "branch": "history_rows",
-        "has_query": bool(filters.get("q")),
-        "offloaded_id_count": len(offloaded_ids),
-        "structured_active": bool(structured_filters and structured_filters.active),
-        "line_scan": needs_line_scan,
-        "candidate_count": candidate_count,
-        "result_count": len(runs),
-    })
+    log.debug(
+        "API_HISTORY_DATA_ACCESS",
+        extra={
+            "session": get_log_session_id(session_id),
+            "team_scope": bool(team_id),
+            "branch": "history_rows",
+            "has_query": bool(filters.get("q")),
+            "offloaded_id_count": len(offloaded_ids),
+            "structured_active": bool(structured_filters and structured_filters.active),
+            "line_scan": needs_line_scan,
+            "candidate_count": candidate_count,
+            "result_count": len(runs),
+        },
+    )
     return runs, total
 
 
@@ -454,13 +454,13 @@ def artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: st
     with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
-            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
+            f"SELECT personal_workspace_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
             (*scope_params, run_id),
         ).fetchone()
         if not run_row:
             return None
         row = conn.execute(
-            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "SELECT id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
             "FROM run_file_artifacts WHERE run_id = ? AND id = ?",
             (str(run_row["team_id"] or ""), run_id, artifact_id),
@@ -468,8 +468,10 @@ def artifact_for_run(session_id: str, team_id: str, run_id: str, artifact_id: st
     if not row:
         return None
     artifact = dict(row)
-    owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
-    artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
+    owner_context = artifact_owner_context(str(artifact.get("personal_workspace_id") or ""), artifact)
+    artifact.update(
+        artifact_availability(str(artifact.get("personal_workspace_id") or ""), artifact, owner_context=owner_context)
+    )
     return artifact
 
 
@@ -477,13 +479,13 @@ def artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[s
     with get_db_connect()() as conn:
         scope_sql, scope_params = run_owner_clause(session_id, team_id, alias="")
         run_row = conn.execute(
-            f"SELECT session_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
+            f"SELECT personal_workspace_id, team_id FROM runs WHERE {scope_sql} AND id = ?",  # nosec
             (*scope_params, run_id),
         ).fetchone()
         if not run_row:
             return None
         rows = conn.execute(
-            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "SELECT id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, preview_type, content_sha256, created, ? AS run_team_id "
             "FROM run_file_artifacts WHERE run_id = ? "
             "ORDER BY created ASC, workspace_path ASC",
@@ -492,7 +494,9 @@ def artifacts_for_run(session_id: str, team_id: str, run_id: str) -> list[dict[s
     artifacts = []
     for row in rows:
         artifact = dict(row)
-        owner_context = artifact_owner_context(str(artifact.get("session_id") or ""), artifact)
-        artifact.update(artifact_availability(str(artifact.get("session_id") or ""), artifact, owner_context=owner_context))
+        owner_context = artifact_owner_context(str(artifact.get("personal_workspace_id") or ""), artifact)
+        artifact.update(
+            artifact_availability(str(artifact.get("personal_workspace_id") or ""), artifact, owner_context=owner_context)
+        )
         artifacts.append(artifact)
     return artifacts

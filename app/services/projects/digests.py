@@ -46,11 +46,7 @@ def _json_param(value: Any) -> Any:
 
 
 def _loads_json_list(value: Any) -> list[str]:
-    return [
-        str(item)
-        for item in dialect_for_backend(get_db_backend()).decode_json_list(value)
-        if str(item or "").strip()
-    ]
+    return [str(item) for item in dialect_for_backend(get_db_backend()).decode_json_list(value) if str(item or "").strip()]
 
 
 def _normalize_cadence(value: Any) -> str:
@@ -91,7 +87,7 @@ def _configured_first_send_lookback_hours(cadence: str) -> int:
     raw_value = settings.get("first_send_lookback_hours")
     try:
         configured = int(raw_value or fallback)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         _warn_invalid_config_once("project_digests.first_send_lookback_hours", raw_value, fallback)
         configured = fallback
     return max(1, min(configured, fallback))
@@ -204,14 +200,14 @@ def _mark_evaluated_skip(
 def _project_row(conn: Any, session_id: str, project_id: str, *, team_id: str = "") -> Any:
     owner_sql, owner_params = shared_owner_where(session_id, team_id=team_id)
     return conn.execute(
-        "SELECT id, session_id, team_id, status FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
+        "SELECT id, personal_workspace_id, team_id, status FROM projects WHERE " + owner_sql + " AND id = ?",  # nosec
         (*owner_params, project_id),
     ).fetchone()
 
 
 def _settings_session_id(project: Any, session_id: str, team_id: str) -> str:
     if str(team_id or "").strip() and project is not None:
-        return str(project["session_id"] or session_id or "").strip()
+        return str(project["personal_workspace_id"] or session_id or "").strip()
     return str(session_id or "").strip()
 
 
@@ -246,7 +242,7 @@ def _validate_channel_ids(conn: Any, session_id: str, team_id: str, channel_ids:
 def _schedule_for_digest(conn: Any, session_id: str, project_id: str, *, team_id: str = "") -> Any:
     return conn.execute(
         "SELECT id, enabled, next_run_at, paused_reason, last_error "
-        "FROM schedules WHERE owner_kind = ? AND owner_id = ? AND session_token = ? AND team_id = ?",
+        "FROM schedules WHERE owner_kind = ? AND owner_id = ? AND personal_workspace_id = ? AND team_id = ?",
         (OWNER_KIND_PROJECT_DIGEST, project_id, session_id, team_id),
     ).fetchone()
 
@@ -292,14 +288,12 @@ def _sync_digest_schedule(
 
 
 def _row_to_settings(
-        row: Any, *, default_project_id: str = "",
-        default_session_id: str = "",
-        default_team_id: str = ""
-    ) -> dict[str, Any]:
+    row: Any, *, default_project_id: str = "", default_session_id: str = "", default_team_id: str = ""
+) -> dict[str, Any]:
     if row is None:
         return {
             "project_id": default_project_id,
-            "session_id": default_session_id,
+            "personal_workspace_id": default_session_id,
             "team_id": default_team_id,
             "enabled": False,
             "cadence_preset": _configured_default_cadence(),
@@ -313,7 +307,7 @@ def _row_to_settings(
         }
     return {
         "project_id": str(row["project_id"]),
-        "session_id": str(row["session_id"]),
+        "personal_workspace_id": str(row["personal_workspace_id"]),
         "team_id": str(row["team_id"] or ""),
         "enabled": bool(row["enabled"]),
         "cadence_preset": str(row["cadence_preset"] or DEFAULT_DIGEST_CADENCE),
@@ -330,7 +324,7 @@ def _row_to_settings(
 def _attach_schedule_status(conn: Any, settings: dict[str, Any]) -> dict[str, Any]:
     row = _schedule_for_digest(
         conn,
-        str(settings.get("session_id") or ""),
+        str(settings.get("personal_workspace_id") or ""),
         str(settings.get("project_id") or ""),
         team_id=str(settings.get("team_id") or ""),
     )
@@ -342,8 +336,7 @@ def _attach_schedule_status(conn: Any, settings: dict[str, Any]) -> dict[str, An
     fire = None
     if row is not None:
         fire = conn.execute(
-            "SELECT status, reason, fired_at FROM schedule_fires "
-            "WHERE schedule_id = ? ORDER BY fired_at DESC, id DESC LIMIT 1",
+            "SELECT status, reason, fired_at FROM schedule_fires WHERE schedule_id = ? ORDER BY fired_at DESC, id DESC LIMIT 1",
             (str(row["id"]),),
         ).fetchone()
     settings["schedule_last_fire_status"] = str(fire["status"] or "") if fire is not None else ""
@@ -362,7 +355,7 @@ def digest_event_identity(
 ) -> dict[str, str]:
     return {
         "project_id": str(project_id or "").strip(),
-        "session_id": str(session_id or "").strip(),
+        "personal_workspace_id": str(session_id or "").strip(),
         "team_id": str(team_id or "").strip(),
         "window_start": str(window_start or "").strip(),
         "window_end": str(window_end or "").strip(),
@@ -370,13 +363,15 @@ def digest_event_identity(
 
 
 def _digest_event_key(identity: dict[str, str]) -> str:
-    raw = "\x1f".join([
-        str(identity.get("project_id") or ""),
-        str(identity.get("session_id") or ""),
-        str(identity.get("team_id") or ""),
-        str(identity.get("window_start") or ""),
-        str(identity.get("window_end") or ""),
-    ])
+    raw = "\x1f".join(
+        [
+            str(identity.get("project_id") or ""),
+            str(identity.get("personal_workspace_id") or ""),
+            str(identity.get("team_id") or ""),
+            str(identity.get("window_start") or ""),
+            str(identity.get("window_end") or ""),
+        ]
+    )
     return "project_digest:" + hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:32]
 
 
@@ -390,9 +385,9 @@ def get_digest_settings(session_id: str, project_id: str, *, team_id: str = "", 
         return None
     settings_session_id = _settings_session_id(project, session_id, team_id)
     row = conn.execute(
-        "SELECT project_id, session_id, team_id, enabled, cadence_preset, channel_ids_json, "
+        "SELECT project_id, personal_workspace_id, team_id, enabled, cadence_preset, channel_ids_json, "
         "quiet_no_change, risk_escalations_enabled, last_evaluated_at, last_sent_at, created, updated "
-        "FROM project_digest_settings WHERE project_id = ? AND session_id = ? AND team_id = ?",
+        "FROM project_digest_settings WHERE project_id = ? AND personal_workspace_id = ? AND team_id = ?",
         (project_id, settings_session_id, team_id),
     ).fetchone()
     settings = _row_to_settings(
@@ -434,16 +429,15 @@ def save_digest_settings(
         raise ProjectWorkspaceError("choose at least one digest notification channel")
     _validate_channel_ids(conn, session_id, team_id, channel_ids)
     quiet_no_change = _bool_flag(payload.get("quiet_no_change"), default=False)
-    risk_escalations_enabled = _bool_flag(
-        payload.get("risk_escalations_enabled"), default=False
-    )
+    risk_escalations_enabled = _bool_flag(payload.get("risk_escalations_enabled"), default=False)
     now = _now()
     conn.execute(
         "INSERT INTO project_digest_settings "
-        "(project_id, session_id, team_id, enabled, cadence_preset, channel_ids_json, quiet_no_change, risk_escalations_enabled, "
+        "(project_id, personal_workspace_id, team_id, enabled, cadence_preset, "
+        "channel_ids_json, quiet_no_change, risk_escalations_enabled, "
         "last_evaluated_at, last_sent_at, created, updated) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?) "
-        "ON CONFLICT(project_id, session_id, team_id) DO UPDATE SET "
+        "ON CONFLICT(project_id, personal_workspace_id, team_id) DO UPDATE SET "
         "enabled = excluded.enabled, cadence_preset = excluded.cadence_preset, "
         "channel_ids_json = excluded.channel_ids_json, quiet_no_change = excluded.quiet_no_change, "
         "risk_escalations_enabled = excluded.risk_escalations_enabled, "
@@ -487,7 +481,7 @@ def mark_digest_evaluated(
     stamp = parsed.isoformat() if parsed is not None else _now()
     conn.execute(
         "UPDATE project_digest_settings SET last_evaluated_at = ?, updated = ? "
-        "WHERE project_id = ? AND session_id = ? AND team_id = ? "
+        "WHERE project_id = ? AND personal_workspace_id = ? AND team_id = ? "
         "AND (last_evaluated_at IS NULL OR last_evaluated_at = '' OR last_evaluated_at < ?)",
         (stamp, stamp, project_id, session_id, team_id, stamp),
     )
@@ -506,7 +500,7 @@ def mark_digest_sent(
     stamp = parsed.isoformat() if parsed is not None else _now()
     conn.execute(
         "UPDATE project_digest_settings SET last_sent_at = ?, updated = ? "
-        "WHERE project_id = ? AND session_id = ? AND team_id = ? "
+        "WHERE project_id = ? AND personal_workspace_id = ? AND team_id = ? "
         "AND (last_sent_at IS NULL OR last_sent_at = '' OR last_sent_at < ?)",
         (stamp, stamp, project_id, session_id, team_id, stamp),
     )
@@ -524,8 +518,7 @@ def _window_start(settings: dict[str, Any], fired_at: str) -> str:
 
 def _summary_has_changes(summary: dict[str, Any]) -> bool:
     watcher_changes = any(
-        int(summary.get(key) or 0) > 0
-        for key in ("changed_monitor_count", "recovered_monitor_count", "failed_monitor_count")
+        int(summary.get(key) or 0) > 0 for key in ("changed_monitor_count", "recovered_monitor_count", "failed_monitor_count")
     )
     raw_risk = summary.get("risk")
     risk = raw_risk if isinstance(raw_risk, dict) else {}

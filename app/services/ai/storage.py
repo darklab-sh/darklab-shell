@@ -175,7 +175,7 @@ def enqueue_assist(
             assist_id = f"ai_{uuid.uuid4().hex}"
             active_conn.execute(
                 "INSERT INTO ai_run_assists "
-                "(id, run_id, session_id, team_id, variant, prompt_version, prompt_version_source, "
+                "(id, run_id, personal_workspace_id, team_id, variant, prompt_version, prompt_version_source, "
                 "payload_schema_version, model, context_hash, status, active_project_id, "
                 "project_target_snapshot, payload, input_chars, estimated_input_tokens, "
                 "redacted_bytes, pre_redaction_bytes, created_at, updated_at) "

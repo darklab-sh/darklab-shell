@@ -15,7 +15,8 @@ import pytest
 from core.database_backend import DatabaseBackend
 from core.database_access import get_db_connect
 from core.helpers import LEGACY_SESSION_ADAPTER_REMOVAL_ITEM
-from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
+from core.migrations import MIGRATIONS, v0078_principal_credential_persistence, v0079_credential_scopes
+from core.migrations.runner import run_migrations
 from services.auth import storage
 from services.auth.contracts import LastCredentialLockout, PAT_DEFAULT_EXPIRY_DAYS
 from services.auth.rate_limit import (
@@ -32,7 +33,11 @@ from services.auth.resolver import (
     AuthenticationState,
     resolve_authentication,
 )
+from services.auth.workspace_storage import anonymous_workspace_storage_key
+from services.scheduler.service import create_schedule
 from services.secrets.vault import reset_master_key_cache_for_tests
+from services.teams import storage as team_storage
+from services.teams.capabilities import Capability, role_can
 from services.teams.contracts import TeamError
 from services.teams.scope import (
     anonymous_owner_context,
@@ -62,6 +67,21 @@ def auth_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     _schema(conn)
+    yield conn
+    conn.close()
+    reset_master_key_cache_for_tests()
+
+
+@pytest.fixture
+def ownership_cutover_db(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
     yield conn
     conn.close()
     reset_master_key_cache_for_tests()
@@ -127,6 +147,11 @@ def test_resolver_distinguishes_every_principal_credential_state(auth_db, tmp_pa
     assert isinstance(valid.context, AuthenticatedContext)
     assert valid.context.principal_id == bundle.principal.id
     assert valid.context.personal_workspace_id == bundle.workspace.id
+    owner = owner_context_from_authentication(valid)
+    assert owner.owner_id == bundle.workspace.id
+    assert owner.workspace_storage_key == bundle.workspace.storage_key
+    assert owner.actor_principal_id == bundle.principal.id
+    assert owner.actor_credential_id == bundle.credential.metadata.id
 
     expired_issued = storage.issue_credential(
         bundle.principal.id,
@@ -365,9 +390,8 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
     assert redeemed.status_code == 200
     assert secret not in redeemed.get_data(as_text=True)
 
-    pending_cutover = client.get("/history", headers=headers)
-    assert pending_cutover.status_code == 409
-    assert pending_cutover.get_json()["error"] == "principal_cutover_pending"
+    attached_history = client.get("/history", headers=headers)
+    assert attached_history.status_code == 200
     assert LEGACY_SESSION_ADAPTER_REMOVAL_ITEM == 11
 
     unknown = _unknown_secret()
@@ -535,3 +559,227 @@ def test_secret_bearing_auth_routes_are_post_only():
     }
     assert methods.keys() == SECRET_BEARING_ENDPOINTS
     assert all(route_methods == {"OPTIONS", "POST"} for route_methods in methods.values())
+
+
+def test_anonymous_upgrade_rekeys_rows_in_place_and_preserves_fts_and_workspace(
+    ownership_cutover_db,
+    tmp_path,
+):
+    conn = ownership_cutover_db
+    anonymous_id = str(uuid.uuid4())
+    settings = _settings(tmp_path)
+    storage_key = anonymous_workspace_storage_key(anonymous_id)
+    workspace_path = settings.root / storage_key
+    workspace_path.mkdir()
+    evidence = workspace_path / "evidence.txt"
+    evidence.write_text("cutover evidence\n", encoding="utf-8")
+
+    run_id = "run_cutover_rowid"
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, personal_workspace_id, command, started, output_search_text) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (run_id, anonymous_id, "printf cutover-marker", "2026-09-08T12:00:00+00:00", "cutover marker"),
+    )
+    batch_id = "batch_cutover_actor"
+    conn.execute(
+        "INSERT INTO atlas_import_batches "
+        "(id, personal_workspace_id, actor_session_id, source_tool, import_name, created, applied_at) "
+        "VALUES (?, ?, ?, 'nmap', 'Cutover import', ?, ?)",
+        (
+            batch_id,
+            anonymous_id,
+            anonymous_id,
+            "2026-09-08T12:00:00+00:00",
+            "2026-09-08T12:00:01+00:00",
+        ),
+    )
+    conn.commit()
+    before_rowid = conn.execute("SELECT rowid FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
+
+    bundle = storage.create_principal_with_credential(
+        anonymous_id=anonymous_id,
+        settings=settings,
+        conn=conn,
+    )
+
+    run_row = conn.execute(
+        "SELECT rowid, personal_workspace_id FROM runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
+    assert run_row["rowid"] == before_rowid
+    assert run_row["personal_workspace_id"] == bundle.workspace.id
+    fts_rows = conn.execute(
+        "SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?",
+        ("cutover",),
+    ).fetchall()
+    assert [row["rowid"] for row in fts_rows] == [before_rowid]
+
+    batch = conn.execute(
+        "SELECT personal_workspace_id, actor_session_id, actor_principal_id, actor_credential_id "
+        "FROM atlas_import_batches WHERE id = ?",
+        (batch_id,),
+    ).fetchone()
+    assert batch["personal_workspace_id"] == bundle.workspace.id
+    assert batch["actor_session_id"] == anonymous_id
+    assert batch["actor_principal_id"] == bundle.principal.id
+    assert batch["actor_credential_id"] == bundle.credential.metadata.id
+    assert bundle.workspace.storage_key == storage_key
+    assert workspace_path.is_dir()
+    assert evidence.read_text(encoding="utf-8") == "cutover evidence\n"
+
+
+def test_cutover_failure_rolls_back_all_database_ownership_changes(
+    ownership_cutover_db,
+    tmp_path,
+    monkeypatch,
+):
+    conn = ownership_cutover_db
+    anonymous_id = str(uuid.uuid4())
+    settings = _settings(tmp_path)
+    workspace_path = settings.root / anonymous_workspace_storage_key(anonymous_id)
+    workspace_path.mkdir()
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, personal_workspace_id, command, started, output_search_text) "
+        "VALUES ('run_cutover_rollback', ?, 'true', '2026-09-08T12:00:00+00:00', 'rollback')",
+        (anonymous_id,),
+    )
+    conn.commit()
+
+    def fail_after_first_owner_update(active_conn, **values):
+        active_conn.execute(
+            "UPDATE runs SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
+            (values["workspace_id"], values["anonymous_id"]),
+        )
+        raise RuntimeError("injected cutover failure")
+
+    monkeypatch.setattr(storage, "attach_anonymous_ownership", fail_after_first_owner_update)
+    with pytest.raises(RuntimeError, match="injected cutover failure"):
+        storage.create_principal_with_credential(
+            anonymous_id=anonymous_id,
+            settings=settings,
+            conn=conn,
+        )
+
+    assert conn.execute(
+        "SELECT personal_workspace_id FROM runs WHERE id = 'run_cutover_rollback'"
+    ).fetchone()[0] == anonymous_id
+    for table_name in ("principals", "personal_workspaces", "credentials"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] == 0
+    assert workspace_path.is_dir()
+
+
+def test_principal_team_membership_and_owned_rows_survive_credential_changes(
+    ownership_cutover_db,
+    tmp_path,
+):
+    conn = ownership_cutover_db
+    settings = _settings(tmp_path)
+    bundles = [storage.create_principal_with_credential(settings=settings, conn=conn) for _ in range(4)]
+    owner_bundle = bundles[0]
+    team = team_storage.create_team(
+        conn,
+        name="Principal team",
+        creator_session_token=owner_bundle.principal.id,
+        creator_credential_id=owner_bundle.credential.metadata.id,
+    )
+    team_id = team["id"]
+    roles = ("admin", "operator", "viewer")
+    for bundle, role in zip(bundles[1:], roles, strict=True):
+        team_storage.add_team_member(
+            conn,
+            team_id=team_id,
+            session_token=bundle.principal.id,
+            joined_by_credential_id=owner_bundle.credential.metadata.id,
+            role=role,
+        )
+
+    owner_membership = team_storage.get_team_membership(
+        conn, team_id, owner_bundle.principal.id
+    )
+    assert owner_membership is not None
+    assert owner_membership["role"] == "owner"
+    for bundle, role in zip(bundles[1:], roles, strict=True):
+        member = team_storage.get_team_membership(conn, team_id, bundle.principal.id)
+        assert member is not None
+        assert member["role"] == role
+        assert member["principal_id"] == bundle.principal.id
+    assert role_can("owner", Capability.MANAGE_OWNERS)
+    assert role_can("admin", Capability.MANAGE_MEMBERS)
+    assert role_can("operator", Capability.RUN_COMMANDS)
+    assert role_can("viewer", Capability.VIEW_TEAM)
+    assert not role_can("viewer", Capability.RUN_COMMANDS)
+
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, personal_workspace_id, command, started, output_search_text) "
+        "VALUES ('run_credential_stability', ?, 'true', '2026-09-08T12:00:00+00:00', 'stable')",
+        (owner_bundle.workspace.id,),
+    )
+    schedule = create_schedule(
+        owner_bundle.workspace.id,
+        command_text="true",
+        cadence_preset="hourly",
+        conn=conn,
+    )
+    replacement = storage.rotate_credential(
+        owner_bundle.principal.id,
+        owner_bundle.credential.metadata.id,
+        conn=conn,
+    )
+    backup = storage.issue_credential(
+        owner_bundle.principal.id,
+        created_by_credential_id=replacement.metadata.id,
+        conn=conn,
+    )
+    storage.revoke_credential(
+        owner_bundle.principal.id,
+        replacement.metadata.id,
+        conn=conn,
+    )
+    resolved = resolve_authentication(
+        {"X-Darklab-Credential": backup.secret},
+        conn=conn,
+    )
+    assert resolved.state == AuthenticationState.VALID
+    assert isinstance(resolved.context, AuthenticatedContext)
+    assert resolved.context.personal_workspace_id == owner_bundle.workspace.id
+    assert conn.execute(
+        "SELECT personal_workspace_id FROM runs WHERE id = 'run_credential_stability'"
+    ).fetchone()[0] == owner_bundle.workspace.id
+    assert conn.execute(
+        "SELECT personal_workspace_id FROM schedules WHERE id = ?",
+        (schedule.id,),
+    ).fetchone()[0] == owner_bundle.workspace.id
+    assert storage.get_personal_workspace(owner_bundle.principal.id, conn=conn).storage_key == (
+        owner_bundle.workspace.storage_key
+    )
+    owner_membership = team_storage.get_team_membership(
+        conn, team_id, owner_bundle.principal.id
+    )
+    assert owner_membership is not None
+    assert owner_membership["role"] == "owner"
+
+
+def test_public_share_survives_upgrade_and_mutation_rekeys_to_workspace(anonymous_identity_factory):
+    from conftest import make_test_app
+
+    flask_app = make_test_app()
+    flask_app.config["RATELIMIT_ENABLED"] = False
+    client = flask_app.test_client()
+    anonymous = anonymous_identity_factory("principal-share-cutover")
+    created = client.post(
+        "/share",
+        headers=anonymous.headers,
+        json={"label": "Cutover share", "content": ["public line"]},
+    )
+    assert created.status_code == 200
+    share_id = created.get_json()["id"]
+
+    upgraded = client.post("/auth/upgrade", headers=anonymous.headers, json={})
+    assert upgraded.status_code == 201
+    headers = {"X-Darklab-Credential": upgraded.get_json()["secret"]}
+    assert client.get(f"/share/{share_id}").status_code == 200
+    assert client.delete(f"/share/{share_id}", headers=headers).status_code == 200
+    assert client.get(f"/share/{share_id}").status_code == 404

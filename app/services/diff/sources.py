@@ -66,7 +66,7 @@ def _run_rows_for_ids(owner: OwnerContext, run_ids: list[str]) -> dict[str, dict
     scope_sql, scope_params = shared_owner_predicate(
         owner,
         team_column="runs.team_id",
-        session_column="runs.session_id",
+        session_column="runs.personal_workspace_id",
     )
     placeholders = ", ".join("?" for _item in run_ids)
     with get_db_connect()() as conn:
@@ -87,7 +87,7 @@ def _latest_run_rows_for_tab(owner: OwnerContext, tab_id: str) -> list[dict[str,
     scope_sql, scope_params = shared_owner_predicate(
         owner,
         team_column="runs.team_id",
-        session_column="runs.session_id",
+        session_column="runs.personal_workspace_id",
     )
     with get_db_connect()() as conn:
         rows = conn.execute(

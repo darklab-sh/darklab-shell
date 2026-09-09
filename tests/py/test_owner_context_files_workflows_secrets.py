@@ -26,11 +26,11 @@ def _mixed_storage_rows(conn: sqlite3.Connection) -> tuple[str, str]:
     owner_b = anonymous_session_id("files-workflows-secrets-owner-b")
     conn.execute(
         "CREATE TABLE owner_storage_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, session_token TEXT NOT NULL, "
         "team_id TEXT, kind TEXT NOT NULL)"
     )
     conn.executemany(
-        "INSERT INTO owner_storage_rows (id, session_id, session_token, team_id, kind) "
+        "INSERT INTO owner_storage_rows (id, personal_workspace_id, session_token, team_id, kind) "
         "VALUES (?, ?, ?, ?, ?)",
         (
             ("owner-a-null", owner_a, owner_a, None, "domain"),
@@ -102,7 +102,10 @@ def test_files_workflows_and_secrets_preserve_mixed_sqlite_result_sets():
             "team-red-flat-null",
         ]
 
-        secret_owner = token_keyed_owner_predicate(_secret_scope_owner("team-red"))
+        secret_owner = token_keyed_owner_predicate(
+            _secret_scope_owner("team-red"),
+            token_column="session_token",
+        )
         assert _selected_ids(conn, secret_owner.sql, secret_owner.params) == [
             "team-red",
             "team-red-flat-empty",

@@ -61,7 +61,7 @@ def _interaction_row(conn, row: Any) -> dict[str, Any]:
 
 def _select_sql(owner_sql: str) -> str:
     return (
-        "SELECT i.*, c.session_id, c.team_id, c.project_id, c.assessment_id, "
+        "SELECT i.*, c.personal_workspace_id, c.team_id, c.project_id, c.assessment_id, "
         "c.check_id, c.run_id, c.target_entity_id, c.callback_label, "
         "c.allowed_domain, c.status AS correlation_status, c.activated_at, "
         "c.active_until FROM oast_interactions i JOIN oast_correlations c "
@@ -129,7 +129,7 @@ def _ensure_assessment_run_evidence(conn, correlation: Any, observed_at: str) ->
     ).fetchone()
     candidate = {
         "already_linked": existing is not None,
-        "session_id": str(correlation["session_id"] or ""),
+        "personal_workspace_id": str(correlation["personal_workspace_id"] or ""),
         "team_id": str(correlation["team_id"] or ""),
         "project_id": str(correlation["project_id"] or ""),
     }
@@ -238,7 +238,7 @@ def ingest_oast_interaction(
                 active_conn.commit()
             raise
         existing = active_conn.execute(
-            "SELECT i.*, c.session_id, c.team_id, c.project_id, c.assessment_id, "
+            "SELECT i.*, c.personal_workspace_id, c.team_id, c.project_id, c.assessment_id, "
             "c.check_id, c.run_id, c.target_entity_id, c.callback_label, "
             "c.allowed_domain, c.status AS correlation_status, c.activated_at, "
             "c.active_until FROM oast_interactions i JOIN oast_correlations c "

@@ -26,7 +26,7 @@ from services.projects.contracts import (
     ProjectWorkspaceQuotaExceeded,
 )
 from services.notifications.channels_store import list_notification_channels
-from services.notifications.models import is_durable_session_token
+from services.notifications.models import is_durable_personal_owner
 from services.projects.auto_promote import (
     apply_stored_rule as apply_auto_promote_rule,  # noqa: F401 - compatibility seam for projects_auto_promote/tests
     create_rule as create_auto_promote_rule,  # noqa: F401 - compatibility seam for projects_auto_promote/tests
@@ -262,7 +262,7 @@ def _project_owner_any_capability(capabilities):
 
 
 def _can_manage_project_digest_settings(session_id, team_id):
-    if not is_durable_session_token(session_id):
+    if not is_durable_personal_owner(session_id):
         return False
     if not team_id:
         return True
@@ -275,7 +275,7 @@ def _can_manage_project_digest_settings(session_id, team_id):
 
 
 def _project_notification_channels(session_id, team_id):
-    if not is_durable_session_token(session_id):
+    if not is_durable_personal_owner(session_id):
         return []
     return list_notification_channels(session_id, team_id=team_id)
 
@@ -290,7 +290,7 @@ def _project_download_ticket_owner(payload, *, project_id, expected_ids):
     for key, expected in expected_ids.items():
         if str(payload.get(key) or "") != str(expected or ""):
             raise DownloadTicketError("download ticket target is invalid")
-    session_id = str(payload.get("session_id") or "").strip()
+    session_id = str(payload.get("personal_workspace_id") or "").strip()
     if not session_id:
         raise DownloadTicketError("download ticket session is invalid")
     return session_id, str(payload.get("team_id") or "").strip()

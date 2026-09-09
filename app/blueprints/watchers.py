@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Browser routes for session-owned change-detection watchers."""
+"""Browser routes for owner-scoped change-detection watchers."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ from services.watchers.service import (
     run_watcher_transaction,
     update_watcher,
 )
+from services.notifications.models import is_durable_personal_owner
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamPermissionDenied
 from services.teams.request_scope import RequestScope, RequestScopeError, current_request_scope, scope_error_payload
@@ -76,7 +77,7 @@ def _required_token_session():
     session_id = get_session_id()
     if not session_id:
         return "", (jsonify({"error": "session_required"}), 401)
-    if not str(session_id).startswith("tok_"):
+    if not is_durable_personal_owner(session_id):
         return "", (jsonify({"error": "session_token_required"}), 401)
     return session_id, None
 

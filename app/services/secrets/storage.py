@@ -94,7 +94,10 @@ def _secret_scope_owner(scope_id: str) -> OwnerContext:
 
 
 def list_secret_metadata(session_token: str) -> list[dict[str, str | list[str]]]:
-    owner = token_keyed_owner_predicate(_secret_scope_owner(session_token))
+    owner = token_keyed_owner_predicate(
+        _secret_scope_owner(session_token),
+        token_column="owner_id",
+    )
     with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT name, consumer_envs, updated_at FROM secrets "  # nosec B608
@@ -114,9 +117,10 @@ def upsert_secret_with_connection(conn, session_token: str, name: str, value: st
     exact_secret = composite_owner_predicate(
         owner,
         owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_column="owner_id",
         key_values=(("name", normalized_name),),
     )
-    vault_scope = token_keyed_owner_predicate(owner)
+    vault_scope = token_keyed_owner_predicate(owner, token_column="owner_id")
 
     existing = conn.execute(
         "SELECT created_at FROM secrets WHERE " + exact_secret.sql,  # nosec B608
@@ -138,9 +142,9 @@ def upsert_secret_with_connection(conn, session_token: str, name: str, value: st
     created_at = now if created else existing["created_at"]
     conn.execute(
         "INSERT INTO secrets "
-        "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+        "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(session_token, name) DO UPDATE SET "
+        "ON CONFLICT(owner_id, name) DO UPDATE SET "
         "ciphertext = excluded.ciphertext, "
         "nonce = excluded.nonce, "
         "consumer_envs = excluded.consumer_envs, "
@@ -195,7 +199,7 @@ def upsert_secret(
             },
             conn=conn,
             **(audit_fields or {
-                "session_id": audit_session_id or session_token,
+                "personal_workspace_id": audit_session_id or session_token,
                 "actor_session_id": audit_session_id or session_token,
                 "team_id": team_id,
             }),
@@ -217,6 +221,7 @@ def delete_secret(
     owner = composite_owner_predicate(
         _secret_scope_owner(session_token),
         owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_column="owner_id",
         key_values=(("name", normalized_name),),
     )
     with get_db_connect()() as conn:
@@ -234,7 +239,7 @@ def delete_secret(
                 },
                 conn=conn,
                 **(audit_fields or {
-                    "session_id": audit_session_id or session_token,
+                    "personal_workspace_id": audit_session_id or session_token,
                     "actor_session_id": audit_session_id or session_token,
                     "team_id": team_id,
                 }),
@@ -251,7 +256,10 @@ def get_secret_value_for_env(
     team_id: str = "",
 ) -> str | None:
     normalized_env = normalize_secret_name(env_name)
-    owner = token_keyed_owner_predicate(_secret_scope_owner(session_token))
+    owner = token_keyed_owner_predicate(
+        _secret_scope_owner(session_token),
+        token_column="owner_id",
+    )
     with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT ciphertext, nonce, consumer_envs FROM secrets "  # nosec B608
@@ -284,6 +292,7 @@ def get_secret_value_by_name(
     owner = composite_owner_predicate(
         _secret_scope_owner(session_token),
         owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_column="owner_id",
         key_values=(("name", normalized_name),),
     )
     with get_db_connect()() as conn:
@@ -312,7 +321,7 @@ def rewrap_session_secrets(
 ) -> int:
     """Re-encrypt all secrets for a session under the currently active key."""
     vault_owner = _secret_scope_owner(session_token)
-    vault_scope = token_keyed_owner_predicate(vault_owner)
+    vault_scope = token_keyed_owner_predicate(vault_owner, token_column="owner_id")
     with get_db_connect()() as conn:
         rows = conn.execute(
             "SELECT name, ciphertext, nonce FROM secrets WHERE " + vault_scope.sql,  # nosec B608
@@ -326,6 +335,7 @@ def rewrap_session_secrets(
             secret_owner = composite_owner_predicate(
                 vault_owner,
                 owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+                owner_column="owner_id",
                 key_values=(("name", row["name"]),),
             )
             conn.execute(
@@ -340,7 +350,7 @@ def rewrap_session_secrets(
             details={"updated_count": updated, "count": updated},
             conn=conn,
             **(audit_fields or {
-                "session_id": audit_session_id or session_token,
+                "personal_workspace_id": audit_session_id or session_token,
                 "actor_session_id": audit_session_id or session_token,
                 "team_id": team_id,
             }),
@@ -353,7 +363,7 @@ def rewrap_session_secrets(
 def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> int:
     """Move secret rows between session tokens without decrypting values."""
     source_owner = _secret_scope_owner(from_session_id)
-    source_scope = token_keyed_owner_predicate(source_owner)
+    source_scope = token_keyed_owner_predicate(source_owner, token_column="owner_id")
     rows = conn.execute(
         "SELECT name, ciphertext, nonce, consumer_envs, created_at, updated_at "  # nosec B608
         "FROM secrets WHERE " + source_scope.sql,
@@ -363,9 +373,9 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
     migrated_names = []
     insert_sql = (
         "INSERT INTO secrets "  # nosec
-        "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+        "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        + dialect_for_backend(get_db_backend()).insert_or_ignore_clause(("session_token", "name"))
+        + dialect_for_backend(get_db_backend()).insert_or_ignore_clause(("owner_id", "name"))
     )
     for row in rows:
         cur = conn.execute(
@@ -388,6 +398,7 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
             composite_owner_predicate(
                 source_owner,
                 owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+                owner_column="owner_id",
                 key_values=(("name", name),),
             )
             for name in migrated_names

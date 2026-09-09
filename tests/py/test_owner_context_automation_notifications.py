@@ -27,12 +27,12 @@ def _mixed_automation_rows(conn: sqlite3.Connection) -> tuple[str, str]:
     owner_b = "tok_automation_owner_b"
     conn.execute(
         "CREATE TABLE owner_automation_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, session_token TEXT NOT NULL, "
         "team_id TEXT, state TEXT NOT NULL, enabled INTEGER NOT NULL)"
     )
     conn.executemany(
         "INSERT INTO owner_automation_rows "
-        "(id, session_id, session_token, team_id, state, enabled) "
+        "(id, personal_workspace_id, session_token, team_id, state, enabled) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         (
             ("owner-a-null", owner_a, owner_a, None, "ok", 1),

@@ -64,7 +64,7 @@ def is_failed_exit_code(exit_code):
 
 
 def is_valid_anonymous_session_id(session_id):
-    """Return whether ``session_id`` is a browser-generated anonymous UUID."""
+    """Return whether ``personal_workspace_id`` is a browser-generated anonymous UUID."""
     try:
         from services.auth.contracts import validate_anonymous_uuid  # noqa: PLC0415
 
@@ -178,11 +178,7 @@ def get_authentication_result():
 
 
 def get_session_id():
-    """Return a v2 owner id through the temporary, fail-closed adapter.
-
-    New principal credentials deliberately do not become owner ids here. This
-    adapter remains only until the principal/workspace ownership cutover.
-    """
+    """Return the request's personal owner id through the transition adapter."""
     from services.auth.resolver import (  # noqa: PLC0415
         AnonymousContext,
         AuthenticatedContext,
@@ -198,9 +194,7 @@ def get_session_id():
     if isinstance(context, AnonymousContext):
         return context.anonymous_id
     if isinstance(context, AuthenticatedContext):
-        raise LegacyIdentityAdapterUnavailable(
-            "principal credentials cannot use session-owned routes before the ownership cutover"
-        )
+        return context.personal_workspace_id
     return ""
 
 

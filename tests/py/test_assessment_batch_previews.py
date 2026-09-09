@@ -104,7 +104,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
     with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO projects "
-            "(id, session_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
+            "(id, personal_workspace_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 "prj-preview-storage",
                 _PREVIEW_STORAGE_OWNER,
@@ -116,7 +116,7 @@ def test_assessment_batch_previews_are_atomic_paged_current_and_owner_scoped():
         )
         conn.execute(
             "INSERT INTO project_assessments "
-            "(id, session_id, project_id, title, profile_key, profile_version, status, "
+            "(id, personal_workspace_id, project_id, title, profile_key, profile_version, status, "
             "started_at, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, 'network', '1.0', 'active', ?, ?, ?)",
             (

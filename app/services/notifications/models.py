@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import json
 from typing import Any
 
+from services.auth.contracts import InvalidIdentityValue, validate_identifier
+
 CHANNEL_KIND_WEBHOOK = "webhook"
 CHANNEL_KIND_SLACK = "slack"
 CHANNEL_KIND_DISCORD = "discord"
@@ -71,15 +73,31 @@ def notification_app_name() -> str:
     return name or DEFAULT_NOTIFICATION_APP_NAME
 
 
-def is_durable_session_token(session_token: str) -> bool:
-    return str(session_token or "").startswith("tok_")
+def is_durable_personal_owner(owner_id: str) -> bool:
+    """Return whether an owner survives beyond an anonymous browser session."""
+    normalized = str(owner_id or "").strip()
+    if normalized.startswith("tok_"):
+        return True
+    if not normalized.startswith("wsp_"):
+        return False
+    try:
+        validate_identifier(normalized, "workspace")
+    except InvalidIdentityValue:
+        return False
+    return True
 
 
-def require_durable_session_token(session_token: str) -> str:
-    token = str(session_token or "").strip()
-    if not is_durable_session_token(token):
-        raise ValueError("notification channels require a durable session token")
-    return token
+def require_durable_personal_owner(owner_id: str) -> str:
+    normalized = str(owner_id or "").strip()
+    if not is_durable_personal_owner(normalized):
+        raise ValueError("this feature requires a durable personal workspace")
+    return normalized
+
+
+# Temporary names retained for the legacy session interface. Product code uses
+# the owner-named helpers; remove these aliases with the item 11 cutover cleanup.
+is_durable_session_token = is_durable_personal_owner
+require_durable_session_token = require_durable_personal_owner
 
 
 def _decode_json_dict(value: Any) -> dict[str, Any]:
@@ -128,7 +146,7 @@ class NotificationChannel:
     def from_row(cls, row: Any) -> "NotificationChannel":
         return cls(
             id=str(row["id"]),
-            session_token=str(row["session_token"]),
+            session_token=str(row["personal_workspace_id"]),
             team_id=str(row["team_id"] or "") if "team_id" in row.keys() else "",
             kind=str(row["kind"]),
             label=str(row["label"] or ""),
@@ -162,7 +180,7 @@ class NotificationEvent:
     def from_row(cls, row: Any) -> "NotificationEvent":
         return cls(
             id=str(row["id"]),
-            session_token=str(row["session_token"]),
+            session_token=str(row["personal_workspace_id"]),
             team_id=str(row["team_id"] or "") if "team_id" in row.keys() else "",
             channel_id=str(row["channel_id"]),
             trigger=str(row["trigger"]),

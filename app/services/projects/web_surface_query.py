@@ -10,7 +10,7 @@ from services.runs.kinds import RUN_KIND_EXTERNAL
 
 
 _CAPTURE_SELECT = (
-    "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, "
+    "SELECT a.id, a.personal_workspace_id, a.run_id, a.workspace_path, a.display_name, "
     "a.kind, a.byte_size, a.detected_by, a.content_type, a.preview_type, "
     "a.content_sha256, a.created, r.team_id AS run_team_id, r.command, "
     "r.started, r.finished, r.output_preview "
