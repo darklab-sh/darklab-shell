@@ -30,6 +30,8 @@ from .contracts import (
     TeamOwnerRequired,
     TeamSlugUnavailable,
 )
+from .ownership_queries import team_only_owner_predicate
+from .scope import team_owner_context
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -244,9 +246,10 @@ def team_detail(conn: Any, team_id: str, *, current_session_token: str = "") -> 
     team = get_team(conn, team_id)
     if team is None:
         return None
+    owner = team_only_owner_predicate(team_owner_context(team_id))
     rows = conn.execute(
-        "SELECT * FROM team_members WHERE team_id = ? ORDER BY status, role, joined_at",
-        (team_id,),
+        f"SELECT * FROM team_members WHERE {owner.sql} ORDER BY status, role, joined_at",  # nosec B608
+        owner.params,
     ).fetchall()
     current_hash = token_hash(current_session_token.strip()) if current_session_token.strip() else ""
     members = []
@@ -255,12 +258,12 @@ def team_detail(conn: Any, team_id: str, *, current_session_token: str = "") -> 
         data["is_current"] = bool(current_hash and data.get("session_token_hash") == current_hash)
         members.append(_public_member(data))
     invite_rows = conn.execute(
-        "SELECT * FROM team_invites WHERE team_id = ? ORDER BY created_at DESC",
-        (team_id,),
+        f"SELECT * FROM team_invites WHERE {owner.sql} ORDER BY created_at DESC",  # nosec B608
+        owner.params,
     ).fetchall()
     recovery_rows = conn.execute(
-        "SELECT * FROM team_recovery_codes WHERE team_id = ? ORDER BY created_at DESC",
-        (team_id,),
+        f"SELECT * FROM team_recovery_codes WHERE {owner.sql} ORDER BY created_at DESC",  # nosec B608
+        owner.params,
     ).fetchall()
     public = _public_team(team)
     public["member"] = _public_member(get_team_membership(conn, team_id, current_session_token) or {})
@@ -273,10 +276,11 @@ def team_detail(conn: Any, team_id: str, *, current_session_token: str = "") -> 
 
 
 def active_owner_count(conn: Any, team_id: str) -> int:
+    owner = team_only_owner_predicate(team_owner_context(team_id))
     row = conn.execute(
         "SELECT COUNT(*) AS count FROM team_members "
-        "WHERE team_id = ? AND role = 'owner' AND status = 'active' AND removed_at = ''",
-        (team_id,),
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''",  # nosec B608
+        owner.params,
     ).fetchone()
     return int(row["count"] if row else 0)
 
@@ -284,11 +288,12 @@ def active_owner_count(conn: Any, team_id: str) -> int:
 def _lock_active_owner_rows(conn: Any, team_id: str) -> None:
     if get_db_backend() != DatabaseBackend.POSTGRES:
         return
+    owner = team_only_owner_predicate(team_owner_context(team_id))
     conn.execute(
         "SELECT id FROM team_members "
-        "WHERE team_id = ? AND role = 'owner' AND status = 'active' AND removed_at = '' "
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = '' "  # nosec B608
         "ORDER BY id FOR UPDATE",
-        (team_id,),
+        owner.params,
     ).fetchall()
 
 
@@ -453,13 +458,14 @@ def update_team_member(
         params.append(member_id)
         where_sql = "id = ?"
         if owner_role_change:
+            owner = team_only_owner_predicate(team_owner_context(member["team_id"]))
             where_sql += (
                 " AND (role != 'owner' OR ("
                 "SELECT COUNT(*) FROM team_members "
-                "WHERE team_id = ? AND role = 'owner' AND status = 'active' AND removed_at = ''"
+                f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec B608
                 ") > 1)"
             )
-            params.append(member["team_id"])
+            params.extend(owner.params)
         result = conn.execute(f"UPDATE team_members SET {', '.join(updates)} WHERE {where_sql}", params)  # nosec
         if owner_role_change and not result.rowcount:
             raise TeamOwnerRequired("A team must keep at least one active owner")
@@ -478,14 +484,15 @@ def soft_remove_team_member(conn: Any, member_id: str, *, removed_at: str = "") 
         _lock_active_owner_rows(conn, member["team_id"])
         if active_owner_count(conn, member["team_id"]) <= 1:
             raise TeamOwnerRequired("A team must keep at least one active owner")
+    owner = team_only_owner_predicate(team_owner_context(member["team_id"]))
     result = conn.execute(
         "UPDATE team_members SET status = 'removed', removed_at = ? "
         "WHERE id = ? AND status = 'active' "
         "AND (role != 'owner' OR ("
         "SELECT COUNT(*) FROM team_members "
-        "WHERE team_id = ? AND role = 'owner' AND status = 'active' AND removed_at = ''"
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec B608
         ") > 1)",
-        (removed_at or now(), member_id, member["team_id"]),
+        (removed_at or now(), member_id, *owner.params),
     )
     if not result.rowcount:
         refreshed = get_member(conn, member_id)
@@ -681,10 +688,11 @@ def create_team_recovery_code(
 def rotate_team_recovery_code(conn: Any, *, team_id: str, created_by_member_id: str) -> dict[str, Any]:
     require_active_team(conn, team_id)
     created = now()
+    owner = team_only_owner_predicate(team_owner_context(team_id))
     conn.execute(
         "UPDATE team_recovery_codes SET rotated_at = ? "
-        "WHERE team_id = ? AND rotated_at = '' AND revoked_at = '' AND used_at = ''",
-        (created, team_id),
+        f"WHERE {owner.sql} AND rotated_at = '' AND revoked_at = '' AND used_at = ''",  # nosec B608
+        (created, *owner.params),
     )
     code = new_recovery_code()
     recovery = create_team_recovery_code(

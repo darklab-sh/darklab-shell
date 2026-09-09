@@ -72,6 +72,11 @@ def _require_personal(context: OwnerContext) -> None:
         raise TeamError("Personal-only table cannot be queried with a team owner context")
 
 
+def _require_team(context: OwnerContext) -> None:
+    if context.scope != "team":
+        raise TeamError("Team-only table cannot be queried with a personal owner context")
+
+
 def personal_only_owner_predicate(
     context: OwnerContext,
     *,
@@ -81,6 +86,17 @@ def personal_only_owner_predicate(
     _require_personal(context)
     owner_column = _identifier(owner_column, "Owner column")
     return OwnershipPredicate(f"{owner_column} = ?", (context.owner_id,))
+
+
+def team_only_owner_predicate(
+    context: OwnerContext,
+    *,
+    team_column: str = "team_id",
+) -> OwnershipPredicate:
+    """Match a table whose only ownership key is its team id."""
+    _require_team(context)
+    team_column = _identifier(team_column, "Team column")
+    return OwnershipPredicate(f"{team_column} = ?", (context.owner_id,))
 
 
 def _personal_team_sql(team_column: str, representation: PersonalTeamRows) -> str:

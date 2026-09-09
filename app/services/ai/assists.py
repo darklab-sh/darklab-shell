@@ -26,6 +26,8 @@ from services.ai.storage import enqueue_assist, list_recent_assists_for_run
 from services.metrics_lazy import app_metrics
 from services.projects.active import get_active_project
 from services.projects.targets import list_project_targets
+from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
+from services.teams.scope import owner_context_for_scope
 
 log = logging.getLogger("shell")
 
@@ -281,17 +283,18 @@ def _log_enqueue_result(
 
 
 def _owned_run_row(session_id: str, run_id: str, *, team_id: str = "") -> dict[str, Any] | None:
-    if team_id:
-        sql = "SELECT id, session_id, team_id, command, finished, exit_code FROM runs WHERE team_id = ? AND id = ?"
-        params = (team_id, run_id)
-    else:
-        sql = (
-            "SELECT id, session_id, team_id, command, finished, exit_code FROM runs "
-            "WHERE session_id = ? AND (team_id IS NULL OR team_id = '') AND id = ?"
-        )
-        params = (session_id, run_id)
+    owner = composite_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        key_values=(("id", run_id),),
+        team_column="team_id",
+        personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
+    )
     with get_db_connect()() as conn:
-        row = conn.execute(sql, params).fetchone()
+        row = conn.execute(
+            "SELECT id, session_id, team_id, command, finished, exit_code FROM runs "
+            f"WHERE {owner.sql}",  # nosec B608
+            owner.params,
+        ).fetchone()
     return dict(row) if row else None
 
 

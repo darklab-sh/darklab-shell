@@ -25,6 +25,8 @@ from services.scheduler.dispatch import fire_schedule
 from services.scheduler.models import Schedule
 from services.scheduler.service import ScheduleError, get_schedule
 from services.session.variables import SessionVariableError
+from services.teams.ownership_queries import composite_owner_predicate
+from services.teams.scope import personal_owner_context
 from services.watchers.models import WATCHER_STATE_PAUSED, Watcher
 from services.watchers.service import (
     WatcherError,
@@ -195,10 +197,14 @@ def _parse_create(parts: list[str]) -> dict[str, Any]:
 
 
 def _baseline_for_session(baseline_run_id: str, session_id: str) -> dict[str, Any]:
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        key_values=(("id", baseline_run_id),),
+    )
     with database.db_connect() as conn:
         row = conn.execute(
-            "SELECT id, command, finished FROM runs WHERE id = ? AND session_id = ?",
-            (baseline_run_id, session_id),
+            f"SELECT id, command, finished FROM runs WHERE {owner.sql}",  # nosec B608
+            owner.params,
         ).fetchone()
     if row is None:
         raise BuiltinWatchError(f"baseline run not found: {baseline_run_id}")
