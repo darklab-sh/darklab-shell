@@ -15,6 +15,11 @@ from config import resolve_effective_cfg
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.metrics.cve_risk import CVE_RISK_WORK_ITEMS, RISK_ESCALATIONS_CREATED
+from services.teams.ownership_queries import (
+    PersonalTeamRows,
+    team_capable_owner_predicate,
+)
+from services.teams.scope import owner_context_for_scope
 from .links import group_observations, observations_for_cve
 
 
@@ -563,14 +568,16 @@ def acknowledge_escalation(
         team = conn.execute("SELECT status FROM teams WHERE id = ?", (team_id,)).fetchone()
         if team is not None and str(team["status"] or "") == "archived":
             raise ValueError("archived teams cannot change risk escalation acknowledgement")
-        owner_clause = "r.owner_team_id = ?"
-        owner_params: tuple[Any, ...] = (team_id,)
-    else:
-        owner_clause = "r.owner_team_id = '' AND r.owner_session_id = ?"
-        owner_params = (session_id,)
+    owner = team_capable_owner_predicate(
+        owner_context_for_scope(session_id, team_id=team_id),
+        owner_column="r.owner_session_id",
+        team_column="r.owner_team_id",
+        personal_team_rows=PersonalTeamRows.EMPTY,
+        owner_column_first=False,
+    )
     row = conn.execute(
-        _ACKNOWLEDGE_ESCALATION_SQL.format(owner_clause=owner_clause),
-        (escalation_id, project_id, *owner_params),
+        _ACKNOWLEDGE_ESCALATION_SQL.format(owner_clause=owner.sql),  # nosec B608
+        (escalation_id, project_id, *owner.params),
     ).fetchone()
     if row is None:
         return None

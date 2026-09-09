@@ -25,6 +25,8 @@ from services.projects.targets import (
     infer_project_target_payload,
     list_project_targets,
 )
+from services.teams.ownership_queries import composite_owner_predicate, personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def _project_usage() -> list[dict[str, object]]:
@@ -102,18 +104,25 @@ def _resolve_project_ref(
 
 
 def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
+    context = personal_owner_context(session_id)
     with get_db_connect()() as conn:
         if tab_id:
+            owner = composite_owner_predicate(
+                context,
+                key_values=(("owner_tab_id", tab_id),),
+            )
             row = conn.execute(
                 "SELECT id FROM runs "
-                "WHERE session_id = ? AND run_kind = 'external' AND owner_tab_id = ? "
+                f"WHERE {owner.sql} AND run_kind = 'external' "  # nosec B608
                 "ORDER BY started DESC LIMIT 1",
-                (session_id, tab_id),
+                owner.params,
             ).fetchone()
         else:
+            owner = personal_only_owner_predicate(context)
             row = conn.execute(
-                "SELECT id FROM runs WHERE session_id = ? AND run_kind = 'external' ORDER BY started DESC LIMIT 1",
-                (session_id,),
+                f"SELECT id FROM runs WHERE {owner.sql} "  # nosec B608
+                "AND run_kind = 'external' ORDER BY started DESC LIMIT 1",
+                owner.params,
             ).fetchone()
     return str(row["id"] or "") if row else ""
 

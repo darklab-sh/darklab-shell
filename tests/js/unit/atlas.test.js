@@ -4015,8 +4015,10 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.getAttribute('aria-label'))
       .toBe('Back to Atlas results')
     document.querySelector('#atlas-mobile-entity-topbar .atlas-mobile-back-btn')?.click()
-    expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
-    expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
+    await vi.waitFor(() => {
+      expect(document.getElementById('atlas-mobile-list-view')?.classList.contains('u-hidden')).toBe(false)
+      expect(document.getElementById('atlas-mobile-entity-view')?.classList.contains('u-hidden')).toBe(true)
+    })
     document.body.classList.remove('mobile-terminal-mode')
   }, 20_000)
 

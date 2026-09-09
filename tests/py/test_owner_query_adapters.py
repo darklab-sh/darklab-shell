@@ -16,6 +16,7 @@ from services.teams.ownership_queries import (
     composite_owner_predicate,
     personal_only_owner_predicate,
     team_capable_owner_predicate,
+    team_only_owner_predicate,
     token_keyed_owner_predicate,
 )
 from services.teams.scope import personal_owner_context, team_owner_context
@@ -102,6 +103,7 @@ def _assert_mixed_owner_results(conn):
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         ),
     ) == ["team-row"]
+    assert _selected_ids(conn, team_only_owner_predicate(team)) == ["team-row"]
     assert _selected_ids(
         conn,
         token_keyed_owner_predicate(
@@ -159,6 +161,8 @@ def test_owner_query_adapters_require_explicit_table_shape():
         token_keyed_owner_predicate(owner, team_column="team_id")
     with pytest.raises(TeamError, match="Personal-only table"):
         personal_only_owner_predicate(team)
+    with pytest.raises(TeamError, match="Team-only table"):
+        team_only_owner_predicate(owner)
     with pytest.raises(TeamError, match="at least one additional key"):
         composite_owner_predicate(owner, key_values=())
     with pytest.raises(TeamError, match="valid owner key shape"):

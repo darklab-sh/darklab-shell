@@ -1,0 +1,42 @@
+{
+  "format_version": 1,
+  "branch": "refactor/owner-context-remaining-surfaces",
+  "baseline_site_count": 52,
+  "summary": {
+    "equivalent_adapter": 34,
+    "equivalent_named_exception": 18,
+    "non_equivalent": 0
+  },
+  "classification_contract": "Every baseline site is classified by the per-path counts below. Adapter conversions preserve the prior bound-owner result set. The remaining principal-foundation, attribution, membership-hash, and row-correlation queries are named exceptions because they do not authorize rows through a legacy OwnerContext owner key. No conversion changes behavior in this branch.",
+  "paths": {
+    "app/core/database.py": {"baseline": 1, "adapter": 0, "named_exception": 1},
+    "app/services/ai/assists.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/ai/context.py": {"baseline": 4, "adapter": 4, "named_exception": 0},
+    "app/services/ai/storage.py": {"baseline": 6, "adapter": 6, "named_exception": 0},
+    "app/services/audit/queries.py": {"baseline": 1, "adapter": 0, "named_exception": 1},
+    "app/services/auth/resolver.py": {"baseline": 2, "adapter": 0, "named_exception": 2},
+    "app/services/auth/storage.py": {"baseline": 10, "adapter": 0, "named_exception": 10},
+    "app/services/commands/builtins_project.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/commands/builtins_runtime.py": {"baseline": 7, "adapter": 7, "named_exception": 0},
+    "app/services/commands/builtins_watch.py": {"baseline": 1, "adapter": 1, "named_exception": 0},
+    "app/services/cve_risk/escalation.py": {"baseline": 4, "adapter": 2, "named_exception": 2},
+    "app/services/diff/classifiers/findings.py": {"baseline": 2, "adapter": 2, "named_exception": 0},
+    "app/services/teams/storage.py": {"baseline": 10, "adapter": 8, "named_exception": 2}
+  },
+  "result_set_contracts": {
+    "personal_only": "Runtime, project, watcher, and structured-finding lookups continue to match the supplied session identity without adding a team predicate.",
+    "team_capable_null_or_empty": "AI run, project, and assist queries match team_id in team scope or session_id with a NULL or empty team marker in personal scope.",
+    "team_capable_empty": "Risk acknowledgement matches team_id in team scope or the exact session owner with an empty team marker in personal scope.",
+    "exact_legacy_compound_owner": "Risk escalation state and deduplication remain named exceptions so they continue to match the exact stored legacy session, team, and record keys without adding request-identity validation.",
+    "team_only": "Team detail, active-owner protection, and recovery-code rotation continue to match the supplied team id without inventing a personal owner column.",
+    "principal_foundation": "Principal, personal-workspace, credential, and credential-scope queries remain inside the additive authentication storage boundary until Phase 3B activates those owners.",
+    "named_exceptions": "Watcher backfill keeps its cross-table owner correlation, audit browsing keeps attribution-only filters, and team membership discovery keeps the legacy one-way token-hash lookup until Phase 3B."
+  },
+  "coverage": {
+    "list_detail": "AI assists and context, runtime history and counts, project latest-run selection, team detail, risk state, and structured findings.",
+    "mutation": "Risk acknowledgement, team last-owner protection, team-member removal, and recovery-code rotation retain their exact owner boundaries.",
+    "import_export": "The remaining surfaces do not add a separate owner-scoped import or export path; audit browsing and AI context reads preserve their existing filters.",
+    "cleanup_retention": "Team recovery rotation and the watcher project-id backfill retain their existing team and row-correlation boundaries.",
+    "worker": "AI assist queue reads and risk state deduplication continue to use the current session or team owner; principal storage remains additive and inactive as an ownership source."
+  }
+}

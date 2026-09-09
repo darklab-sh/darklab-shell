@@ -10,6 +10,8 @@ from typing import Any
 from services.diff.classifiers import register_classifier
 from services.diff.classifiers.common import list_delta
 from services.diff.models import DIFF_KIND_NONE, DIFF_KIND_SIGNAL, DiffResult
+from services.teams.ownership_queries import composite_owner_predicate
+from services.teams.scope import personal_owner_context
 
 
 def applies_to(_command_text: str, run: dict[str, Any], conn=None) -> bool:
@@ -19,21 +21,35 @@ def applies_to(_command_text: str, run: dict[str, Any], conn=None) -> bool:
     session_id = str(run.get("session_id") or "")
     if not run_id or not session_id:
         return False
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        owner_column="f.session_id",
+        key_values=(("fo.run_id", run_id),),
+    )
     row = conn.execute(
         "SELECT 1 FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        "WHERE f.session_id = ? AND fo.run_id = ? LIMIT 1",
-        (session_id, run_id),
+        f"WHERE {owner.sql} LIMIT 1",  # nosec B608
+        owner.params,
     ).fetchone()
     return row is not None
 
 
 def _items(conn, run: dict[str, Any]) -> list[dict[str, Any]]:
+    session_id = str(run.get("session_id") or "")
+    run_id = str(run.get("id") or "")
+    if not session_id or not run_id:
+        return []
+    owner = composite_owner_predicate(
+        personal_owner_context(session_id),
+        owner_column="f.session_id",
+        key_values=(("fo.run_id", run_id),),
+    )
     rows = conn.execute(
         "SELECT f.id, f.signature_hash, f.fingerprint, f.title, f.raw_line, f.severity, fo.line_number "
         "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        "WHERE f.session_id = ? AND fo.run_id = ? "
+        f"WHERE {owner.sql} "  # nosec B608
         "ORDER BY fo.line_number ASC, f.id ASC",
-        (str(run.get("session_id") or ""), str(run.get("id") or "")),
+        owner.params,
     ).fetchall()
     items = []
     for row in rows:
@@ -72,4 +88,3 @@ def diff(
     }
     kind = DIFF_KIND_SIGNAL if int(delta["added_count"]) or effective_removed_count else DIFF_KIND_NONE
     return DiffResult(summary=summary, kind=kind, truncated=bool(delta["truncated"]))
-

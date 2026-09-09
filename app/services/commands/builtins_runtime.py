@@ -36,6 +36,8 @@ from services.commands.builtins_format import (
 )
 from services.commands.builtins_session import mask_session_token as _mask_session_token
 from services.session.variables import list_session_variables
+from services.teams.ownership_queries import personal_only_owner_predicate
+from services.teams.scope import personal_owner_context
 from services.workspace.files import workspace_settings, workspace_usage
 
 
@@ -72,48 +74,35 @@ def _recent_runs(session_id: str, limit: int | None = None):
     # Synthetic status/history helpers stay session-scoped to match the rest of
     # the shell rather than exposing global activity.
     effective_limit = int(limit if limit is not None else resolve_effective_cfg()["recent_commands_limit"])
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         return conn.execute(
-            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT ?",
-            (session_id, effective_limit),
+            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec B608
+            "ORDER BY started DESC LIMIT ?",
+            (*owner.params, effective_limit),
         ).fetchall()
 
 
 def _session_history_runs(session_id: str):
     # The built-in `history` command should behave like a terminal history view:
     # session-scoped, chronological, and unclipped by the recent-command cache.
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         return conn.execute(
-            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started ASC, id ASC",
-            (session_id,),
+            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec B608
+            "ORDER BY started ASC, id ASC",
+            owner.params,
         ).fetchall()
 
 
-def _session_run_count(session_id: str) -> int:
-    with get_db_connect()() as conn:
-        row = conn.execute("SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (session_id,)).fetchone()
-    return int(row["count"]) if row else 0
-
-
-def _session_snapshot_count(session_id: str) -> int:
-    with get_db_connect()() as conn:
-        row = conn.execute("SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?", (session_id,)).fetchone()
-    return int(row["count"]) if row else 0
-
-
-def _session_starred_command_count(session_id: str) -> int:
-    with get_db_connect()() as conn:
-        row = conn.execute("SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?", (session_id,)).fetchone()
-    return int(row["count"]) if row else 0
-
-
-def _session_has_saved_preferences(session_id: str) -> bool:
+def _session_row_count(table: str, session_id: str) -> int:
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT 1 FROM session_preferences WHERE session_id = ? LIMIT 1",
-            (session_id,),
+            f"SELECT COUNT(*) AS count FROM {table} WHERE {owner.sql}",  # nosec B608
+            owner.params,
         ).fetchone()
-    return bool(row)
+    return int(row["count"]) if row else 0
 
 
 def _session_variable_count(session_id: str) -> int:
@@ -584,6 +573,10 @@ def run_builtin_status(
     width = 18
     cfg = resolve_effective_cfg()
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
+    run_count = _session_row_count("runs", session_id)
+    snapshot_count = _session_row_count("snapshots", session_id)
+    starred_count = _session_row_count("starred_commands", session_id)
+    has_saved_options = _session_row_count("session_preferences", session_id) > 0
     lines = [
         _output_line("Shell status:", "builtin-section"),
         _output_line(_format_native_record("app", cfg["app_name"], width), "builtin-kv"),
@@ -597,12 +590,12 @@ def run_builtin_status(
             _format_native_record("redis", _ansi_status_label(_status_redis_label(redis_client_value)), width),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "builtin-kv"),
-        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "builtin-kv"),
+        _output_line(_format_native_record("runs in session", str(run_count), width), "builtin-kv"),
+        _output_line(_format_native_record("snapshots", str(snapshot_count), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "starred commands",
-                str(_session_starred_command_count(session_id)),
+                str(starred_count),
                 width,
             ),
             "builtin-kv",
@@ -610,7 +603,7 @@ def run_builtin_status(
         _output_line(
             _format_native_record(
                 "saved options",
-                _ansi_yes_no(_session_has_saved_preferences(session_id)),
+                _ansi_yes_no(has_saved_options),
                 width,
             ),
             "builtin-kv",
@@ -666,6 +659,7 @@ def run_builtin_stats(
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
 ) -> list[dict[str, object]]:
     elapsed_sql = _stats_elapsed_sql()
+    owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         raw_rows = conn.execute(
             f"""
@@ -673,10 +667,10 @@ def run_builtin_stats(
                    exit_code,
                    {elapsed_sql}
               FROM runs
-             WHERE session_id = ?
+             WHERE {owner.sql}
              ORDER BY started ASC, id ASC
-            """,  # nosec
-            (session_id,),
+            """,  # nosec B608
+            owner.params,
         ).fetchall()
 
     run_total = len(raw_rows)
@@ -732,6 +726,8 @@ def run_builtin_stats(
     completed = success_total + failed_total
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
+    snapshot_count = _session_row_count("snapshots", session_id)
+    starred_count = _session_row_count("starred_commands", session_id)
     success_rate = (
         f"{_ansi_green(_format_percent(success_total, completed))} "
         f"({_ansi_green(f'{success_total} ok')} / {_ansi_red(f'{failed_total} failed')})"
@@ -744,9 +740,9 @@ def run_builtin_stats(
             "builtin-kv",
         ),
         _output_line(_format_native_record("runs", str(run_total), width), "builtin-kv"),
-        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "builtin-kv"),
+        _output_line(_format_native_record("snapshots", str(snapshot_count), width), "builtin-kv"),
         _output_line(
-            _format_native_record("starred commands", str(_session_starred_command_count(session_id)), width),
+            _format_native_record("starred commands", str(starred_count), width),
             "builtin-kv",
         ),
         _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "builtin-kv"),

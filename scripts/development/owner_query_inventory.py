@@ -39,6 +39,7 @@ QUERY_HELPERS = (
     "shared_owner_predicate",
     "personal_only_owner_predicate",
     "team_capable_owner_predicate",
+    "team_only_owner_predicate",
     "token_keyed_owner_predicate",
     "composite_owner_predicate",
     "attribution_values",
@@ -95,6 +96,10 @@ NAMED_RELATIONAL_EXCEPTIONS = {
     ),
 }
 NAMED_SOURCE_HASH_EXCEPTIONS = {
+    ("app/core/database.py", "_backfill_watcher_monitoring_fields", "4e50e61ea2"):
+        "watcher project inference preserves its cross-table run, project, and owner correlation",
+    ("app/services/audit/queries.py", "list_events", "56857e73f3"):
+        "audit browsing filters attribution hashes and labels rather than authorizing row ownership",
     ("app/services/workspace/metadata.py", "_workspace_metadata_owner_where", "73d6422a2d"):
         "team workspace metadata preserves direct and legacy flattened-owner representations",
     ("app/services/assessments/coverage_candidates.py", "candidate_checks_for_run", "c7fd2fc2d9"):
@@ -179,6 +184,14 @@ NAMED_SOURCE_HASH_EXCEPTIONS = {
         "target snapshot summaries use the legacy flattened metadata-owner key",
     ("app/services/connectors/zap_jobs.py", "create_zap_job", "1c67e9f4df"):
         "ZAP creation preserves its cross-table assessment, profile, and owner correlations",
+    ("app/services/cve_risk/escalation.py", "_state_row", "d18a95dbb5"):
+        "risk state loading preserves the exact stored legacy owner and remediation key",
+    ("app/services/cve_risk/escalation.py", "_create_escalation", "4311164b17"):
+        "risk deduplication preserves the exact stored legacy compound owner and feed key",
+    ("app/services/teams/storage.py", "list_teams_for_token", "b09bcda6c4"):
+        "team discovery resolves membership from the legacy one-way session-token hash",
+    ("app/services/teams/storage.py", "get_team_membership", "8c475540c2"):
+        "team authorization resolves one membership from its team id and legacy token hash",
 }
 OWNER_COLUMN_RE = re.compile(
     r"(?i)\b(?:[a-z_][a-z0-9_]*\.)?"
