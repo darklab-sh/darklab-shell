@@ -1342,7 +1342,8 @@ def _create_fts_schema(conn):
                 content=runs, content_rowid=rowid
             )
         """)
-    # Runs are never updated after insert, so no UPDATE trigger is needed.
+    # Ownership-only updates may re-key a run in place; indexed run content
+    # remains immutable, so the external-content FTS table needs no UPDATE trigger.
     conn.execute("DROP TRIGGER IF EXISTS runs_ai")
     conn.execute("""
         CREATE TRIGGER runs_ai AFTER INSERT ON runs BEGIN

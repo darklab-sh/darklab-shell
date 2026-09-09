@@ -30,13 +30,13 @@ def referenced_secret_names(profile: Mapping[str, Any]) -> set[str]:
 
 
 def available_secret_names(conn: Any, context: OwnerContext) -> set[str]:
-    owner = token_keyed_owner_predicate(context)
+    owner = token_keyed_owner_predicate(context, token_column="owner_id")
     rows = conn.execute(f"SELECT name FROM secrets WHERE {owner.sql} ORDER BY name", owner.params).fetchall()  # nosec
     return {str(row["name"] or "") for row in rows}
 
 
 def secret_reference_lookup(conn: Any, context: OwnerContext) -> dict[str, str]:
-    owner = token_keyed_owner_predicate(context)
+    owner = token_keyed_owner_predicate(context, token_column="owner_id")
     rows = conn.execute(f"SELECT name, consumer_envs FROM secrets WHERE {owner.sql} ORDER BY name", owner.params).fetchall()  # nosec
     names = {str(row["name"] or ""): str(row["name"] or "") for row in rows}
     aliases: dict[str, str] = {}

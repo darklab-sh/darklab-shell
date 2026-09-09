@@ -87,7 +87,7 @@ def launch_fanout_child(
         started = run_routes._start_brokered_run_service(
             original_command=command,
             display_command=launch_spec.display_command,
-            session_id=str(execution.get("session_id") or ""),
+            session_id=str(execution.get("personal_workspace_id") or ""),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
             client_ip="",

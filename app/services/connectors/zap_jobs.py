@@ -135,7 +135,7 @@ def create_zap_job(
             "WHERE pa.project_id = ? AND pa.id = ? AND pc.id = ? "
             "AND hp.id = ? AND hp.revision = ? AND hp.enabled = TRUE "
             "AND hp.team_id = pa.team_id "
-            "AND (pa.team_id != '' OR hp.session_id = pa.session_id) "
+            "AND (pa.team_id != '' OR hp.personal_workspace_id = pa.personal_workspace_id) "
             "AND pa.status = 'active' AND " + owner_sql,
             (
                 project_id,
@@ -153,7 +153,7 @@ def create_zap_job(
             )
         active_conn.execute(
             "INSERT INTO zap_connector_jobs ("
-            "id, session_id, team_id, project_id, assessment_id, check_id, "
+            "id, personal_workspace_id, team_id, project_id, assessment_id, check_id, "
             "http_profile_id, http_profile_revision, actor_member_id, actor_role, "
             "policy_level, target_count, plan_summary_json, report_filename, "
             "created_at, updated_at, expires_at) "

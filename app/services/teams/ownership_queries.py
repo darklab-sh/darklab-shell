@@ -1,13 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Auditable SQL predicates for legacy owner-key shapes.
-
-These adapters deliberately keep the current ``session_id`` and
-``session_token`` ownership model.  Phase 3A callers must choose the personal
-team-column representation explicitly so a query conversion cannot silently
-change its result set.
-"""
+"""Auditable SQL predicates for personal-workspace and team owner shapes."""
 
 from __future__ import annotations
 
@@ -23,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class PersonalTeamRows(str, Enum):
-    """How a table represents rows owned by a personal session."""
+    """How a table represents rows owned by a personal workspace."""
 
     UNFILTERED = "unfiltered"
     NULL = "null"
@@ -32,10 +26,10 @@ class PersonalTeamRows(str, Enum):
 
 
 class OwnerKeyShape(str, Enum):
-    """Legacy column used as the personal owner key."""
+    """Historical source shape for a column now keyed by personal workspace."""
 
-    SESSION_ID = "session_id"
-    SESSION_TOKEN = "session_token"
+    SESSION_ID = "legacy-session-id"
+    SESSION_TOKEN = "legacy-session-token"
 
 
 @dataclass(frozen=True)
@@ -53,7 +47,8 @@ class OwnershipPredicate:
 class AttributionValues:
     """Actor fields for audit columns; these values do not grant ownership."""
 
-    session_id: str
+    principal_id: str
+    credential_id: str
     member_id: str
 
 
@@ -80,7 +75,7 @@ def _require_team(context: OwnerContext) -> None:
 def personal_only_owner_predicate(
     context: OwnerContext,
     *,
-    owner_column: str = "session_id",
+    owner_column: str = "personal_workspace_id",
 ) -> OwnershipPredicate:
     """Match a personal-only table without inventing a team-column constraint."""
     _require_personal(context)
@@ -116,7 +111,7 @@ def _personal_team_sql(team_column: str, representation: PersonalTeamRows) -> st
 def team_capable_owner_predicate(
     context: OwnerContext,
     *,
-    owner_column: str = "session_id",
+    owner_column: str = "personal_workspace_id",
     team_column: str = "team_id",
     personal_team_rows: PersonalTeamRows,
     owner_column_first: bool = True,
@@ -140,11 +135,11 @@ def team_capable_owner_predicate(
 def token_keyed_owner_predicate(
     context: OwnerContext,
     *,
-    token_column: str = "session_token",
+    token_column: str = "personal_workspace_id",
     team_column: str | None = None,
     personal_team_rows: PersonalTeamRows | None = None,
 ) -> OwnershipPredicate:
-    """Match tables whose legacy owner column is ``session_token``."""
+    """Match tables migrated from a legacy token-shaped owner column."""
     if team_column is None:
         if personal_team_rows is not None:
             raise TeamError("Personal team rows require a team column")
@@ -175,7 +170,7 @@ def composite_owner_predicate(
     if not isinstance(owner_key_shape, OwnerKeyShape):
         raise TeamError("Composite owner predicate requires a valid owner key shape")
     if owner_column is None:
-        owner_column = owner_key_shape.value
+        owner_column = "personal_workspace_id"
     if owner_key_shape is OwnerKeyShape.SESSION_TOKEN:
         owner = token_keyed_owner_predicate(
             context,
@@ -214,10 +209,8 @@ def composite_owner_predicate(
 
 def attribution_values(context: OwnerContext) -> AttributionValues:
     """Return actor metadata separately from the row-ownership predicate."""
-    session_id = str(context.actor_session_id or "").strip()
-    if context.scope == "personal" and not session_id:
-        session_id = context.owner_id
     return AttributionValues(
-        session_id=session_id,
+        principal_id=str(context.actor_principal_id or "").strip(),
+        credential_id=str(context.actor_credential_id or "").strip(),
         member_id=str(context.actor_member_id or "").strip(),
     )

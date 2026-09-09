@@ -12,10 +12,10 @@ from services.projects.scope import shared_owner_where
 
 MEMBER_UPSERT_SQL = (
     "INSERT INTO finding_remediation_merge_members "
-    "(session_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
+    "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
     "vulnerability_id, rule_identity, created_by_session_id, created_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-    "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+    "ON CONFLICT(personal_workspace_id, team_id, affected_subject, identity_value) DO UPDATE SET "
     "merge_id = excluded.merge_id, identity_kind = excluded.identity_kind, "
     "vulnerability_id = excluded.vulnerability_id, rule_identity = excluded.rule_identity"
 )
@@ -50,7 +50,7 @@ def member_payload(
     reference: Mapping[str, Any],
 ) -> dict[str, str]:
     return {
-        "session_id": key[0],
+        "personal_workspace_id": key[0],
         "team_id": key[1],
         "affected_subject": key[2],
         "identity_kind": str(reference.get("identity_kind") or "rule"),
@@ -67,12 +67,12 @@ def rows_by_keys(conn: Any, keys: set[tuple[str, str, str, str]]) -> list[Any]:
     for offset in range(0, len(ordered), 80):
         chunk = ordered[offset:offset + 80]
         clauses = " OR ".join(
-            "(session_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
+            "(personal_workspace_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
             for _ in chunk
         )
         # The clause shape is fixed; every owner and identity value remains bound.
         rows.extend(conn.execute(
-            "SELECT session_id, team_id, merge_id, affected_subject, identity_kind, "
+            "SELECT personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, "
             "identity_value, vulnerability_id, rule_identity, created_by_session_id, created_at "
             "FROM finding_remediation_merge_members WHERE "  # nosec
             + clauses,
@@ -90,11 +90,11 @@ def rows_by_merge_ids(
     for offset in range(0, len(ordered), 100):
         chunk = ordered[offset:offset + 100]
         clauses = " OR ".join(
-            "(session_id = ? AND team_id = ? AND merge_id = ?)" for _ in chunk
+            "(personal_workspace_id = ? AND team_id = ? AND merge_id = ?)" for _ in chunk
         )
         # The clause shape is fixed; every owner and merge id remains bound.
         rows.extend(conn.execute(
-            "SELECT session_id, team_id, merge_id, affected_subject, identity_kind, "
+            "SELECT personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, "
             "identity_value, vulnerability_id, rule_identity, created_by_session_id, created_at "
             "FROM finding_remediation_merge_members WHERE "  # nosec
             + clauses,
@@ -113,7 +113,7 @@ def remediation_group_membership(
     membership_rows = rows_by_keys(conn, set(references_by_key))
     merge_by_key = {
         (
-            str(row["session_id"] or ""),
+            str(row["personal_workspace_id"] or ""),
             str(row["team_id"] or ""),
             str(row["affected_subject"] or ""),
             str(row["identity_value"] or ""),
@@ -128,7 +128,7 @@ def remediation_group_membership(
     }
     for row in rows_by_merge_ids(conn, merge_ids):
         merge_key = (
-            str(row["session_id"] or ""),
+            str(row["personal_workspace_id"] or ""),
             str(row["team_id"] or ""),
             str(row["merge_id"] or ""),
         )
@@ -156,7 +156,7 @@ def expand_remediation_group_members(
     template_by_merge: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in selected_rows:
         key = (
-            str(row["session_id"] or ""),
+            str(row["personal_workspace_id"] or ""),
             str(row["team_id"] or ""),
             str(row["affected_subject"] or ""),
             str(row["identity_value"] or ""),
@@ -166,7 +166,7 @@ def expand_remediation_group_members(
             template_by_merge[merge_key] = dict(expanded[key])
     merge_ids = {
         (
-            str(row["session_id"] or ""),
+            str(row["personal_workspace_id"] or ""),
             str(row["team_id"] or ""),
             str(row["merge_id"] or ""),
         )
@@ -175,7 +175,7 @@ def expand_remediation_group_members(
     }
     for row in rows_by_merge_ids(conn, merge_ids):
         key = (
-            str(row["session_id"] or ""),
+            str(row["personal_workspace_id"] or ""),
             str(row["team_id"] or ""),
             str(row["affected_subject"] or ""),
             str(row["identity_value"] or ""),

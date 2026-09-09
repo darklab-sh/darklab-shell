@@ -74,7 +74,7 @@ def matching_history_runs(
         return conn.execute(
             "SELECT r.id, EXISTS ("  # nosec
             "SELECT 1 FROM starred_commands sc "
-            "WHERE sc.session_id = r.session_id AND sc.command = r.command"
+            "WHERE sc.personal_workspace_id = r.personal_workspace_id AND sc.command = r.command"
             ") AS starred"
             + run_sql
             + " ORDER BY r.started DESC, r.id DESC",

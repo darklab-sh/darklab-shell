@@ -13,7 +13,7 @@ from services.projects.finding_vulnerabilities import finding_cves
 
 
 _RUN_FINDINGS_SQL = (
-    "SELECT f.id, f.session_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
+    "SELECT f.id, f.personal_workspace_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
     "f.signature_hash, f.origin, f.validation_method, f.title, f.raw_line, "
     "f.fingerprint, f.cve_ids_json, 'run' AS support_type, "
     "occurrence.run_id AS support_id FROM project_assessment_evidence evidence "
@@ -23,7 +23,7 @@ _RUN_FINDINGS_SQL = (
     "AND evidence.source_state = 'available'"
 )
 _DIRECT_FINDINGS_SQL = (
-    "SELECT f.id, f.session_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
+    "SELECT f.id, f.personal_workspace_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
     "f.signature_hash, f.origin, f.validation_method, f.title, f.raw_line, "
     "f.fingerprint, f.cve_ids_json, 'finding' AS support_type, "
     "evidence.evidence_id AS support_id FROM project_assessment_evidence evidence "
@@ -32,7 +32,7 @@ _DIRECT_FINDINGS_SQL = (
     "AND evidence.source_state = 'available'"
 )
 _MANUAL_FINDINGS_SQL = (
-    "SELECT f.id, f.session_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
+    "SELECT f.id, f.personal_workspace_id, f.team_id, f.target_id, f.entity_id, f.subject_key, "
     "f.signature_hash, f.origin, f.validation_method, f.title, f.raw_line, "
     "f.fingerprint, f.cve_ids_json, 'assessment_check' AS support_type, "
     "link.evidence_id AS support_id FROM finding_evidence_links link "

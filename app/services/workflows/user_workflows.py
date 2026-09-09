@@ -250,7 +250,7 @@ def _workflow_owner_where(session_id, *, team_id="", table_alias=""):
     prefix = f"{table_alias}." if table_alias else ""
     owner = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         owner_column_first=False,
@@ -262,7 +262,7 @@ def list_user_workflows(session_id, *, team_id=""):
     with get_db_connect()() as conn:
         owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         rows = conn.execute(
-            "SELECT id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated "
+            "SELECT id, personal_workspace_id, team_id, definition_version, title, description, inputs, steps, created, updated "
             "FROM user_workflows WHERE " + owner_sql + " ORDER BY updated DESC, created DESC",  # nosec
             owner_params,
         ).fetchall()
@@ -273,7 +273,7 @@ def get_user_workflow(session_id, workflow_id, *, team_id=""):
     with get_db_connect()() as conn:
         owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         row = conn.execute(
-            "SELECT id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated "
+            "SELECT id, personal_workspace_id, team_id, definition_version, title, description, inputs, steps, created, updated "
             "FROM user_workflows WHERE " + owner_sql + " AND id = ?",  # nosec
             (*owner_params, workflow_id),
         ).fetchone()
@@ -298,7 +298,7 @@ def create_user_workflow(session_id, data, *, team_id=""):
             workflow_id = _new_workflow_id()
             result = conn.execute(
                 "INSERT INTO user_workflows "  # nosec
-                "(id, session_id, team_id, definition_version, title, description, inputs, steps, created, updated) "
+                "(id, personal_workspace_id, team_id, definition_version, title, description, inputs, steps, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + dialect.insert_or_ignore_clause(("id",)),
                 (

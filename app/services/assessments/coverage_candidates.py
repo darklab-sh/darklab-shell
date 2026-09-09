@@ -13,7 +13,7 @@ from services.workflows.execution_kinds import ASSESSMENT_BATCH_EXECUTION_KIND
 def candidate_checks_for_run(conn: Any, run_id: str) -> list[dict[str, Any]]:
     """Return active checks, limited to explicit mappings for batch children."""
     rows = conn.execute(
-        "SELECT a.id AS assessment_id, a.session_id, a.team_id, a.project_id, "
+        "SELECT a.id AS assessment_id, a.personal_workspace_id, a.team_id, a.project_id, "
         "a.profile_snapshot, c.id AS check_id, c.check_key, c.target_type, "
         "c.target_value, c.state, c.state_source, c.state_reason, "
         "c.first_evidence_at, c.last_evidence_at "
@@ -30,7 +30,7 @@ def candidate_checks_for_run(conn: Any, run_id: str) -> list[dict[str, Any]]:
         "AND mapping.check_id = c.id "
         "WHERE pl.entity_type = 'run' AND pl.entity_id = ? "
         "AND a.team_id = r.team_id "
-        "AND (a.team_id != '' OR a.session_id = r.session_id) "
+        "AND (a.team_id != '' OR a.personal_workspace_id = r.personal_workspace_id) "
         "AND (child.id IS NULL OR execution.execution_kind != ? "
         "OR (item.item_index IS NOT NULL AND mapping.check_id IS NOT NULL)) "
         "ORDER BY a.id ASC, c.id ASC",

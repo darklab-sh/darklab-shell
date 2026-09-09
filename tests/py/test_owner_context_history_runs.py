@@ -20,10 +20,10 @@ def _mixed_history_rows(conn: sqlite3.Connection) -> tuple[str, str]:
     owner_a = anonymous_session_id("history-owner-a")
     owner_b = anonymous_session_id("history-owner-b")
     conn.execute(
-        "CREATE TABLE owner_history_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE owner_history_rows (id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     conn.executemany(
-        "INSERT INTO owner_history_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO owner_history_rows (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),
@@ -72,10 +72,10 @@ def test_run_visibility_preserves_empty_team_personal_semantics(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute(
-        "CREATE TABLE runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE runs (id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     conn.executemany(
-        "INSERT INTO runs (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO runs (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),
@@ -102,10 +102,10 @@ def test_snapshot_bulk_mutation_preserves_unfiltered_session_semantics(monkeypat
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.execute(
-        "CREATE TABLE snapshots (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE snapshots (id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     conn.executemany(
-        "INSERT INTO snapshots (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO snapshots (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),

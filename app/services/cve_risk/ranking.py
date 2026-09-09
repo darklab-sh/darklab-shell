@@ -270,7 +270,7 @@ def _finding_with_owner(
     owner = owner_by_finding_id.get(str(finding.get("id") or ""))
     if owner is None:
         return finding
-    return {**finding, "session_id": owner[0], "team_id": owner[1]}
+    return {**finding, "personal_workspace_id": owner[0], "team_id": owner[1]}
 
 
 def _attach_identity_references(

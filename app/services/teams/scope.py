@@ -21,6 +21,9 @@ OwnerScope = Literal["personal", "team"]
 class OwnerContext:
     scope: OwnerScope
     owner_id: str
+    workspace_storage_key: str = ""
+    actor_principal_id: str = ""
+    actor_credential_id: str = ""
     actor_session_id: str = ""
     actor_member_id: str = ""
 
@@ -71,13 +74,22 @@ def anonymous_owner_context(anonymous_id: str) -> OwnerContext:
     return OwnerContext(scope="personal", owner_id=normalized, actor_session_id=normalized)
 
 
-def team_owner_context(team_id: str, *, actor_member_id: str = "", actor_session_id: str = "") -> OwnerContext:
+def team_owner_context(
+    team_id: str,
+    *,
+    actor_member_id: str = "",
+    actor_principal_id: str = "",
+    actor_credential_id: str = "",
+    actor_session_id: str = "",
+) -> OwnerContext:
     team_id = team_id.strip()
     if not team_id:
         raise TeamError("Team owner context requires a team id")
     return OwnerContext(
         scope="team",
         owner_id=team_id,
+        actor_principal_id=actor_principal_id.strip(),
+        actor_credential_id=actor_credential_id.strip(),
         actor_session_id=actor_session_id.strip(),
         actor_member_id=actor_member_id.strip(),
     )
@@ -120,7 +132,9 @@ def owner_context_from_authentication(result) -> OwnerContext:
         return OwnerContext(
             scope="personal",
             owner_id=result.context.personal_workspace_id,
-            actor_session_id=result.context.credential_id,
+            workspace_storage_key=result.context.workspace_storage_key,
+            actor_principal_id=result.context.principal_id,
+            actor_credential_id=result.context.credential_id,
         )
     if isinstance(result.context, LegacySessionContext):
         return personal_owner_context(result.context.session_id)
@@ -130,9 +144,9 @@ def owner_context_from_authentication(result) -> OwnerContext:
 def personal_scope_predicate(
     context: OwnerContext,
     *,
-    session_column: str = "session_id",
+    session_column: str = "personal_workspace_id",
 ) -> tuple[str, tuple[str]]:
-    """Return a predicate for current tables that are still personal-session scoped."""
+    """Return a predicate for a table owned by a personal workspace."""
     predicate = personal_only_owner_predicate(context, owner_column=session_column)
     return predicate.sql, predicate.params
 
@@ -141,7 +155,7 @@ def shared_owner_predicate(
     context: OwnerContext,
     *,
     team_column: str = "team_id",
-    session_column: str = "session_id",
+    session_column: str = "personal_workspace_id",
 ) -> tuple[str, tuple[str]]:
     """Return a future-ready predicate for tables with nullable team ownership."""
     predicate = team_capable_owner_predicate(
@@ -164,7 +178,7 @@ def empty_team_owner_predicate(
     prefix = f"{table_prefix}." if table_prefix else ""
     predicate = team_capable_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
         owner_column_first=False,

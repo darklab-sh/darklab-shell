@@ -39,14 +39,14 @@ def _project_artifact_rows_to_items(session_id, conn, rows, *, team_id=""):
     artifact_ids = [str(row["id"] or "") for row in rows if row["id"]]
     artifact_labels = _entity_labels_by_id(conn, session_id, "run_file_artifact", artifact_ids, team_id=team_id)
     artifact_notes = _entity_notes_by_id(conn, session_id, "run_file_artifact", artifact_ids, team_id=team_id)
-    actors = _team_actor_map(conn, team_id, [row["session_id"] for row in rows if row["session_id"]])
+    actors = _team_actor_map(conn, team_id, [row["personal_workspace_id"] for row in rows if row["personal_workspace_id"]])
     artifacts = []
     for row in rows:
         item = _row_to_run_file_artifact(row)
         if not item:
             continue
         item_id = str(item["id"])
-        artifact_owner_session = str(item.get("session_id") or session_id)
+        artifact_owner_session = str(item.get("personal_workspace_id") or session_id)
         owner_context = _artifact_owner_context(artifact_owner_session, item)
         artifact = {
             **item,
@@ -54,7 +54,7 @@ def _project_artifact_rows_to_items(session_id, conn, rows, *, team_id=""):
             "labels": artifact_labels.get(item_id, []),
             "note": artifact_notes.get(item_id),
         }
-        actor = _actor_for_session(item.get("session_id"), actors)
+        actor = _actor_for_session(item.get("personal_workspace_id"), actors)
         if actor:
             artifact["created_by"] = actor
         artifacts.append(artifact)
@@ -184,7 +184,7 @@ def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, of
         run_counts = {str(row["run_id"] or ""): int(row["count"] or 0) for row in count_rows}
         total = sum(run_counts.values())
         rows = conn.execute(
-            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "  # nosec
+            "SELECT a.id, a.personal_workspace_id, a.run_id, a.workspace_path, a.display_name, a.kind, a.byte_size, "  # nosec
             "a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
             "r.team_id AS run_team_id "
             "FROM run_file_artifacts a JOIN runs r ON r.id = a.run_id "
@@ -225,7 +225,7 @@ def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_i
         project_owner_sql, project_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="p")
         run_owner_sql, run_owner_params = shared_owner_where(session_id, team_id=team_id, table_alias="r")
         row = conn.execute(
-            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, "
+            "SELECT a.id, a.personal_workspace_id, a.run_id, a.workspace_path, a.display_name, a.kind, "
             "a.byte_size, a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created, "
             "r.team_id AS run_team_id "
             "FROM run_file_artifacts a "
@@ -236,17 +236,17 @@ def get_project_run_file_artifact(session_id, project_id, artifact_id, *, team_i
             "AND " + run_owner_sql,
             (*project_owner_params, project_id, artifact_id, *run_owner_params),
         ).fetchone()
-        actors = _team_actor_map(conn, team_id, [row["session_id"]] if row else [])
+        actors = _team_actor_map(conn, team_id, [row["personal_workspace_id"]] if row else [])
     artifact = _row_to_run_file_artifact(row)
     if not artifact:
         return None
-    artifact_owner_session = str(artifact.get("session_id") or session_id)
+    artifact_owner_session = str(artifact.get("personal_workspace_id") or session_id)
     owner_context = _artifact_owner_context(artifact_owner_session, artifact)
     result = {
         **artifact,
         **_artifact_availability(artifact_owner_session, artifact, owner_context=owner_context),
     }
-    actor = _actor_for_session(artifact.get("session_id"), actors)
+    actor = _actor_for_session(artifact.get("personal_workspace_id"), actors)
     if actor:
         result["created_by"] = actor
     return result

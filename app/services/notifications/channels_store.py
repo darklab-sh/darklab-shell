@@ -39,7 +39,7 @@ from services.notifications.models import (
     TRIGGERS,
     NotificationChannel,
     NotificationEvent,
-    require_durable_session_token,
+    require_durable_personal_owner,
 )
 from services.notifications.payloads import build_test_payload
 from services.notifications.secrets import channel_secret_name, emit_channel_secret_audits, store_channel_secret_with_connection
@@ -109,8 +109,7 @@ CHANNEL_CONFIG_FIELD_DEFINITIONS = {
 }
 
 CHANNEL_CONFIG_FIELDS = {
-    kind: tuple(str(field["name"]) for field in fields)
-    for kind, fields in CHANNEL_CONFIG_FIELD_DEFINITIONS.items()
+    kind: tuple(str(field["name"]) for field in fields) for kind, fields in CHANNEL_CONFIG_FIELD_DEFINITIONS.items()
 }
 
 TRIGGER_LABELS = {
@@ -158,7 +157,7 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
         return dict(value)
     try:
         parsed = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
 
@@ -175,7 +174,7 @@ def _owner_where(session_token: str, team_id: str = "") -> tuple[str, tuple[str,
 def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
     owner_sql, owner_params = _owner_where(session_token, team_id)
     return conn.execute(
-        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
         "muted, created, updated "
         f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
         owner_params,
@@ -185,7 +184,7 @@ def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
 def _get_channel(conn, session_token: str, channel_id: str, team_id: str = "") -> NotificationChannel:
     owner_sql, owner_params = _owner_where(session_token, team_id)
     row = conn.execute(
-        "SELECT id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, "
+        "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
         "muted, created, updated "
         f"FROM notification_channels WHERE {owner_sql} AND id = ?",  # nosec
         (*owner_params, channel_id),
@@ -254,11 +253,7 @@ def _secret_values(raw: Any) -> dict[str, str]:
 def _secret_refs_for_values(channel_id: str, kind: str, raw_secret_values: Any) -> dict[str, str]:
     values = _secret_values(raw_secret_values)
     allowed = set(CHANNEL_SECRET_FIELDS[kind])
-    return {
-        field: channel_secret_name(channel_id, field)
-        for field in allowed
-        if field in values
-    }
+    return {field: channel_secret_name(channel_id, field) for field in allowed if field in values}
 
 
 def _store_secret_values(conn, session_token: str, channel_id: str, kind: str, raw_secret_values: Any) -> list[tuple[dict, bool]]:
@@ -293,8 +288,7 @@ def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
         "config": channel.config,
         "triggers": [trigger for trigger in channel.triggers if trigger != TRIGGER_TEST],
         "secret_fields": [
-            {"name": field, "configured": bool(str(channel.secrets.get(field) or "").strip())}
-            for field in secret_fields
+            {"name": field, "configured": bool(str(channel.secrets.get(field) or "").strip())} for field in secret_fields
         ],
         "muted": channel.muted,
         "created": channel.created,
@@ -376,11 +370,7 @@ def _assessment_batch_event_context(payload: Mapping[str, Any]) -> dict[str, str
         "project_id": str(payload.get("project_id") or ""),
         "assessment_id": str(payload.get("assessment_id") or ""),
         "status": str(payload.get("status") or ""),
-        "url": str(
-            payload.get("assessment_batch_url")
-            or payload.get("assessment_batch_path")
-            or ""
-        ),
+        "url": str(payload.get("assessment_batch_url") or payload.get("assessment_batch_path") or ""),
     }
 
 
@@ -409,20 +399,20 @@ def notification_channel_kind_contract() -> dict[str, Any]:
     kinds = []
     for kind in CHANNEL_KIND_ORDER:
         secret_labels = CHANNEL_SECRET_FIELD_LABELS[kind]
-        kinds.append({
-            "kind": kind,
-            "label": CHANNEL_KIND_LABELS[kind],
-            "secret_fields": [
-                {"name": field, "label": secret_labels.get(field, field)}
-                for field in CHANNEL_SECRET_FIELDS[kind]
-            ],
-            "config_fields": [dict(field) for field in CHANNEL_CONFIG_FIELD_DEFINITIONS[kind]],
-        })
+        kinds.append(
+            {
+                "kind": kind,
+                "label": CHANNEL_KIND_LABELS[kind],
+                "secret_fields": [
+                    {"name": field, "label": secret_labels.get(field, field)} for field in CHANNEL_SECRET_FIELDS[kind]
+                ],
+                "config_fields": [dict(field) for field in CHANNEL_CONFIG_FIELD_DEFINITIONS[kind]],
+            }
+        )
     return {
         "kinds": kinds,
         "triggers": [
-            {"value": trigger, "label": TRIGGER_LABELS.get(trigger, trigger.replace("_", " ").title())}
-            for trigger in UI_TRIGGERS
+            {"value": trigger, "label": TRIGGER_LABELS.get(trigger, trigger.replace("_", " ").title())} for trigger in UI_TRIGGERS
         ],
     }
 
@@ -432,21 +422,17 @@ def _test_event_statuses(conn, event_ids: list[str]) -> list[dict[str, Any]]:
         return []
     placeholders = ", ".join("?" for _ in event_ids)
     rows = conn.execute(
-        "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+        "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
         "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
         f"FROM notification_events WHERE id IN ({placeholders})",  # nosec
         event_ids,
     ).fetchall()
     events_by_id = {str(row["id"]): NotificationEvent.from_row(row) for row in rows}
-    return [
-        _serialize_test_event(events_by_id[event_id])
-        for event_id in event_ids
-        if event_id in events_by_id
-    ]
+    return [_serialize_test_event(events_by_id[event_id]) for event_id in event_ids if event_id in events_by_id]
 
 
 def list_notification_channels(session_token: str, *, team_id: str = "") -> list[dict[str, Any]]:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     with database.db_connect() as conn:
         return [_serialize_channel(NotificationChannel.from_row(row)) for row in _channel_rows(conn, session_token, team_id)]
 
@@ -461,7 +447,7 @@ def list_notification_events(
     trigger: str = "",
     team_id: str = "",
 ) -> dict[str, Any]:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     normalized_status = str(status or "").strip()
     normalized_channel_id = str(channel_id or "").strip()
     normalized_trigger = str(trigger or "").strip()
@@ -490,7 +476,7 @@ def list_notification_events(
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
-            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, status, attempts, "
+            "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
             "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
             f"FROM notification_events WHERE {where_sql} "  # nosec
             "ORDER BY created DESC, id DESC LIMIT ? OFFSET ?",
@@ -514,7 +500,7 @@ def create_notification_channel(
     audit_fields: Mapping[str, Any] | None = None,
     audit_source: str = "",
 ) -> dict[str, Any]:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     kind = _normalize_kind(data.get("kind"))
     channel_id = _channel_id()
     now = _utc_now()
@@ -544,7 +530,8 @@ def create_notification_channel(
         )
         conn.execute(
             "INSERT INTO notification_channels "
-            "(id, session_token, team_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+            "(id, personal_workspace_id, team_id, kind, label, secrets_json, "
+            "config_json, triggers_json, muted, created, updated) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 channel.id,
@@ -581,7 +568,7 @@ def update_notification_channel(
     audit_fields: Mapping[str, Any] | None = None,
     audit_source: str = "",
 ) -> dict[str, Any]:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     with database.db_connect() as conn:
         existing = _get_channel(conn, session_token, channel_id, team_id)
         kind = _normalize_kind(data.get("kind", existing.kind))
@@ -621,7 +608,8 @@ def update_notification_channel(
             ),
         )
         changed_fields = [
-            field for field in ("label", "config", "triggers", "muted", "secret_refs")
+            field
+            for field in ("label", "config", "triggers", "muted", "secret_refs")
             if (
                 (field == "label" and channel.label != existing.label)
                 or (field == "config" and channel.config != existing.config)
@@ -651,7 +639,7 @@ def delete_notification_channel(
     audit_fields: Mapping[str, Any] | None = None,
     audit_source: str = "",
 ) -> bool:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     removed = False
     with database.db_connect() as conn:
         channel = _get_channel(conn, session_token, channel_id, team_id)
@@ -674,7 +662,7 @@ def delete_notification_channel(
         for secret_name in channel.secrets.values():
             try:
                 delete_secret(channel.secret_owner_token, str(secret_name))
-            except (ValueError, MasterKeyError, SecretDecryptError):
+            except ValueError, MasterKeyError, SecretDecryptError:
                 continue
     return removed
 
@@ -682,12 +670,12 @@ def delete_notification_channel(
 def migrate_notification_channels_session(conn, from_session_id: str, to_session_id: str) -> dict[str, int]:
     source_owner = token_keyed_owner_predicate(personal_owner_context(from_session_id))
     channels_result = conn.execute(
-        "UPDATE notification_channels SET session_token = ? WHERE "  # nosec B608
+        "UPDATE notification_channels SET personal_workspace_id = ? WHERE "  # nosec B608
         + source_owner.sql,
         (to_session_id, *source_owner.params),
     )
     events_result = conn.execute(
-        "UPDATE notification_events SET session_token = ? WHERE "  # nosec B608
+        "UPDATE notification_events SET personal_workspace_id = ? WHERE "  # nosec B608
         + source_owner.sql,
         (to_session_id, *source_owner.params),
     )
@@ -705,7 +693,7 @@ def send_test_notification(
     audit_fields: Mapping[str, Any] | None = None,
     audit_source: str = "",
 ) -> dict[str, Any]:
-    session_token = require_durable_session_token(session_token)
+    session_token = require_durable_personal_owner(session_token)
     with database.db_connect() as conn:
         channel = _get_channel(conn, session_token, channel_id, team_id)
         event_ids = dispatcher.enqueue(

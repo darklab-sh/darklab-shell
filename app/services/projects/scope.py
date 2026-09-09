@@ -26,7 +26,7 @@ def personal_owner_where(
     session_id: str,
     *,
     table_alias: str = "",
-    session_column: str = "session_id",
+    session_column: str = "personal_workspace_id",
 ) -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
     predicate = personal_only_owner_predicate(
@@ -42,7 +42,7 @@ def shared_owner_where(
     team_id: str = "",
     table_alias: str = "",
     team_column: str = "team_id",
-    session_column: str = "session_id",
+    session_column: str = "personal_workspace_id",
     personal_team_rows: PersonalTeamRows = PersonalTeamRows.EMPTY,
 ) -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
@@ -95,7 +95,7 @@ def personal_owner_prefix(session_id: str) -> tuple[str, tuple[str, ...]]:
 def project_select_columns(table_alias: str = "") -> str:
     prefix = f"{table_alias}." if table_alias else ""
     return (
-        f"{prefix}id, {prefix}session_id, {prefix}team_id, {prefix}name, "
+        f"{prefix}id, {prefix}personal_workspace_id, {prefix}team_id, {prefix}name, "
         f"{prefix}slug, {prefix}description, {prefix}status, {prefix}color, "
         f"{prefix}created, {prefix}updated"
     )

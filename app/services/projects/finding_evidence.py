@@ -249,7 +249,7 @@ def link_finding_evidence_on_conn(
     created_at = now()
     conn.execute(
         "INSERT INTO finding_evidence_links "
-        "(id, session_id, team_id, project_id, finding_id, evidence_type, evidence_id, "
+        "(id, personal_workspace_id, team_id, project_id, finding_id, evidence_type, evidence_id, "
         "run_id, line_number, snippet, created_by_session_id, created_by_member_id, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (

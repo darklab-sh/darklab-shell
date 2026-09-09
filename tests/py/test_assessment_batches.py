@@ -300,7 +300,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         }
         conn.execute(
             "INSERT INTO projects "
-            "(id, session_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
+            "(id, personal_workspace_id, name, slug, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 project_id,
                 session_id,
@@ -312,7 +312,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         )
         conn.execute(
             "INSERT INTO project_assessments "
-            "(id, session_id, project_id, title, profile_key, profile_version, "
+            "(id, personal_workspace_id, project_id, title, profile_key, profile_version, "
             "status, started_at, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, 'network', '1.0', 'active', ?, ?, ?)",
             (
@@ -349,7 +349,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
     with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO assessment_batch_previews "
-            "(id, session_id, project_id, assessment_id, profile_key, profile_version, "
+            "(id, personal_workspace_id, project_id, assessment_id, profile_key, profile_version, "
             "selection_json, summary_json, plan_digest, candidate_item_count, "
             "selected_item_count, mapping_count, safe_item_count, standard_item_count, "
             "max_parallel, max_owner_parallel, max_instance_parallel, expires_at, created) "
@@ -485,7 +485,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         ).fetchall()
         execution_count = conn.execute(
             "SELECT COUNT(*) AS n FROM workflow_executions "
-            "WHERE session_id = ? AND execution_kind = 'assessment_batch'",
+            "WHERE personal_workspace_id = ? AND execution_kind = 'assessment_batch'",
             (session_id,),
         ).fetchone()
     assert [
@@ -568,7 +568,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
         ):
             conn.execute(
                 "INSERT INTO workflow_executions "
-                "(id, session_id, execution_kind, workflow_id, workflow_source, title, "
+                "(id, personal_workspace_id, execution_kind, workflow_id, workflow_source, title, "
                 "definition_snapshot, input_values, variables, status, project_id, "
                 "created, updated, finished) VALUES (?, ?, 'assessment_batch', '', "
                 "'assessment', 'Assessment batch', '{}', '{}', '{}', ?, ?, ?, ?, ?)",
@@ -588,7 +588,7 @@ def test_assessment_batch_storage_events_and_migration_are_backend_neutral(monke
                 ),
             )
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+            "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
             "VALUES (?, ?, 'nmap retention.example', ?, ?, 0)",
             (run_id, session_id, timestamp, timestamp),
         )

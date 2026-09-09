@@ -149,7 +149,7 @@ def _finding_summaries(conn: Any, groups: list[dict[str, Any]]) -> dict[str, dic
         "FROM findings f LEFT JOIN finding_triage_details triage ",
         "ON triage.finding_id = f.id AND (",
         "(f.team_id != '' AND triage.team_id = f.team_id) OR ",
-        "(f.team_id = '' AND triage.session_id = f.session_id ",
+        "(f.team_id = '' AND triage.personal_workspace_id = f.personal_workspace_id ",
         "AND COALESCE(triage.team_id, '') = '')) WHERE ",
         in_sql,
     ))

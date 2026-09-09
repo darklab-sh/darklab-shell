@@ -35,14 +35,14 @@ def metadata_owner_sql(alias: str, team_id: str = "") -> str:
     context = _scope_context(normalized_team_id)
     direct = team_capable_owner_predicate(
         context,
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )
     if normalized_team_id:
         return (
             f"({direct.sql} OR "
-            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}session_id = ?))"
+            f"(({prefix}team_id IS NULL OR {prefix}team_id = '') AND {prefix}personal_workspace_id = ?))"
         )
     return direct.sql
 
@@ -59,7 +59,7 @@ def run_scope_sql(alias: str, team_id: str = "") -> str:
     context = _scope_context(team_id)
     return team_capable_owner_predicate(
         context,
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     ).sql
@@ -84,7 +84,7 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
     if normalized_team_id:
         direct = team_capable_owner_predicate(
             _scope_context(normalized_team_id),
-            owner_column=f"{prefix}session_id",
+            owner_column=f"{prefix}personal_workspace_id",
             team_column=f"{prefix}team_id",
             personal_team_rows=PersonalTeamRows.EMPTY,
         )
@@ -107,7 +107,7 @@ def entity_scope_sql(alias: str, team_id: str = "") -> str:
         ))
     return team_capable_owner_predicate(
         _scope_context(),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     ).sql
@@ -184,14 +184,14 @@ def finding_source_scope_sql(alias: str, team_id: str = "") -> str:
     if not normalize_team_id(team_id):
         return team_capable_owner_predicate(
             _scope_context(),
-            owner_column=f"{prefix}session_id",
+            owner_column=f"{prefix}personal_workspace_id",
             team_column=f"{prefix}team_id",
             personal_team_rows=PersonalTeamRows.EMPTY,
         ).sql
     run_sql = run_scope_sql("source_run", team_id)
     direct = team_capable_owner_predicate(
         _scope_context(team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.EMPTY,
     )

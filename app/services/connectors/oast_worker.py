@@ -78,7 +78,7 @@ def _fail_unrecoverable_session(
     correlation_id = str(correlation.get("id") or "")
     try:
         close_oast_correlation(
-            str(correlation.get("session_id") or ""),
+            str(correlation.get("personal_workspace_id") or ""),
             correlation_id,
             team_id=str(correlation.get("team_id") or ""),
             failed=True,

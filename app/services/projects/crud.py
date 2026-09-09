@@ -50,7 +50,7 @@ def create_project(session_id, data, *, team_id=""):
             slug = allocate_slug(conn, session_id, payload["name"], team_id=team_id)
             result = conn.execute(
                 "INSERT INTO projects "
-                "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+                "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
                 (

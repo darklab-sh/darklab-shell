@@ -14,7 +14,7 @@ from services.watchers.classifiers import registered_classifiers as registered_w
 def _run(run_id: str, command: str, lines: Sequence[str | dict[str, Any]], *, session_id: str = "tok_watchers"):
     return {
         "id": run_id,
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "command": command,
         "output_preview": json.dumps(lines),
         "preview_truncated": False,
@@ -29,7 +29,7 @@ def _findings_conn():
     conn.execute("""
         CREATE TABLE findings (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
+            personal_workspace_id TEXT NOT NULL,
             signature_hash TEXT NOT NULL DEFAULT '',
             fingerprint TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL DEFAULT '',
@@ -50,7 +50,7 @@ def _findings_conn():
 def _insert_finding(conn, finding_id: str, run_id: str, signature_hash: str, title: str):
     conn.execute(
         "INSERT OR IGNORE INTO findings "
-        "(id, session_id, signature_hash, fingerprint, title, raw_line, severity) "
+        "(id, personal_workspace_id, signature_hash, fingerprint, title, raw_line, severity) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (finding_id, "tok_watchers", signature_hash, f"fp-{finding_id}", title, title, "medium"),
     )

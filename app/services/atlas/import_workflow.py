@@ -451,7 +451,7 @@ def _insert_or_update_finding(
     )
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, team_id, run_id, target_id, scope, line_number, review_state, "
+        "(id, personal_workspace_id, team_id, run_id, target_id, scope, line_number, review_state, "
         "entity_id, subject_key, signature_hash, severity, kind, tool_root, "
         "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, "
         "status_updated_at, fingerprint, title, raw_line, created, origin, validation_method) "

@@ -248,7 +248,7 @@ try:
         ]
         time_modifier = f"-{index} seconds"
         conn.execute(
-            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
             "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
             "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, ?, 0, 0)",
             (run_id, session_id, command, time_modifier, time_modifier, preview(command, lines), len(lines) + 2),
@@ -306,7 +306,7 @@ def output_preview(command, lines):
 
 def insert_run(conn, run_id, command, lines, started):
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, ?, 0, 0)",
         (run_id, session_id, command, started, started, output_preview(command, lines), len(lines) + 2),
@@ -315,7 +315,7 @@ def insert_run(conn, run_id, command, lines, started):
 def insert_schedule(conn, schedule_id, watcher_id, command, cadence, enabled):
     conn.execute(
         "INSERT INTO schedules "
-        "(id, session_token, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, timezone, "
+        "(id, personal_workspace_id, owner_kind, owner_id, kind, command_text, cron_expr, cadence_preset, timezone, "
         "enabled, next_run_at, label, created, updated) "
         "VALUES (?, ?, 'watcher', ?, 'command', ?, '0 * * * *', ?, 'UTC', ?, ?, ?, ?, ?)",
         (schedule_id, session_id, watcher_id, command, cadence, enabled, "2026-06-15T13:00:00+00:00", command, now, now),
@@ -324,7 +324,7 @@ def insert_schedule(conn, schedule_id, watcher_id, command, cadence, enabled):
 def insert_watcher(conn, watcher_id, schedule_id, label, command, baseline_run_id, last_run_id, summary, cadence):
     conn.execute(
         "INSERT INTO watchers "
-        "(id, session_token, project_id, label, command_text, schedule_id, baseline_run_id, last_run_id, "
+        "(id, personal_workspace_id, project_id, label, command_text, schedule_id, baseline_run_id, last_run_id, "
         "last_diff_summary_json, state, state_reason, options_json, policy_json, consecutive_changed, created, updated) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'changed', 'diff_detected', ?, ?, 1, ?, ?)",
         (
@@ -398,7 +398,7 @@ try:
     insert_fire(conn, deleted_fire_id, deleted_watcher_id, deleted_run_id, baseline_run_id, deleted_summary, "2026-06-15T11:55:00+00:00")
     conn.execute(
         "INSERT INTO risk_escalations ("
-        "id, owner_session_id, remediation_id, cve_id, source, transition_kind, "
+        "id, personal_workspace_id, remediation_id, cve_id, source, transition_kind, "
         "feed_version, observation_count, created_at, updated_at"
         ") VALUES (?, ?, ?, 'CVE-2026-10001', 'kev', 'kev_added', "
         "'2026.06.15', 2, ?, ?)",
@@ -456,7 +456,7 @@ conn.row_factory = sqlite3.Row
 try:
     run_id = "run_e2e_overview_ports_" + uuid.uuid4().hex[:16]
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, 3, 0, 0)",
         (
@@ -510,7 +510,7 @@ try:
         )
     conn.execute(
         "INSERT OR REPLACE INTO entity_intel_snapshots "
-        "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+        "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
         "VALUES (?, ?, ?, 'tls_certificate', 'ok', ?, ?, ?, ?)",
         (
             "snap_e2e_overview_" + target_id,
@@ -533,7 +533,7 @@ try:
     )
     conn.execute(
         "INSERT OR REPLACE INTO findings "
-        "(id, session_id, entity_id, target_id, subject_key, signature_hash, severity, status, title, created, last_seen_at) "
+        "(id, personal_workspace_id, entity_id, target_id, subject_key, signature_hash, severity, status, title, created, last_seen_at) "
         "VALUES (?, ?, ?, ?, ?, ?, 'high', 'new', ?, ?, ?)",
         (
             "finding_e2e_overview_" + target_id,
@@ -626,7 +626,7 @@ preview = [{
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, ?, ?, 0, ?, 0, 1, 0, 0)",
         (
@@ -650,7 +650,7 @@ try:
     )
     conn.executemany(
         "INSERT INTO run_file_artifacts "
-        "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+        "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
         "detected_by, content_type, preview_type, content_sha256, created) "
         "VALUES (?, ?, ?, ?, ?, 'screenshot', ?, 'httpx_screenshot', 'image/png', 'image', ?, ?)",
         [

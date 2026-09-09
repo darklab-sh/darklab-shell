@@ -44,7 +44,7 @@ _SECRET_REFERENCE_LABELS = {
     "client_key_passphrase": "Client-key passphrase Secret",
 }
 _SELECT_COLUMNS = (
-    "h.id, h.session_id, h.team_id, h.project_id, h.name, h.name_key, h.role_key, "
+    "h.id, h.personal_workspace_id, h.team_id, h.project_id, h.name, h.name_key, h.role_key, "
     "h.base_url, h.scope_roots_json, h.allowed_hosts_json, h.headers_json, "
     "h.secret_refs_json, h.file_refs_json, h.proxy_url, h.login_workflow_id, "
     "h.token_capture_rules_json, h.include_paths_json, h.exclude_paths_json, "
@@ -75,7 +75,7 @@ def _json(value: Any) -> Any:
 def _internal_profile(row: Any) -> dict[str, Any]:
     return {
         "id": str(row["id"] or ""),
-        "session_id": str(row["session_id"] or ""),
+        "personal_workspace_id": str(row["personal_workspace_id"] or ""),
         "team_id": str(row["team_id"] or ""),
         "project_id": str(row["project_id"] or ""),
         "name": str(row["name"] or ""),
@@ -287,7 +287,7 @@ def _serialize_profile(
         available_secrets = _available_secret_names(
             conn,
             owner_context_for_scope(
-                str(profile.get("session_id") or ""),
+                str(profile.get("personal_workspace_id") or ""),
                 team_id=str(profile.get("team_id") or ""),
             ),
         )
@@ -395,7 +395,7 @@ def create_http_profile_on_conn(
     created_at = now()
     conn.execute(
         "INSERT INTO project_http_profiles ("
-        "id, session_id, team_id, project_id, name, name_key, role_key, base_url, "
+        "id, personal_workspace_id, team_id, project_id, name, name_key, role_key, base_url, "
         "scope_roots_json, allowed_hosts_json, headers_json, secret_refs_json, file_refs_json, "
         "proxy_url, login_workflow_id, token_capture_rules_json, include_paths_json, "
         "exclude_paths_json, rate_limit_per_second, concurrency, enabled, revision, "

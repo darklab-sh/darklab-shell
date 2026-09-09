@@ -36,7 +36,7 @@ def _lock_suffix() -> str:
 
 def _batch_context(conn: Any, batch_id: str) -> dict[str, object]:
     row = conn.execute(
-        "SELECT e.id AS execution_id, e.session_id, e.team_id, e.status AS execution_status, "
+        "SELECT e.id AS execution_id, e.personal_workspace_id, e.team_id, e.status AS execution_status, "
         "e.current_step_id, b.max_parallel, b.max_target_parallel, "
         "b.max_owner_parallel, b.max_instance_parallel, s.step_index, "
         "s.status AS step_status, s.fanout_checkpoint "

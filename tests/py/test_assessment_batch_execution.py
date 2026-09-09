@@ -109,13 +109,13 @@ def batch_builder():
         created = "2026-08-17 12:00:00"
         with get_db_connect()() as conn:
             conn.execute(
-                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "
                 "VALUES (?, ?, 'Batch execution', ?, ?, ?)",
                 (project_id, session_id, "batch-" + suffix[:12], created, created),
             )
             conn.execute(
                 "INSERT INTO project_assessments "
-                "(id, session_id, project_id, title, profile_key, profile_version, "
+                "(id, personal_workspace_id, project_id, title, profile_key, profile_version, "
                 "status, started_at, created_at, updated_at) "
                 "VALUES (?, ?, ?, 'Batch execution', 'network', '1.0', "
                 "'active', ?, ?, ?)",
@@ -351,7 +351,7 @@ def test_nuclei_template_failure_diagnosis_collapses_affected_commands(batch_bui
         for index, output in enumerate(outputs):
             run_id = f"run-nuclei-template-{uuid.uuid4().hex}"
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, "
+                "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, "
                 "finished, exit_code, output_search_text) VALUES (?, ?, 'external', "
                 "?, ?, ?, 1, ?)",
                 (
@@ -408,7 +408,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
     with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code, "
+            "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
             "output_preview, output_line_count) "
             "VALUES (?, ?, 'external', 'ping -c 4 target-0.example.test', ?, ?, 0, '[]', 0)",
             (run_id, batch["session_id"], created, created),
@@ -622,7 +622,7 @@ def test_batch_child_evidence_considers_only_independently_matching_mapped_check
             )
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, run_kind, command, started, finished, exit_code) "
+            "(id, personal_workspace_id, run_kind, command, started, finished, exit_code) "
             "VALUES (?, ?, 'external', ?, ?, ?, 0)",
             (run_id, batch["session_id"], f"ping -c 4 {target}", created, created),
         )
@@ -993,7 +993,7 @@ def _add_batch_notification_channels(batch: dict[str, str]) -> None:
         ):
             conn.execute(
                 "INSERT INTO notification_channels "
-                "(id, session_token, team_id, kind, label, secrets_json, config_json, "
+                "(id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, "
                 "triggers_json, muted, created, updated) "
                 "VALUES (?, ?, '', 'webhook', ?, '{}', '{}', ?, 0, ?, ?)",
                 (
@@ -1011,9 +1011,9 @@ def _add_batch_notification_channels(batch: dict[str, str]) -> None:
 def _batch_notification_events(batch: dict[str, str]) -> list[dict[str, Any]]:
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT id, session_token, team_id, channel_id, trigger, payload_json, "
+            "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, "
             "status, attempts, next_attempt_at, last_attempt_at, last_error, run_id, "
-            "created, dead_at FROM notification_events WHERE session_token = ?",
+            "created, dead_at FROM notification_events WHERE personal_workspace_id = ?",
             (batch["session_id"],),
         ).fetchall()
     return [
@@ -1209,7 +1209,7 @@ def _insert_completed_run(batch: dict[str, str], run_id: str, *, exit_code: int 
     with get_db_connect()() as conn:
         conn.execute(
             "INSERT INTO runs "
-            "(id, session_id, command, started, finished, exit_code, output_preview, "
+            "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, "
             "output_line_count) VALUES (?, ?, 'ping -c 4 target-0.example.test', "
             "?, ?, ?, '[]', 0)",
             (run_id, batch["session_id"], finished, finished, exit_code),

@@ -280,14 +280,14 @@ def stop_assessment_batch_for_recovery(
             failure_detail=bounded_detail,
         )
         parent = conn.execute(
-            "SELECT session_id, team_id FROM workflow_executions WHERE id = ?",
+            "SELECT personal_workspace_id, team_id FROM workflow_executions WHERE id = ?",
             (str(batch_id or ""),),
         ).fetchone()
         conn.commit()
     run_ids = tuple(cast(Any, result.get("run_ids") or ()))
     if parent and run_ids:
         signal_batch_cancellation_runs(
-            str(parent["session_id"] or ""),
+            str(parent["personal_workspace_id"] or ""),
             ((str(batch_id), run_ids),),
             team_id=str(parent["team_id"] or ""),
             cancel_run_fn=cancel_run_fn,

@@ -23,6 +23,7 @@ class AuditEventFilters:
     actor_member_id: str = ""
     actor_session_hash: str = ""
     owner_session_hash: str = ""
+    owner_workspace_hash: str = ""
     session_id: str = ""
     team_id: str = ""
     project_id: str = ""
@@ -82,6 +83,9 @@ def event_from_row(row: Any) -> dict[str, Any]:
     return {
         "id": _row_value(row, "id"),
         "owner_session_hash": _row_value(row, "owner_session_hash"),
+        "owner_workspace_hash": _row_value(row, "owner_workspace_hash"),
+        "actor_principal_id": _row_value(row, "actor_principal_id"),
+        "actor_credential_id": _row_value(row, "actor_credential_id"),
         "team_id": _row_value(row, "team_id"),
         "actor_session_hash": _row_value(row, "actor_session_hash"),
         "actor_session_label": _row_value(row, "actor_session_label"),
@@ -117,8 +121,9 @@ def list_events(
     if not actor_session_hash and active_filters.session_id:
         actor_session_hash = token_hash(active_filters.session_id)
     owner_session_hash = active_filters.owner_session_hash
-    if not owner_session_hash and active_filters.session_id:
-        owner_session_hash = token_hash(active_filters.session_id)
+    owner_workspace_hash = active_filters.owner_workspace_hash
+    if not owner_workspace_hash and active_filters.session_id:
+        owner_workspace_hash = token_hash(active_filters.session_id)
     actor_filter = str(active_filters.actor or "").strip()
     actor_like_filter = _contains_like_filter(actor_filter) if actor_filter else ""
     filter_values = [
@@ -127,6 +132,7 @@ def list_events(
         str(active_filters.actor_member_id or "").strip(),
         str(actor_session_hash or "").strip(),
         str(owner_session_hash or "").strip(),
+        str(owner_workspace_hash or "").strip(),
         str(active_filters.team_id or "").strip(),
         str(active_filters.project_id or "").strip(),
         str(active_filters.target_type or "").strip(),
@@ -151,13 +157,14 @@ def list_events(
         filter_values[3], filter_values[3],
         filter_values[4], filter_values[4],
         filter_values[5], filter_values[5],
-        team_id_is_empty,
         filter_values[6], filter_values[6],
+        team_id_is_empty,
         filter_values[7], filter_values[7],
         filter_values[8], filter_values[8],
         filter_values[9], filter_values[9],
         filter_values[10], filter_values[10],
         filter_values[11], filter_values[11],
+        filter_values[12], filter_values[12],
     ]
     normalized_max_limit = max(1, int(max_limit or 500))
     page_limit = max(1, min(int(limit or 100), normalized_max_limit))
@@ -178,6 +185,7 @@ def list_events(
               AND (? = '' OR actor_member_id = ?)
               AND (? = '' OR actor_session_hash = ?)
               AND (? = '' OR owner_session_hash = ?)
+              AND (? = '' OR owner_workspace_hash = ?)
               AND (? = '' OR team_id = ?)
               AND (? = 0 OR team_id IS NULL OR team_id = '')
               AND (? = '' OR project_id = ?)
@@ -208,7 +216,7 @@ _USER_DETAIL_OMIT_KEYS = frozenset({
     "owner_session_hash",
     "raw_path",
     "request_id",
-    "session_id",
+    "personal_workspace_id",
     "user_agent",
 })
 
@@ -346,7 +354,8 @@ def list_scoped_events(
             actor=active_filters.actor,
             actor_member_id=active_filters.actor_member_id,
             actor_session_hash="",
-            owner_session_hash="" if is_team_scope else token_hash(normalized_session_id),
+            owner_session_hash="",
+            owner_workspace_hash="" if is_team_scope else token_hash(normalized_session_id),
             session_id="",
             team_id=team_id,
             project_id=requested_project_id,

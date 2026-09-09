@@ -116,12 +116,12 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 
 **Steps**
 
-- [ ] Change authenticated personal contexts to carry the principal's personal-workspace id as `owner_id` plus separate principal and credential actor metadata. Keep team contexts owned by `team_id` while attribution and capability checks use the principal/member identity rather than a token value.
+- [x] Change authenticated personal contexts to carry the principal's personal-workspace id as `owner_id` plus separate principal and credential actor metadata. Keep team contexts owned by `team_id` while attribution and capability checks use the principal/member identity rather than a token value.
 - [ ] Replace direct token/session ownership columns and foreign keys across the Phase 3A inventory with personal-workspace or principal references on both backends. Treat the existing `team_members.session_token_hash` and `teams.created_by_session_token_hash` fields as a digest-only precedent to migrate away from, not as durable owner keys to preserve.
 - [ ] Replace private actor references used for attribution with principal references while keeping public pseudonymous display data bounded and optional.
 - [ ] Replace `team_members` token references and uniqueness constraints with principal membership on both backends. Preserve owner, admin, operator, and viewer capability behavior and explicit personal/team scope selection.
 - [ ] Remove `/session/migrate`. Anonymous upgrade uses the atomic attachment operation; activating, adding, or rotating a credential never moves records.
-- [ ] Re-key authenticated share mutations, including `delete_share`, through the new owner context. Review unauthenticated `get_share` permalink access separately so this phase does not accidentally change the public-share behavior reserved for the access-profile decision.
+- [x] Re-key authenticated share mutations, including `delete_share`, through the new owner context. Review unauthenticated `get_share` permalink access separately so this phase does not accidentally change the public-share behavior reserved for the access-profile decision.
 
 **Acceptance criteria**
 

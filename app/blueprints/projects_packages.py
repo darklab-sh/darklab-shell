@@ -322,7 +322,7 @@ def projects_packages_download_job_ticket(project_id, package_id, job_id):
         return jsonify({"error": archive.get("error") or "package archive is not ready", "status": status}), status_code
     ticket = create_download_ticket({
         "kind": "project_package_job",
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "team_id": team_id,
         "project_id": project_id,
         "package_id": package_id,

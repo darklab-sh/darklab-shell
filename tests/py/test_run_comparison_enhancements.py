@@ -38,19 +38,25 @@ def _comparison_key(text: str) -> str:
     )
 
 
-@pytest.mark.parametrize(("before", "after"), (
-    ("[high] TLS certificate expires soon", "[critical] TLS certificate expires soon"),
-    ("severity: medium exposed service", "severity: high exposed service"),
-    ("low severity weak cipher", "high severity weak cipher"),
-    ("TruffleHog verified AWS key", "TruffleHog unknown AWS key"),
-    ("|_ CVE-2026-0001 7.5 https://vulners.com/cve/CVE-2026-0001", "|_ CVE-2026-0001 9.8 https://vulners.com/cve/CVE-2026-0001"),
+@pytest.mark.parametrize(
+    ("before", "after"),
     (
-        "Nmap Vulners: CVE-2026-0001 affects https on darklab.sh:443 "
-        "(CVSS score 7.5, severity high); public exploit references: CVE-2026-0001",
-        "Nmap Vulners: CVE-2026-0001 affects https on darklab.sh:443 "
-        "(CVSS score 9.8, severity critical); public exploit references: CVE-2026-0001",
+        ("[high] TLS certificate expires soon", "[critical] TLS certificate expires soon"),
+        ("severity: medium exposed service", "severity: high exposed service"),
+        ("low severity weak cipher", "high severity weak cipher"),
+        ("TruffleHog verified AWS key", "TruffleHog unknown AWS key"),
+        (
+            "|_ CVE-2026-0001 7.5 https://vulners.com/cve/CVE-2026-0001",
+            "|_ CVE-2026-0001 9.8 https://vulners.com/cve/CVE-2026-0001",
+        ),
+        (
+            "Nmap Vulners: CVE-2026-0001 affects https on darklab.sh:443 "
+            "(CVSS score 7.5, severity high); public exploit references: CVE-2026-0001",
+            "Nmap Vulners: CVE-2026-0001 affects https on darklab.sh:443 "
+            "(CVSS score 9.8, severity critical); public exploit references: CVE-2026-0001",
+        ),
     ),
-))
+)
 def test_finding_comparison_key_ignores_supported_severity_tokens(before, after):
     assert _comparison_key(before) == _comparison_key(after)
     assert finding_comparison_key(
@@ -81,20 +87,20 @@ def test_changed_findings_pair_exact_severities_before_remaining_duplicates():
     assert result["unchanged_count"] == 1
     assert result["added"] == []
     assert result["removed"] == []
-    assert result["changed"] == [{
-        "key": "shared",
-        "before": left[0],
-        "after": right[1],
-        "changed_fields": ["severity"],
-    }]
+    assert result["changed"] == [
+        {
+            "key": "shared",
+            "before": left[0],
+            "after": right[1],
+            "changed_fields": ["severity"],
+        }
+    ]
 
     duplicate_left = [
-        {"comparison_key": "duplicate", "key": "duplicate", "id": f"left-{index}", "severity": "low"}
-        for index in range(1000)
+        {"comparison_key": "duplicate", "key": "duplicate", "id": f"left-{index}", "severity": "low"} for index in range(1000)
     ]
     duplicate_right = [
-        {"comparison_key": "duplicate", "key": "duplicate", "id": f"right-{index}", "severity": "high"}
-        for index in range(1000)
+        {"comparison_key": "duplicate", "key": "duplicate", "id": f"right-{index}", "severity": "high"} for index in range(1000)
     ]
     duplicate_result = compare_finding_items(duplicate_left, duplicate_right)
     assert len(duplicate_result["changed"]) == 1000
@@ -118,12 +124,12 @@ def _legacy_finding_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE TABLE runs (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
+            personal_workspace_id TEXT NOT NULL,
             team_id TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE findings (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
+            personal_workspace_id TEXT NOT NULL,
             team_id TEXT NOT NULL DEFAULT '',
             run_id TEXT NOT NULL DEFAULT '',
             line_number INTEGER,
@@ -160,12 +166,10 @@ def test_occurrence_migration_backfills_and_trigger_snapshots_comparison_metadat
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     _legacy_finding_schema(conn)
-    conn.execute(
-        "INSERT INTO runs (id, session_id) VALUES ('run-old', 'session-a')"
-    )
+    conn.execute("INSERT INTO runs (id, personal_workspace_id) VALUES ('run-old', 'session-a')")
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, raw_line, created) "
+        "(id, personal_workspace_id, run_id, line_number, severity, tool_root, kind, subject_key, raw_line, created) "
         "VALUES ('finding-old', 'session-a', '', 2, 'high', 'scanner', 'finding', "
         "'domain:darklab.sh', '[high] exposed service', '2026-07-13T10:00:00Z')"
     )
@@ -183,12 +187,10 @@ def test_occurrence_migration_backfills_and_trigger_snapshots_comparison_metadat
     assert backfilled["observed_severity"] == "high"
     assert finding_compare_key(backfilled) == _comparison_key("[high] exposed service")
 
-    conn.execute(
-        "INSERT INTO runs (id, session_id) VALUES ('run-new', 'session-a')"
-    )
+    conn.execute("INSERT INTO runs (id, personal_workspace_id) VALUES ('run-new', 'session-a')")
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, line_number, severity, tool_root, kind, subject_key, raw_line, created) "
+        "(id, personal_workspace_id, run_id, line_number, severity, tool_root, kind, subject_key, raw_line, created) "
         "VALUES ('finding-new', 'session-a', 'run-new', 4, 'critical', 'scanner', 'finding', "
         "'domain:darklab.sh', '[critical] exposed service', '2026-07-13T11:00:00Z')"
     )
@@ -212,12 +214,13 @@ def test_finding_compare_loader_applies_owner_scope_to_run_and_finding():
         ("team-run", "session-b", "team-a"),
     ):
         conn.execute(
-            "INSERT INTO runs (id, session_id, team_id) VALUES (?, ?, ?)",
+            "INSERT INTO runs (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
             (run_id, session_id, team_id),
         )
         conn.execute(
             "INSERT INTO findings "
-            "(id, session_id, team_id, run_id, line_number, severity, tool_root, kind, subject_key, raw_line, created) "
+            "(id, personal_workspace_id, team_id, run_id, line_number, severity, "
+            "tool_root, kind, subject_key, raw_line, created) "
             "VALUES (?, ?, ?, ?, 0, 'high', 'scanner', 'finding', 'domain:darklab.sh', "
             "'[high] exposed service', '2026-07-13T10:00:00Z')",
             (f"finding-{run_id}", session_id, team_id, run_id),
@@ -273,13 +276,16 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
     assert len(capped_hosts["added"]) == 1000
     assert capped_hosts["truncated"] is True
 
-    assert compare_additional_derived_groups(
-        {"command": "httpx -u https://darklab.sh"},
-        {"command": "httpx -u https://darklab.sh"},
-        [{"text": "https://old.darklab.sh"}],
-        [{"text": "https://new.darklab.sh"}],
-        skip_hosts=True,
-    ) == []
+    assert (
+        compare_additional_derived_groups(
+            {"command": "httpx -u https://darklab.sh"},
+            {"command": "httpx -u https://darklab.sh"},
+            [{"text": "https://old.darklab.sh"}],
+            [{"text": "https://new.darklab.sh"}],
+            skip_hosts=True,
+        )
+        == []
+    )
 
     tls_groups = compare_additional_derived_groups(
         {"command": "openssl s_client -connect darklab.sh:443", "full_output_truncated": True},
@@ -322,12 +328,15 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
     assert tls_groups[0]["truncated"] is True
     assert tls_groups[0]["note"] == "TLS results may be incomplete."
 
-    assert compare_additional_derived_groups(
-        {"command": "subfinder -d darklab.sh"},
-        {"command": "amass enum -d darklab.sh"},
-        [{"text": "old.darklab.sh"}],
-        [{"text": "new.darklab.sh"}],
-    ) == []
+    assert (
+        compare_additional_derived_groups(
+            {"command": "subfinder -d darklab.sh"},
+            {"command": "amass enum -d darklab.sh"},
+            [{"text": "old.darklab.sh"}],
+            [{"text": "new.darklab.sh"}],
+        )
+        == []
+    )
 
     session_id = anonymous_session_id(f"compare-derived-{uuid.uuid4().hex[:8]}")
     left_id = f"run-derived-left-{uuid.uuid4().hex[:8]}"
@@ -337,7 +346,7 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
         with sqlite3.connect(DB_PATH) as conn:
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, "
+                "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output_preview, "
                 "output_line_count) VALUES (?, ?, 'external', 'subfinder -d darklab.sh', ?, ?, 0, ?, 1)",
                 [
                     (
@@ -397,29 +406,34 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
             conn.row_factory = sqlite3.Row
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, 'external', 'scanner darklab.sh', ?, ?, 0, ?, ?)",
                 [
                     (
-                        left_id, session_id, "2026-07-13T10:00:00Z", "2026-07-13T10:00:01Z",
-                        json.dumps(left_entries), len(left_entries),
+                        left_id,
+                        session_id,
+                        "2026-07-13T10:00:00Z",
+                        "2026-07-13T10:00:01Z",
+                        json.dumps(left_entries),
+                        len(left_entries),
                     ),
                     (
-                        right_id, session_id, "2026-07-13T11:00:00Z", "2026-07-13T11:00:01Z",
-                        json.dumps(right_entries), len(right_entries),
+                        right_id,
+                        session_id,
+                        "2026-07-13T11:00:00Z",
+                        "2026-07-13T11:00:01Z",
+                        json.dumps(right_entries),
+                        len(right_entries),
                     ),
                 ],
             )
             left_findings = record_run_findings(conn, session_id, left_id, left_entries)
             right_findings = record_run_findings(conn, session_id, right_id, right_entries)
             repeated_right_findings = record_run_findings(conn, session_id, right_id, right_entries)
-            assert [item["id"] for item in repeated_right_findings] == [
-                item["id"] for item in right_findings
-            ]
+            assert [item["id"] for item in repeated_right_findings] == [item["id"] for item in right_findings]
             finding_ids.extend(item["id"] for item in (*left_findings, *right_findings))
             occurrence_snapshots = conn.execute(
-                "SELECT observed_severity, comparison_key FROM findings_occurrences "
-                "WHERE run_id = ? ORDER BY line_number",
+                "SELECT observed_severity, comparison_key FROM findings_occurrences WHERE run_id = ? ORDER BY line_number",
                 (right_id,),
             ).fetchall()
             assert [str(row["observed_severity"]) for row in occurrence_snapshots] == [
@@ -432,9 +446,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
             subjects = {
                 str(row["subject_key"])
                 for row in conn.execute(
-                    "SELECT subject_key FROM findings WHERE id IN ("
-                    + ",".join("?" for _finding_id in finding_ids)
-                    + ")",
+                    "SELECT subject_key FROM findings WHERE id IN (" + ",".join("?" for _finding_id in finding_ids) + ")",
                     finding_ids,
                 ).fetchall()
             }
@@ -446,7 +458,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
             }
             conn.execute(
                 "INSERT INTO workflow_executions "
-                "(id, session_id, workflow_id, workflow_source, title, status, current_step_id, created, updated) "
+                "(id, personal_workspace_id, workflow_id, workflow_source, title, status, current_step_id, created, updated) "
                 "VALUES (?, ?, 'workflow-1', 'user', 'External review', 'completed', 'scan', "
                 "'2026-07-13T10:00:00Z', '2026-07-13T10:00:01Z')",
                 (execution_id, session_id),
@@ -502,10 +514,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
         assert reversed_response.status_code == 200
         assert reversed_payload["left_run_id"] == right_id
         assert reversed_payload["right_run_id"] == left_id
-        reversed_changed = {
-            item["before"]["raw_line"]: item
-            for item in reversed_payload["objects"]["findings"]["changed"]
-        }
+        reversed_changed = {item["before"]["raw_line"]: item for item in reversed_payload["objects"]["findings"]["changed"]}
         assert reversed_changed["[high] exposed service"]["before"]["severity"] == "high"
         assert reversed_changed["[high] exposed service"]["after"]["severity"] == "low"
     finally:
@@ -555,7 +564,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             operator_member_id = str(operator["id"])
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+                "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
                 "output_preview, output_line_count) "
                 "VALUES (?, ?, ?, 'external', 'scanner darklab.sh', ?, ?, 0, ?, 1)",
                 [
@@ -565,11 +574,15 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
                         team_id,
                         "2026-07-13T10:00:00Z",
                         "2026-07-13T10:00:01Z",
-                        json.dumps([{
-                            "text": "[low] scoped finding",
-                            "line_index": 0,
-                            "signals": ["findings"],
-                        }]),
+                        json.dumps(
+                            [
+                                {
+                                    "text": "[low] scoped finding",
+                                    "line_index": 0,
+                                    "signals": ["findings"],
+                                }
+                            ]
+                        ),
                     ),
                     (
                         right_id,
@@ -577,11 +590,15 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
                         team_id,
                         "2026-07-13T11:00:00Z",
                         "2026-07-13T11:00:01Z",
-                        json.dumps([{
-                            "text": "[high] scoped finding",
-                            "line_index": 0,
-                            "signals": ["findings"],
-                        }]),
+                        json.dumps(
+                            [
+                                {
+                                    "text": "[high] scoped finding",
+                                    "line_index": 0,
+                                    "signals": ["findings"],
+                                }
+                            ]
+                        ),
                     ),
                     (
                         hidden_personal_run_id,
@@ -601,16 +618,21 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
                     ),
                 ],
             )
-            left_entries = json.loads(conn.execute(
-                "SELECT output_preview FROM runs WHERE id = ?",
-                (left_id,),
-            ).fetchone()["output_preview"])
-            right_entries = json.loads(conn.execute(
-                "SELECT output_preview FROM runs WHERE id = ?",
-                (right_id,),
-            ).fetchone()["output_preview"])
+            left_entries = json.loads(
+                conn.execute(
+                    "SELECT output_preview FROM runs WHERE id = ?",
+                    (left_id,),
+                ).fetchone()["output_preview"]
+            )
+            right_entries = json.loads(
+                conn.execute(
+                    "SELECT output_preview FROM runs WHERE id = ?",
+                    (right_id,),
+                ).fetchone()["output_preview"]
+            )
             recorded_finding_ids.extend(
-                item["id"] for item in record_run_findings(
+                item["id"]
+                for item in record_run_findings(
                     conn,
                     team_session,
                     left_id,
@@ -619,7 +641,8 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
                 )
             )
             recorded_finding_ids.extend(
-                item["id"] for item in record_run_findings(
+                item["id"]
+                for item in record_run_findings(
                     conn,
                     team_session,
                     right_id,
@@ -629,7 +652,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             )
             conn.executemany(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
                 "VALUES (?, ?, ?, ?, ?, 'output', 4, 'test', '2026-07-13T11:00:00Z')",
                 [
                     (f"artifact-{left_id}", team_session, left_id, "reports/left.txt", "left.txt"),
@@ -645,7 +668,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             )
             conn.executemany(
                 "INSERT INTO findings "
-                "(id, session_id, team_id, run_id, scope, severity, tool_root, title, raw_line, "
+                "(id, personal_workspace_id, team_id, run_id, scope, severity, tool_root, title, raw_line, "
                 "line_number, fingerprint, created) VALUES (?, ?, ?, ?, 'finding', 'critical', "
                 "'scanner', 'hidden', '[critical] hidden', 0, ?, '2026-07-13T11:00:00Z')",
                 [
@@ -667,7 +690,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             )
             conn.executemany(
                 "INSERT INTO workflow_executions "
-                "(id, session_id, team_id, workflow_id, workflow_source, title, status, current_step_id, "
+                "(id, personal_workspace_id, team_id, workflow_id, workflow_source, title, status, current_step_id, "
                 "created, updated) VALUES (?, ?, ?, 'deleted-workflow', 'user', ?, 'completed', 'scan', "
                 "'2026-07-13T10:00:00Z', '2026-07-13T11:00:00Z')",
                 [
@@ -693,7 +716,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             )
             conn.execute(
                 "INSERT INTO projects "
-                "(id, session_id, team_id, name, slug, created, updated) "
+                "(id, personal_workspace_id, team_id, name, slug, created, updated) "
                 "VALUES (?, ?, ?, 'Team comparison', ?, '2026-07-13T09:00:00Z', '2026-07-13T11:00:00Z')",
                 (project_id, team_session, team_id, project_id),
             )
@@ -716,10 +739,13 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
         team_headers = {"X-Session-ID": team_session, "X-Team-ID": team_id}
         compare_url = f"/history/compare?left={left_id}&right={right_id}"
         assert client.get(compare_url, headers=personal_headers).status_code == 404
-        assert client.get(
-            f"/history/compare/lines?left={left_id}&right={right_id}&side=a&start=0&end=1",
-            headers=personal_headers,
-        ).status_code == 404
+        assert (
+            client.get(
+                f"/history/compare/lines?left={left_id}&right={right_id}&side=a&start=0&end=1",
+                headers=personal_headers,
+            ).status_code
+            == 404
+        )
 
         candidates = client.get(
             f"/history/{right_id}/compare-candidates",
@@ -760,9 +786,7 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             headers=team_headers,
         )
         assert lazy_response.status_code == 200
-        assert [line["text"] for line in lazy_response.get_json()["lines"]] == [
-            "[high] scoped finding"
-        ]
+        assert [line["text"] for line in lazy_response.get_json()["lines"]] == ["[high] scoped finding"]
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -775,31 +799,43 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
         assert revoked.status_code == 403
     finally:
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("DELETE FROM workflow_execution_steps WHERE execution_id IN (?, ?)", (
-                valid_execution_id,
-                hidden_execution_id,
-            ))
-            conn.execute("DELETE FROM workflow_executions WHERE id IN (?, ?)", (
-                valid_execution_id,
-                hidden_execution_id,
-            ))
+            conn.execute(
+                "DELETE FROM workflow_execution_steps WHERE execution_id IN (?, ?)",
+                (
+                    valid_execution_id,
+                    hidden_execution_id,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM workflow_executions WHERE id IN (?, ?)",
+                (
+                    valid_execution_id,
+                    hidden_execution_id,
+                ),
+            )
             conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             conn.executemany(
                 "DELETE FROM findings WHERE id = ?",
                 [(finding_id,) for finding_id in (*recorded_finding_ids, *mismatched_finding_ids)],
             )
-            conn.execute("DELETE FROM run_file_artifacts WHERE run_id IN (?, ?, ?)", (
-                left_id,
-                right_id,
-                hidden_personal_run_id,
-            ))
-            conn.executemany("DELETE FROM runs WHERE id = ?", [
-                (left_id,),
-                (right_id,),
-                (hidden_personal_run_id,),
-                (hidden_team_run_id,),
-            ])
+            conn.execute(
+                "DELETE FROM run_file_artifacts WHERE run_id IN (?, ?, ?)",
+                (
+                    left_id,
+                    right_id,
+                    hidden_personal_run_id,
+                ),
+            )
+            conn.executemany(
+                "DELETE FROM runs WHERE id = ?",
+                [
+                    (left_id,),
+                    (right_id,),
+                    (hidden_personal_run_id,),
+                    (hidden_team_run_id,),
+                ],
+            )
             if team_id:
                 conn.execute("DELETE FROM team_members WHERE team_id = ?", (team_id,))
                 conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
@@ -820,7 +856,7 @@ def test_compare_candidates_only_include_older_completed_external_runs():
         with sqlite3.connect(DB_PATH) as conn:
             conn.executemany(
                 "INSERT INTO runs "
-                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview) "
+                "(id, personal_workspace_id, run_kind, command, started, finished, exit_code, output_preview) "
                 "VALUES (?, ?, ?, 'scanner darklab.sh', ?, ?, 0, '[]')",
                 [
                     (source_id, session_id, "external", "2026-07-13T12:00:00Z", "2026-07-13T12:00:01Z"),

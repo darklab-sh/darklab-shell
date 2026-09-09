@@ -13,7 +13,6 @@ from flask import Blueprint, jsonify, request
 from config import CFG
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
-from services.audit.context import request_audit_fields
 from services.audit.models import AuditEventType
 from services.audit.queries import AuditEventFilters, AuditScopeError, list_scoped_events
 from services.audit.recorder import record_event
@@ -29,7 +28,12 @@ from services.teams.contracts import (
     TeamSlugUnavailable,
 )
 from services.teams.request_scope import RequestScope
-from services.teams.scope import team_owner_context
+from services.teams.request_identity import (
+    current_credential_id,
+    required_team_identity,
+    team_actor_audit_fields,
+    team_context_for_actor,
+)
 from services.watchers.service import pause_team_watchers_and_schedules
 
 teams_bp = Blueprint("teams", __name__)
@@ -56,12 +60,8 @@ def _parse_int(value, default, *, minimum=0, maximum=100):
 
 
 def _required_token_session():
-    session_id = get_session_id()
-    if not session_id:
-        return "", (jsonify({"error": "session_required"}), 401)
-    if not str(session_id).startswith("tok_"):
-        return "", (jsonify({"error": "session_token_required"}), 401)
-    return session_id, None
+    identity, error = required_team_identity()
+    return (identity, None) if not error else ("", (jsonify({"error": error}), 401))
 
 
 def _json_body() -> tuple[dict[str, Any], Any]:
@@ -111,29 +111,7 @@ def _actor_log_fields(actor: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _actor_audit_fields(
-    session_token: str,
-    *,
-    team_id: str = "",
-    actor: dict[str, Any] | None = None,
-    actor_member_id: str = "",
-    actor_role: str = "",
-    actor_display_name: str = "",
-) -> dict[str, Any]:
-    actor_member_id = actor_member_id or str((actor or {}).get("id") or "")
-    actor_role = actor_role or str((actor or {}).get("role") or "")
-    actor_display_name = actor_display_name or str(
-        (actor or {}).get("display_name") or (actor or {}).get("name") or ""
-    )
-    return {
-        "session_id": session_token,
-        "actor_session_id": session_token,
-        "team_id": team_id,
-        "actor_member_id": actor_member_id,
-        "actor_role": actor_role,
-        "actor_display_name": actor_display_name,
-        **request_audit_fields(request),
-    }
+_actor_audit_fields = team_actor_audit_fields
 
 
 def _record_team_audit(
@@ -257,6 +235,7 @@ def session_teams_create():
                 name=str(data.get("name") or ""),
                 slug=str(data.get("slug") or ""),
                 creator_session_token=session_token,
+                creator_credential_id=current_credential_id(),
                 display_name=str(data.get("display_name") or ""),
             )
             detail = storage.team_detail(conn, team["id"], current_session_token=session_token)
@@ -319,11 +298,7 @@ def session_teams_activity(team_id):
 
         actor = storage.run_team_read(_membership)
         scope = RequestScope(
-            team_owner_context(
-                team_id,
-                actor_member_id=str(actor.get("id") or ""),
-                actor_session_id=session_token,
-            ),
+            team_context_for_actor(team_id, actor),
             team_id=team_id,
             member=actor,
             team_status=str(actor.get("team_status") or ""),
@@ -531,6 +506,7 @@ def session_teams_join():
                 code=str(data.get("code") or ""),
                 session_token=session_token,
                 display_name=str(data.get("display_name") or ""),
+                joined_by_credential_id=current_credential_id(),
             )
             detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
             _record_team_audit(
@@ -768,6 +744,7 @@ def session_teams_recovery_redeem():
                 code=str(data.get("code") or ""),
                 session_token=session_token,
                 display_name=str(data.get("display_name") or ""),
+                joined_by_credential_id=current_credential_id(),
             )
             detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
             _record_team_audit(

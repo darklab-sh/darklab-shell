@@ -157,7 +157,7 @@ def group_observations(
     grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for finding in findings:
         team_id = str(finding.get("team_id") or "")
-        session_id = "" if team_id else str(finding.get("session_id") or "")
+        session_id = "" if team_id else str(finding.get("personal_workspace_id") or "")
         key = (session_id, team_id, remediation_identity(finding, cve_id))
         grouped.setdefault(key, []).append(finding)
     return grouped

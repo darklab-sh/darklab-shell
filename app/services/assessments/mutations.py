@@ -31,7 +31,7 @@ from services.projects.utils import now
 _MANUAL_EXCLUSION_STATES = frozenset({"blocked", "skipped", "not_applicable"})
 _CHECK_SQL = (
     "SELECT p.status AS project_status, a.status AS assessment_status, "
-    "a.profile_snapshot, a.session_id, a.team_id, a.project_id, "
+    "a.profile_snapshot, a.personal_workspace_id, a.team_id, a.project_id, "
     "c.id, c.assessment_id, c.category, c.check_key, c.target_entity_id, "
     "c.target_type, c.target_value, c.applicability, c.policy_level, "
     "c.state, c.state_source, c.state_reason, c.recommended_action_key, "
@@ -333,7 +333,7 @@ def link_manual_evidence_on_conn(
         raise AssessmentConflict("assessment evidence is already linked")
     enforce_evidence_quotas(conn, [{
         "already_linked": False,
-        "session_id": str(row["session_id"] or ""),
+        "personal_workspace_id": str(row["personal_workspace_id"] or ""),
         "team_id": str(row["team_id"] or ""),
         "project_id": str(row["project_id"] or ""),
     }])

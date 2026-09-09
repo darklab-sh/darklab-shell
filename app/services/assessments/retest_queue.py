@@ -43,7 +43,7 @@ def _queue_rows(
         "JOIN findings f ON f.id = link.finding_id ",
         "JOIN finding_triage_details triage ON triage.finding_id = f.id ",
         "AND COALESCE(triage.team_id, '') = COALESCE(link.team_id, '') ",
-        "AND (COALESCE(link.team_id, '') != '' OR triage.session_id = link.session_id) ",
+        "AND (COALESCE(link.team_id, '') != '' OR triage.personal_workspace_id = link.personal_workspace_id) ",
         "JOIN project_assessment_checks c ON c.id = link.evidence_id ",
         "WHERE ",
         owner_sql,

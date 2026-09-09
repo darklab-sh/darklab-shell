@@ -166,7 +166,7 @@ def save_zap_job_report(
     except UnicodeDecodeError as exc:
         raise ZapJobArtifactError("zap_report_invalid", "The ZAP report is not valid UTF-8 JSON") from exc
     owner = owner_context_for_scope(
-        str(job.get("session_id") or ""),
+        str(job.get("personal_workspace_id") or ""),
         team_id=str(job.get("team_id") or ""),
         actor_member_id=str(job.get("actor_member_id") or ""),
     )

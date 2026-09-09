@@ -160,7 +160,7 @@ def _scope_available(
         str(scope.get("assessment_team_id") or ""),
     )
     execution_owner = (
-        str(execution.get("session_id") or ""),
+        str(execution.get("personal_workspace_id") or ""),
         str(execution.get("team_id") or ""),
     )
     return bool(
@@ -184,9 +184,9 @@ def load_batch_recovery_snapshot(batch_id: str) -> dict[str, object]:
     with get_db_connect()() as conn:
         scope_row = conn.execute(
             "SELECT b.*, p.id AS project_exists, p.status AS project_status, "
-            "p.session_id AS project_session_id, p.team_id AS project_team_id, "
+            "p.personal_workspace_id AS project_session_id, p.team_id AS project_team_id, "
             "a.id AS assessment_exists, a.status AS assessment_status, "
-            "a.session_id AS assessment_session_id, a.team_id AS assessment_team_id "
+            "a.personal_workspace_id AS assessment_session_id, a.team_id AS assessment_team_id "
             "FROM assessment_batches b "
             "JOIN workflow_executions e ON e.id = b.execution_id "
             "LEFT JOIN projects p ON p.id = e.project_id "

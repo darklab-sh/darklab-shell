@@ -171,13 +171,13 @@ def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schem
         """
         CREATE TABLE owner_adapter_rows (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
+            personal_workspace_id TEXT NOT NULL,
             team_id TEXT
         )
         """
     )
     conn.executemany(
-        "INSERT INTO owner_adapter_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO owner_adapter_rows (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", "tok_owner_a", None),
             ("owner-a-empty", "tok_owner_a", ""),
@@ -232,12 +232,14 @@ def test_remaining_surface_adapters_preserve_mixed_postgres_result_sets(postgres
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
     conn.execute(
         "CREATE TABLE owner_remaining_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT, run_id TEXT NOT NULL)"
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, "
+        "team_id TEXT, run_id TEXT NOT NULL)"
     )
     owner_a = anonymous_session_id("postgres-remaining-surfaces-owner-a")
     owner_b = anonymous_session_id("postgres-remaining-surfaces-owner-b")
     conn.executemany(
-        "INSERT INTO owner_remaining_rows (id, session_id, team_id, run_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO owner_remaining_rows "
+        "(id, personal_workspace_id, team_id, run_id) VALUES (?, ?, ?, ?)",
         (
             ("owner-a-null", owner_a, None, "run-one"),
             ("owner-a-empty", owner_a, "", "run-one"),
@@ -289,12 +291,14 @@ def test_history_owner_clauses_preserve_mixed_postgres_result_sets(postgres_sche
 
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
     conn.execute(
-        "CREATE TABLE owner_history_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE owner_history_rows ("
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     owner_a = anonymous_session_id("postgres-history-owner-a")
     owner_b = anonymous_session_id("postgres-history-owner-b")
     conn.executemany(
-        "INSERT INTO owner_history_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO owner_history_rows "
+        "(id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),
@@ -328,12 +332,14 @@ def test_project_and_atlas_owner_clauses_preserve_mixed_postgres_result_sets(pos
 
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
     conn.execute(
-        "CREATE TABLE owner_project_rows (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT)"
+        "CREATE TABLE owner_project_rows ("
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT)"
     )
     owner_a = anonymous_session_id("postgres-project-owner-a")
     owner_b = anonymous_session_id("postgres-project-owner-b")
     conn.executemany(
-        "INSERT INTO owner_project_rows (id, session_id, team_id) VALUES (?, ?, ?)",
+        "INSERT INTO owner_project_rows "
+        "(id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
             ("owner-a-null", owner_a, None),
             ("owner-a-empty", owner_a, ""),
@@ -390,13 +396,14 @@ def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgre
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
     conn.execute(
         "CREATE TABLE owner_storage_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, owner_id TEXT NOT NULL, "
         "team_id TEXT, kind TEXT NOT NULL)"
     )
     owner_a = anonymous_session_id("postgres-files-workflows-secrets-owner-a")
     owner_b = anonymous_session_id("postgres-files-workflows-secrets-owner-b")
     conn.executemany(
-        "INSERT INTO owner_storage_rows (id, session_id, session_token, team_id, kind) "
+        "INSERT INTO owner_storage_rows "
+        "(id, personal_workspace_id, owner_id, team_id, kind) "
         "VALUES (?, ?, ?, ?, ?)",
         (
             ("owner-a-null", owner_a, owner_a, None, "domain"),
@@ -454,7 +461,10 @@ def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgre
         "team-red-flat-empty",
         "team-red-flat-null",
     ]
-    secret_owner = token_keyed_owner_predicate(_secret_scope_owner("team-red"))
+    secret_owner = token_keyed_owner_predicate(
+        _secret_scope_owner("team-red"),
+        token_column="owner_id",
+    )
     assert selected_ids(secret_owner.sql, secret_owner.params) == [
         "team-red",
         "team-red-flat-empty",
@@ -484,21 +494,21 @@ def test_automation_notification_owner_clauses_preserve_mixed_postgres_result_se
     conn = PostgresSqliteCompatConnection(postgres_schema.conn)
     conn.execute(
         "CREATE TABLE owner_automation_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_token TEXT NOT NULL, "
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, "
         "team_id TEXT, state TEXT NOT NULL, enabled BOOLEAN NOT NULL)"
     )
     owner_a = "tok_postgres_automation_owner_a"
     owner_b = "tok_postgres_automation_owner_b"
     conn.executemany(
         "INSERT INTO owner_automation_rows "
-        "(id, session_id, session_token, team_id, state, enabled) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "(id, personal_workspace_id, team_id, state, enabled) "
+        "VALUES (?, ?, ?, ?, ?)",
         (
-            ("owner-a-null", owner_a, owner_a, None, "ok", True),
-            ("owner-a-empty", owner_a, owner_a, "", "ok", True),
-            ("owner-b-empty", owner_b, owner_b, "", "ok", True),
-            ("team-red", owner_b, owner_b, "team-red", "ok", True),
-            ("team-blue", owner_a, owner_a, "team-blue", "ok", True),
+            ("owner-a-null", owner_a, None, "ok", True),
+            ("owner-a-empty", owner_a, "", "ok", True),
+            ("owner-b-empty", owner_b, "", "ok", True),
+            ("team-red", owner_b, "team-red", "ok", True),
+            ("team-blue", owner_a, "team-blue", "ok", True),
         ),
     )
 
@@ -593,6 +603,13 @@ def test_principal_credential_persistence_matches_postgres_contract(
     preserved_path = settings.root / preserved_key
     preserved_path.mkdir()
     (preserved_path / "evidence.txt").write_text("postgres\n", encoding="utf-8")
+    run_id = "run_postgres_owner_cutover"
+    conn.execute(
+        "INSERT INTO runs (id, personal_workspace_id, command, started, output_search_text) "
+        "VALUES (?, ?, 'printf postgres-cutover-marker', ?, 'postgres cutover marker')",
+        (run_id, anonymous_id, "2026-09-08T12:00:00+00:00"),
+    )
+    raw_conn.commit()
 
     bundle = principal_storage.create_principal_with_credential(
         anonymous_id=anonymous_id,
@@ -609,6 +626,10 @@ def test_principal_credential_persistence_matches_postgres_contract(
 
     assert bundle.workspace.storage_key == preserved_key
     assert replacement.metadata.principal_id == bundle.principal.id
+    assert raw_conn.execute(
+        "SELECT personal_workspace_id FROM runs WHERE id = %s",
+        (run_id,),
+    ).fetchone()["personal_workspace_id"] == bundle.workspace.id
     assert principal_storage.get_personal_workspace_path(
         bundle.principal.id,
         settings=settings,
@@ -1134,12 +1155,12 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "references_json": [],
     }
     conn.execute(
-        "INSERT INTO runs (id, session_id, command, started) VALUES (%s, %s, %s, %s)",
+        "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (%s, %s, %s, %s)",
         ("run-after-0044", "migration-session", "scanner darklab.sh", "2026-07-13T10:00:00Z"),
     )
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, line_number, scope, review_state, severity, tool_root, kind, "
+        "(id, personal_workspace_id, run_id, line_number, scope, review_state, severity, tool_root, kind, "
         "subject_key, fingerprint, raw_line, created) "
         "VALUES (%s, %s, %s, 4, 'finding', 'important', 'critical', 'scanner', 'finding', "
         "%s, %s, %s, %s)",
@@ -1259,6 +1280,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0077",
         "0078",
         "0079",
+        "0080",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -1830,7 +1852,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "(SELECT COUNT(*) FROM findings)"
     ).fetchone()) == nvd_counts_before_read
     compat.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
         "VALUES (?, ?, ?, ?, ?, 0)",
         (
             "run-postgres-nmap-1",
@@ -1841,7 +1863,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ),
     )
     compat.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) "
         "VALUES (?, ?, 'port', ?, ?, ?, ?, 1, ?)",
         (
@@ -1899,7 +1921,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         (postgres_inference["finding_id"],),
     ).fetchone()["count"] == 1
     compat.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+        "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) "
         "VALUES (?, ?, ?, ?, ?, 0)",
         (
             "run-postgres-httpx-1",
@@ -1910,7 +1932,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ),
     )
     compat.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) "
         "VALUES (?, ?, 'url', ?, ?, ?, ?, 1, ?)",
         (
@@ -1961,13 +1983,13 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     nessus_target_key = entity_signature("domain", nessus_target)
     compat.execute(
         "INSERT INTO atlas_import_batches "
-        "(id, session_id, source_tool, format_id, import_name, created, applied_at, status) "
+        "(id, personal_workspace_id, source_tool, format_id, import_name, created, applied_at, status) "
         "VALUES ('import-postgres-nessus-1', '12a65b68-a08f-4b2b-bad5-3af70833e2fd', 'Nessus', "
         "'nessus_xml', 'Postgres Nessus', ?, ?, 'applied')",
         ("2026-08-08T11:00:00+00:00", "2026-08-08T11:00:00+00:00"),
     )
     compat.execute(
-        "INSERT INTO entities (id, session_id, type, canonical_value, signature_hash, "
+        "INSERT INTO entities (id, personal_workspace_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) "
         "VALUES ('entity-postgres-nessus', '12a65b68-a08f-4b2b-bad5-3af70833e2fd', 'domain', ?, ?, ?, ?, 1, ?)",
         (
@@ -2102,14 +2124,14 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     ])
     conn.execute(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, status, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, status, created, updated) "
         "VALUES ('prj-dalfox-parameter-pg', 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'Dalfox parameter', 'dalfox-parameter', 'active', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO runs "
-        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
         "output_preview, output_line_count) VALUES (?, 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'external', ?, ?, ?, 0, ?, 2)",
         (run_id, command, timestamp, timestamp, preview),
@@ -2180,7 +2202,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     ]
     conn.execute(
         "INSERT INTO runs "
-        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, "
+        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, "
         "output_preview, output_line_count) VALUES (?, 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', "
         "'external', ?, ?, ?, 0, ?, 2)",
         (active_run_id, plan.command, timestamp, timestamp, json.dumps(xss_entries)),
@@ -2193,7 +2215,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     )
     conn.execute(
         "INSERT INTO entities "
-        "(id, session_id, team_id, type, canonical_value, signature_hash, "
+        "(id, personal_workspace_id, team_id, type, canonical_value, signature_hash, "
         "first_seen_at, last_seen_at, occurrence_count, created) VALUES "
         "('ent-dalfox-xss-pg', 'c50bde9b-0dc5-4698-8d4e-964eca020f87', '', 'url', ?, "
         "'sig-dalfox-xss-pg', ?, ?, 1, ?)",
@@ -2238,14 +2260,14 @@ def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_
     timestamp = "2026-08-04T12:00:00+00:00"
     conn.execute(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
         "VALUES ('prj-assessment-cleanup', 'assessment-cleanup', '', 'Cleanup', 'cleanup', '', "
         "'active', '', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
         "VALUES ('asm-cleanup', 'assessment-cleanup', '', 'prj-assessment-cleanup', "
         "'Cleanup', 'network', '1.0', ?, 'active', ?, ?, ?)",
@@ -2306,14 +2328,14 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     timestamp = "2026-08-04T12:00:00+00:00"
     conn.execute(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
         "VALUES ('prj-assessment-lifecycle', 'f7ed510e-c04f-4fb3-9a93-03eb1704b961', '', 'Lifecycle', "
         "'lifecycle', '', 'active', '', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
         "VALUES ('asm-lifecycle', 'f7ed510e-c04f-4fb3-9a93-03eb1704b961', '', "
         "'prj-assessment-lifecycle', 'Lifecycle', 'network', '1.0', ?, "
@@ -2330,7 +2352,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
     )
     conn.execute(
         "INSERT INTO schemathesis_run_evidence "
-        "(id, session_id, project_id, assessment_id, check_id, run_id, "
+        "(id, personal_workspace_id, project_id, assessment_id, check_id, run_id, "
         "schema_artifact_id, schema_sha256, schema_version, profile_key, profile_version, "
         "tool_version, seed, stop_reason, running_time_seconds, expected_operation_count, "
         "observed_operation_count, case_count, failure_count, missing_operations_json, "
@@ -2412,14 +2434,14 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     timestamp = "2026-08-04T12:00:00+00:00"
     conn.execute(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
         "VALUES ('prj-assessment-state', '85d41ca2-5b5c-4db6-a651-b2b25a18aa4b', '', 'State', "
         "'state', '', 'active', '', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
         "VALUES ('asm-state', '85d41ca2-5b5c-4db6-a651-b2b25a18aa4b', '', 'prj-assessment-state', "
         "'State', 'network', '1.0', ?, 'active', ?, ?, ?)",
@@ -2543,14 +2565,14 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     timestamp = "2026-08-06T12:00:00+00:00"
     conn.execute(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
         "VALUES ('prj-assessment-handoff', 'assessment-handoff', '', 'Handoff', "
         "'handoff', '', 'active', '', ?, ?)",
         (timestamp, timestamp),
     )
     conn.execute(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, created_at, updated_at) "
         "VALUES ('asm-handoff', 'assessment-handoff', '', 'prj-assessment-handoff', "
         "'Handoff', 'network', '1.0', ?, 'active', ?, ?, ?)",
@@ -2573,7 +2595,7 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     )
     finding = {
         "id": "finding-handoff",
-        "session_id": "assessment-handoff",
+        "personal_workspace_id": "assessment-handoff",
         "team_id": "",
         "subject_key": "handoff.example",
         "signature_hash": "signature-handoff",
@@ -2586,13 +2608,13 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     )[0]["remediation_id"]
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, team_id, subject_key, signature_hash, origin, "
+        "(id, personal_workspace_id, team_id, subject_key, signature_hash, origin, "
         "validation_method, severity, status, title, cve_ids_json, first_seen_at, "
         "last_seen_at, created) VALUES (?, ?, '', ?, ?, ?, ?, 'critical', 'new', "
         "'Postgres worklist finding', ?, ?, ?, ?)",
         (
             finding["id"],
-            finding["session_id"],
+            finding["personal_workspace_id"],
             finding["subject_key"],
             finding["signature_hash"],
             finding["origin"],
@@ -3012,7 +3034,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         status = "archived" if index % 9 == 0 else "active"
         compat.execute(
             "INSERT INTO projects "
-            "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+            "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
             "VALUES (?, ?, '', ?, ?, '', ?, '', ?, ?)",
             (
                 project_id,
@@ -3027,7 +3049,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
     timestamp = "2026-08-10T12:00:00+00:00"
     compat.executemany(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, completed_at, archived_at, created_at, updated_at) "
         "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', 'project-one-id', ?, 'network', '1.0', ?, "
         "?, ?, ?, ?, ?, ?)",
@@ -3048,7 +3070,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
     )
     compat.executemany(
         "INSERT INTO project_assessments "
-        "(id, session_id, team_id, project_id, title, profile_key, profile_version, "
+        "(id, personal_workspace_id, team_id, project_id, title, profile_key, profile_version, "
         "profile_snapshot, status, started_at, completed_at, created_at, updated_at) "
         "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'network', '1.0', ?, "
         "'completed', ?, ?, ?, ?)",
@@ -3087,7 +3109,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
     )
     compat.executemany(
         "INSERT INTO risk_escalations "
-        "(id, owner_session_id, owner_team_id, remediation_id, cve_id, source, "
+        "(id, personal_workspace_id, owner_team_id, remediation_id, cve_id, source, "
         "transition_kind, feed_version, created_at, updated_at) "
         "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', '', ?, ?, 'kev', 'kev_added', ?, ?, ?)",
         [
@@ -3108,7 +3130,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         [(f"risk-plan-{index:03}",) for index in range(180)],
     )
     compat.executemany(
-        "INSERT INTO findings (id, session_id, target_id, title, created) "
+        "INSERT INTO findings (id, personal_workspace_id, target_id, title, created) "
         "VALUES (?, '52057f5a-094d-4cdf-b078-398dc07ab75d', ?, 'Plan finding', ?)",
         [
             (f"finding-plan-{index:03}", f"target-plan-{index:03}", timestamp)
@@ -3315,11 +3337,11 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
         conn.execute("RESET enable_seqscan")
         conn.commit()
 
-    assert entity_scope_sql("e") == "e.session_id = ? AND e.team_id = ''"
-    assert finding_source_scope_sql("f") == "f.session_id = ? AND f.team_id = ''"
-    assert project_owner_sql == "session_id = ? AND team_id = ''"
-    assert project_entity_owner_sql == "AND e.session_id = ? AND e.team_id = '' "
-    assert project_finding_owner_sql == "AND f.session_id = ? AND f.team_id = '' "
+    assert entity_scope_sql("e") == "e.personal_workspace_id = ? AND e.team_id = ''"
+    assert finding_source_scope_sql("f") == "f.personal_workspace_id = ? AND f.team_id = ''"
+    assert project_owner_sql == "personal_workspace_id = ? AND team_id = ''"
+    assert project_entity_owner_sql == "AND e.personal_workspace_id = ? AND e.team_id = '' "
+    assert project_finding_owner_sql == "AND f.personal_workspace_id = ? AND f.team_id = '' "
     assert (
         "idx_entities_session_type_last_seen" in atlas_entity_plan
         or "idx_entities_session_last_seen_value" in atlas_entity_plan
@@ -3394,7 +3416,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     )
     compat.execute(
         "INSERT INTO runs "
-        "(id, session_id, team_id, run_kind, command, started, output_preview) "
+        "(id, personal_workspace_id, team_id, run_kind, command, started, output_preview) "
         "VALUES (?, ?, ?, 'external', 'nmap run-visible.lookup.example', ?, '[]')",
         ("run-exact-lookup", session_id, team_id, observed_at),
     )
@@ -3406,7 +3428,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     )
     compat.execute(
         "INSERT INTO atlas_import_batches "
-        "(id, session_id, team_id, source_tool, import_name, created, applied_at) "
+        "(id, personal_workspace_id, team_id, source_tool, import_name, created, applied_at) "
         "VALUES ('batch-exact-lookup', ?, ?, 'generic_jsonl', 'Exact lookup import', ?, ?)",
         (session_id, team_id, observed_at, observed_at),
     )
@@ -3457,7 +3479,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     foreign_project_id = "project-exact-lookup-foreign"
     compat.executemany(
         "INSERT INTO projects "
-        "(id, session_id, team_id, name, slug, description, status, color, created, updated) "
+        "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
         "VALUES (?, ?, ?, ?, ?, '', 'active', '', ?, ?)",
         [
             (
@@ -3526,7 +3548,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     )
     compat.execute(
         "INSERT INTO entity_intel_snapshots "
-        "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
+        "(id, personal_workspace_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
         "VALUES ('snapshot-exact-lookup', ?, ?, 'routeviews', 'ok', 'Persisted owner snapshot', ?, ?, '')",
         (
             team_id,
@@ -3856,7 +3878,7 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
         conn.execute(
             """
             INSERT INTO runs
-            (id, session_id, team_id, run_kind, command, started, finished, exit_code, output,
+            (id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, output,
              output_preview, preview_truncated, output_line_count, full_output_available,
              full_output_truncated, output_search_text)
             VALUES (%s, %s, %s, 'external', %s, %s, %s, 0, '[]', %s, false, 1, false, false, %s)
@@ -4014,7 +4036,7 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
     with conn.cursor() as cursor:
         cursor.executemany(
             """
-            INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+            INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             [
@@ -4092,7 +4114,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
         cursor.executemany(
             """
             INSERT INTO runs (
-                id, session_id, command, output_search_text, started, finished,
+                id, personal_workspace_id, command, output_search_text, started, finished,
                 exit_code, output, output_preview, output_line_count
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -4163,7 +4185,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     assert deleted.get_json() == {"ok": True, "deleted_count": 1}
     with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT id FROM runs WHERE session_id = %s ORDER BY id",
+            "SELECT id FROM runs WHERE personal_workspace_id = %s ORDER BY id",
             (session_id,),
         )
         assert [row["id"] for row in cursor.fetchall()] == [
@@ -4200,18 +4222,19 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
     with conn.cursor() as cursor:
         cursor.executemany(
             """
-            INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+            INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             [(run_id, session, command, started, finished, exit_code, "[]")
              for run_id, session, command, started, finished, exit_code in run_rows],
         )
     conn.execute(
-        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO snapshots "
+        "(id, personal_workspace_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
         ("snap-pg-stats", session_id, "stats snapshot", "2026-05-16T00:04:00Z", "[]"),
     )
     conn.execute(
-        "INSERT INTO starred_commands (session_id, command) VALUES (%s, %s)",
+        "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (%s, %s)",
         (session_id, "nmap darklab.sh"),
     )
     conn.commit()
@@ -4253,14 +4276,15 @@ def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, pos
     with conn.cursor() as cursor:
         cursor.executemany(
             """
-            INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+            INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             [(run_id, session, command, started, finished, exit_code, "[]")
              for run_id, session, command, started, finished, exit_code in run_rows],
         )
     conn.execute(
-        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO snapshots "
+        "(id, personal_workspace_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
         ("snap-pg-builtin-stats", session_id, "stats snapshot", "2026-05-16T00:03:00Z", "[]"),
     )
     conn.commit()
@@ -4327,7 +4351,7 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
     assert data["run"]["command"] == "theme current"
     assert data["run"]["status"] == "succeeded"
     assert data["run"]["output_line_count"] == 1
-    assert row["session_id"] == session_id
+    assert row["personal_workspace_id"] == session_id
     assert row["run_kind"] == "builtin"
     assert row["owner_tab_id"] == "tab-postgres"
     assert row["command"] == "theme current"
@@ -4407,13 +4431,16 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     }]
     conn.execute(
         """
-        INSERT INTO projects (id, session_id, name, slug, description, status, created, updated)
+        INSERT INTO projects (
+            id, personal_workspace_id, name, slug, description, status, created, updated
+        )
         VALUES (%s, %s, 'Postgres Active', 'postgres-active', '', 'active', %s, %s)
         """,
         (project_id, session_id, timestamp, timestamp),
     )
     conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        "INSERT INTO session_preferences "
+        "(personal_workspace_id, preferences, updated) VALUES (%s, %s, %s)",
         (
             session_id,
             Jsonb({
@@ -4517,7 +4544,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     assert active_project_link["project_id"] == project_id
     assert active_project_link["linked_entity_count"] == 1
     assert active_project_link["available_entity_count"] == 2
-    assert run_row["session_id"] == session_id
+    assert run_row["personal_workspace_id"] == session_id
     assert run_row["run_kind"] == "external"
     assert run_row["owner_tab_id"] == "tab-postgres-external"
     assert run_row["full_output_available"] is True
@@ -4571,12 +4598,14 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         })
 
     conn.execute(
-        "INSERT INTO projects (id, session_id, name, slug, description, status, created, updated) "
+        "INSERT INTO projects "
+        "(id, personal_workspace_id, name, slug, description, status, created, updated) "
         "VALUES (%s, %s, 'WHOIS Postgres', 'whois-postgres', '', 'active', %s, %s)",
         (project_id, session_id, timestamp, timestamp),
     )
     conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        "INSERT INTO session_preferences "
+        "(personal_workspace_id, preferences, updated) VALUES (%s, %s, %s)",
         (
             session_id,
             Jsonb({"pref_project_auto_link_run_entities": "on"}),
@@ -4584,7 +4613,8 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         ),
     )
     conn.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview) "
+        "INSERT INTO runs "
+        "(id, personal_workspace_id, command, started, finished, exit_code, output_preview) "
         "VALUES (%s, %s, %s, %s, %s, 0, '[]')",
         (run_id, session_id, "whois 164.111.15.52", timestamp, timestamp),
     )
@@ -4690,7 +4720,8 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
         owner_tab_id="tab-postgres-optional-failure",
     )
     run_row = conn.execute(
-        "SELECT id, session_id, command, owner_tab_id, output_search_text FROM runs WHERE id = %s",
+        "SELECT id, personal_workspace_id, command, owner_tab_id, output_search_text "
+        "FROM runs WHERE id = %s",
         (run_id,),
     ).fetchone()
     finding_count = conn.execute(
@@ -4700,7 +4731,7 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
 
     assert active_project_link is None
     assert run_row is not None
-    assert run_row["session_id"] == session_id
+    assert run_row["personal_workspace_id"] == session_id
     assert run_row["command"] == "nuclei -u https://darklab.sh"
     assert run_row["owner_tab_id"] == "tab-postgres-optional-failure"
     assert "optional finding capture" in run_row["output_search_text"]
@@ -4939,15 +4970,15 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         headers={"X-Session-ID": session_id},
     )
     prefs_row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = %s",
+        "SELECT preferences FROM session_preferences WHERE personal_workspace_id = %s",
         (session_id,),
     ).fetchone()
     workflows_row = conn.execute(
-        "SELECT inputs, steps FROM user_workflows WHERE session_id = %s AND id = %s",
+        "SELECT inputs, steps FROM user_workflows WHERE personal_workspace_id = %s AND id = %s",
         (session_id, workflow["id"]),
     ).fetchone()
     starred_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = %s",
+        "SELECT COUNT(*) AS count FROM starred_commands WHERE personal_workspace_id = %s",
         (session_id,),
     ).fetchone()["count"]
 
@@ -5107,7 +5138,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         "skipped": [2], "cancelled": False,
     }
     failed_fanout_parent = get_execution(
-        str(fanout_execution["session_id"]),
+        str(fanout_execution["personal_workspace_id"]),
         str(fanout_execution["id"]),
     )
     assert failed_fanout_parent is not None
@@ -5191,7 +5222,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     recovery_finished = datetime.now(timezone.utc)
     conn.execute(
         "INSERT INTO runs "
-        "(id, session_id, command, started, finished, exit_code, output_preview, "
+        "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, "
         "output_line_count) VALUES (%s, %s, 'httpx -u one.example -silent', %s, %s, 0, '[]', 0)",
         (completed_recovery_run_id, session_id, recovery_finished, recovery_finished),
     )
@@ -5277,7 +5308,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     contended_run_id = "run-pg-fanout-cancel-" + uuid.uuid4().hex
     assert bind_fanout_child_run(str(claimed_for_cancel["id"]), contended_run_id) is True
     canceled_fanout = cancel_execution(
-        str(contended_fanout["session_id"]),
+        str(contended_fanout["personal_workspace_id"]),
         str(contended_fanout["id"]),
     )
     assert canceled_fanout is not None
@@ -5357,30 +5388,33 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     timestamp = "2026-05-17T00:00:00Z"
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+        INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
         VALUES (%s, %s, 'host darklab.sh', %s, %s, 0, '[]')
         """,
         ("run-session-migrate-pg", source_session_id, timestamp, timestamp),
     )
     conn.execute(
-        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO snapshots "
+        "(id, personal_workspace_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
         ("snap-session-migrate-pg", source_session_id, "session migrate", timestamp, "[]"),
     )
     conn.execute(
-        "INSERT INTO starred_commands (session_id, command) VALUES (%s, %s)",
+        "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (%s, %s)",
         (source_session_id, "host darklab.sh"),
     )
     conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        "INSERT INTO session_preferences "
+        "(personal_workspace_id, preferences, updated) VALUES (%s, %s, %s)",
         (source_session_id, Jsonb({"pref_theme_name": "darklab_obsidian.yaml"}), timestamp),
     )
     conn.execute(
-        "INSERT INTO session_variables (session_id, name, value, updated) VALUES (%s, %s, %s, %s)",
+        "INSERT INTO session_variables "
+        "(personal_workspace_id, name, value, updated) VALUES (%s, %s, %s, %s)",
         (source_session_id, "target", "darklab.sh", timestamp),
     )
     conn.execute(
         """
-        INSERT INTO recent_values (session_id, kind, value, last_used, use_count)
+        INSERT INTO recent_values (personal_workspace_id, kind, value, last_used, use_count)
         VALUES (%s, 'domain', 'darklab.sh', %s, 2)
         """,
         (source_session_id, timestamp),
@@ -5439,7 +5473,7 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     destination_token = json.loads(token_resp.data)["session_token"]
     disposition_sql = (
         "INSERT INTO finding_remediation_dispositions "
-        "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
         "rule_identity, review_state, remediation, created_at, updated_at, "
         "remediation_updated_at) "
         "VALUES (%s, '', 'subject:postgres-migration', 'rule', "
@@ -5469,7 +5503,7 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     )
     conn.execute(
         "INSERT INTO finding_remediation_merge_members "
-        "(session_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
+        "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
         "vulnerability_id, rule_identity, created_by_session_id, created_at) "
         "VALUES (%s, '', 'rmg_postgres_migration', 'entity:postgres-migration', "
         "'vulnerability', 'CVE-2026-12345', 'CVE-2026-12345', "
@@ -5514,45 +5548,45 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         json={"token": destination_token},
     )
     migrated_run = conn.execute(
-        "SELECT session_id FROM runs WHERE id = %s",
+        "SELECT personal_workspace_id FROM runs WHERE id = %s",
         ("run-session-migrate-pg",),
     ).fetchone()
     migrated_snapshot = conn.execute(
-        "SELECT session_id FROM snapshots WHERE id = %s",
+        "SELECT personal_workspace_id FROM snapshots WHERE id = %s",
         ("snap-session-migrate-pg",),
     ).fetchone()
     migrated_prefs = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = %s",
+        "SELECT preferences FROM session_preferences WHERE personal_workspace_id = %s",
         (destination_token,),
     ).fetchone()
     source_prefs = conn.execute(
-        "SELECT 1 FROM session_preferences WHERE session_id = %s",
+        "SELECT 1 FROM session_preferences WHERE personal_workspace_id = %s",
         (source_session_id,),
     ).fetchone()
     migrated_recent = conn.execute(
-        "SELECT kind, value, use_count FROM recent_values WHERE session_id = %s",
+        "SELECT kind, value, use_count FROM recent_values WHERE personal_workspace_id = %s",
         (destination_token,),
     ).fetchone()
     source_recent_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM recent_values WHERE session_id = %s",
+        "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = %s",
         (source_session_id,),
     ).fetchone()["count"]
     migrated_stars = conn.execute(
-        "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = %s",
+        "SELECT COUNT(*) AS count FROM starred_commands WHERE personal_workspace_id = %s",
         (destination_token,),
     ).fetchone()["count"]
     migrated_variables = conn.execute(
-        "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = %s",
+        "SELECT COUNT(*) AS count FROM session_variables WHERE personal_workspace_id = %s",
         (destination_token,),
     ).fetchone()["count"]
     migrated_disposition = conn.execute(
-        "SELECT session_id, review_state, remediation, created_at, updated_at, "
+        "SELECT personal_workspace_id, review_state, remediation, created_at, updated_at, "
         "remediation_updated_at "
         "FROM finding_remediation_dispositions "
         "WHERE affected_subject = 'subject:postgres-migration'",
     ).fetchone()
     migrated_merge_member = conn.execute(
-        "SELECT session_id, merge_id, created_by_session_id "
+        "SELECT personal_workspace_id, merge_id, created_by_session_id "
         "FROM finding_remediation_merge_members "
         "WHERE affected_subject = 'entity:postgres-migration'",
     ).fetchone()
@@ -5578,8 +5612,8 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert json.loads(migrate_resp.data)["migrated_finding_remediation_dispositions"] == 1
     assert json.loads(migrate_resp.data)["migrated_finding_remediation_guidance"] == 1
     assert json.loads(migrate_resp.data)["migrated_finding_remediation_merge_members"] == 1
-    assert migrated_run["session_id"] == destination_token
-    assert migrated_snapshot["session_id"] == destination_token
+    assert migrated_run["personal_workspace_id"] == destination_token
+    assert migrated_snapshot["personal_workspace_id"] == destination_token
     assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
     assert source_prefs is None
     assert migrated_recent["kind"] == "domain"
@@ -5588,18 +5622,18 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     assert int(source_recent_count) == 0
     assert int(migrated_stars) == 1
     assert int(migrated_variables) == 1
-    assert migrated_disposition["session_id"] == destination_token
+    assert migrated_disposition["personal_workspace_id"] == destination_token
     assert migrated_disposition["review_state"] == "important"
     assert migrated_disposition["remediation"] == "Use the source guidance."
     assert migrated_disposition["created_at"].isoformat() == "2026-05-15T00:00:00+00:00"
     assert migrated_disposition["updated_at"].isoformat() == "2026-05-18T00:00:00+00:00"
     assert migrated_disposition["remediation_updated_at"].isoformat() == "2026-05-19T00:00:00+00:00"
-    assert migrated_merge_member["session_id"] == destination_token
+    assert migrated_merge_member["personal_workspace_id"] == destination_token
     assert migrated_merge_member["merge_id"] == "rmg_postgres_migration"
     assert migrated_merge_member["created_by_session_id"] == destination_token
     assert source_workflow_execution is None
     assert migrated_workflow_execution is not None
-    assert migrated_workflow_execution["session_id"] == destination_token
+    assert migrated_workflow_execution["personal_workspace_id"] == destination_token
     assert migrated_workflow_execution["steps"][0]["run_id"] == workflow_run_id
     assert revoke_resp.status_code == 200
     assert revoked_verify_resp.status_code == 200
@@ -5616,14 +5650,14 @@ def test_secret_session_migration_uses_postgres_conflict_handling(monkeypatch, p
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.execute(
         """
-        INSERT INTO secrets (session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
+        INSERT INTO secrets (owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         ("old-session", "VT_API_KEY", b"source", b"nonce1", '["VT_API_KEY"]', "created", "updated"),
     )
     conn.execute(
         """
-        INSERT INTO secrets (session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
+        INSERT INTO secrets (owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         ("new-session", "VT_API_KEY", b"destination", b"nonce2", '["VT_API_KEY"]', "created", "updated"),
@@ -5637,11 +5671,11 @@ def test_secret_session_migration_uses_postgres_conflict_handling(monkeypatch, p
         "new-session",
     )
     old_row = conn.execute(
-        "SELECT ciphertext FROM secrets WHERE session_token = %s AND name = %s",
+        "SELECT ciphertext FROM secrets WHERE owner_id = %s AND name = %s",
         ("old-session", "VT_API_KEY"),
     ).fetchone()
     new_row = conn.execute(
-        "SELECT ciphertext FROM secrets WHERE session_token = %s AND name = %s",
+        "SELECT ciphertext FROM secrets WHERE owner_id = %s AND name = %s",
         ("new-session", "VT_API_KEY"),
     ).fetchone()
 
@@ -5843,7 +5877,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     nuclei_failure_run_id = "run-pg-nuclei-failure-" + uuid.uuid4().hex
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, "
         "exit_code, output_search_text) VALUES (%s, %s, 'external', %s, %s, %s, 1, %s)",
         (
             nuclei_failure_run_id,
@@ -5870,7 +5904,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     conn.execute(
         "INSERT INTO notification_channels "
-        "(id, session_token, team_id, kind, label, secrets_json, config_json, "
+        "(id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, "
         "triggers_json, muted, created, updated) VALUES "
         "('ntc_postgres_batch', %s, '', 'webhook', 'Assessment batch', "
         "'{}'::jsonb, '{}'::jsonb, '[\"run_complete\"]'::jsonb, false, %s, %s)",
@@ -5927,7 +5961,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     conn.execute(
         """
         INSERT INTO runs (
-            id, session_id, run_kind, command, started, finished, exit_code,
+            id, personal_workspace_id, run_kind, command, started, finished, exit_code,
             output_preview, output_search_text
         )
         VALUES (%s, %s, 'external', %s, %s, %s, 0, %s, %s)
@@ -6038,7 +6072,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         )
         compat_conn.execute(
             "INSERT INTO run_file_artifacts "
-            "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
             "detected_by, content_type, preview_type, created) "
             "VALUES (?, ?, ?, 'captures/darklab.png', 'darklab.png', 'screenshot', 16, "
             "'httpx_screenshot', 'image/png', 'image', ?)",
@@ -6117,11 +6151,12 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers=api_headers,
     )
     prefs_row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = %s",
+        "SELECT preferences FROM session_preferences WHERE personal_workspace_id = %s",
         (session_id,),
     ).fetchone()
     port_row = conn.execute(
-        "SELECT attributes_json FROM entities WHERE session_id = %s AND type = 'port' AND canonical_value = %s",
+        "SELECT attributes_json FROM entities "
+        "WHERE personal_workspace_id = %s AND type = 'port' AND canonical_value = %s",
         (session_id, "darklab.sh:443/tcp"),
     ).fetchone()
     conn.execute(
@@ -6592,14 +6627,16 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
     workspace_path = "reports/targets.txt"
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, run_kind, command, started, finished, output)
+        INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, output)
         VALUES (%s, %s, 'external', %s, %s, %s, %s)
         """,
         (run_id, session_id, "cat reports/targets.txt", timestamp, timestamp, "[]"),
     )
     conn.execute(
         """
-        INSERT INTO projects (id, session_id, name, slug, description, status, created, updated)
+        INSERT INTO projects (
+            id, personal_workspace_id, name, slug, description, status, created, updated
+        )
         VALUES (%s, %s, 'Workspace Project', 'workspace-project', '', 'active', %s, %s)
         """,
         (project_id, session_id, timestamp, timestamp),
@@ -6614,21 +6651,25 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
     conn.execute(
         """
         INSERT INTO run_file_artifacts
-        (id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created)
+        (id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created)
         VALUES (%s, %s, %s, %s, 'targets.txt', 'text', 12, 'workspace', %s)
         """,
         ("rfa-" + uuid.uuid4().hex, session_id, run_id, workspace_path, timestamp),
     )
     conn.execute(
         """
-        INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created)
+        INSERT INTO entity_labels (
+            id, personal_workspace_id, entity_type, entity_id, label, source, created
+        )
         VALUES (%s, %s, 'workspace_file', %s, 'Important', 'manual', %s)
         """,
         ("lbl-" + uuid.uuid4().hex, session_id, workspace_path, timestamp),
     )
     conn.execute(
         """
-        INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated)
+        INSERT INTO entity_notes (
+            id, personal_workspace_id, entity_type, entity_id, body, created, updated
+        )
         VALUES (%s, %s, 'workspace_file', %s, 'manual context', %s, %s)
         """,
         ("note-" + uuid.uuid4().hex, session_id, workspace_path, timestamp, timestamp),
@@ -6689,7 +6730,9 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     timestamp = "2026-05-17T00:00:00Z"
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_search_text)
+        INSERT INTO runs (
+            id, personal_workspace_id, run_kind, command, started, output_preview, output_search_text
+        )
         VALUES (%s, %s, 'external', %s, %s, %s, %s)
         """,
         (run_id, session_id, "nmap darklab.sh", timestamp, "[]", "443/tcp open https on darklab.sh"),
@@ -6697,7 +6740,8 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created)
+        (id, personal_workspace_id, type, canonical_value, signature_hash,
+         first_seen_at, last_seen_at, occurrence_count, created)
         VALUES (%s, %s, 'domain', 'darklab.sh', %s, %s, %s, 1, %s)
         """,
         (entity_id, session_id, "sig-" + uuid.uuid4().hex, timestamp, timestamp, timestamp),
@@ -6712,7 +6756,8 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     conn.execute(
         """
         INSERT INTO findings
-        (id, session_id, run_id, entity_id, subject_key, signature_hash, tool_root, first_run_id, last_run_id,
+        (id, personal_workspace_id, run_id, entity_id, subject_key, signature_hash,
+         tool_root, first_run_id, last_run_id,
          first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
         VALUES (%s, %s, %s, %s, 'domain:darklab.sh', %s, 'nmap', %s, %s, %s, %s, 1, 'new', %s, %s, %s)
         """,
@@ -6740,7 +6785,9 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     conn.execute(
         """
-        INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created)
+        INSERT INTO entity_labels (
+            id, personal_workspace_id, entity_type, entity_id, label, source, created
+        )
         VALUES (%s, %s, 'atlas_entity', %s, 'Interesting', 'manual', %s)
         """,
         ("lbl-" + uuid.uuid4().hex, session_id, entity_id, timestamp),
@@ -6748,7 +6795,8 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     conn.execute(
         """
         INSERT INTO entity_intel_snapshots
-        (id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at)
+        (id, personal_workspace_id, entity_id, provider, status, summary,
+         data_json, fetched_at, expires_at)
         VALUES (%s, %s, %s, 'crtsh', 'ok', 'data available', %s, %s, '')
         """,
         (
@@ -6871,7 +6919,8 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created)
+        (id, personal_workspace_id, type, canonical_value, signature_hash,
+         first_seen_at, last_seen_at, occurrence_count, created)
         VALUES (%s, %s, 'domain', 'darklab.sh', %s, %s, %s, 1, %s)
         """,
         (entity_id, session_id, "sig-" + uuid.uuid4().hex, timestamp, timestamp, timestamp),
@@ -6879,7 +6928,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+        (id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id,
          first_seen_at, last_seen_at, occurrence_count, created)
         VALUES (%s, %s, 'url', 'https://darklab.sh/login', %s, %s, %s, %s, 1, %s)
         """,
@@ -6896,7 +6945,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO findings
-        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+        (id, personal_workspace_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
          first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
         VALUES (%s, %s, %s, 'https://darklab.sh/login', %s, 'critical', 'finding', 'nuclei',
                 %s, %s, 1, 'new', 'Critical login finding', 'critical login finding', %s)
@@ -6906,7 +6955,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+        (id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id,
          first_seen_at, last_seen_at, occurrence_count, created)
         SELECT
             'ent-profile-url-' || seq.n,
@@ -6929,7 +6978,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+        (id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id,
          first_seen_at, last_seen_at, occurrence_count, created)
         SELECT
             'ent-profile-port-' || seq.n,
@@ -6949,7 +6998,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO entities
-        (id, session_id, type, canonical_value, signature_hash, host_entity_id,
+        (id, personal_workspace_id, type, canonical_value, signature_hash, host_entity_id,
          first_seen_at, last_seen_at, occurrence_count, created)
         SELECT
             'ent-profile-unrelated-' || seq.n,
@@ -6969,7 +7018,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO findings
-        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+        (id, personal_workspace_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
          first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
         SELECT
             'fnd-profile-url-' || seq.n,
@@ -6994,7 +7043,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO findings
-        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+        (id, personal_workspace_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
          first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
         SELECT
             'fnd-profile-port-' || seq.n,
@@ -7019,7 +7068,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     conn.execute(
         """
         INSERT INTO findings
-        (id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
+        (id, personal_workspace_id, entity_id, subject_key, signature_hash, severity, kind, tool_root,
          first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created)
         SELECT
             'fnd-profile-unrelated-' || seq.n,
@@ -7043,7 +7092,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     )
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, run_kind, command, started, finished, output)
+        INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, output)
         VALUES (%s, %s, 'external', 'nmap darklab.sh', %s, %s, '[]')
         """,
         ("run-profile-observation", session_id, timestamp, timestamp),
@@ -7053,14 +7102,15 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
         INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count)
         SELECT id, %s, %s, %s, 1
         FROM entities
-        WHERE session_id = %s AND type = 'port' AND host_entity_id = %s
+        WHERE personal_workspace_id = %s AND type = 'port' AND host_entity_id = %s
         """,
         ("run-profile-observation", timestamp, timestamp, session_id, entity_id),
     )
     conn.execute(
         """
         INSERT INTO scan_target_observations
-        (session_id, team_id, run_id, entity_id, entity_type, canonical_value, scan_kind,
+            (personal_workspace_id, team_id, run_id, entity_id, entity_type,
+             canonical_value, scan_kind,
          command_root, observed_at, port_entity_count, created)
         VALUES (%s, '', %s, %s, 'domain', 'darklab.sh', 'port_scan', 'nmap', %s, 251, %s)
         """,
@@ -7227,7 +7277,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
         EXPLAIN (ANALYZE, FORMAT JSON)
         SELECT child_e.id
         FROM entities child_e
-        WHERE child_e.session_id = %s
+        WHERE child_e.personal_workspace_id = %s
           AND child_e.team_id = ''
           AND child_e.type = 'url'
           AND child_e.host_entity_id = %s
@@ -7244,7 +7294,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
         EXPLAIN (ANALYZE, FORMAT JSON)
         SELECT f.id
         FROM findings f
-        WHERE f.session_id = %s
+        WHERE f.personal_workspace_id = %s
           AND f.team_id = ''
           AND f.entity_id IN (
               SELECT bucket_e.id
@@ -7252,7 +7302,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
               WHERE bucket_e.host_entity_id = %s
                 AND bucket_e.host_entity_id != ''
                 AND bucket_e.type = 'url'
-                AND bucket_e.session_id = %s
+                AND bucket_e.personal_workspace_id = %s
                 AND bucket_e.team_id = ''
           )
         """,
@@ -7284,7 +7334,7 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
     conn.execute(
         """
         INSERT INTO runs (
-            id, session_id, command, started, finished, exit_code,
+            id, personal_workspace_id, command, started, finished, exit_code,
             output, output_preview, output_search_text, output_line_count
         )
         VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s, 1)
@@ -7302,7 +7352,7 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
     )
     conn.execute(
         """
-        INSERT INTO snapshots (id, session_id, label, created, content)
+        INSERT INTO snapshots (id, personal_workspace_id, label, created, content)
         VALUES (%s, %s, %s, %s, %s)
         """,
         ("snap-diag-pg", "sess-diag-pg", "postgres diag", "2026-05-16T00:00:03Z", "snapshot"),
@@ -7352,7 +7402,7 @@ def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_sch
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+        INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
         VALUES (%s, %s, %s, %s, %s, 0, %s)
         """,
         ("run-metrics-pg", "sess-metrics-pg", "dig darklab.sh", "2026-05-16T00:00:00Z", "2026-05-16T00:00:01Z", "[]"),
@@ -7420,7 +7470,9 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
     snapshot_body_path = data_root / json.loads(snapshot_pointer)["rel_path"]
     conn.execute(
         """
-        INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_search_text)
+        INSERT INTO runs (
+            id, personal_workspace_id, command, started, finished, exit_code, output_search_text
+        )
         VALUES (%s, %s, %s, %s, %s, 0, %s)
         """,
         (
@@ -7441,7 +7493,8 @@ def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postg
         ("old-run-pg", "old-run.txt.gz", "2020-01-01T00:00:01Z"),
     )
     conn.execute(
-        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        "INSERT INTO snapshots "
+        "(id, personal_workspace_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
         ("old-snapshot-pg", "sess-retention-pg", "old snapshot", "2020-01-01T00:00:02Z", snapshot_pointer),
     )
     conn.commit()
@@ -7580,6 +7633,17 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
             DatabaseBackend.SQLITE
         ):
             conn.execute(statement)
+        for table_name, old_column, new_column in (
+            ("runs", "session_id", "personal_workspace_id"),
+            ("snapshots", "session_id", "personal_workspace_id"),
+            ("session_preferences", "session_id", "personal_workspace_id"),
+            ("entities", "session_id", "personal_workspace_id"),
+            ("entity_intel_snapshots", "session_id", "personal_workspace_id"),
+            ("secrets", "session_token", "owner_id"),
+        ):
+            conn.execute(
+                f"ALTER TABLE {table_name} RENAME COLUMN {old_column} TO {new_column}"  # nosec B608
+            )
         conn.execute(
             "INSERT INTO schema_migrations VALUES (?, ?, ?)",
             ("0039", "unified_schema_baseline", "2026-05-16T00:00:00Z"),
@@ -7587,7 +7651,7 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
         conn.execute(
             """
             INSERT INTO runs (
-                id, session_id, run_kind, owner_tab_id, command, output, output_preview,
+                id, personal_workspace_id, run_kind, owner_tab_id, command, output, output_preview,
                 preview_truncated, output_line_count, full_output_available,
                 full_output_truncated, output_search_text, exit_code, started, finished
             )
@@ -7712,7 +7776,7 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
     observed_at = "2026-08-09T00:01:00+00:00"
     conn.execute(
         "INSERT INTO runs "
-        "(id, session_id, team_id, run_kind, command, started, finished, exit_code, output_preview) "
+        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code, output_preview) "
         "VALUES ('run-nmap-service-pg', '26dd5570-e408-487e-81ef-a6234db644d9', '', 'external', "
         "'nmap -sV -oX scan.xml 192.0.2.10', ?, ?, 0, '[]')",
         (observed_at, observed_at),

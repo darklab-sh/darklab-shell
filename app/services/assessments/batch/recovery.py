@@ -65,7 +65,7 @@ def _recover_canceling(
     children: object,
 ) -> str:
     batch_id = str(execution.get("id") or "")
-    session_id = str(execution.get("session_id") or "")
+    session_id = str(execution.get("personal_workspace_id") or "")
     team_id = str(execution.get("team_id") or "")
     dialect = dialect_for_backend(get_db_backend())
     with get_db_connect()() as conn:

@@ -36,7 +36,7 @@ def _artifact_conn() -> sqlite3.Connection:
     conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, team_id TEXT NOT NULL DEFAULT '')")
     conn.execute(
         "CREATE TABLE run_file_artifacts ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_id TEXT NOT NULL, workspace_path TEXT NOT NULL)"
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, run_id TEXT NOT NULL, workspace_path TEXT NOT NULL)"
     )
     return conn
 
@@ -191,7 +191,7 @@ def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner
     conn = _artifact_conn()
     conn.execute("INSERT INTO runs (id, team_id) VALUES ('run-prior', '')")
     conn.execute(
-        "INSERT INTO run_file_artifacts (id, session_id, run_id, workspace_path) "
+        "INSERT INTO run_file_artifacts (id, personal_workspace_id, run_id, workspace_path) "
         "VALUES ('artifact-prior', ?, 'run-prior', 'shots/prior.png')",
         (owner.owner_id,),
     )
@@ -243,7 +243,7 @@ def test_protected_screenshot_paths_follow_personal_and_team_ownership():
         ("a5", "member-two", "other-team", "shots/other-team.png"),
     ):
         conn.execute(
-            "INSERT INTO run_file_artifacts (id, session_id, run_id, workspace_path) VALUES (?, ?, ?, ?)",
+            "INSERT INTO run_file_artifacts (id, personal_workspace_id, run_id, workspace_path) VALUES (?, ?, ?, ?)",
             (artifact_id, session_id, run_id, path),
         )
     candidates = [

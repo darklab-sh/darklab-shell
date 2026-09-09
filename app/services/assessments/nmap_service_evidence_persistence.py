@@ -118,7 +118,7 @@ def _persist_observation(
     )
     result = conn.execute(
         "INSERT INTO nmap_service_observations "
-        "(id, session_id, team_id, run_id, target, service, script_id, evidence_kind, "
+        "(id, personal_workspace_id, team_id, run_id, target, service, script_id, evidence_kind, "
         "classification, tool_version, parser_version, fields_json, fields_truncated, "
         "collection_truncated, observed_at, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -136,7 +136,7 @@ def _persist_observation(
 
 def _matches(row: Any, values: tuple[Any, ...], fields: list[Any], dialect: Any) -> bool:
     keys = (
-        "id", "session_id", "team_id", "run_id", "target", "service", "script_id",
+        "id", "personal_workspace_id", "team_id", "run_id", "target", "service", "script_id",
         "evidence_kind", "classification", "tool_version", "parser_version",
     )
     return bool(

@@ -47,7 +47,7 @@ def attach_oast_interaction_to_finding(
         try:
             load_assessment_evidence_source(
                 active_conn,
-                str(row["session_id"] or ""),
+                str(row["personal_workspace_id"] or ""),
                 str(row["team_id"] or ""),
                 str(row["project_id"] or ""),
                 "finding",
@@ -85,7 +85,7 @@ def attach_oast_interaction_to_finding(
             ):
                 link_finding_evidence_on_conn(
                     active_conn,
-                    str(row["session_id"] or ""),
+                    str(row["personal_workspace_id"] or ""),
                     str(row["project_id"] or ""),
                     selected_finding_id,
                     {"evidence_type": evidence_type, "evidence_id": evidence_id},

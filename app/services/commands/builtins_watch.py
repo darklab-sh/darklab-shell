@@ -38,6 +38,7 @@ from services.watchers.service import (
     pause_watcher,
     resume_watcher,
 )
+from services.notifications.models import is_durable_personal_owner
 
 log = logging.getLogger("shell")
 
@@ -69,7 +70,7 @@ def _durable_session_error(session_id: str) -> str:
 
 
 def _is_durable_session(session_id: str) -> bool:
-    return str(session_id or "").startswith("tok_")
+    return is_durable_personal_owner(session_id)
 
 
 def _watcher_for_session(watcher_id: str, session_id: str) -> Watcher:
@@ -243,7 +244,7 @@ def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
         record_watcher_event(
             AuditEventType.WATCHER_CREATE,
             watcher,
-            audit_fields={"session_id": session_id, "actor_session_id": session_id},
+            audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
             source="terminal_builtin",
             conn=conn,
         )
@@ -279,7 +280,7 @@ def _run_watcher_now(watcher: Watcher) -> list[dict[str, object]]:
         record_watcher_event(
             AuditEventType.WATCHER_RUN_NOW,
             active,
-            audit_fields={"session_id": watcher.session_token, "actor_session_id": watcher.session_token},
+            audit_fields={"personal_workspace_id": watcher.session_token, "actor_session_id": watcher.session_token},
             source="terminal_builtin",
             details=run_now_details(
                 status,
@@ -343,7 +344,7 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                 record_watcher_event(
                     AuditEventType.WATCHER_PAUSE,
                     updated or watcher,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"changed_fields": ["state", "enabled"]},
                     conn=conn,
@@ -366,7 +367,7 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                 record_watcher_event(
                     AuditEventType.WATCHER_RESUME,
                     updated or watcher,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"changed_fields": ["state", "enabled"]},
                     conn=conn,
@@ -389,7 +390,7 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                 record_watcher_event(
                     AuditEventType.WATCHER_DELETE,
                     watcher,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"deleted_count": 1 if removed else 0},
                     conn=conn,
@@ -417,7 +418,7 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
                 record_watcher_event(
                     AuditEventType.WATCHER_ACCEPT_BASELINE,
                     updated,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"baseline_run_id": updated.baseline_run_id},
                     conn=conn,

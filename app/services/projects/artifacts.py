@@ -39,7 +39,7 @@ def row_to_run_file_artifact(row):
         return None
     return {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "run_id": row["run_id"],
         "workspace_path": row["workspace_path"],
         "display_name": row["display_name"],
@@ -64,7 +64,7 @@ def artifact_owner_context(session_id: str, artifact) -> OwnerContext:
     team_id = _trim_text((artifact or {}).get("run_team_id") or (artifact or {}).get("team_id"), MAX_ENTITY_ID_LEN)
     if team_id:
         return team_owner_context(team_id, actor_session_id=str(session_id or ""))
-    artifact_session_id = str((artifact or {}).get("session_id") or session_id or "").strip()
+    artifact_session_id = str((artifact or {}).get("personal_workspace_id") or session_id or "").strip()
     return personal_owner_context(artifact_session_id)
 
 
@@ -217,7 +217,7 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts, *, owner_cont
             candidate_id = new_run_file_artifact_id()
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "(id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_type, preview_type, content_sha256, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
@@ -237,7 +237,7 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts, *, owner_cont
                 ),
             )
             row = conn.execute(
-                "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "SELECT id, personal_workspace_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_type, preview_type, content_sha256, created "
                 "FROM run_file_artifacts WHERE id = ?",
                 (candidate_id,),

@@ -95,7 +95,7 @@ def _row_to_label(row):
         return None
     item = {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "entity_type": row["entity_type"],
         "entity_id": row["entity_id"],
         "label": row["label"],
@@ -112,7 +112,7 @@ def _row_to_entity_note(row):
         return None
     item = {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "entity_type": row["entity_type"],
         "entity_id": row["entity_id"],
         "body": row["body"],
@@ -129,7 +129,7 @@ def _row_to_finding_triage(row):
         return None
     item = {
         "id": row["id"],
-        "session_id": row["session_id"],
+        "personal_workspace_id": row["personal_workspace_id"],
         "finding_id": row["finding_id"],
         "remediation": row["remediation"],
         "verification_steps": row["verification_steps"],
@@ -256,7 +256,7 @@ def _entity_labels_by_id(conn, session_id, entity_type, entity_ids, *, team_id="
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_id, team_id, entity_type, entity_id, label, source, created "  # nosec
+        "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created "  # nosec
         "FROM entity_labels WHERE " + owner_sql + " AND entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
         "ORDER BY " + _label_order_sql(),
@@ -280,7 +280,7 @@ def _entity_notes_by_id(conn, session_id, entity_type, entity_ids, *, team_id=""
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_id, team_id, entity_type, entity_id, body, created, updated "  # nosec
+        "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated "  # nosec
         "FROM entity_notes WHERE " + owner_sql + " AND entity_type = ? "
         f"AND entity_id IN ({placeholders})",
         [*owner_params, entity_type, *values],
@@ -295,7 +295,7 @@ def _finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
     owner_sql, owner_params = _metadata_owner_where(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "SELECT id, personal_workspace_id, team_id, finding_id, remediation, verification_steps, "
         "verification_status, verification_notes, verification_updated_by_member_id, "
         "verification_updated_at, "
         "COALESCE((SELECT display_name FROM team_members WHERE id = "
@@ -315,7 +315,7 @@ def _full_finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
     scope_params = finding_source_scope_params(session_id, team_id)
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT f.id, f.session_id, f.team_id, f.entity_id, f.target_id, "  # nosec
+        "SELECT f.id, f.personal_workspace_id, f.team_id, f.entity_id, f.target_id, "  # nosec
         "f.subject_key, f.signature_hash, f.origin, f.validation_method, f.status, "
         "f.kind, f.tool_root, f.title, f.raw_line, f.fingerprint, f.cve_ids_json "
         "FROM findings f WHERE " + scope_sql + f" AND f.id IN ({placeholders})",
@@ -331,7 +331,7 @@ def _full_finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
         str(row["id"]): (
             ("", normalized_team_id)
             if normalized_team_id
-            else (str(row["session_id"] or ""), str(row["team_id"] or ""))
+            else (str(row["personal_workspace_id"] or ""), str(row["team_id"] or ""))
         )
         for row in rows
     }
@@ -369,7 +369,7 @@ def _full_finding_triage_by_id(conn, session_id, finding_ids, *, team_id=""):
 def default_finding_triage_details(session_id, finding_id, *, team_id=""):
     item = {
         "id": "",
-        "session_id": str(session_id or "").strip(),
+        "personal_workspace_id": str(session_id or "").strip(),
         "finding_id": str(finding_id or "").strip(),
         "remediation": "",
         "verification_steps": "",
@@ -387,7 +387,7 @@ def default_finding_triage_details(session_id, finding_id, *, team_id=""):
     }
     normalized_team_id = normalize_team_id(team_id)
     if normalized_team_id:
-        item["session_id"] = _metadata_session_id(session_id, normalized_team_id)
+        item["personal_workspace_id"] = _metadata_session_id(session_id, normalized_team_id)
         item["team_id"] = normalized_team_id
     else:
         item["team_id"] = ""
@@ -562,7 +562,7 @@ def _save_project_note(conn, session_id, project_id, notes, *, team_id=""):
     ).fetchone()
     if existing:
         conn.execute(
-            "UPDATE entity_notes SET session_id = ?, team_id = ?, body = ?, updated = ? WHERE id = ?",
+            "UPDATE entity_notes SET personal_workspace_id = ?, team_id = ?, body = ?, updated = ? WHERE id = ?",
             (metadata_session, metadata_team_id, body, now, existing["id"]),
         )
         return
@@ -581,7 +581,7 @@ def _save_project_note(conn, session_id, project_id, notes, *, team_id=""):
         note_id = _new_entity_note_id()
         result = conn.execute(
             "INSERT INTO entity_notes "
-            "(id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+            "(id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, ?, ?, 'project', ?, ?, ?, ?) "
             "ON CONFLICT(id) DO NOTHING",
             (note_id, metadata_session, metadata_team_id, project_id, body, now, now),
@@ -714,7 +714,7 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id, *, team
             return row is not None
         owner = personal_only_owner_predicate(
             personal_owner_context(session_id),
-            owner_column="session_id",
+            owner_column="personal_workspace_id",
         )
         row = conn.execute(
             f"SELECT 1 FROM run_file_artifacts WHERE {owner.sql} AND id = ?",  # nosec
@@ -736,7 +736,7 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id, *, team
             return row is not None
         owner = personal_only_owner_predicate(
             owner_context_for_scope(session_id),
-            owner_column="session_id",
+            owner_column="personal_workspace_id",
         )
         row = conn.execute(
             f"SELECT 1 FROM evidence_packages WHERE {owner.sql} AND id = ?",  # nosec
@@ -755,7 +755,7 @@ def list_entity_labels(session_id, entity_type, entity_id, *, team_id=""):
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         rows = conn.execute(
-            "SELECT id, session_id, team_id, entity_type, entity_id, label, source, created "  # nosec
+            "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created "  # nosec
             "FROM entity_labels WHERE " + owner_sql + " AND entity_type = ? AND entity_id = ? "
             "ORDER BY " + _label_order_sql(),
             (*owner_params, entity_type, entity_id),
@@ -781,7 +781,7 @@ def add_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
-            "SELECT id, session_id, team_id, entity_type, entity_id, label, source, created "  # nosec
+            "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created "  # nosec
             "FROM entity_labels WHERE " + owner_sql + " AND entity_type = ? "
             "AND entity_id = ? AND label = ?",
             [*owner_params, entity_type, entity_id, label],
@@ -789,12 +789,12 @@ def add_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
         if row:
             if normalize_team_id(team_id) and str(row["team_id"] or "") != metadata_team_id:
                 conn.execute(
-                    "UPDATE entity_labels SET session_id = ?, team_id = ? WHERE id = ?",
+                    "UPDATE entity_labels SET personal_workspace_id = ?, team_id = ? WHERE id = ?",
                     (metadata_session, metadata_team_id, row["id"]),
                 )
                 conn.commit()
                 row = conn.execute(
-                    "SELECT id, session_id, team_id, entity_type, entity_id, label, source, created "
+                    "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created "
                     "FROM entity_labels WHERE id = ?",
                     (row["id"],),
                 ).fetchone()
@@ -825,12 +825,12 @@ def add_entity_label(session_id, entity_type, entity_id, data, *, team_id=""):
             label_id = _new_entity_label_id()
             conn.execute(
                 "INSERT INTO entity_labels "
-                "(id, session_id, team_id, entity_type, entity_id, label, source, created) "
+                "(id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)",
                 (label_id, metadata_session, metadata_team_id, entity_type, entity_id, label, created),
             )
             row = conn.execute(
-                "SELECT id, session_id, team_id, entity_type, entity_id, label, source, created "
+                "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, label, source, created "
                 "FROM entity_labels WHERE id = ?",
                 [label_id],
             ).fetchone()
@@ -869,7 +869,7 @@ def get_entity_note(session_id, entity_type, entity_id, *, team_id=""):
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         row = conn.execute(
-            "SELECT id, session_id, team_id, entity_type, entity_id, body, created, updated "
+            "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated "
             "FROM entity_notes WHERE " + owner_sql + " AND entity_type = ? AND entity_id = ?",  # nosec
             (*owner_params, entity_type, entity_id),
         ).fetchone()
@@ -886,17 +886,17 @@ def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id, team_id=team_id):
             return None
         existing = conn.execute(
-            "SELECT id, session_id, team_id, entity_type, entity_id, body, created, updated "
+            "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated "
             "FROM entity_notes WHERE " + owner_sql + " AND entity_type = ? AND entity_id = ?",  # nosec
             [*owner_params, entity_type, entity_id],
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE entity_notes SET session_id = ?, team_id = ?, body = ?, updated = ? WHERE id = ?",
+                "UPDATE entity_notes SET personal_workspace_id = ?, team_id = ?, body = ?, updated = ? WHERE id = ?",
                 (metadata_session, metadata_team_id, payload["body"], now, existing["id"]),
             )
             row = conn.execute(
-                "SELECT id, session_id, team_id, entity_type, entity_id, body, created, updated "
+                "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE id = ?",
                 [existing["id"]],
             ).fetchone()
@@ -917,7 +917,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
             note_id = _new_entity_note_id()
             conn.execute(
                 "INSERT INTO entity_notes "
-                "(id, session_id, team_id, entity_type, entity_id, body, created, updated) "
+                "(id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     note_id,
@@ -931,7 +931,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data, *, team_id=""):
                 ),
             )
             row = conn.execute(
-                "SELECT id, session_id, team_id, entity_type, entity_id, body, created, updated "
+                "SELECT id, personal_workspace_id, team_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE id = ?",
                 [note_id],
             ).fetchone()
@@ -1041,7 +1041,7 @@ def upsert_finding_triage_details_on_conn(
         return None
     observation_payload = {**payload, "remediation": ""}
     existing = conn.execute(
-        "SELECT id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "SELECT id, personal_workspace_id, team_id, finding_id, remediation, verification_steps, "
         "verification_status, verification_notes, verification_updated_by_session_id, "
         "verification_updated_by_member_id, verification_updated_at, created, updated "
         "FROM finding_triage_details WHERE " + owner_sql + " AND finding_id = ?",  # nosec
@@ -1082,7 +1082,7 @@ def upsert_finding_triage_details_on_conn(
         )
     if existing:
         conn.execute(
-            "UPDATE finding_triage_details SET session_id = ?, team_id = ?, remediation = ?, "
+            "UPDATE finding_triage_details SET personal_workspace_id = ?, team_id = ?, remediation = ?, "
             "verification_steps = ?, verification_status = ?, verification_notes = ?, "
             "verification_updated_by_session_id = ?, verification_updated_by_member_id = ?, "
             "verification_updated_at = ?, updated = ? WHERE id = ?",
@@ -1121,16 +1121,16 @@ def upsert_finding_triage_details_on_conn(
     conflict_target = (
         "ON CONFLICT(team_id, finding_id) WHERE team_id != '' DO UPDATE SET "
         if metadata_team_id
-        else "ON CONFLICT(session_id, finding_id) WHERE team_id IS NULL OR team_id = '' DO UPDATE SET "
+        else "ON CONFLICT(personal_workspace_id, finding_id) WHERE team_id IS NULL OR team_id = '' DO UPDATE SET "
     )
     conn.execute(
         "INSERT INTO finding_triage_details "
-        "(id, session_id, team_id, finding_id, remediation, verification_steps, "
+        "(id, personal_workspace_id, team_id, finding_id, remediation, verification_steps, "
         "verification_status, verification_notes, verification_updated_by_session_id, "
         "verification_updated_by_member_id, verification_updated_at, created, updated) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         f"{conflict_target}"  # nosec
-        "session_id = excluded.session_id, "
+        "personal_workspace_id = excluded.personal_workspace_id, "
         "team_id = excluded.team_id, "
         "remediation = excluded.remediation, "
         "verification_steps = excluded.verification_steps, "

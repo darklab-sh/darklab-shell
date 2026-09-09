@@ -33,6 +33,7 @@ from services.scheduler.service import (
     pause_schedule,
     resume_schedule,
 )
+from services.notifications.models import is_durable_personal_owner
 from services.session.variables import SessionVariableError
 
 log = logging.getLogger("shell")
@@ -63,7 +64,7 @@ def _durable_session_error(session_id: str) -> str:
 
 
 def _is_durable_session(session_id: str) -> bool:
-    return str(session_id or "").startswith("tok_")
+    return is_durable_personal_owner(session_id)
 
 
 def _schedule_for_session(schedule_id: str, session_id: str) -> Schedule:
@@ -187,7 +188,7 @@ def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, object
         record_schedule_event(
             AuditEventType.SCHEDULE_CREATE,
             schedule,
-            audit_fields={"session_id": session_id, "actor_session_id": session_id},
+            audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
             source="terminal_builtin",
             conn=conn,
         )
@@ -220,7 +221,7 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, object]]:
         record_schedule_event(
             AuditEventType.SCHEDULE_RUN_NOW,
             active,
-            audit_fields={"session_id": schedule.session_token, "actor_session_id": schedule.session_token},
+            audit_fields={"personal_workspace_id": schedule.session_token, "actor_session_id": schedule.session_token},
             source="terminal_builtin",
             details=run_now_details(
                 status,
@@ -282,7 +283,7 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                 record_schedule_event(
                     AuditEventType.SCHEDULE_UPDATE,
                     updated or schedule,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"changed_fields": ["enabled", "paused_reason"]},
                     conn=conn,
@@ -305,7 +306,7 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                 record_schedule_event(
                     AuditEventType.SCHEDULE_UPDATE,
                     updated or schedule,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"changed_fields": ["enabled", "paused_reason"]},
                     conn=conn,
@@ -329,7 +330,7 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                 record_schedule_event(
                     AuditEventType.SCHEDULE_DELETE,
                     schedule,
-                    audit_fields={"session_id": session_id, "actor_session_id": session_id},
+                    audit_fields={"personal_workspace_id": session_id, "actor_session_id": session_id},
                     source="terminal_builtin",
                     details={"deleted_count": 1 if removed else 0},
                     conn=conn,

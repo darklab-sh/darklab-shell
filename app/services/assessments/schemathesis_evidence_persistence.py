@@ -99,9 +99,9 @@ def _load_storage_contract(
         "FROM project_assessment_checks c "
         "JOIN project_assessments a ON a.id = c.assessment_id "
         "JOIN projects p ON p.id = a.project_id "
-        "AND p.session_id = a.session_id AND p.team_id = a.team_id "
+        "AND p.personal_workspace_id = a.personal_workspace_id AND p.team_id = a.team_id "
         "JOIN entities e ON e.id = c.target_entity_id "
-        "AND e.session_id = a.session_id AND e.team_id = a.team_id "
+        "AND e.personal_workspace_id = a.personal_workspace_id AND e.team_id = a.team_id "
         "JOIN project_links target_link ON target_link.project_id = p.id "
         "AND target_link.entity_type = 'atlas_entity' "
         "AND target_link.entity_id = e.id AND target_link.review_state = 'confirmed' "
@@ -172,7 +172,7 @@ def _insert_report(
     dialect = dialect_for_backend(get_db_backend())
     result = conn.execute(
         "INSERT INTO schemathesis_run_evidence "
-        "(id, session_id, team_id, project_id, assessment_id, check_id, run_id, "
+        "(id, personal_workspace_id, team_id, project_id, assessment_id, check_id, run_id, "
         "schema_artifact_id, schema_sha256, schema_version, profile_key, profile_version, "
         "tool_version, seed, stop_reason, running_time_seconds, expected_operation_count, "
         "observed_operation_count, case_count, failure_count, missing_operations_json, "

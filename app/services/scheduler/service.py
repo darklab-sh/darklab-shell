@@ -14,7 +14,7 @@ from config import resolve_effective_cfg
 from core import database
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from services.notifications.models import require_durable_session_token
+from services.notifications.models import require_durable_personal_owner
 from services.scheduler.cron import default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.models import (
     FIRE_STATUSES,
@@ -93,7 +93,7 @@ def _value(row: Any, key: str, default: Any = "") -> Any:
 def row_to_schedule(row: Any) -> Schedule:
     return Schedule(
         id=str(_value(row, "id")),
-        session_token=str(_value(row, "session_token")),
+        session_token=str(_value(row, "personal_workspace_id")),
         team_id=str(_value(row, "team_id")),
         owner_kind=str(_value(row, "owner_kind") or OWNER_KIND_USER),
         owner_id=str(_value(row, "owner_id")),
@@ -166,7 +166,7 @@ def _owner_schedule_clause(session_token: str, team_id: str = "", *, table_alias
     prefix = f"{table_alias}." if table_alias else ""
     owner = token_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
-        token_column=f"{prefix}session_token",
+        token_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -210,7 +210,7 @@ def create_schedule(
     enabled: bool = True,
     conn=None,
 ) -> Schedule:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     owner = _normalize_owner_kind(owner_kind)
     kind = _normalize_kind(SCHEDULE_KIND_COMMAND)
     command = str(command_text or "").strip()
@@ -256,7 +256,7 @@ def create_schedule(
         conn.execute(
             """
             INSERT INTO schedules (
-                id, session_token, team_id, owner_kind, owner_id, kind, command_text, cron_expr,
+                id, personal_workspace_id, team_id, owner_kind, owner_id, kind, command_text, cron_expr,
                 cadence_preset, timezone, enabled, next_run_at, last_run_at, last_run_id,
                 overlap_policy, consecutive_failures, label, paused_reason, last_error,
                 created, updated
@@ -318,7 +318,7 @@ def get_schedule(schedule_id: str, *, conn=None) -> Schedule | None:
 
 
 def list_for_session(session_token: str, *, include_watchers: bool = False, conn=None) -> list[Schedule]:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     return list_for_owner(session, team_id="", include_watchers=include_watchers, conn=conn)
 
 
@@ -329,7 +329,7 @@ def list_for_owner(
     include_watchers: bool = False,
     conn=None,
 ) -> list[Schedule]:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     owner_sql, owner_params = _owner_schedule_clause(session, team_id)
     ctx = None
     if conn is None:

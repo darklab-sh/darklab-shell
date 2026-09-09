@@ -26,10 +26,10 @@ def _mixed_remaining_rows(conn: sqlite3.Connection) -> tuple[str, str]:
     owner_b = anonymous_session_id("remaining-surfaces-owner-b")
     conn.execute(
         "CREATE TABLE owner_remaining_rows ("
-        "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, team_id TEXT, run_id TEXT NOT NULL)"
+        "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT, run_id TEXT NOT NULL)"
     )
     conn.executemany(
-        "INSERT INTO owner_remaining_rows (id, session_id, team_id, run_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO owner_remaining_rows (id, personal_workspace_id, team_id, run_id) VALUES (?, ?, ?, ?)",
         (
             ("owner-a-null", owner_a, None, "run-one"),
             ("owner-a-empty", owner_a, "", "run-one"),
@@ -118,6 +118,7 @@ def test_remaining_surface_review_covers_every_baseline_site():
         ).read_text(encoding="utf-8").splitlines()
     ]
     sites = [item for item in inventory if item.get("kind") == "site"]
+    metadata = next(item for item in inventory if item.get("kind") == "metadata")
     assert all(item["conversion_classification"] != "unclassified" for item in sites)
     remaining = [
         item
@@ -125,7 +126,9 @@ def test_remaining_surface_review_covers_every_baseline_site():
         if item.get("planned_branch")
         == "refactor/owner-context-remaining-surfaces"
     ]
-    assert len(remaining) == 18
+    assert len(remaining) == metadata["summary"]["by_branch"][
+        "refactor/owner-context-remaining-surfaces"
+    ]
     assert {item["conversion_classification"] for item in remaining} == {
         "equivalent",
         "principal-foundation",

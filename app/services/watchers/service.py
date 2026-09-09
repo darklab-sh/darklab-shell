@@ -14,7 +14,7 @@ from config import resolve_effective_cfg
 from core import database
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from services.notifications.models import require_durable_session_token
+from services.notifications.models import require_durable_personal_owner
 from services.scheduler.models import OWNER_KIND_WATCHER
 from services.scheduler.service import (
     create_schedule,
@@ -158,7 +158,7 @@ def _watcher_run_owner_clause(watcher: Watcher, *, table_alias: str = "r") -> tu
     prefix = f"{table_alias}." if table_alias else ""
     owner = team_capable_owner_predicate(
         owner_context_for_scope(watcher.session_token, team_id=watcher.team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         owner_column_first=False,
@@ -279,7 +279,7 @@ def normalize_watcher_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
 def row_to_watcher(row: Any) -> Watcher:
     return Watcher(
         id=str(_value(row, "id")),
-        session_token=str(_value(row, "session_token")),
+        session_token=str(_value(row, "personal_workspace_id")),
         team_id=str(_value(row, "team_id")),
         project_id=str(_value(row, "project_id")),
         label=str(_value(row, "label")),
@@ -343,7 +343,7 @@ def _owner_watcher_clause(session_token: str, team_id: str = "", *, table_alias:
     prefix = f"{table_alias}." if table_alias else ""
     owner = token_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
-        token_column=f"{prefix}session_token",
+        token_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -363,7 +363,7 @@ def _project_owner_clause(session_token: str, team_id: str = "", *, table_alias:
     prefix = f"{table_alias}." if table_alias else ""
     owner = team_capable_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
-        owner_column=f"{prefix}session_id",
+        owner_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         owner_column_first=False,
@@ -445,12 +445,12 @@ def get_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
 
 
 def list_for_session(session_token: str, *, conn=None) -> list[Watcher]:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     return list_for_owner(session, team_id="", conn=conn)
 
 
 def list_for_owner(session_token: str, *, team_id: str = "", conn=None) -> list[Watcher]:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     owner_sql, owner_params = _owner_watcher_clause(session, team_id)
     ctx = None
     if conn is None:
@@ -511,7 +511,7 @@ def create_watcher(
     enabled: bool = True,
     conn=None,
 ) -> Watcher:
-    session = require_durable_session_token(session_token)
+    session = require_durable_personal_owner(session_token)
     normalized_team_id = str(team_id or "").strip()
     command = str(command_text or "").strip()
     baseline = str(baseline_run_id or "").strip()
@@ -554,7 +554,7 @@ def create_watcher(
         conn.execute(
             """
             INSERT INTO watchers (
-                id, session_token, team_id, project_id, label, command_text, schedule_id, baseline_run_id,
+                id, personal_workspace_id, team_id, project_id, label, command_text, schedule_id, baseline_run_id,
                 last_run_id, last_diff_summary_json, state, state_reason, last_error,
                 options_json, policy_json, consecutive_no_change, consecutive_changed, consecutive_failures,
                 created, updated
@@ -1027,7 +1027,7 @@ def pause_watchers_for_deleted_baselines(conn, run_ids: list[str]) -> int:
         return 0
     placeholders = ", ".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_token, team_id, project_id, schedule_id, baseline_run_id FROM watchers "  # nosec
+        "SELECT id, personal_workspace_id, team_id, project_id, schedule_id, baseline_run_id FROM watchers "  # nosec
         f"WHERE baseline_run_id IN ({placeholders})",
         ids,
     ).fetchall()
@@ -1048,7 +1048,7 @@ def pause_watchers_for_deleted_baselines(conn, run_ids: list[str]) -> int:
             log.warning("WATCHER_BASELINE_DELETED", extra={
                 "watcher_id": watcher_id,
                 "baseline_run_id": baseline_run_id,
-                "session": get_log_session_id(str(_value(row, "session_token") or "")),
+                "session": get_log_session_id(str(_value(row, "personal_workspace_id") or "")),
                 "team_id": str(_value(row, "team_id") or ""),
                 "project_id": str(_value(row, "project_id") or ""),
             })

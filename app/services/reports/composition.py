@@ -330,7 +330,7 @@ def _artifact_preview_text(session_id: str, artifact: dict[str, Any], *, cfg: Ma
     if reason:
         return {"embedded": False, "reason": reason}
     try:
-        owner = artifact_owner_context(str(artifact.get("session_id") or session_id or ""), artifact)
+        owner = artifact_owner_context(str(artifact.get("personal_workspace_id") or session_id or ""), artifact)
         text = read_owner_workspace_text_file(owner, str(artifact.get("workspace_path") or ""), cfg or _config.CFG)
     except WorkspaceError as exc:
         return {"embedded": False, "reason": str(exc) or "Artifact preview is unavailable."}

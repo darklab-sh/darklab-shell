@@ -265,7 +265,7 @@ def projects_report_export_job_ticket(project_id, job_id):
         return jsonify({"error": archive.get("error") or "report archive is not ready", "status": status}), status_code
     ticket = create_download_ticket({
         "kind": "project_report_job",
-        "session_id": session_id,
+        "personal_workspace_id": session_id,
         "team_id": team_id,
         "project_id": project_id,
         "job_id": job_id,

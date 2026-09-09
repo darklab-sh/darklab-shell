@@ -12,7 +12,7 @@ from typing import Any, NoReturn
 from flask import Request
 
 from core.database_access import get_db_connect
-from core.helpers import get_client_ip, get_log_session_id
+from core.helpers import get_authentication_result, get_client_ip, get_log_session_id
 
 from .scope import OwnerContext, personal_owner_context, shared_owner_predicate, team_owner_context
 from .storage import get_team_membership
@@ -49,7 +49,7 @@ class RequestScope:
         *,
         table_alias: str = "",
         team_column: str = "team_id",
-        session_column: str = "session_id",
+        session_column: str = "personal_workspace_id",
     ) -> tuple[str, tuple[str, ...]]:
         prefix = f"{table_alias}." if table_alias else ""
         return shared_owner_predicate(
@@ -175,7 +175,22 @@ def current_request_scope(
     to personal scope; invalid team metadata is rejected so callers don't
     accidentally leak personal data after a bad team switch.
     """
+    from services.auth.resolver import AuthenticatedContext  # noqa: PLC0415
+
     session_id = session_id.strip()
+    authentication = get_authentication_result()
+    authenticated = (
+        authentication.context
+        if isinstance(authentication.context, AuthenticatedContext)
+        else None
+    )
+    if authenticated is not None:
+        # The authenticated workspace is authoritative. Never allow a caller
+        # to substitute a different personal owner alongside a valid secret.
+        session_id = authenticated.personal_workspace_id
+        membership_identity = authenticated.principal_id
+    else:
+        membership_identity = session_id
     team_id, source = _requested_team_context(request)
     if not session_id:
         _raise_scope_error(
@@ -195,8 +210,18 @@ def current_request_scope(
             source=source,
             scope="personal",
         )
+        if authenticated is not None:
+            return RequestScope(
+                OwnerContext(
+                    scope="personal",
+                    owner_id=authenticated.personal_workspace_id,
+                    workspace_storage_key=authenticated.workspace_storage_key,
+                    actor_principal_id=authenticated.principal_id,
+                    actor_credential_id=authenticated.credential_id,
+                )
+            )
         return RequestScope(personal_owner_context(session_id))
-    if not session_id.startswith("tok_"):
+    if authenticated is None and not session_id.startswith("tok_"):
         _raise_scope_error(
             "team_token_required",
             "Team scope requires a session token.",
@@ -207,7 +232,7 @@ def current_request_scope(
             status_code=401,
         )
     with get_db_connect()() as conn:
-        member = get_team_membership(conn, team_id, session_id)
+        member = get_team_membership(conn, team_id, membership_identity)
     if not member:
         _raise_scope_error(
             "team_forbidden",
@@ -233,7 +258,9 @@ def current_request_scope(
                 team_owner_context(
                     team_id,
                     actor_member_id=str(member.get("id") or ""),
-                    actor_session_id=session_id,
+                    actor_principal_id=(authenticated.principal_id if authenticated else ""),
+                    actor_credential_id=(authenticated.credential_id if authenticated else ""),
+                    actor_session_id=("" if authenticated else session_id),
                 ),
                 team_id=team_id,
                 member=member,
@@ -261,7 +288,9 @@ def current_request_scope(
         team_owner_context(
             team_id,
             actor_member_id=str(member.get("id") or ""),
-            actor_session_id=session_id,
+            actor_principal_id=(authenticated.principal_id if authenticated else ""),
+            actor_credential_id=(authenticated.credential_id if authenticated else ""),
+            actor_session_id=("" if authenticated else session_id),
         ),
         team_id=team_id,
         member=member,

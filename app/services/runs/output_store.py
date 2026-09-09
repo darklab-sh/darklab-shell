@@ -375,7 +375,7 @@ def load_run_output_events_for_run(
 ) -> RunOutputLoadResult:
     unknown_collector = unknown_line_event_collector({
         "run_id": str(run.get("id") or ""),
-        "session": get_log_session_id(str(run.get("session_id") or "")),
+        "session": get_log_session_id(str(run.get("personal_workspace_id") or "")),
     })
     if prefer_full and run.get("full_output_available") and run.get("rel_path"):
         rel_path = str(run.get("rel_path") or "")
@@ -391,7 +391,7 @@ def load_run_output_events_for_run(
                 "reason": type(exc).__name__,
             }
             default_log_extra = {
-                "session": get_log_session_id(str(run.get("session_id") or "")),
+                "session": get_log_session_id(str(run.get("personal_workspace_id") or "")),
                 "rel_path": rel_path,
             }
             log_extra.update(default_log_extra if failure_log_extra is None else failure_log_extra)

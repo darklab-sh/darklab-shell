@@ -117,7 +117,7 @@ def finding_schemas() -> dict[str, Any]:
             ],
             "properties": {
                 "id": {"type": "string"},
-                "session_id": {"type": "string"},
+                "personal_workspace_id": {"type": "string"},
                 "run_id": {"type": "string"},
                 "target_id": {"type": "string"},
                 "entity_id": {"type": "string"},

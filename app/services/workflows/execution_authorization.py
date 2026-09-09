@@ -70,7 +70,7 @@ def current_execution_role(
     """Return one stable failure or the initiator's current command role."""
     team_id = str(execution.get("team_id") or "")
     member_id = str(execution.get("actor_member_id") or "")
-    session_id = str(execution.get("session_id") or "")
+    session_id = str(execution.get("personal_workspace_id") or "")
     with get_db_connect()() as conn:
         token_exists = not session_id.startswith("tok_") or bool(
             conn.execute(

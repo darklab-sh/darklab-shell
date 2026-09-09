@@ -19,10 +19,10 @@ from services.projects.finding_vulnerabilities import finding_cves
 
 _DISPOSITION_UPSERT_SQL = (
     "INSERT INTO finding_remediation_dispositions "
-    "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+    "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
     "vulnerability_id, rule_identity, review_state, created_at, updated_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-    "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+    "ON CONFLICT(personal_workspace_id, team_id, affected_subject, identity_value) DO UPDATE SET "
     "identity_kind = excluded.identity_kind, "
     "vulnerability_id = excluded.vulnerability_id, "
     "rule_identity = excluded.rule_identity, "
@@ -32,11 +32,11 @@ _DISPOSITION_UPSERT_SQL = (
 
 _GUIDANCE_UPSERT_SQL = (
     "INSERT INTO finding_remediation_dispositions "
-    "(session_id, team_id, affected_subject, identity_kind, identity_value, "
+    "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
     "vulnerability_id, rule_identity, review_state, remediation, created_at, "
     "updated_at, remediation_updated_at) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-    "ON CONFLICT(session_id, team_id, affected_subject, identity_value) DO UPDATE SET "
+    "ON CONFLICT(personal_workspace_id, team_id, affected_subject, identity_value) DO UPDATE SET "
     "identity_kind = excluded.identity_kind, "
     "vulnerability_id = excluded.vulnerability_id, "
     "rule_identity = excluded.rule_identity, "
@@ -80,7 +80,7 @@ def _finding_with_owner(
     owner = owner_by_finding_id.get(str(finding.get("id") or ""))
     if owner is None:
         return finding
-    return {**finding, "session_id": owner[0], "team_id": owner[1]}
+    return {**finding, "personal_workspace_id": owner[0], "team_id": owner[1]}
 
 
 def _remediation_preview(value: Any, limit: int = 160) -> str:
@@ -116,12 +116,12 @@ def attach_remediation_dispositions(
     for offset in range(0, len(ordered), 100):
         chunk = ordered[offset:offset + 100]
         clauses = " OR ".join(
-            "(session_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
+            "(personal_workspace_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
             for _ in chunk
         )
         # The clause shape is fixed above; every value remains bound.
         rows = conn.execute(
-            "SELECT session_id, team_id, affected_subject, identity_value, "
+            "SELECT personal_workspace_id, team_id, affected_subject, identity_value, "
             "review_state, updated_at, remediation, remediation_updated_at "
             "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
@@ -129,7 +129,7 @@ def attach_remediation_dispositions(
         ).fetchall()
         for row in rows:
             key = (
-                str(row["session_id"] or ""),
+                str(row["personal_workspace_id"] or ""),
                 str(row["team_id"] or ""),
                 str(row["affected_subject"] or ""),
                 str(row["identity_value"] or ""),
@@ -271,19 +271,19 @@ def remediation_guidance_by_finding_id(
     for offset in range(0, len(ordered_keys), 100):
         chunk = ordered_keys[offset:offset + 100]
         clauses = " OR ".join(
-            "(session_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
+            "(personal_workspace_id = ? AND team_id = ? AND affected_subject = ? AND identity_value = ?)"
             for _ in chunk
         )
         # The clause shape is fixed; every owner and identity value remains bound.
         rows = conn.execute(
-            "SELECT session_id, team_id, affected_subject, identity_value, remediation "
+            "SELECT personal_workspace_id, team_id, affected_subject, identity_value, remediation "
             "FROM finding_remediation_dispositions WHERE "  # nosec
             + clauses,
             tuple(value for key in chunk for value in key),
         ).fetchall()
         for row in rows:
             key = (
-                str(row["session_id"] or ""),
+                str(row["personal_workspace_id"] or ""),
                 str(row["team_id"] or ""),
                 str(row["affected_subject"] or ""),
                 str(row["identity_value"] or ""),
@@ -306,7 +306,7 @@ def _rows_for_affected_subject(
     if affected_subject.startswith("entity:"):
         value = affected_subject.removeprefix("entity:")
         sql = "".join((
-            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+            "SELECT id, personal_workspace_id, team_id, entity_id, target_id, subject_key, ",
             "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
             "cve_ids_json FROM findings WHERE ",
             scope_sql,
@@ -319,7 +319,7 @@ def _rows_for_affected_subject(
     if affected_subject.startswith("subject:"):
         value = affected_subject.removeprefix("subject:")
         sql = "".join((
-            "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+            "SELECT id, personal_workspace_id, team_id, entity_id, target_id, subject_key, ",
             "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
             "cve_ids_json FROM findings WHERE ",
             scope_sql,
@@ -331,7 +331,7 @@ def _rows_for_affected_subject(
         ).fetchall()
     finding_id = affected_subject.removeprefix("observation:")
     sql = "".join((
-        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, ",
+        "SELECT id, personal_workspace_id, team_id, entity_id, target_id, subject_key, ",
         "signature_hash, origin, validation_method, title, raw_line, fingerprint, ",
         "cve_ids_json FROM findings WHERE ",
         scope_sql,
@@ -357,7 +357,7 @@ def set_remediation_group_review_state(
     placeholders = ",".join("?" for _ in finding_ids)
     # Placeholders are generated from the bounded selected-id set; values remain bound.
     rows = conn.execute(
-        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
+        "SELECT id, personal_workspace_id, team_id, entity_id, target_id, subject_key, "
         "signature_hash, origin, validation_method, title, raw_line, fingerprint, "
         f"cve_ids_json FROM findings WHERE id IN ({placeholders})",  # nosec
         tuple(sorted(finding_ids)),
@@ -369,7 +369,7 @@ def set_remediation_group_review_state(
         if owner_scope is not None:
             finding = {
                 **finding,
-                "session_id": owner_scope[0],
+                "personal_workspace_id": owner_scope[0],
                 "team_id": owner_scope[1],
             }
         references = finding_identity_references(finding, finding_cves(finding))
@@ -418,7 +418,7 @@ def set_remediation_group_review_state(
             candidate = _finding_payload(row)
             candidates[str(row["id"])] = {
                 **candidate,
-                "session_id": session_id,
+                "personal_workspace_id": session_id,
                 "team_id": team_id,
             }
     affected_ids: set[str] = set()
@@ -450,7 +450,7 @@ def set_remediation_group_guidance(
     placeholders = ",".join("?" for _ in finding_ids)
     # Placeholders are generated from the bounded selected-id set; values remain bound.
     rows = conn.execute(
-        "SELECT id, session_id, team_id, entity_id, target_id, subject_key, "
+        "SELECT id, personal_workspace_id, team_id, entity_id, target_id, subject_key, "
         "signature_hash, origin, validation_method, status, title, raw_line, fingerprint, "
         f"cve_ids_json FROM findings WHERE id IN ({placeholders}) ORDER BY id",  # nosec
         tuple(sorted(finding_ids)),
@@ -462,7 +462,7 @@ def set_remediation_group_guidance(
         if owner_scope is not None:
             finding = {
                 **finding,
-                "session_id": owner_scope[0],
+                "personal_workspace_id": owner_scope[0],
                 "team_id": owner_scope[1],
             }
         for reference in finding_identity_references(finding, finding_cves(finding)):
@@ -508,7 +508,7 @@ def set_remediation_group_guidance(
             candidate = _finding_payload(candidate_row)
             candidate = {
                 **candidate,
-                "session_id": session_id,
+                "personal_workspace_id": session_id,
                 "team_id": team_id,
             }
             matching_states = [

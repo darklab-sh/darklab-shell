@@ -101,14 +101,14 @@ current_lines = common_lines + [
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now', '-2 minutes'), datetime('now', '-2 minutes'), "
         "0, ?, 0, ?, 0, 0)",
         (baseline_id, session_id, command, preview(baseline_lines, (9, 10)), len(baseline_lines) + 2),
     )
     conn.execute(
-        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
         "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), "
         "0, ?, 0, ?, 0, 0)",
@@ -119,7 +119,7 @@ try:
     removed_finding_id = "fnd_cmp_removed_" + uuid.uuid4().hex[:16]
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
+        "(id, personal_workspace_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
         "fingerprint, title, raw_line, created) "
         "VALUES (?, ?, ?, 'finding', 11, 'high', 'nmap', 'finding', 'service:shared', ?, ?, ?, datetime('now'))",
         (
@@ -145,7 +145,7 @@ try:
     )
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
+        "(id, personal_workspace_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
         "fingerprint, title, raw_line, created) "
         "VALUES (?, ?, ?, 'finding', 12, 'critical', 'nmap', 'finding', 'service:added', ?, ?, ?, datetime('now'))",
         (
@@ -159,7 +159,7 @@ try:
     )
     conn.execute(
         "INSERT INTO findings "
-        "(id, session_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
+        "(id, personal_workspace_id, run_id, scope, line_number, severity, tool_root, kind, subject_key, "
         "fingerprint, title, raw_line, created) "
         "VALUES (?, ?, ?, 'finding', 11, 'medium', 'nmap', 'finding', 'service:removed', ?, ?, ?, "
         "datetime('now', '-2 minutes'))",
@@ -174,7 +174,7 @@ try:
     )
     conn.execute(
         "INSERT INTO workflow_executions "
-        "(id, session_id, workflow_id, workflow_source, title, status, current_step_id, created, updated) "
+        "(id, personal_workspace_id, workflow_id, workflow_source, title, status, current_step_id, created, updated) "
         "VALUES (?, ?, 'workflow-compare', 'user', 'Comparison playbook', 'completed', 'scan', "
         "datetime('now', '-1 minute'), datetime('now', '-1 minute'))",
         (execution_id, session_id),

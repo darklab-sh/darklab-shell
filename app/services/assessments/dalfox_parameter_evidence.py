@@ -114,7 +114,7 @@ def _project_run_row(
     )
     # Both owner predicates come from fixed helpers; all values stay bound.
     sql = "".join((
-        "SELECT r.id, r.session_id, r.team_id, r.run_kind, r.command, r.finished, ",
+        "SELECT r.id, r.personal_workspace_id, r.team_id, r.run_kind, r.command, r.finished, ",
         "r.exit_code, r.output_preview, r.preview_truncated, r.full_output_available, ",
         "r.full_output_truncated, art.rel_path FROM projects p ",
         "JOIN project_links pl ON pl.project_id = p.id ",

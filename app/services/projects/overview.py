@@ -349,7 +349,7 @@ def _overview_snapshots_by_entity(conn, metadata_session: str, target_ids: list[
     rows = conn.execute(
         "SELECT id, entity_id, provider, status, summary, data_json, fetched_at, expires_at "
         "FROM entity_intel_snapshots "
-        f"WHERE session_id = ? AND entity_id IN ({placeholders}) "  # nosec
+        f"WHERE personal_workspace_id = ? AND entity_id IN ({placeholders}) "  # nosec
         "ORDER BY entity_id ASC, fetched_at DESC, provider ASC",
         (metadata_session, *target_ids),
     ).fetchall()
