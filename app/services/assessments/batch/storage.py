@@ -192,6 +192,8 @@ def create_batch_parent(
     actor_role: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     max_active: int | None = None,
     _preflight_on_conn: Callable[[Any, str], str] | None = None,
     _initialize_on_conn: Callable[[Any, str, str], None] | None = None,
@@ -263,12 +265,16 @@ def create_batch_parent(
             team_id=team_id,
         )
         first_step_id = "chunk_0001"
+        from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(conn, session_id)
         conn.execute(
             "INSERT INTO workflow_executions "
             "(id, execution_kind, personal_workspace_id, team_id, workflow_id, workflow_source, title, "
             "definition_snapshot, input_values, variables, status, current_step_id, project_id, "
-            "actor_member_id, actor_role, owner_client_id, owner_tab_id, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, 'assessment', 'Assessment batch', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "actor_member_id, actor_role, owner_client_id, owner_tab_id, created, updated, "
+            "principal_id, originating_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, 'assessment', 'Assessment batch', ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 batch_id,
                 ASSESSMENT_BATCH_EXECUTION_KIND,
@@ -286,6 +292,8 @@ def create_batch_parent(
                 str(owner_tab_id or ""),
                 created,
                 created,
+                resolved_principal_id or None,
+                str(originating_credential_id or "").strip() or None,
             ),
         )
         conn.execute(

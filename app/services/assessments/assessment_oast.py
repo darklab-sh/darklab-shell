@@ -224,6 +224,8 @@ def reserve_assessment_oast(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
 ) -> dict[str, Any]:
     """Confirm the current redacted plan and reserve one callback identity."""
     plan = confirmed_assessment_oast_plan(
@@ -247,6 +249,8 @@ def reserve_assessment_oast(
             team_id=team_id,
             actor_member_id=actor_member_id,
             actor_role=actor_role,
+            principal_id=principal_id,
+            originating_credential_id=originating_credential_id,
             window_seconds=int(oast["reservation_window_seconds"]),
         )
     except OastCorrelationError as exc:

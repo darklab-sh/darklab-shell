@@ -11716,6 +11716,9 @@
             "nullable": true,
             "type": "string"
           },
+          "created_by_credential_id": {
+            "type": "string"
+          },
           "cron_expr": {
             "type": "string"
           },
@@ -11732,6 +11735,9 @@
             "type": "string"
           },
           "label": {
+            "type": "string"
+          },
+          "last_changed_by_credential_id": {
             "type": "string"
           },
           "last_error": {
@@ -11766,6 +11772,9 @@
           "paused_reason": {
             "type": "string"
           },
+          "principal_id": {
+            "type": "string"
+          },
           "team_id": {
             "type": "string"
           },
@@ -11796,7 +11805,10 @@
           "paused_reason",
           "last_error",
           "created",
-          "updated"
+          "updated",
+          "principal_id",
+          "created_by_credential_id",
+          "last_changed_by_credential_id"
         ],
         "type": "object"
       },
@@ -11846,10 +11858,16 @@
           "id": {
             "type": "string"
           },
+          "originating_credential_id": {
+            "type": "string"
+          },
           "owner_id": {
             "type": "string"
           },
           "owner_kind": {
+            "type": "string"
+          },
+          "principal_id": {
             "type": "string"
           },
           "reason": {
@@ -11883,7 +11901,9 @@
           "fired_at",
           "run_id",
           "status",
-          "reason"
+          "reason",
+          "principal_id",
+          "originating_credential_id"
         ],
         "type": "object"
       },
@@ -12452,10 +12472,16 @@
             "nullable": true,
             "type": "string"
           },
+          "created_by_credential_id": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
           "label": {
+            "type": "string"
+          },
+          "last_changed_by_credential_id": {
             "type": "string"
           },
           "last_diff_summary": {
@@ -12472,6 +12498,9 @@
           },
           "policy": {
             "$ref": "#/components/schemas/WatcherPolicy"
+          },
+          "principal_id": {
+            "type": "string"
           },
           "project_id": {
             "type": "string"
@@ -12522,7 +12551,10 @@
           "consecutive_changed",
           "consecutive_failures",
           "created",
-          "updated"
+          "updated",
+          "principal_id",
+          "created_by_credential_id",
+          "last_changed_by_credential_id"
         ],
         "type": "object"
       },
@@ -12656,6 +12688,12 @@
             },
             "type": "array"
           },
+          "originating_credential_id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -12699,7 +12737,9 @@
           "ack_note",
           "ack_by",
           "ack_at",
-          "created"
+          "created",
+          "principal_id",
+          "originating_credential_id"
         ],
         "type": "object"
       },

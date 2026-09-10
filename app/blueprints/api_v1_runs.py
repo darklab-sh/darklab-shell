@@ -156,6 +156,8 @@ def api_run_ai_summary(run_id):
             run_id,
             team_id=owner_scope.team_id,
             force=api_routes._parse_bool(api_routes._json_body().get("force")),
+            principal_id=owner_scope.context.actor_principal_id,
+            originating_credential_id=owner_scope.context.actor_credential_id,
         )
     except AIAssistRouteError as exc:
         return api_routes._api_json_error(exc.code, exc.message, exc.status_code)
@@ -175,6 +177,8 @@ def api_run_ai_next_commands(run_id):
             run_id,
             team_id=owner_scope.team_id,
             force=api_routes._parse_bool(api_routes._json_body().get("force")),
+            principal_id=owner_scope.context.actor_principal_id,
+            originating_credential_id=owner_scope.context.actor_credential_id,
         )
     except AIAssistRouteError as exc:
         return api_routes._api_json_error(exc.code, exc.message, exc.status_code)

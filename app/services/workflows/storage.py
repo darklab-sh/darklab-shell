@@ -19,6 +19,7 @@ from core.database_backend import (
 )
 
 from services.runs.private_data import redact_private_values
+from services.auth.background_authorization import principal_id_for_workspace
 from services.teams.ownership_queries import (
     PersonalTeamRows,
     personal_only_owner_predicate,
@@ -233,6 +234,8 @@ def create_execution(
     actor_role: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     max_active: int = 3,
 ) -> dict[str, Any]:
     execution_id = _new_id("wfx_")
@@ -241,6 +244,7 @@ def create_execution(
     steps = [step for step in raw_steps if isinstance(step, Mapping)] if isinstance(raw_steps, list) else []
     dialect = _dialect()
     with get_db_connect()() as conn:
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(conn, session_id)
         _lock_execution_owner(conn, session_id, team_id)
         owner_sql, owner_params = _owner_where(session_id, team_id=team_id)
         active_row = conn.execute(
@@ -256,8 +260,8 @@ def create_execution(
             "INSERT INTO workflow_executions "
             "(id, execution_kind, personal_workspace_id, team_id, workflow_id, workflow_source, title, definition_snapshot, "
             "input_values, variables, status, current_step_id, workspace_cwd, project_id, actor_member_id, "
-            "actor_role, owner_client_id, owner_tab_id, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "actor_role, owner_client_id, owner_tab_id, created, updated, principal_id, originating_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 execution_id,
                 WORKFLOW_EXECUTION_KIND,
@@ -278,6 +282,8 @@ def create_execution(
                 str(owner_tab_id or ""),
                 created,
                 created,
+                resolved_principal_id or None,
+                str(originating_credential_id or "").strip() or None,
             ),
         )
         for index, step in enumerate(steps):

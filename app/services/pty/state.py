@@ -42,6 +42,8 @@ def store_pty_meta(run: Any, *, redis_client: Any | None = None, closed: bool = 
         "run_id": run.run_id,
         "session_id": run.session_id,
         "team_id": run.team_id,
+        "principal_id": str(getattr(run, "principal_id", "") or ""),
+        "credential_id": str(getattr(run, "credential_id", "") or ""),
         "command": run.command,
         "started": run.started,
         "rows": run.rows,

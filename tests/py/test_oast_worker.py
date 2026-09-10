@@ -37,6 +37,7 @@ from services.connectors.oast_worker_state import (
 
 _CORRELATION_ID = "ocr_0123456789abcdef0123456789abcdef"
 _CALLBACK_LABEL = "abcdefghijklmnopqrstuvwxy01234567"
+_ANONYMOUS_WORKSPACE_ID = "11111111-1111-4111-8111-111111111111"
 
 
 def _settings() -> OastConnectorSettings:
@@ -55,7 +56,7 @@ def _correlation(status: str = "reserved", **changes: object) -> dict[str, objec
     settings = _settings()
     value: dict[str, object] = {
         "id": _CORRELATION_ID,
-        "personal_workspace_id": "owner-a",
+        "personal_workspace_id": _ANONYMOUS_WORKSPACE_ID,
         "team_id": "",
         "status": status,
         "callback_label": _CALLBACK_LABEL,
@@ -135,8 +136,8 @@ def test_oast_worker_polls_active_session_and_records_bounded_rejects():
     assert ingest.call_count == 2
     ingest.assert_has_calls(
         [
-            mock.call("owner-a", _CORRELATION_ID, interaction, team_id=""),
-            mock.call("owner-a", _CORRELATION_ID, interaction, team_id=""),
+            mock.call(_ANONYMOUS_WORKSPACE_ID, _CORRELATION_ID, interaction, team_id=""),
+            mock.call(_ANONYMOUS_WORKSPACE_ID, _CORRELATION_ID, interaction, team_id=""),
         ]
     )
     ingestion_log.assert_called_once_with(

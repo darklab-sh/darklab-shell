@@ -587,6 +587,7 @@ def test_principal_credential_persistence_matches_postgres_contract(
     reset_master_key_cache_for_tests()
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     conn = PostgresSqliteCompatConnection(raw_conn)
     settings = WorkspaceSettings(
         enabled=True,
@@ -860,6 +861,115 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
     assert failure["details"] == {"authentication_state": "unknown_credential"}
     assert unknown_tail not in json.dumps(dict(failure))
 
+    raw_conn.commit()
+    reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+def test_principal_background_authorization_matches_postgres_contract(
+    postgres_schema,
+    tmp_path,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle as auth_lifecycle
+    from services.auth import storage as principal_storage
+    from services.auth.background_authorization import (
+        BackgroundAuthorizationState,
+        resolve_background_authorization,
+    )
+    from services.auth.resolver import AuthenticatedContext, resolve_authentication
+    from services.scheduler.service import create_schedule
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.teams.capabilities import Capability
+    from services.workspace.models import WorkspaceSettings
+
+    data_dir = tmp_path / "background-auth-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    settings = WorkspaceSettings(
+        enabled=True,
+        backend="volume",
+        root=tmp_path / "background-auth-workspaces",
+        quota_bytes=1024,
+        max_file_bytes=1024,
+        max_files=10,
+        inactivity_ttl_hours=1,
+    )
+    settings.root.mkdir()
+    bundle = principal_storage.create_principal_with_credential(settings=settings, conn=conn)
+    device = principal_storage.issue_credential(
+        bundle.principal.id,
+        label="Postgres device",
+        created_by_credential_id=bundle.credential.metadata.id,
+        conn=conn,
+    )
+    schedule = create_schedule(
+        bundle.workspace.id,
+        command_text="true",
+        cadence_preset="hourly",
+        principal_id=bundle.principal.id,
+        credential_id=device.metadata.id,
+        conn=conn,
+    )
+    raw_conn.commit()
+
+    authorized = resolve_background_authorization(
+        conn,
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        originating_credential_id=device.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert authorized.allowed
+    current = resolve_authentication(
+        {"X-Darklab-Credential": bundle.credential.secret},
+        conn=conn,
+    )
+    assert isinstance(current.context, AuthenticatedContext)
+
+    @contextmanager
+    def connect():
+        yield conn
+
+    _, disposition = auth_lifecycle.revoke(
+        current.context,
+        device.metadata.id,
+        pause_related_work=True,
+        include_durable_work=True,
+        connect=connect,
+    )
+    assert [(item.kind, item.id) for item in disposition.paused] == [("schedule", schedule.id)]
+    paused = raw_conn.execute(
+        "SELECT enabled, paused_reason FROM schedules WHERE id = %s",
+        (schedule.id,),
+    ).fetchone()
+    assert paused["enabled"] is False
+    assert paused["paused_reason"] == "credential_revoked"
+
+    monkeypatch.setattr(
+        "services.auth.background_runtime.stop_principal_active_work",
+        lambda _principal_id: (),
+    )
+    auth_lifecycle.set_principal_enabled(
+        bundle.principal.id,
+        enabled=False,
+        reason="Postgres contract",
+        connect=connect,
+    )
+    denied = resolve_background_authorization(
+        conn,
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert denied.state == BackgroundAuthorizationState.PRINCIPAL_DISABLED
     raw_conn.commit()
     reset_master_key_cache_for_tests()
 
@@ -1281,6 +1391,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0078",
         "0079",
         "0080",
+        "0081",
     ]
     assert applied_again == []
     table_rows = conn.execute(

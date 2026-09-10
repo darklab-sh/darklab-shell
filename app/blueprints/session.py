@@ -533,10 +533,13 @@ def session_workflows_create():
     if forbidden:
         return forbidden
     try:
+        audit_fields = route_audit_fields(session_id, request, scope)
         workflow = create_user_workflow(
             session_id,
             request.get_json(silent=True) or {},
             team_id=scope.team_id if scope else "",
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
         )
     except UserWorkflowError as exc:
         log.warning("WORKFLOW_DEFINITION_VALIDATION_FAILED", extra={
@@ -558,7 +561,7 @@ def session_workflows_create():
             AuditEventType.WORKFLOW_CREATE,
             target_id=str(workflow["id"]),
             details={"action": "create", "source": "team"},
-            **route_audit_fields(session_id, request, scope),
+            **audit_fields,
         )
     return jsonify({"ok": True, "workflow": workflow}), 201
 
@@ -587,11 +590,13 @@ def session_workflows_update(workflow_id):
     if forbidden:
         return forbidden
     try:
+        audit_fields = route_audit_fields(session_id, request, scope)
         workflow = update_user_workflow(
             session_id,
             workflow_id,
             request.get_json(silent=True) or {},
             team_id=scope.team_id if scope else "",
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
         )
     except UserWorkflowError as exc:
         log.warning("WORKFLOW_DEFINITION_VALIDATION_FAILED", extra={
@@ -615,7 +620,7 @@ def session_workflows_update(workflow_id):
             AuditEventType.WORKFLOW_UPDATE,
             target_id=workflow_id,
             details={"action": "update", "source": "team"},
-            **route_audit_fields(session_id, request, scope),
+            **audit_fields,
         )
     return jsonify({"ok": True, "workflow": workflow})
 

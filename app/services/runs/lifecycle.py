@@ -606,6 +606,8 @@ def start_real_command_process(
     active_kwargs = {
         "owner_client_id": owner_client_id,
         "owner_tab_id": owner_tab_id,
+        "principal_id": workspace_owner.actor_principal_id,
+        "credential_id": workspace_owner.actor_credential_id,
     }
     if team_id:
         active_kwargs["team_id"] = team_id

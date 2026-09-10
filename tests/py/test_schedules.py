@@ -220,7 +220,7 @@ class TestSchedulesRoutes:
         monkeypatch.setattr(
             dispatch,
             "_launch_user_schedule_run",
-            lambda schedule: captured.append(schedule.team_id) or "run_team_schedule",
+            lambda schedule, **_kwargs: captured.append(schedule.team_id) or "run_team_schedule",
         )
         created = client.post(
             "/schedules",
@@ -347,7 +347,11 @@ class TestSchedulesRoutes:
         client, db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_run_now"
         _register_token(token)
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_schedule_now")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda _schedule, **_kwargs: "run_schedule_now",
+        )
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
@@ -388,7 +392,11 @@ class TestSchedulesRoutes:
         token = "tok_schedule_history_link"
         run_id = "run_schedule_history_link"
         _register_token(token)
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: run_id)
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda _schedule, **_kwargs: run_id,
+        )
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
@@ -1167,7 +1175,11 @@ class TestScheduleBuiltin:
         _client, db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_builtin_run"
         _register_token(token)
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_builtin_schedule")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda _schedule, **_kwargs: "run_builtin_schedule",
+        )
         execute_builtin_command('schedule create --cron "0 * * * *" -- ping -c 1 darklab.sh', token)
         with db_connect() as conn:
             schedule_id = conn.execute("SELECT id FROM schedules WHERE personal_workspace_id = ?", (token,)).fetchone()["id"]

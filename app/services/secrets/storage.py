@@ -107,7 +107,16 @@ def list_secret_metadata(session_token: str) -> list[dict[str, str | list[str]]]
     return [_metadata_from_row(row) for row in rows]
 
 
-def upsert_secret_with_connection(conn, session_token: str, name: str, value: str, consumer_envs=None) -> tuple[dict, bool]:
+def upsert_secret_with_connection(
+    conn,
+    session_token: str,
+    name: str,
+    value: str,
+    consumer_envs=None,
+    *,
+    principal_id: str = "",
+    credential_id: str = "",
+) -> tuple[dict, bool]:
     normalized_name = normalize_secret_name(name)
     normalized_envs = normalize_consumer_envs(consumer_envs, default_name=normalized_name)
     ciphertext, nonce = encrypt_secret(value)
@@ -140,16 +149,36 @@ def upsert_secret_with_connection(conn, session_token: str, name: str, value: st
             raise SecretConsumerEnvConflict(conflicts[0], row["name"])
     created = existing is None
     created_at = now if created else existing["created_at"]
+    from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+    resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+        conn, session_token
+    )
+    changed_by_credential_id = str(credential_id or "").strip()
     conn.execute(
         "INSERT INTO secrets "
-        "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "(owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at, "
+        "principal_id, created_by_credential_id, last_changed_by_credential_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(owner_id, name) DO UPDATE SET "
         "ciphertext = excluded.ciphertext, "
         "nonce = excluded.nonce, "
         "consumer_envs = excluded.consumer_envs, "
+        "last_changed_by_credential_id = COALESCE("
+        "excluded.last_changed_by_credential_id, secrets.last_changed_by_credential_id), "
         "updated_at = excluded.updated_at",
-        (session_token, normalized_name, ciphertext, nonce, envs_json, created_at, now),
+        (
+            session_token,
+            normalized_name,
+            ciphertext,
+            nonce,
+            envs_json,
+            created_at,
+            now,
+            resolved_principal_id or None,
+            changed_by_credential_id or None,
+            changed_by_credential_id or None,
+        ),
     )
     return {
         "name": normalized_name,
@@ -187,7 +216,15 @@ def upsert_secret(
     audit_fields: dict[str, Any] | None = None,
 ) -> tuple[dict, bool]:
     with get_db_connect()() as conn:
-        metadata, created = upsert_secret_with_connection(conn, session_token, name, value, consumer_envs)
+        metadata, created = upsert_secret_with_connection(
+            conn,
+            session_token,
+            name,
+            value,
+            consumer_envs,
+            principal_id=str((audit_fields or {}).get("actor_principal_id") or ""),
+            credential_id=str((audit_fields or {}).get("actor_credential_id") or ""),
+        )
         event_type = AuditEventType.SECRET_CREATE if created else AuditEventType.SECRET_UPDATE
         record_event(
             event_type,

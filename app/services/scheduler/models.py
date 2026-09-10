@@ -61,6 +61,9 @@ class Schedule:
     last_error: str
     created: str
     updated: str
+    principal_id: str = ""
+    created_by_credential_id: str = ""
+    last_changed_by_credential_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,3 +77,5 @@ class ScheduleFire:
     run_id: str
     status: str
     reason: str
+    principal_id: str = ""
+    originating_credential_id: str = ""

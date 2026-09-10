@@ -13,6 +13,7 @@ from typing import Any
 import uuid
 
 from core.database_access import get_db_connect
+from services.auth.background_authorization import principal_id_for_workspace
 from services.connectors.zap_plan_contracts import ZapAutomationPlanSummary
 from services.teams.scope import empty_team_owner_predicate as _owner_predicate
 
@@ -85,6 +86,8 @@ def create_zap_job(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     now: datetime | None = None,
     conn=None,
 ) -> dict[str, Any]:
@@ -128,6 +131,9 @@ def create_zap_job(
         raise ZapJobError("zap_job_id_invalid", "The ZAP job id is invalid")
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+            active_conn, owner_session
+        )
         current = active_conn.execute(
             "SELECT 1 FROM project_assessments pa "  # nosec
             "JOIN project_assessment_checks pc ON pc.assessment_id = pa.id "
@@ -156,8 +162,8 @@ def create_zap_job(
             "id, personal_workspace_id, team_id, project_id, assessment_id, check_id, "
             "http_profile_id, http_profile_revision, actor_member_id, actor_role, "
             "policy_level, target_count, plan_summary_json, report_filename, "
-            "created_at, updated_at, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at, updated_at, expires_at, principal_id, originating_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 normalized_job_id,
                 owner_session,
@@ -176,6 +182,8 @@ def create_zap_job(
                 created_at,
                 created_at,
                 expires_at,
+                resolved_principal_id or None,
+                str(originating_credential_id or "").strip() or None,
             ),
         )
         if owns_conn:

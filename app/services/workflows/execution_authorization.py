@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 
 from config import resolve_effective_cfg
 from core.database_access import get_db_connect
-from services.teams.capabilities import Capability, role_can
-from services.teams.storage import get_member, get_team
+from services.auth.background_authorization import (
+    BackgroundAuthorizationState,
+    resolve_background_authorization,
+)
+from services.teams.capabilities import Capability
 
 
 def max_execution_runtime_seconds() -> int:
@@ -68,35 +71,29 @@ def current_execution_role(
     execution: Mapping[str, object],
 ) -> tuple[str, str, str]:
     """Return one stable failure or the initiator's current command role."""
-    team_id = str(execution.get("team_id") or "")
-    member_id = str(execution.get("actor_member_id") or "")
-    session_id = str(execution.get("personal_workspace_id") or "")
     with get_db_connect()() as conn:
-        token_exists = not session_id.startswith("tok_") or bool(
-            conn.execute(
-                "SELECT 1 FROM session_tokens WHERE token = ?",
-                (session_id,),
-            ).fetchone()
+        authorization = resolve_background_authorization(
+            conn,
+            principal_id=str(execution.get("principal_id") or ""),
+            personal_workspace_id=str(execution.get("personal_workspace_id") or ""),
+            team_id=str(execution.get("team_id") or ""),
+            actor_member_id=str(execution.get("actor_member_id") or ""),
+            originating_credential_id=str(execution.get("originating_credential_id") or ""),
+            required_capability=Capability.RUN_COMMANDS,
         )
-        team = get_team(conn, team_id) if team_id else None
-        member = get_member(conn, member_id) if member_id else None
-    if not token_exists:
+    if authorization.state is BackgroundAuthorizationState.LEGACY_SESSION_REVOKED:
         return "token_revoked", "The execution initiator's token is no longer active.", ""
-    if not team_id:
-        return "", "", ""
-    if not team or str(team.get("status") or "") != "active":
+    if authorization.state is BackgroundAuthorizationState.PRINCIPAL_DISABLED:
+        return "principal_disabled", authorization.message, ""
+    if authorization.state is BackgroundAuthorizationState.TEAM_UNAVAILABLE:
         return "team_unavailable", "The execution team is no longer active.", ""
-    if (
-        not member
-        or str(member.get("team_id") or "") != team_id
-        or str(member.get("status") or "") != "active"
-        or bool(member.get("removed_at"))
-    ):
+    if authorization.state is BackgroundAuthorizationState.MEMBERSHIP_REVOKED:
         return "member_revoked", "The execution initiator is no longer active.", ""
-    role = str(member.get("role") or "")
-    if not role_can(role, Capability.RUN_COMMANDS):
-        return "permission_revoked", "The initiator can no longer run commands.", role
-    return "", "", role
+    if authorization.state is BackgroundAuthorizationState.CAPABILITY_REVOKED:
+        return "permission_revoked", "The initiator can no longer run commands.", authorization.role
+    if not authorization.allowed:
+        return "owner_unavailable", authorization.message, ""
+    return "", "", authorization.role
 
 
 __all__ = [

@@ -289,17 +289,28 @@ def _definition_version(workflow) -> int:
     return version if isinstance(version, int) and version in {1, 2, 3} else 1
 
 
-def create_user_workflow(session_id, data, *, team_id=""):
+def create_user_workflow(
+    session_id,
+    data,
+    *,
+    team_id="",
+    principal_id="",
+    credential_id="",
+):
     workflow = _clean_payload(data)
     created = _now()
     with get_db_connect()() as conn:
+        from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(conn, session_id)
         dialect = dialect_for_backend(get_db_backend())
         for _ in range(10):
             workflow_id = _new_workflow_id()
             result = conn.execute(
                 "INSERT INTO user_workflows "  # nosec
-                "(id, personal_workspace_id, team_id, definition_version, title, description, inputs, steps, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "(id, personal_workspace_id, team_id, definition_version, title, description, inputs, steps, created, updated, "
+                "principal_id, created_by_credential_id, last_changed_by_credential_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + dialect.insert_or_ignore_clause(("id",)),
                 (
                     workflow_id,
@@ -312,6 +323,9 @@ def create_user_workflow(session_id, data, *, team_id=""):
                     dialect.json_param(workflow["steps"]),
                     created,
                     created,
+                    resolved_principal_id or None,
+                    str(credential_id or "").strip() or None,
+                    str(credential_id or "").strip() or None,
                 ),
             )
             if result.rowcount:
@@ -320,7 +334,14 @@ def create_user_workflow(session_id, data, *, team_id=""):
         raise UserWorkflowError("could not allocate a workflow id")
 
 
-def update_user_workflow(session_id, workflow_id, data, *, team_id=""):
+def update_user_workflow(
+    session_id,
+    workflow_id,
+    data,
+    *,
+    team_id="",
+    credential_id="",
+):
     workflow = _clean_payload(data)
     updated = _now()
     with get_db_connect()() as conn:
@@ -328,7 +349,8 @@ def update_user_workflow(session_id, workflow_id, data, *, team_id=""):
         owner_sql, owner_params = _workflow_owner_where(session_id, team_id=team_id)
         result = conn.execute(
             "UPDATE user_workflows "
-            "SET definition_version = ?, title = ?, description = ?, inputs = ?, steps = ?, updated = ? "
+            "SET definition_version = ?, title = ?, description = ?, inputs = ?, steps = ?, "
+            "last_changed_by_credential_id = COALESCE(?, last_changed_by_credential_id), updated = ? "
             "WHERE " + owner_sql + " AND id = ?",  # nosec
             (
                 _definition_version(workflow),
@@ -336,6 +358,7 @@ def update_user_workflow(session_id, workflow_id, data, *, team_id=""):
                 workflow["description"],
                 dialect.json_param(workflow["inputs"]),
                 dialect.json_param(workflow["steps"]),
+                str(credential_id or "").strip() or None,
                 updated,
                 *owner_params,
                 workflow_id,

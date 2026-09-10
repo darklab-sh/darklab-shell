@@ -117,6 +117,7 @@ def workflow_executions_create():
         return jsonify({"error": str(exc)}), 400
     project = get_active_project(session_id, team_id=scope.team_id)
     member = scope.member or {}
+    audit_fields = route_audit_fields(session_id, request, scope)
     try:
         execution = create_execution(
             session_id=session_id,
@@ -131,6 +132,8 @@ def workflow_executions_create():
             actor_role=str(member.get("role") or ""),
             owner_client_id=str(request.headers.get("X-Client-ID") or "").strip()[:128],
             owner_tab_id=str(data.get("tab_id") or "").strip()[:128],
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(audit_fields.get("actor_credential_id") or ""),
             max_active=int(resolve_effective_cfg().get("workflow_active_execution_limit") or 3),
         )
     except WorkflowActiveExecutionLimitExceeded as exc:

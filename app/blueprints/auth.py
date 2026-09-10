@@ -233,6 +233,19 @@ def update_credential(credential_id: str):
         return _error(exc)
 
 
+@auth_bp.get("/credentials/<credential_id>/durable-work")
+def credential_durable_work(credential_id: str):
+    try:
+        context = require_authenticated_context()
+        _require_pat_scope(context, "identity:read")
+        disposition = lifecycle.list_credential_durable_work(context, credential_id)
+        return jsonify({"durable_work": disposition.to_safe_dict()})
+    except (AuthenticationRejected, IdentityStorageError, PermissionError) as exc:
+        if isinstance(exc, AuthenticationRejected):
+            return jsonify({"error": exc.code, "message": exc.message}), 401
+        return _error(exc)
+
+
 @auth_bp.post("/credentials/<credential_id>/rotate")
 def rotate_credential(credential_id: str):
     try:
@@ -257,14 +270,22 @@ def revoke_credential(credential_id: str):
     try:
         context = require_authenticated_context()
         data = _payload()
-        metadata = lifecycle.revoke(
+        result = lifecycle.revoke(
             context,
             credential_id,
             reason=str(data.get("reason") or ""),
             confirm_lockout=data.get("confirm_lockout") is True,
+            pause_related_work=data.get("pause_related_work") is True,
+            include_durable_work=True,
             request_fields=_request_fields(),
         )
-        return jsonify({"credential": metadata.to_safe_dict()})
+        if isinstance(result, tuple):
+            metadata, disposition = result
+            durable_work = disposition.to_safe_dict()
+        else:  # Compatibility for route-level test doubles.
+            metadata = result
+            durable_work = {"affected": [], "paused": [], "affected_count": 0, "paused_count": 0}
+        return jsonify({"credential": metadata.to_safe_dict(), "durable_work": durable_work})
     except (AuthenticationRejected, IdentityStorageError, PermissionError) as exc:
         if isinstance(exc, AuthenticationRejected):
             return jsonify({"error": exc.code, "message": exc.message}), 401

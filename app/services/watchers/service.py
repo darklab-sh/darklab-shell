@@ -24,6 +24,7 @@ from services.scheduler.service import (
     resume_schedule,
     update_schedule,
 )
+from services.auth.background_authorization import principal_id_for_workspace
 from services.watchers.models import (
     DIFF_KIND_NONE,
     DIFF_KINDS,
@@ -298,6 +299,9 @@ def row_to_watcher(row: Any) -> Watcher:
         consecutive_failures=int(_value(row, "consecutive_failures", 0) or 0),
         created=str(_value(row, "created")),
         updated=str(_value(row, "updated")),
+        principal_id=str(_value(row, "principal_id") or ""),
+        created_by_credential_id=str(_value(row, "created_by_credential_id") or ""),
+        last_changed_by_credential_id=str(_value(row, "last_changed_by_credential_id") or ""),
     )
 
 
@@ -322,6 +326,8 @@ def row_to_watcher_fire(row: Any) -> WatcherFire:
         ack_by=str(_value(row, "ack_by")),
         ack_at=str(_value(row, "ack_at")),
         created=str(_value(row, "created")),
+        principal_id=str(_value(row, "principal_id") or ""),
+        originating_credential_id=str(_value(row, "originating_credential_id") or ""),
     )
 
 
@@ -509,6 +515,8 @@ def create_watcher(
     options: dict[str, Any] | None = None,
     policy: dict[str, Any] | None = None,
     enabled: bool = True,
+    principal_id: str = "",
+    credential_id: str = "",
     conn=None,
 ) -> Watcher:
     session = require_durable_personal_owner(session_token)
@@ -526,6 +534,7 @@ def create_watcher(
         conn = ctx.__enter__()
     assert conn is not None
     try:
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(conn, session)
         if _watcher_count(conn, session, team_id=normalized_team_id) >= _max_watchers_per_session():
             raise WatcherError("watcher quota exceeded for this scope")
         normalized_project_id = normalize_watcher_project_id(
@@ -546,6 +555,8 @@ def create_watcher(
             owner_kind=OWNER_KIND_WATCHER,
             owner_id=watcher_id,
             enabled=enabled,
+            principal_id=resolved_principal_id,
+            credential_id=credential_id,
             conn=conn,
         )
         now = _utc_now()
@@ -557,8 +568,8 @@ def create_watcher(
                 id, personal_workspace_id, team_id, project_id, label, command_text, schedule_id, baseline_run_id,
                 last_run_id, last_diff_summary_json, state, state_reason, last_error,
                 options_json, policy_json, consecutive_no_change, consecutive_changed, consecutive_failures,
-                created, updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 watcher_id,
@@ -581,6 +592,9 @@ def create_watcher(
                 0,
                 now,
                 now,
+                resolved_principal_id or None,
+                str(credential_id or "").strip() or None,
+                str(credential_id or "").strip() or None,
             ),
         )
         if ctx is not None:
@@ -595,7 +609,13 @@ def create_watcher(
             ctx.__exit__(None, None, None)
 
 
-def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Watcher | None:
+def update_watcher(
+    watcher_id: str,
+    updates: dict[str, Any],
+    *,
+    credential_id: str = "",
+    conn=None,
+) -> Watcher | None:
     watcher = get_watcher(watcher_id, conn=conn)
     if watcher is None:
         return None
@@ -620,7 +640,12 @@ def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Wa
     assert conn is not None
     try:
         if schedule_updates:
-            updated_schedule = update_schedule(watcher.schedule_id, schedule_updates, conn=conn)
+            updated_schedule = update_schedule(
+                watcher.schedule_id,
+                schedule_updates,
+                credential_id=credential_id,
+                conn=conn,
+            )
             if updated_schedule is None:
                 raise WatcherError("watcher schedule not found")
             next_command = updated_schedule.command_text
@@ -653,7 +678,8 @@ def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Wa
         conn.execute(
             """
             UPDATE watchers
-            SET label = ?, project_id = ?, command_text = ?, options_json = ?, policy_json = ?, updated = ?
+            SET label = ?, project_id = ?, command_text = ?, options_json = ?, policy_json = ?,
+                last_changed_by_credential_id = COALESCE(?, last_changed_by_credential_id), updated = ?
             WHERE id = ?
             """,
             (
@@ -662,6 +688,7 @@ def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Wa
                 next_command,
                 _dialect().json_param(options),
                 _dialect().json_param(policy),
+                str(credential_id or "").strip() or None,
                 now,
                 watcher.id,
             ),
@@ -684,17 +711,24 @@ def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Wa
             ctx.__exit__(None, None, None)
 
 
-def pause_watcher(watcher_id: str, reason: str = "", *, conn=None) -> Watcher | None:
+def pause_watcher(
+    watcher_id: str,
+    reason: str = "",
+    *,
+    credential_id: str = "",
+    conn=None,
+) -> Watcher | None:
     return set_watcher_state(
         watcher_id,
         state=WATCHER_STATE_PAUSED,
         state_reason=reason or "paused",
         schedule_enabled=False,
+        credential_id=credential_id,
         conn=conn,
     )
 
 
-def resume_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
+def resume_watcher(watcher_id: str, *, credential_id: str = "", conn=None) -> Watcher | None:
     existing = get_watcher(watcher_id, conn=conn)
     watcher = set_watcher_state(
         watcher_id,
@@ -703,6 +737,7 @@ def resume_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
         last_error="",
         consecutive_failures=0,
         schedule_enabled=True,
+        credential_id=credential_id,
         conn=conn,
     )
     return watcher
@@ -804,8 +839,8 @@ def record_watcher_fire(
         "INSERT INTO watcher_fires "  # nosec
         "(id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind, "
         "truncated, notification_event_ids_json, state_at_fire, state_reason, fire_kind, "
-        "ack_state, ack_note, ack_by, ack_at, created, team_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ack_state, ack_note, ack_by, ack_at, created, team_id, principal_id, originating_credential_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         + _dialect().insert_or_ignore_clause(("watcher_id", "run_id"))
     )
     conn.execute(
@@ -828,6 +863,8 @@ def record_watcher_fire(
             "",
             created,
             watcher.team_id,
+            watcher.principal_id or None,
+            watcher.last_changed_by_credential_id or watcher.created_by_credential_id or None,
         ),
     )
     row = conn.execute(
@@ -971,6 +1008,7 @@ def set_watcher_state(
     consecutive_changed: int | None = None,
     consecutive_failures: int | None = None,
     schedule_enabled: bool | None = None,
+    credential_id: str = "",
     conn=None,
 ) -> Watcher | None:
     if state not in WATCHER_STATES:
@@ -993,7 +1031,8 @@ def set_watcher_state(
             UPDATE watchers
             SET state = ?, state_reason = ?, last_error = ?, last_run_id = ?,
                 last_diff_summary_json = ?, consecutive_no_change = ?,
-                consecutive_changed = ?, consecutive_failures = ?, updated = ?
+                consecutive_changed = ?, consecutive_failures = ?,
+                last_changed_by_credential_id = COALESCE(?, last_changed_by_credential_id), updated = ?
             WHERE id = ?
             """,
             (
@@ -1005,14 +1044,20 @@ def set_watcher_state(
                 next_no_change,
                 next_changed,
                 next_failures,
+                str(credential_id or "").strip() or None,
                 now,
                 watcher.id,
             ),
         )
         if schedule_enabled is False:
-            pause_schedule(watcher.schedule_id, state_reason or state, conn=conn)
+            pause_schedule(
+                watcher.schedule_id,
+                state_reason or state,
+                credential_id=credential_id,
+                conn=conn,
+            )
         elif schedule_enabled is True:
-            resume_schedule(watcher.schedule_id, conn=conn)
+            resume_schedule(watcher.schedule_id, credential_id=credential_id, conn=conn)
         if ctx is not None:
             conn.commit()
         return get_watcher(watcher.id, conn=conn)

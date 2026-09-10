@@ -230,6 +230,7 @@ def watchers_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         def _create(conn):
+            audit_fields = route_audit_fields(session_id, request, owner_scope)
             payload = normalize_watcher_create_payload(
                 data,
                 session_id,
@@ -239,6 +240,8 @@ def watchers_create():
             watcher = create_watcher(
                 session_id,
                 team_id=owner_scope.team_id,
+                principal_id=str(audit_fields.get("actor_principal_id") or ""),
+                credential_id=str(audit_fields.get("actor_credential_id") or ""),
                 **payload,
                 conn=conn,
             )
@@ -246,7 +249,7 @@ def watchers_create():
             record_watcher_event(
                 AuditEventType.WATCHER_CREATE,
                 watcher,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                audit_fields=audit_fields,
                 source="browser",
                 conn=conn,
             )
@@ -290,6 +293,8 @@ def watchers_update(watcher_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         def _update(conn):
+            audit_fields = route_audit_fields(session_id, request, owner_scope)
+            credential_id = str(audit_fields.get("actor_credential_id") or "")
             watcher = _watcher_for_session_or_404(
                 watcher_id,
                 session_id,
@@ -297,15 +302,18 @@ def watchers_update(watcher_id):
                 conn=conn,
             )
             route_update = normalize_watcher_update_payload(data, session_id)
-            updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
+            updated = (
+                update_watcher(watcher.id, route_update.updates, credential_id=credential_id, conn=conn)
+                if route_update.updates else watcher
+            )
             if updated is None:
                 raise WatcherNotFound("watcher not found")
             event_type = AuditEventType.WATCHER_UPDATE
             if route_update.pause_requested:
-                updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+                updated = pause_watcher(updated.id, route_update.reason, credential_id=credential_id, conn=conn)
                 event_type = AuditEventType.WATCHER_PAUSE
             elif route_update.resume_requested:
-                updated = resume_watcher(updated.id, conn=conn)
+                updated = resume_watcher(updated.id, credential_id=credential_id, conn=conn)
                 event_type = AuditEventType.WATCHER_RESUME
             if updated is None:
                 raise WatcherNotFound("watcher not found")
@@ -313,7 +321,7 @@ def watchers_update(watcher_id):
             record_watcher_event(
                 event_type,
                 updated,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                audit_fields=audit_fields,
                 source="browser",
                 details={
                     "changed_fields": sorted(key for key in route_update.updates if key != "workspace_cwd"),

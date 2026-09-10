@@ -21,7 +21,14 @@ def _run_schedule_api_transaction(callback):
 
 def create_schedule_for_api(session_id: str, *, team_id: str, payload: dict[str, Any], audit_fields: dict[str, Any]):
     def _create(conn):
-        schedule = create_schedule(session_id, team_id=team_id, **payload, conn=conn)
+        schedule = create_schedule(
+            session_id,
+            team_id=team_id,
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
+            **payload,
+            conn=conn,
+        )
         record_schedule_event(
             AuditEventType.SCHEDULE_CREATE,
             schedule,
@@ -36,7 +43,12 @@ def create_schedule_for_api(session_id: str, *, team_id: str, payload: dict[str,
 
 def update_schedule_for_api(schedule_id: str, updates: dict[str, Any], *, audit_fields: dict[str, Any]):
     def _update(conn):
-        updated = update_schedule(schedule_id, updates, conn=conn)
+        updated = update_schedule(
+            schedule_id,
+            updates,
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
+            conn=conn,
+        )
         if updated is not None:
             record_schedule_event(
                 AuditEventType.SCHEDULE_UPDATE,
@@ -86,4 +98,3 @@ def fire_schedule_now_for_api(schedule, *, audit_fields: dict[str, Any]):
         return status, refreshed, fired_at
 
     return _run_schedule_api_transaction(_fire)
-

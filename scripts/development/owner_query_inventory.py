@@ -97,6 +97,16 @@ NAMED_RELATIONAL_EXCEPTIONS = {
         "sfe_e.personal_workspace_id = {run_alias}.personal_workspace_id",
     ),
 }
+PRINCIPAL_BACKGROUND_ATTRIBUTION_SITES = {
+    (
+        "app/services/projects/digests.py",
+        "save_digest_settings",
+    ): "digest settings record principal and credential attribution without granting access",
+    (
+        "app/services/secrets/storage.py",
+        "upsert_secret_with_connection",
+    ): "secret writes record principal and credential attribution without granting access",
+}
 NAMED_SOURCE_HASH_EXCEPTIONS = {
     (
         "app/core/database.py",
@@ -561,7 +571,9 @@ def _current_result_set(key_shape: str, team_behavior: str) -> str:
     return descriptions[team_behavior]
 
 
-def _planned_branch(path: str) -> str:
+def _planned_branch(path: str, scope: str = "") -> str:
+    if (path, scope) in PRINCIPAL_BACKGROUND_ATTRIBUTION_SITES:
+        return "feat/principal-background-authorization"
     if "/migrations/" in path or path.endswith("/migration.py"):
         return "migration-code"
     if re.search(r"/(?:history|runs?)/", path) or path.startswith("app/blueprints/history"):
@@ -606,8 +618,10 @@ def _named_source_hash_exception(path: str, scope: str, site_id: str) -> str:
 
 
 def _classification(path: str, scope: str, source: str) -> str:
-    if _planned_branch(path) == "migration-code":
+    if _planned_branch(path, scope) == "migration-code":
         return "migration"
+    if (path, scope) in PRINCIPAL_BACKGROUND_ATTRIBUTION_SITES:
+        return "principal-foundation"
     if path.startswith("app/services/auth/"):
         return "principal-foundation"
     if _named_relational_exception(path, scope, source):
@@ -616,8 +630,11 @@ def _classification(path: str, scope: str, source: str) -> str:
 
 
 def _reviewed_exception(path: str, scope: str, source: str) -> str:
-    if _planned_branch(path) == "migration-code":
+    if _planned_branch(path, scope) == "migration-code":
         return "migration code"
+    principal_attribution = PRINCIPAL_BACKGROUND_ATTRIBUTION_SITES.get((path, scope))
+    if principal_attribution:
+        return f"principal background attribution boundary: {principal_attribution}"
     if path.startswith("app/services/auth/"):
         return "principal credential persistence boundary"
     named = _named_relational_exception(path, scope, source)
@@ -738,7 +755,7 @@ def generate_sites() -> list[InventorySite]:
                     table_team_columns={table: table_shapes.get(table, "unknown") for table in tables},
                     current_result_set=_current_result_set(key_shape, team_behavior),
                     conversion_classification=_classification(relative, scope, normalized),
-                    planned_branch=_planned_branch(relative),
+                    planned_branch=_planned_branch(relative, scope),
                     phase_3b_replacement=_phase_3b_replacement(key_shape),
                     reviewed_exception=_reviewed_exception(relative, scope, normalized),
                     source=normalized[:500],
@@ -775,6 +792,15 @@ def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) 
         for field in REVIEWED_FIELDS:
             if field in reviewed:
                 site[field] = reviewed[field]
+        principal_attribution = PRINCIPAL_BACKGROUND_ATTRIBUTION_SITES.get(
+            (str(site["path"]), str(site["scope"]))
+        )
+        if principal_attribution:
+            site["conversion_classification"] = "principal-foundation"
+            site["planned_branch"] = "feat/principal-background-authorization"
+            site["reviewed_exception"] = (
+                f"principal background attribution boundary: {principal_attribution}"
+            )
         named_exception = _named_source_hash_exception(
             str(site["path"]),
             str(site["scope"]),

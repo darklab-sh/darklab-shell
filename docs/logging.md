@@ -400,6 +400,8 @@ The current event inventory is:
 | INFO | `ZAP_WORKER_LOCK_HELD` | ZAP connector worker | — |
 | INFO | `ZAP_WORKER_STOPPED` | ZAP connector worker | pid |
 | INFO | `ZAP_JOB_STATE_CHANGED` | ZAP connector worker | job_id, from_status, to_status, phase, duration_ms, report_bytes when ready |
+| WARN | `ZAP_JOB_AUTHORIZATION_REJECTED` | ZAP connector worker | job_id, principal_id, credential_id, team_id, fixed reason |
+| WARN | `OAST_CORRELATION_AUTHORIZATION_REJECTED` | private OAST connector worker | correlation_id, principal_id, credential_id, team_id, fixed reason |
 | INFO | `OAST_PROVIDER_SESSION_READY` | private OAST provider registration | correlation_id, correlation_status |
 | INFO | `OAST_INTERACTIONS_INGESTED` | private OAST interaction ingestion | correlation_id, correlation_status, accepted_count, rejected_count, duplicate_count |
 | INFO | `OAST_PROVIDER_SESSION_CLEANED` | private OAST terminal cleanup | correlation_id, correlation_status |
@@ -540,7 +542,7 @@ The current event inventory is:
 | WARN | `AI_COORDINATION_HEARTBEAT_FAILED` | AI Redis coordination heartbeat | (+ traceback) |
 | WARN | `AI_WORKER_COORDINATION_UNAVAILABLE` | AI worker coordination | error |
 | WARN | `AI_ASSIST_STALE_RECLAIMED` | AI worker queue recovery | count, stale_after_seconds |
-| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message, http_status |
+| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, principal_id, credential_id, team_id, session, secret_scope, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message, http_status |
 | WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
 | WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
 | WARN | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP_DEGRADED` | active-run startup cleanup | reason, fallback, pid |

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import logging
 import uuid
@@ -113,6 +114,9 @@ def row_to_schedule(row: Any) -> Schedule:
         last_error=str(_value(row, "last_error")),
         created=str(_value(row, "created")),
         updated=str(_value(row, "updated")),
+        principal_id=str(_value(row, "principal_id") or ""),
+        created_by_credential_id=str(_value(row, "created_by_credential_id") or ""),
+        last_changed_by_credential_id=str(_value(row, "last_changed_by_credential_id") or ""),
     )
 
 
@@ -127,6 +131,8 @@ def row_to_schedule_fire(row: Any) -> ScheduleFire:
         run_id=str(_value(row, "run_id")),
         status=str(_value(row, "status")),
         reason=str(_value(row, "reason")),
+        principal_id=str(_value(row, "principal_id") or ""),
+        originating_credential_id=str(_value(row, "originating_credential_id") or ""),
     )
 
 
@@ -208,6 +214,8 @@ def create_schedule(
     owner_kind: str = OWNER_KIND_USER,
     owner_id: str = "",
     enabled: bool = True,
+    principal_id: str = "",
+    credential_id: str = "",
     conn=None,
 ) -> Schedule:
     session = require_durable_personal_owner(session_token)
@@ -241,6 +249,9 @@ def create_schedule(
         last_error="",
         created=now,
         updated=now,
+        principal_id=str(principal_id or ""),
+        created_by_credential_id=str(credential_id or ""),
+        last_changed_by_credential_id=str(credential_id or ""),
     )
     ctx = None
     if conn is None:
@@ -248,6 +259,10 @@ def create_schedule(
         conn = ctx.__enter__()
     assert conn is not None
     try:
+        if not schedule.principal_id and session.startswith("wsp_"):
+            from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+            schedule = replace(schedule, principal_id=principal_id_for_workspace(conn, session))
         if (
             schedule.owner_kind == OWNER_KIND_USER
             and _normal_schedule_count(conn, session, team_id=schedule.team_id) >= _max_schedules_per_session()
@@ -259,8 +274,8 @@ def create_schedule(
                 id, personal_workspace_id, team_id, owner_kind, owner_id, kind, command_text, cron_expr,
                 cadence_preset, timezone, enabled, next_run_at, last_run_at, last_run_id,
                 overlap_policy, consecutive_failures, label, paused_reason, last_error,
-                created, updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule.id,
@@ -284,6 +299,9 @@ def create_schedule(
                 schedule.last_error,
                 schedule.created,
                 schedule.updated,
+                schedule.principal_id or None,
+                schedule.created_by_credential_id or None,
+                schedule.last_changed_by_credential_id or None,
             ),
         )
         if ctx is not None:
@@ -353,7 +371,13 @@ def list_for_owner(
             ctx.__exit__(None, None, None)
 
 
-def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> Schedule | None:
+def update_schedule(
+    schedule_id: str,
+    updates: dict[str, Any],
+    *,
+    credential_id: str = "",
+    conn=None,
+) -> Schedule | None:
     schedule = get_schedule(schedule_id, conn=conn)
     if schedule is None:
         return None
@@ -392,7 +416,7 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
             UPDATE schedules
             SET command_text = ?, cron_expr = ?, cadence_preset = ?, timezone = ?, enabled = ?,
                 next_run_at = ?, label = ?, paused_reason = ?, last_error = ?,
-                consecutive_failures = ?, updated = ?
+                consecutive_failures = ?, updated = ?, last_changed_by_credential_id = ?
             WHERE id = ?
             """,
             (
@@ -407,6 +431,7 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
                 next_last_error,
                 next_failures,
                 now,
+                str(credential_id or schedule.last_changed_by_credential_id) or None,
                 schedule_id,
             ),
         )
@@ -429,14 +454,26 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
             ctx.__exit__(None, None, None)
 
 
-def pause_schedule(schedule_id: str, reason: str = "", *, conn=None) -> Schedule | None:
-    return update_schedule(schedule_id, {"enabled": False, "paused_reason": reason or "paused"}, conn=conn)
+def pause_schedule(
+    schedule_id: str,
+    reason: str = "",
+    *,
+    credential_id: str = "",
+    conn=None,
+) -> Schedule | None:
+    return update_schedule(
+        schedule_id,
+        {"enabled": False, "paused_reason": reason or "paused"},
+        credential_id=credential_id,
+        conn=conn,
+    )
 
 
-def resume_schedule(schedule_id: str, *, conn=None) -> Schedule | None:
+def resume_schedule(schedule_id: str, *, credential_id: str = "", conn=None) -> Schedule | None:
     return update_schedule(
         schedule_id,
         {"enabled": True, "paused_reason": "", "last_error": "", "consecutive_failures": 0},
+        credential_id=credential_id,
         conn=conn,
     )
 
@@ -478,11 +515,14 @@ def record_schedule_fire(
         run_id=str(run_id or ""),
         status=status,
         reason=str(reason or ""),
+        principal_id=schedule.principal_id,
+        originating_credential_id=schedule.last_changed_by_credential_id,
     )
     conn.execute(
         """
-        INSERT INTO schedule_fires (id, schedule_id, team_id, owner_kind, owner_id, fired_at, run_id, status, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO schedule_fires (id, schedule_id, team_id, owner_kind, owner_id, fired_at, run_id, status, reason,
+                                    principal_id, originating_credential_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             fire.id,
@@ -494,6 +534,8 @@ def record_schedule_fire(
             fire.run_id,
             fire.status,
             fire.reason,
+            fire.principal_id or None,
+            fire.originating_credential_id or None,
         ),
     )
     return fire

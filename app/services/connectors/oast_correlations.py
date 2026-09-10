@@ -14,6 +14,7 @@ from typing import Any
 import uuid
 
 from core.database_access import get_db_connect
+from services.auth.background_authorization import principal_id_for_workspace
 from services.connectors.oast_config import OastConnectorSettings
 from services.teams.scope import empty_team_owner_predicate as _owner_predicate
 
@@ -96,6 +97,8 @@ def reserve_oast_correlation(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     window_seconds: int = 900,
     correlation_id: str = "",
     callback_label: str = "",
@@ -155,6 +158,9 @@ def reserve_oast_correlation(
     )
     owns_conn = conn is None
     with _connection_scope(conn) as active_conn:
+        resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+            active_conn, owner_session
+        )
         scope = active_conn.execute(
             "SELECT pc.target_entity_id, pc.policy_level, pc.recommended_action_key "
             "FROM project_assessments pa "
@@ -202,8 +208,8 @@ def reserve_oast_correlation(
             "id, personal_workspace_id, team_id, project_id, assessment_id, check_id, "
             "target_entity_id, action_key, callback_label, allowed_domain, "
             "service_origin_sha256, actor_member_id, actor_role, created_at, "
-            "updated_at, active_until, purge_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "updated_at, active_until, purge_at, principal_id, originating_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 selected_id,
                 owner_session,
@@ -222,6 +228,8 @@ def reserve_oast_correlation(
                 created_at,
                 active_until,
                 purge_at,
+                resolved_principal_id or None,
+                str(originating_credential_id or "").strip() or None,
             ),
         )
         if owns_conn:

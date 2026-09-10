@@ -17,6 +17,7 @@ import uuid
 
 from core.database_access import get_db_connect
 from services.metrics_lazy import app_metrics
+from services.auth.background_authorization import principal_id_for_workspace
 from services.ai import ai_cfg
 from services.teams.ownership_queries import PersonalTeamRows, composite_owner_predicate
 from services.teams.scope import owner_context_for_scope
@@ -136,6 +137,8 @@ def enqueue_assist(
     active_project_id: str = "",
     project_target_snapshot: list[dict[str, Any]] | None = None,
     force: bool = False,
+    principal_id: str = "",
+    originating_credential_id: str = "",
     conn=None,
 ) -> tuple[dict[str, Any], bool]:
     """Return an existing cached/active assist or insert a queued row."""
@@ -144,6 +147,9 @@ def enqueue_assist(
         resolved_model = model or settings["model"]
         owns_conn = conn is None
         with _connection_scope(conn) as active_conn:
+            resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+                active_conn, session_id
+            )
             if not force:
                 cached = cached_completed_assist(
                     session_id,
@@ -178,8 +184,9 @@ def enqueue_assist(
                 "(id, run_id, personal_workspace_id, team_id, variant, prompt_version, prompt_version_source, "
                 "payload_schema_version, model, context_hash, status, active_project_id, "
                 "project_target_snapshot, payload, input_chars, estimated_input_tokens, "
-                "redacted_bytes, pre_redaction_bytes, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "redacted_bytes, pre_redaction_bytes, created_at, updated_at, principal_id, "
+                "originating_credential_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     assist_id,
                     run_id,
@@ -200,6 +207,8 @@ def enqueue_assist(
                     int(context_result.pre_redaction_bytes),
                     now,
                     now,
+                    resolved_principal_id or None,
+                    str(originating_credential_id or "").strip() or None,
                 ),
             )
             if owns_conn:

@@ -92,6 +92,26 @@ _ATTRIBUTION_COLUMNS = (
     ("project_http_profiles", "updated_by_session_id", "updated_by_principal_id", "updated_by_credential_id"),
 )
 
+_BACKGROUND_PRINCIPAL_TABLES = (
+    "schedules",
+    "watchers",
+    "user_workflows",
+    "notification_channels",
+    "project_digest_settings",
+    "evidence_packages",
+    "project_reports",
+    "workflow_executions",
+    "notification_events",
+    "ai_run_assists",
+    "zap_connector_jobs",
+    "oast_correlations",
+)
+
+_BACKGROUND_CHILD_TABLES = (
+    ("schedule_fires", "schedule_id", "schedules"),
+    ("watcher_fires", "watcher_id", "watchers"),
+)
+
 
 def _cutover_schema_is_active(conn: Any, backend: DatabaseBackend) -> bool:
     if backend == DatabaseBackend.SQLITE:
@@ -107,6 +127,13 @@ def _cutover_schema_is_active(conn: Any, backend: DatabaseBackend) -> bool:
     return conn.execute(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
         ("0080",),
+    ).fetchone() is not None
+
+
+def _background_authorization_schema_is_active(conn: Any) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM schema_migrations WHERE version = ?",
+        ("0081",),
     ).fetchone() is not None
 
 
@@ -136,6 +163,32 @@ def attach_anonymous_ownership(
         (workspace_id, anonymous_id),
     )
     counts["secrets"] = max(0, int(cursor.rowcount or 0))
+
+    if _background_authorization_schema_is_active(conn):
+        # Anonymous work predates credentials, so attach it to the new
+        # principal without claiming that the upgrade credential created or
+        # last changed it. Those credential-attribution columns remain NULL.
+        for table_name in _BACKGROUND_PRINCIPAL_TABLES:
+            conn.execute(
+                f"UPDATE {table_name} SET principal_id = ? "  # nosec B608 - fixed internal table tuple
+                "WHERE personal_workspace_id = ? AND principal_id IS NULL",
+                (principal_id, workspace_id),
+            )
+        conn.execute(
+            "UPDATE secrets SET principal_id = ? "
+            "WHERE owner_id = ? AND principal_id IS NULL",
+            (principal_id, workspace_id),
+        )
+        for child_table, parent_key, parent_table in _BACKGROUND_CHILD_TABLES:
+            conn.execute(
+                f"UPDATE {child_table} SET principal_id = ("  # nosec B608 - fixed internal identifier tuple
+                f"SELECT {parent_table}.principal_id FROM {parent_table} "
+                f"WHERE {parent_table}.id = {child_table}.{parent_key}"
+                ") WHERE principal_id IS NULL AND EXISTS ("
+                f"SELECT 1 FROM {parent_table} WHERE {parent_table}.id = {child_table}.{parent_key} "
+                f"AND {parent_table}.personal_workspace_id = ?)",
+                (workspace_id,),
+            )
 
     for table_name, legacy_column, principal_column, credential_column in _ATTRIBUTION_COLUMNS:
         conn.execute(

@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "4096500fa94c0930ae62c565b1fb8f39291b8520aa2b9de5a1544afdcb56af59"
+_LOG_EVENT_INVENTORY_HASH = "e2f0c80b96c3bff2c9f385ed530cc20736102cdb9c75dfc135584b63aef5b265"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
