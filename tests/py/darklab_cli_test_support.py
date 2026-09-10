@@ -515,7 +515,7 @@ def install_cli_harness(monkeypatch):
                 return {"finding": {"id": "fnd_cli", "status": "new", "severity": "medium", "title": "Open port"}}
             raise cli_main.DarklabCliError("not_found: missing")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
     return SimpleNamespace(
         cli_main=cli_main,

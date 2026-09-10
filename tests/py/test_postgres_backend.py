@@ -22,7 +22,12 @@ import pytest
 
 import config
 from conftest import build_test_config
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import (
+    anonymous_session_id,
+    api_identity_headers,
+    browser_identity_headers,
+    principal_identity,
+)
 import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
@@ -3933,9 +3938,6 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    owner_token = "tok_pg_team_owner_" + uuid.uuid4().hex
-    operator_token = "tok_pg_team_operator_" + uuid.uuid4().hex
-    outsider_token = "tok_pg_team_outsider_" + uuid.uuid4().hex
     created = "2026-05-29T00:00:00+00:00"
 
     @contextmanager
@@ -3944,20 +3946,15 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
-    for token in (owner_token, operator_token, outsider_token):
-        register_durable_session_token(token)
+    owner_token = principal_identity("postgres-team-owner-" + uuid.uuid4().hex).owner_id
+    operator_token = principal_identity("postgres-team-operator-" + uuid.uuid4().hex).owner_id
+    outsider_token = principal_identity("postgres-team-outsider-" + uuid.uuid4().hex).owner_id
 
     def api_headers(token: str, *, team_id: str = "") -> dict[str, str]:
-        headers = {"Authorization": f"Bearer {token}"}
-        if team_id:
-            headers["X-Team-ID"] = team_id
-        return headers
+        return api_identity_headers(token, team_id=team_id)
 
     def browser_headers(token: str, *, team_id: str = "") -> dict[str, str]:
-        headers = {"X-Session-ID": token}
-        if team_id:
-            headers["X-Team-ID"] = team_id
-        return headers
+        return browser_identity_headers(token, team_id=team_id)
 
     client = app.test_client()
     team_resp = client.post(
@@ -5849,14 +5846,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
 
     client = app.test_client()
-    bootstrap_session_id = str(uuid.uuid4())
-    token_resp = client.get(
-        "/session/token/generate",
-        headers={"X-Session-ID": bootstrap_session_id},
-    )
-    session_id = json.loads(token_resp.data)["session_token"]
-    browser_headers = {"X-Session-ID": session_id}
-    api_headers = {"Authorization": f"Bearer {session_id}"}
+    identity = principal_identity("postgres-project-routes-" + uuid.uuid4().hex)
+    session_id = identity.owner_id
+    browser_headers = identity.browser_headers()
+    api_headers = identity.api_headers()
     command_catalog_resp = client.get("/commands/catalog", headers=browser_headers)
     api_risk_feeds_resp = client.get("/api/v1/risk/feeds", headers=api_headers)
     create_resp = client.post(
@@ -6293,7 +6286,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         (run_id,),
     ).fetchone()["n"]
 
-    assert token_resp.status_code == 200
+    assert identity.principal_id.startswith("prn_")
     assert command_catalog_resp.status_code == 200
     assert {
         item["source"] for item in json.loads(command_catalog_resp.data)["cve_risk_feeds"]
@@ -6472,14 +6465,9 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
     monkeypatch.setattr(http_profile_runtime, "resolve_data_dir", lambda _cfg: str(tmp_path))
 
     client = app.test_client()
-    bootstrap_session_id = str(uuid.uuid4())
-    token_response = client.get(
-        "/session/token/generate",
-        headers={"X-Session-ID": bootstrap_session_id},
-    )
-    session_id = token_response.get_json()["session_token"]
-    browser_headers = {"X-Session-ID": session_id}
-    api_headers = {"Authorization": f"Bearer {session_id}"}
+    identity = principal_identity("postgres-probe-launch-" + uuid.uuid4().hex)
+    browser_headers = identity.browser_headers()
+    api_headers = identity.api_headers()
     project = client.post(
         "/projects",
         headers=browser_headers,

@@ -99,7 +99,10 @@ async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_
   )
 }
 
-test.describe('session-token lifecycle', () => {
+// The shell command was retired by the v3 principal-access interface work. The
+// temporary browser adapter remains covered by Python route tests until the
+// clean-cutover branch removes it and this legacy suite entirely.
+test.describe.skip('legacy session-token browser lifecycle pending clean cutover', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await page.evaluate(() => localStorage.clear())

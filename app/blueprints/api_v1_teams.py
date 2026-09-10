@@ -14,7 +14,7 @@ from blueprints import api_v1 as api_routes
 @api_routes.limiter.limit(api_routes._api_team_read_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_list():
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     return jsonify({"teams": api_routes.team_api.list_teams_for_api(session_id)})
 
 
@@ -22,7 +22,7 @@ def api_teams_list():
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_create():
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     try:
         team, recovery, detail = api_routes.team_api.create_team_for_api(
@@ -48,7 +48,7 @@ def api_teams_create():
 @api_routes.limiter.limit(api_routes._api_team_read_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_detail(team_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     actor = None
     try:
         actor, detail = api_routes.team_api.team_detail_for_api(team_id, session_id)
@@ -61,7 +61,7 @@ def api_teams_detail(team_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_update(team_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     actor = None
     try:
@@ -107,7 +107,7 @@ def api_teams_update(team_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_invites_create(team_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     actor = None
     try:
@@ -148,7 +148,7 @@ def api_teams_invites_create(team_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_invites_revoke(team_id: str, invite_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     actor = None
     try:
         actor = api_routes.team_api.team_member_for_api(team_id, session_id)
@@ -182,7 +182,7 @@ def api_teams_invites_revoke(team_id: str, invite_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_join():
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     try:
         member, detail = api_routes.team_api.redeem_team_invite_for_api(
@@ -207,7 +207,7 @@ def api_teams_join():
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_members_update(team_id: str, member_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     actor = None
     try:
@@ -248,7 +248,7 @@ def api_teams_members_update(team_id: str, member_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_members_remove(team_id: str, member_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     actor = None
     try:
         actor, target = api_routes.team_api.team_member_and_target_for_api(team_id, session_id, member_id)
@@ -285,7 +285,7 @@ def api_teams_members_remove(team_id: str, member_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_leave(team_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     actor = None
     try:
         actor = api_routes.team_api.team_member_for_api(team_id, session_id)
@@ -304,7 +304,7 @@ def api_teams_leave(team_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_recovery_rotate(team_id: str):
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     actor = None
     try:
         actor = api_routes.team_api.team_member_for_api(team_id, session_id)
@@ -336,7 +336,7 @@ def api_teams_recovery_rotate(team_id: str):
 @api_routes.limiter.limit(api_routes._api_team_write_route_limit, key_func=api_routes._api_team_rate_limit_key)
 @api_routes.require_api_auth
 def api_teams_recovery_redeem():
-    session_id = api_routes._require_session_id()
+    session_id = api_routes._require_principal_id()
     data = api_routes._json_body()
     try:
         member, detail = api_routes.team_api.redeem_team_recovery_for_api(

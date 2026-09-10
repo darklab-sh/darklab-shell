@@ -11,6 +11,7 @@ import threading
 import urllib.request
 import uuid
 from dataclasses import fields
+from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,15 +19,17 @@ from typing import Any
 from unittest import mock
 
 import app as shell_app_module
+import pytest
 from conftest import make_test_app as _test_app
 from conftest import reusable_test_app
 import config
 import core.process as process
 from core.database import DB_PATH
-from core.helpers import get_log_session_id
 from extensions import limiter
 from project_assessment_route_contracts import registered_assessment_mutations
 from services.scheduler.models import CADENCE_PRESETS, Schedule
+from services.auth import storage as principal_storage
+from services.auth.contracts import PAT_SCOPES
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
 from werkzeug.serving import make_server
 
@@ -105,18 +108,71 @@ class _LiveCliServer:
         self._thread.join(timeout=5)
 
 
-def _live_session_token(base_url: str) -> str:
-    with urllib.request.urlopen(f"{base_url}/session/token/generate", timeout=5) as resp:  # nosec
-        payload = json.loads(resp.read().decode("utf-8"))
-    return str(payload["session_token"])
+class _ApiIdentity(str):
+    def __new__(
+        cls,
+        workspace_id: str,
+        *,
+        portable_secret: str,
+        pat_secret: str,
+        principal_id: str,
+        pat_id: str,
+    ):
+        value = str.__new__(cls, workspace_id)
+        value.portable_secret = portable_secret
+        value.pat_secret = pat_secret
+        value.principal_id = principal_id
+        value.pat_id = pat_id
+        return value
+
+
+def _live_pat(base_url: str) -> str:
+    anonymous_id = str(uuid.uuid4())
+    request = urllib.request.Request(
+        f"{base_url}/auth/principals",
+        data=b'{}',
+        headers={"Content-Type": "application/json", "X-Darklab-Anonymous-ID": anonymous_id},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as resp:  # nosec
+        portable = json.loads(resp.read().decode("utf-8"))["secret"]
+    request = urllib.request.Request(
+        f"{base_url}/auth/credentials",
+        data=json.dumps({"type": "pat", "scopes": sorted(PAT_SCOPES)}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-Darklab-Credential": portable},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as resp:  # nosec
+        return str(json.loads(resp.read().decode("utf-8"))["secret"])
 
 
 def _token(client):
-    return json.loads(client.get("/session/token/generate").data)["session_token"]
+    del client
+    bundle = principal_storage.create_principal_with_credential(anonymous_id=str(uuid.uuid4()))
+    pat = principal_storage.issue_credential(
+        bundle.principal.id,
+        credential_type="pat",
+        scopes=PAT_SCOPES,
+        created_by_credential_id=bundle.credential.metadata.id,
+    )
+    return _ApiIdentity(
+        bundle.workspace.id,
+        portable_secret=bundle.credential.secret,
+        pat_secret=pat.secret,
+        principal_id=bundle.principal.id,
+        pat_id=pat.metadata.id,
+    )
 
 
 def _headers(token):
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {token.pat_secret}"}
+
+
+def _browser_headers(identity, team_id=""):
+    headers = {"X-Darklab-Credential": identity.portable_secret}
+    if team_id:
+        headers["X-Team-ID"] = team_id
+    return headers
 
 
 def _seed_run(
@@ -187,7 +243,7 @@ def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict
 
 
 def _create_project(client, token, *, name="API Project"):
-    resp = client.post("/projects", json={"name": name}, headers={"X-Session-ID": token})
+    resp = client.post("/projects", json={"name": name}, headers=_browser_headers(token))
     assert resp.status_code == 201
     return json.loads(resp.data)["project"]
 
@@ -464,24 +520,113 @@ def test_api_v1_rejects_missing_and_anonymous_auth(
     anonymous = anonymous_client.get("/api/v1/whoami")
 
     assert missing.status_code == 401
-    assert json.loads(missing.data)["error"]["code"] == "missing_token"
+    assert json.loads(missing.data)["error"]["code"] == "missing_pat"
     assert anonymous.status_code == 401
-    assert json.loads(anonymous.data)["error"]["code"] == "invalid_token"
+    assert json.loads(anonymous.data)["error"]["code"] == "pat_required"
 
 
-def test_api_v1_rejects_revoked_token():
+def test_api_v1_pat_authentication_states_fail_closed():
+    client = get_client()
+    unknown_source = _token(client)
+    unknown_secret = unknown_source.pat_secret.replace(
+        unknown_source.pat_id,
+        "pat_" + "f" * 32,
+    )
+
+    malformed = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": "Bearer not-a-darklab-pat"},
+    )
+    unknown = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": f"Bearer {unknown_secret}"},
+    )
+
+    revoked_bundle = principal_storage.create_principal_with_credential(anonymous_id=str(uuid.uuid4()))
+    revoked_pat = principal_storage.issue_credential(
+        revoked_bundle.principal.id,
+        credential_type="pat",
+        scopes={"identity:read"},
+        created_by_credential_id=revoked_bundle.credential.metadata.id,
+    )
+    principal_storage.revoke_credential(revoked_bundle.principal.id, revoked_pat.metadata.id)
+    revoked = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": f"Bearer {revoked_pat.secret}"},
+    )
+
+    old_now = datetime.now(timezone.utc) - timedelta(days=10)
+    expired_bundle = principal_storage.create_principal_with_credential(anonymous_id=str(uuid.uuid4()))
+    expired_pat = principal_storage.issue_credential(
+        expired_bundle.principal.id,
+        credential_type="pat",
+        scopes={"identity:read"},
+        created_by_credential_id=expired_bundle.credential.metadata.id,
+        expires_at=old_now + timedelta(days=2),
+        now=old_now,
+    )
+    expired = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": f"Bearer {expired_pat.secret}"},
+    )
+
+    disabled_bundle = principal_storage.create_principal_with_credential(anonymous_id=str(uuid.uuid4()))
+    disabled_pat = principal_storage.issue_credential(
+        disabled_bundle.principal.id,
+        credential_type="pat",
+        scopes={"identity:read"},
+        created_by_credential_id=disabled_bundle.credential.metadata.id,
+    )
+    principal_storage.disable_principal(disabled_bundle.principal.id, reason="security response")
+    disabled = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": f"Bearer {disabled_pat.secret}"},
+    )
+
+    under_scoped_bundle = principal_storage.create_principal_with_credential(anonymous_id=str(uuid.uuid4()))
+    under_scoped_pat = principal_storage.issue_credential(
+        under_scoped_bundle.principal.id,
+        credential_type="pat",
+        scopes={"history:read"},
+        created_by_credential_id=under_scoped_bundle.credential.metadata.id,
+    )
+    under_scoped = client.get(
+        "/api/v1/whoami",
+        headers={"Authorization": f"Bearer {under_scoped_pat.secret}"},
+    )
+
+    legacy_header = client.get(
+        "/api/v1/whoami",
+        headers={"X-Session-ID": str(uuid.uuid4())},
+    )
+    portable_header = client.get(
+        "/api/v1/whoami",
+        headers={"X-Darklab-Credential": revoked_bundle.credential.secret},
+    )
+
+    assert (malformed.status_code, malformed.get_json()["error"]["code"]) == (401, "malformed_credential")
+    assert (unknown.status_code, unknown.get_json()["error"]["code"]) == (401, "unknown_credential")
+    assert (revoked.status_code, revoked.get_json()["error"]["code"]) == (401, "revoked_credential")
+    assert (expired.status_code, expired.get_json()["error"]["code"]) == (401, "expired_credential")
+    assert (disabled.status_code, disabled.get_json()["error"]["code"]) == (401, "disabled_principal")
+    assert (under_scoped.status_code, under_scoped.get_json()["error"]["code"]) == (403, "insufficient_scope")
+    assert (legacy_header.status_code, legacy_header.get_json()["error"]["code"]) == (401, "pat_required")
+    assert (portable_header.status_code, portable_header.get_json()["error"]["code"]) == (401, "pat_required")
+
+
+def test_api_v1_rejects_revoked_pat():
     client = get_client()
     token = _token(client)
 
-    revoke = client.post("/session/token/revoke", json={"token": token}, headers={"X-Session-ID": token})
+    revoke = client.post("/api/v1/credentials/current/revoke", json={}, headers=_headers(token))
     resp = client.get("/api/v1/whoami", headers=_headers(token))
 
     assert revoke.status_code == 200
     assert resp.status_code == 401
-    assert json.loads(resp.data)["error"]["code"] == "revoked_token"
+    assert json.loads(resp.data)["error"]["code"] == "revoked_credential"
 
 
-def test_api_v1_whoami_accepts_bearer_token():
+def test_api_v1_whoami_accepts_scoped_pat():
     from services.api_v1.auth import current_api_session
 
     client = get_client()
@@ -491,12 +636,20 @@ def test_api_v1_whoami_accepts_bearer_token():
     data = json.loads(resp.data)
 
     assert resp.status_code == 200
-    assert data["token_created"]
+    assert data["credential"]["created_at"]
+    assert data["principal_id"] == token.principal_id
+    assert data["personal_workspace_id"] == token
     assert data["last_seen_at"]
     assert "session_id" not in data
     assert "tok_" not in json.dumps(data)
-    assert "tok_" not in json.dumps(data["token_created"])
-    assert "tok_" not in json.dumps(data["last_seen_at"])
+
+    principal = client.get("/api/v1/principal", headers=_headers(token))
+    credentials = client.get("/api/v1/credentials", headers=_headers(token))
+    assert principal.status_code == 200
+    assert principal.get_json()["principal"]["id"] == token.principal_id
+    assert credentials.status_code == 200
+    assert [item["id"] for item in credentials.get_json()["credentials"]] == [token.pat_id]
+    assert token.pat_secret not in credentials.get_data(as_text=True)
 
     with _test_app().test_request_context("/api/v1/whoami", headers=_headers(token)):
         try:
@@ -741,7 +894,7 @@ def test_api_v1_team_routes_use_team_rate_limit_per_token(monkeypatch):
     assert other.status_code == 200
 
 
-def test_api_v1_rate_limit_key_does_not_expose_legacy_bearer_secret():
+def test_api_v1_rate_limit_key_uses_safe_pat_lookup_id():
     from services.api_v1.auth import api_rate_limit_key
 
     flask_app = _test_app()
@@ -756,7 +909,8 @@ def test_api_v1_rate_limit_key_does_not_expose_legacy_bearer_secret():
         key = api_rate_limit_key()
 
     assert token not in key
-    assert key.startswith("legacy:")
+    assert key.startswith("pat_")
+    assert token.pat_secret not in key
     assert key.endswith(f":{remote_addr}")
 
 
@@ -855,7 +1009,7 @@ def test_api_v1_history_honors_team_scope_header(monkeypatch):
     outsider_token = _token(client)
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"name": "API Scope Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
@@ -964,24 +1118,24 @@ def test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links(monkeyp
     viewer_token = _token(client)
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"name": "API Capability Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
     operator_invite = client.post(
         f"/session/teams/{team_id}/invites",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"role": "operator", "label": "API capability operator"},
     )
     viewer_invite = client.post(
         f"/session/teams/{team_id}/invites",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"role": "viewer", "label": "API capability viewer"},
     )
     assert (
         client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": operator_token},
+            headers=_browser_headers(operator_token),
             json={"code": json.loads(operator_invite.data)["invite"]["code"], "display_name": "Operator"},
         ).status_code
         == 201
@@ -989,7 +1143,7 @@ def test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links(monkeyp
     assert (
         client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": viewer_token},
+            headers=_browser_headers(viewer_token),
             json={"code": json.loads(viewer_invite.data)["invite"]["code"], "display_name": "Viewer"},
         ).status_code
         == 201
@@ -997,7 +1151,7 @@ def test_api_v1_team_viewers_cannot_run_commands_or_mutate_project_links(monkeyp
 
     project_resp = client.post(
         "/projects",
-        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        headers=_browser_headers(owner_token, team_id),
         json={"name": "API Capability Review"},
     )
     project_id = json.loads(project_resp.data)["project"]["id"]
@@ -1346,23 +1500,23 @@ def test_api_v1_team_project_readers_include_cross_member_entities_and_findings(
     operator_token = _token(client)
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"name": "API Cross Project " + uuid.uuid4().hex[:8], "display_name": "API owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
     invite_resp = client.post(
         f"/session/teams/{team_id}/invites",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"role": "operator", "label": "API cross operator"},
     )
     join_resp = client.post(
         "/session/teams/join",
-        headers={"X-Session-ID": operator_token},
+        headers=_browser_headers(operator_token),
         json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API operator"},
     )
     project_resp = client.post(
         "/projects",
-        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        headers=_browser_headers(owner_token, team_id),
         json={"name": "API Cross Member Project"},
     )
     project_id = json.loads(project_resp.data)["project"]["id"]
@@ -1633,7 +1787,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     )
     browser_evidence_response = client.get(
         f"/runs/{run_id}/service-evidence?limit=1&offset=0",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     assessment_evidence_response = client.get(
         f"/api/v1/projects/{project['id']}/assessments/{assessment_id}",
@@ -1645,7 +1799,7 @@ def test_api_v1_project_assessments_cover_cycle_check_and_evidence_contracts():
     )
     cross_browser_evidence = client.get(
         f"/runs/{run_id}/service-evidence",
-        headers={"X-Session-ID": other_token},
+        headers=_browser_headers(other_token),
     )
     assert run_evidence_response.status_code == 200
     run_evidence = run_evidence_response.get_json()
@@ -1898,7 +2052,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     cross_scope_response = client.get(path, headers=_headers(other_token))
     browser_preview = client.get(
         path.removeprefix("/api/v1"),
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     assert preview_response.status_code == 200
     assert cross_scope_response.status_code == 404
@@ -2052,7 +2206,7 @@ def test_api_v1_project_finding_verification_actions_are_guarded_and_scoped():
     launch_log_fields = dict(launch_log.kwargs["extra"])
     assert launch_log_fields.pop("ip")
     assert launch_log_fields == {
-        "session": get_log_session_id(token),
+            "session": token.pat_id[:12] + "********",
         "team_id": "",
         "project_id": project["id"],
         "finding_id": finding_id,
@@ -2104,7 +2258,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     preview_response = client.get(path, headers=_headers(token))
     browser_preview = client.get(
         browser_path,
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     cross_scope = client.get(path, headers=_headers(other_token))
     assert preview_response.status_code == 200
@@ -2151,7 +2305,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     ):
         browser_launched_response = client.post(
             browser_path,
-            headers={"X-Session-ID": token},
+            headers=_browser_headers(token),
             json={"confirmed": True, "plan_digest": plan["plan_digest"]},
         )
 
@@ -2195,7 +2349,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     launch_fields = dict(launch_log.kwargs["extra"])
     assert launch_fields.pop("ip")
     assert launch_fields == {
-        "session": get_log_session_id(token),
+            "session": token.pat_id[:12] + "********",
         "team_id": "",
         "project_id": project["id"],
         "assessment_id": created["assessment"]["id"],
@@ -2267,7 +2421,7 @@ def test_api_v1_project_assessment_recommended_actions_are_guarded_and_scoped():
     ):
         failed_browser_launch = client.post(
             browser_path,
-            headers={"X-Session-ID": token},
+            headers=_browser_headers(token),
             json={"confirmed": True, "plan_digest": plan["plan_digest"]},
         )
     assert failed_browser_launch.status_code == 503
@@ -2294,7 +2448,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     secret_value = "protected-profile-value"
     stored = client.post(
         "/session/secrets",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"name": "ASSESSMENT_HTTP_TOKEN", "value": secret_value},
     )
     assert stored.status_code == 201
@@ -2550,7 +2704,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     )
     team_project_response = client.post(
         "/projects",
-        headers={"X-Session-ID": token, "X-Team-ID": team_id},
+        headers=_browser_headers(token, team_id),
         json={"name": "Revoked protected launch"},
     )
     assert team_project_response.status_code == 201
@@ -2564,7 +2718,7 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     team_check = next(item for item in team_assessment["checks"]["checks"] if item["check_key"] == "http_profile")
     team_secret = client.post(
         "/session/secrets",
-        headers={"X-Session-ID": token, "X-Team-ID": team_id},
+        headers=_browser_headers(token, team_id),
         json={"name": "TEAM_ASSESSMENT_TOKEN", "value": "team-protected-value"},
     )
     assert team_secret.status_code == 201
@@ -2598,12 +2752,10 @@ def test_api_v1_assessment_action_launch_uses_protected_http_profile_material(
     assert team_preview.status_code == 200
     assert "team-protected-value" not in team_preview.get_data(as_text=True)
 
-    from services.teams.storage import token_hash
-
     with sqlite3.connect(DB_PATH) as conn:
         admin_member_id = conn.execute(
-            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-            (team_id, token_hash(admin_token)),
+            "SELECT id FROM team_members WHERE team_id = ? AND principal_id = ?",
+            (team_id, admin_token.principal_id),
         ).fetchone()[0]
     demoted = client.patch(
         f"/api/v1/teams/{team_id}/members/{admin_member_id}",
@@ -2972,7 +3124,7 @@ def test_assessment_oast_preview_reservation_and_status_are_private_and_scoped(
         listed = client.get(correlation_path, headers=_headers(token))
         browser_listed = client.get(
             correlation_path.removeprefix("/api/v1"),
-            headers={"X-Session-ID": token},
+            headers=_browser_headers(token),
         )
 
     assert preview.status_code == 200
@@ -3316,7 +3468,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
 
     browser_preview = client.post(
         base.removeprefix("/api/v1") + "/zap-plan",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json=selection,
     )
     assert browser_preview.status_code == 200
@@ -3351,7 +3503,7 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     assert listed.get_json()["jobs"] == [job]
     browser_listed = client.get(
         base.removeprefix("/api/v1") + "/zap-jobs",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     assert browser_listed.status_code == 200
     assert browser_listed.get_json()["jobs"] == [job]
@@ -3384,14 +3536,14 @@ def test_assessment_zap_routes_review_queue_scope_and_cancel(
     browser_base = base.removeprefix("/api/v1")
     browser_queued = client.post(
         browser_base + "/zap-jobs",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={**selection, "confirmed": True, "plan_digest": plan["plan_digest"]},
     )
     assert browser_queued.status_code == 202
     browser_job = browser_queued.get_json()["job"]
     browser_canceled = client.delete(
         browser_base + f"/zap-jobs/{browser_job['id']}",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     assert browser_canceled.status_code == 200
     browser_cancel_record = next(
@@ -3512,7 +3664,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
         assert response.status_code == 201
     target_response = client.post(
         f"/projects/{project['id']}/targets",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"type": "domain", "value": "evidence.example"},
     )
     target_id = target_response.get_json()["target"]["id"]
@@ -3655,7 +3807,7 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
 
     package_response = client.post(
         f"/projects/{project['id']}/packages",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={
             "name": "Typed finding evidence",
             "selection": {"finding_ids": [finding_id]},
@@ -3746,12 +3898,12 @@ def test_api_v1_project_finding_evidence_is_typed_scoped_and_audited():
     assert repeated["verification_status"] == "needs_retest"
     assert "observed" in repeated["reason"]
     browser_route = f"/projects/{project['id']}/findings/{finding_id}/evidence"
-    browser_page = client.get(browser_route, headers={"X-Session-ID": token})
+    browser_page = client.get(browser_route, headers=_browser_headers(token))
     assert browser_page.status_code == 200
     assert browser_page.get_json() == evidence_page
     browser_duplicate = client.post(
         browser_route,
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"evidence_type": "run", "evidence_id": run_id},
     )
     assert browser_duplicate.status_code == 200
@@ -3866,8 +4018,6 @@ def test_api_v1_manual_findings_keep_stable_identity_and_owner_scope():
 
 
 def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context():
-    from services.teams.storage import token_hash
-
     client = get_client()
     owner_token = _token(client)
     viewer_token = _token(client)
@@ -3898,7 +4048,7 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     )
     project_response = client.post(
         "/projects",
-        headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+        headers=_browser_headers(owner_token, team_id),
         json={"name": "Team API Assessment Project"},
     )
     assert project_response.status_code == 201
@@ -3927,18 +4077,9 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     operator_headers = _team_headers(operator_token, team_id)
     admin_headers = _team_headers(admin_token, team_id)
     outsider_headers = _team_headers(outsider_token, team_id)
-    browser_viewer_headers = {
-        "X-Session-ID": viewer_token,
-        "X-Team-ID": team_id,
-    }
-    browser_operator_headers = {
-        "X-Session-ID": operator_token,
-        "X-Team-ID": team_id,
-    }
-    browser_outsider_headers = {
-        "X-Session-ID": outsider_token,
-        "X-Team-ID": team_id,
-    }
+    browser_viewer_headers = _browser_headers(viewer_token, team_id)
+    browser_operator_headers = _browser_headers(operator_token, team_id)
+    browser_outsider_headers = _browser_headers(outsider_token, team_id)
 
     created_response = client.post(
         f"/api/v1/projects/{project_id}/assessments",
@@ -4088,12 +4229,12 @@ def test_api_v1_project_assessments_enforce_team_capabilities_and_actor_context(
     actor = json.loads(operator_check_update.data)["check"]["state_actor"]
     with sqlite3.connect(DB_PATH) as conn:
         operator_member_id = conn.execute(
-            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-            (team_id, token_hash(operator_token)),
+            "SELECT id FROM team_members WHERE team_id = ? AND principal_id = ?",
+            (team_id, operator_token.principal_id),
         ).fetchone()[0]
         owner_member_id = conn.execute(
-            "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-            (team_id, token_hash(owner_token)),
+            "SELECT id FROM team_members WHERE team_id = ? AND principal_id = ?",
+            (team_id, owner_token.principal_id),
         ).fetchone()[0]
     assert actor == {"kind": "team_member", "member_id": operator_member_id}
     assert owner_evidence_write.get_json()["evidence"]["created_by_member_id"] == owner_member_id
@@ -4161,7 +4302,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     target = "api-http-profile.example.com"
     target_response = client.post(
         f"/projects/{project['id']}/targets",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"type": "domain", "value": target},
     )
     assert target_response.status_code == 201
@@ -4330,7 +4471,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     viewer_headers = _team_headers(team_viewer, team_id)
     team_project_response = client.post(
         "/projects",
-        headers={"X-Session-ID": team_owner, "X-Team-ID": team_id},
+        headers=_browser_headers(team_owner, team_id),
         json={"name": "Team HTTP Profiles"},
     )
     assert team_project_response.status_code == 201
@@ -4338,7 +4479,7 @@ def test_api_v1_project_http_profiles_are_scoped_redacted_and_reference_only(mon
     team_target = "team-http-profile.example.com"
     team_target_response = client.post(
         f"/projects/{team_project_id}/targets",
-        headers={"X-Session-ID": team_owner, "X-Team-ID": team_id},
+        headers=_browser_headers(team_owner, team_id),
         json={"type": "domain", "value": team_target},
     )
     assert team_target_response.status_code == 201
@@ -4549,8 +4690,8 @@ def test_api_v1_history_detail_output_and_cross_session_404():
         "load_run_output_events_for_run",
         side_effect=AssertionError("summary-backed history filters should not load transcript events"),
     ):
-        browser_entity_history = client.get("/history?q=entity_type:url", headers={"X-Session-ID": token})
-        browser_kind_history = client.get("/history?q=kind:error", headers={"X-Session-ID": token})
+        browser_entity_history = client.get("/history?q=entity_type:url", headers=_browser_headers(token))
+        browser_kind_history = client.get("/history?q=kind:error", headers=_browser_headers(token))
     invalid_range = client.get(f"/api/v1/runs/{run_id}/output?range=3-2", headers=_headers(token))
     cross_session = client.get(f"/api/v1/history/{run_id}", headers=_headers(other_token))
 
@@ -4783,18 +4924,18 @@ def test_api_v1_ai_assists_honor_team_scope(monkeypatch):
     viewer_token = _token(client)
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"name": "API AI Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
     invite_resp = client.post(
         f"/session/teams/{team_id}/invites",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"role": "viewer", "label": "API AI viewer"},
     )
     join_resp = client.post(
         "/session/teams/join",
-        headers={"X-Session-ID": viewer_token},
+        headers=_browser_headers(viewer_token),
         json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API viewer"},
     )
     run_id = _seed_run(
@@ -4871,7 +5012,7 @@ def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_pat
     other_token = _token(client)
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"name": "API Artifact Operators " + uuid.uuid4().hex[:8], "display_name": "Artifact owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
@@ -5016,7 +5157,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     )
     team_response = client.post(
         "/session/teams",
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
         json={"name": "API Lookup " + uuid.uuid4().hex[:8], "display_name": "Lookup owner"},
     )
     team_id = json.loads(team_response.data)["team"]["id"]
@@ -5046,7 +5187,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
             headers=_headers(token),
             json={"mode": "hostname", "value": private_lookup_value},
         )
-    api_private_lookup_value = "https://missing-api.example/private/path?token=api-super-secret#fragment"
+    api_private_lookup_value = "https://missing-api.example/private/path?pat=api-super-secret#fragment"
     protected_tables = (
         "entities",
         "project_links",
@@ -5194,7 +5335,7 @@ def test_api_v1_exact_atlas_lookup_is_authenticated_and_owner_scoped():
     assert rejected_warning.kwargs["extra"]["reason"] == "invalid_project"
     assert rejected_warning.kwargs["extra"]["project_id"] == foreign_project["id"]
     assert unauthenticated_response.status_code == 401
-    assert json.loads(unauthenticated_response.data)["error"]["code"] == "missing_token"
+    assert json.loads(unauthenticated_response.data)["error"]["code"] == "missing_pat"
 
 
 def test_api_v1_project_readers_are_token_scoped():
@@ -5311,7 +5452,7 @@ def test_api_v1_project_readers_are_token_scoped():
             "remediation": "Restrict the administrative service and require authentication.",
             "verification_status": "ready_to_verify",
         },
-        headers={"X-Session-ID": token},
+        headers=_browser_headers(token),
     )
     owner_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(token))
     owner_findings = client.get(
@@ -5711,9 +5852,9 @@ def test_api_v1_run_start_rejects_archived_project_link(monkeypatch):
     client = get_client()
     token = _token(client)
     monkeypatch.setitem(shell_app_module.CFG, "run_broker_require_redis", False)
-    project_resp = client.post("/projects", json={"name": "Archived API"}, headers={"X-Session-ID": token})
+    project_resp = client.post("/projects", json={"name": "Archived API"}, headers=_browser_headers(token))
     project = json.loads(project_resp.data)["project"]
-    client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers={"X-Session-ID": token})
+    client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers=_browser_headers(token))
 
     resp = client.post(
         "/api/v1/runs",
@@ -5980,7 +6121,7 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
         "info",
         lambda event, *args, **kwargs: audit_events.append((event, kwargs.get("extra", {}))),
     )
-    project_resp = client.post("/projects", json={"name": "API Project"}, headers={"X-Session-ID": token})
+    project_resp = client.post("/projects", json={"name": "API Project"}, headers=_browser_headers(token))
     project = json.loads(project_resp.data)["project"]
     run_id = "api_project_link_run_" + uuid.uuid4().hex[:8]
     route_run_id = _seed_run(token, command="echo route link", output="route link")
@@ -6014,7 +6155,7 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
     cross_link = client.post(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(other_token))
     route_unlink = client.delete(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
     route_unlink_again = client.delete(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
-    client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers={"X-Session-ID": token})
+    client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers=_browser_headers(token))
     archived_link = client.post(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
 
     assert route_link.status_code == 201
@@ -6028,7 +6169,7 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
         "API_PROJECT_RUN_LINKED",
         {
             "ip": "127.0.0.1",
-            "session": token[:8] + "********",
+            "session": token.pat_id[:12] + "********",
             "run_id": route_run_id,
             "project_id": project["id"],
             "link_source": "manual",
@@ -6038,7 +6179,7 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
         "API_PROJECT_RUN_UNLINKED",
         {
             "ip": "127.0.0.1",
-            "session": token[:8] + "********",
+            "session": token.pat_id[:12] + "********",
             "run_id": route_run_id,
             "project_id": project["id"],
         },
@@ -6480,15 +6621,12 @@ def test_api_v1_openapi_route_matches_checked_in_contract():
 
 def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkeypatch):
     from services.notifications.models import ChannelResult
-    from services.secrets import vault as secrets_vault
     import services.notifications.channels.webhook as webhook_channel
 
+    monkeypatch.setitem(config.CFG, "app_name", "darklab_shell")
     client = get_client()
     token = _token(client)
     sent_payloads = []
-    monkeypatch.setitem(config.CFG, "app_name", "darklab_shell")
-    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-    secrets_vault.reset_master_key_cache_for_tests()
 
     def fake_post_json(_url, payload, _config, *, label, **_kwargs):
         sent_payloads.append((label, payload))
@@ -6571,14 +6709,10 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     assert deleted == {"removed": True}
 
 
-def test_api_v1_notification_channels_are_token_scoped(monkeypatch):
-    from services.secrets import vault as secrets_vault
-
+def test_api_v1_notification_channels_are_token_scoped():
     client = get_client()
     token = _token(client)
     other_token = _token(client)
-    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-    secrets_vault.reset_master_key_cache_for_tests()
     create = client.post(
         "/api/v1/notification-channels",
         headers=_headers(token),
@@ -6594,30 +6728,27 @@ def test_api_v1_notification_channels_are_token_scoped(monkeypatch):
     assert json.loads(other_delete.data)["error"]["code"] == "not_found"
 
 
-def test_api_v1_notification_channels_honor_team_scope(monkeypatch):
+def test_api_v1_notification_channels_honor_team_scope():
     from services.notifications import dispatcher
     from services.notifications.models import TRIGGER_RUN_COMPLETE
-    from services.secrets import vault as secrets_vault
 
     client = get_client()
     owner_token = _token(client)
     viewer_token = _token(client)
-    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-    secrets_vault.reset_master_key_cache_for_tests()
     team_resp = client.post(
         "/session/teams",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"name": "API Notification Operators " + uuid.uuid4().hex[:8], "display_name": "API owner"},
     )
     team_id = json.loads(team_resp.data)["team"]["id"]
     invite_resp = client.post(
         f"/session/teams/{team_id}/invites",
-        headers={"X-Session-ID": owner_token},
+        headers=_browser_headers(owner_token),
         json={"role": "viewer", "label": "API notification viewer"},
     )
     join_resp = client.post(
         "/session/teams/join",
-        headers={"X-Session-ID": viewer_token},
+        headers=_browser_headers(viewer_token),
         json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "API viewer"},
     )
     create_resp = client.post(
@@ -6674,7 +6805,7 @@ def test_api_v1_notification_channel_rejections_are_logged():
         "API_NOTIFICATION_CHANNEL_REJECTED",
         extra={
             "ip": "127.0.0.1",
-            "session": "tok_" + token[4:8] + "********",
+                "session": token.pat_id[:12] + "********",
             "code": "invalid_kind",
             "http_status": 400,
             "route": "/api/v1/notification-channels",
@@ -6752,7 +6883,7 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
                 return {"removed": True}
             raise cli_main.DarklabCliError("not_found: missing")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert "--secret " not in cli_main._parser()._subparsers._group_actions[0].choices["notify"].format_help()
@@ -6928,7 +7059,7 @@ def test_darklab_cli_team_commands_manage_api_teams(monkeypatch, capsys, tmp_pat
                 return {"removed": True}
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
@@ -7033,7 +7164,7 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
                 return {"removed": True}
             raise cli_main.DarklabCliError("not_found: missing")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert (
@@ -7207,7 +7338,7 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                 return {"removed": True}
             raise cli_main.DarklabCliError("not_found: missing")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert (
@@ -7452,6 +7583,18 @@ def test_api_v1_openapi_contract_describes_public_shapes():
 
     spec = openapi_spec()
     schemas = spec["components"]["schemas"]
+    assert set(spec["components"]["x-pat-scopes"]) == set(PAT_SCOPES)
+    protected_operations = [
+        operation
+        for path_item in spec["paths"].values()
+        for operation in path_item.values()
+        if isinstance(operation, dict) and operation.get("security") != []
+    ]
+    declared_route_scopes = {
+        operation["x-required-pat-scope"] for operation in protected_operations
+    }
+    assert declared_route_scopes == set(PAT_SCOPES) - {"secrets:manage"}
+    assert "without reading stored values" in spec["components"]["x-pat-scopes"]["secrets:manage"]
     assert {
         "ActiveRunList",
         "ApiError",
@@ -7793,12 +7936,13 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["NotificationEventPage"]["properties"]["events"]["items"] == {"$ref": "#/components/schemas/NotificationEvent"}
     notification_event_params = {param["name"] for param in spec["paths"]["/notification-events"]["get"]["parameters"]}
     assert {"channel_id", "trigger", "status", "limit", "offset"}.issubset(notification_event_params)
-    assert set(spec["paths"]["/runs"]["post"]["responses"]) == {"202", "400", "401", "409", "429", "503"}
+    assert set(spec["paths"]["/runs"]["post"]["responses"]) == {"202", "400", "401", "403", "409", "429", "503"}
     for path, operations in spec["paths"].items():
         for operation in operations.values():
             assert "429" in operation["responses"]
             if path not in {"/health", "/openapi.json"}:
                 assert "401" in operation["responses"]
+                assert "403" in operation["responses"]
 
 
 def test_api_v1_openapi_contract_describes_project_assessments():
@@ -8253,30 +8397,26 @@ def test_api_v1_openapi_contract_describes_manual_finding_mutations():
     assert "manual_updated_by_session_id" not in manual_contract
 
 
-def test_api_v1_whoami_reports_request_time_without_repeating_database_write(monkeypatch):
-    import services.api_v1.auth as api_auth
-
+def test_api_v1_whoami_reports_bounded_credential_last_used_updates():
     client = get_client()
     token = _token(client)
 
-    monkeypatch.setattr(api_auth, "_now", lambda: "2026-05-19 01:00:00")
     first = json.loads(client.get("/api/v1/whoami", headers=_headers(token)).data)
     with sqlite3.connect(DB_PATH) as conn:
         first_stored = conn.execute(
-            "SELECT last_seen_at FROM session_tokens WHERE token = ?",
-            (token,),
+            "SELECT last_used_at FROM credentials WHERE id = ?",
+            (token.pat_id,),
         ).fetchone()[0]
-    monkeypatch.setattr(api_auth, "_now", lambda: "2026-05-19 01:00:01")
     second = json.loads(client.get("/api/v1/whoami", headers=_headers(token)).data)
     with sqlite3.connect(DB_PATH) as conn:
         second_stored = conn.execute(
-            "SELECT last_seen_at FROM session_tokens WHERE token = ?",
-            (token,),
+            "SELECT last_used_at FROM credentials WHERE id = ?",
+            (token.pat_id,),
         ).fetchone()[0]
 
-    assert first["last_seen_at"] == "2026-05-19 01:00:00"
-    assert second["last_seen_at"] == "2026-05-19 01:00:01"
     assert first_stored
+    assert first["last_seen_at"] == first_stored
+    assert second["last_seen_at"] == first_stored
     assert second_stored == first_stored
 
 
@@ -8298,15 +8438,75 @@ def test_darklab_cli_config_flags_win_over_environment(monkeypatch):
     load_config = import_module("darklab_cli.client").load_config
 
     monkeypatch.setenv("DARKLAB_API_URL", "http://env.example")
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_env")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_env_secret")
     monkeypatch.setenv("DARKLAB_TEAM", "team_env")
 
-    config = load_config(Namespace(api_url="http://flag.example/", token="tok_flag", team="team_flag", timeout=2))
+    config = load_config(Namespace(api_url="http://flag.example/", pat="dlp_v1_pat_flag_secret", team="team_flag", timeout=2))
 
     assert config.api_url == "http://flag.example"
-    assert config.token == "tok_flag"
+    assert config.pat == "dlp_v1_pat_flag_secret"
     assert config.team == "team_flag"
     assert config.timeout == 2
+
+
+def test_darklab_cli_credential_commands_use_pat_only_contract(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls: list[tuple[str, str, dict | None]] = []
+
+    class FakeClient:
+        def __init__(self, config):
+            assert config.pat == "dlp_v1_pat_cli_secret"
+
+        def request(self, method, path, *, body=None, **_kwargs):
+            calls.append((method, path, body))
+            if path in {"/whoami", "/principal"}:
+                return {
+                    "principal": {"id": "prn_cli", "status": "active"},
+                    "credential": {"id": "pat_cli", "credential_type": "pat"},
+                }
+            if path == "/credentials":
+                return {
+                    "credentials": [{
+                        "id": "pat_cli",
+                        "credential_type": "pat",
+                        "label": "Automation",
+                        "expires_at": "2026-12-01T00:00:00+00:00",
+                        "revoked_at": None,
+                    }]
+                }
+            if path == "/credentials/current/revoke":
+                assert body == {"reason": "retired device"}
+                return {"credential": {"id": "pat_cli", "revoked_at": "2026-09-09T00:00:00+00:00"}}
+            raise AssertionError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
+    monkeypatch.delenv("DARKLAB_TOKEN", raising=False)
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["whoami", "--format", "json"]) == 0
+    assert "prn_cli" in capsys.readouterr().out
+    assert cli_main.main(["credential", "status", "--format", "json"]) == 0
+    assert "pat_cli" in capsys.readouterr().out
+    assert cli_main.main(["credential", "list", "--format", "json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["credentials"][0]["label"] == "Automation"
+    assert cli_main.main([
+        "credential",
+        "revoke",
+        "--reason",
+        "retired device",
+        "--format",
+        "json",
+    ]) == 0
+    assert "2026-09-09" in capsys.readouterr().out
+    assert calls == [
+        ("GET", "/whoami", None),
+        ("GET", "/principal", None),
+        ("GET", "/credentials", None),
+        ("POST", "/credentials/current/revoke", {"reason": "retired device"}),
+    ]
+    with pytest.raises(SystemExit):
+        cli_main._parser().parse_args(["--token", "tok_legacy", "whoami"])
 
 
 def test_darklab_cli_team_member_update_requires_a_change(monkeypatch, capsys):
@@ -8319,7 +8519,7 @@ def test_darklab_cli_team_member_update_requires_a_change(monkeypatch, capsys):
         def request(self, *_args, **_kwargs):
             raise AssertionError("CLI should reject empty member updates before making a request")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert cli_main.main(["team", "member", "update", "team_cli", "tmem_cli"]) == 1
@@ -8346,7 +8546,7 @@ def test_darklab_cli_team_mutation_errors_surface(monkeypatch, capsys):
                 raise cli_main.DarklabCliError(message)
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     cases = (
@@ -8388,7 +8588,7 @@ def test_darklab_cli_team_json_and_ndjson_shapes_are_stable(monkeypatch, capsys)
                 return detail
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert cli_main.main(["team", "list", "--format", "ndjson"]) == 0
@@ -8431,7 +8631,7 @@ def test_darklab_cli_applies_team_scope_to_non_team_commands(monkeypatch, capsys
                 return {"ok": True, "assessment": {"id": "asmt_team"}}
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
@@ -8500,6 +8700,15 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
     DarklabCliError = client_module.DarklabCliError
     DarklabConfig = client_module.DarklabConfig
     seen = {}
+    authentication_failures = {
+        "missing_pat": 401,
+        "malformed_credential": 401,
+        "unknown_credential": 401,
+        "expired_credential": 401,
+        "revoked_credential": 401,
+        "disabled_principal": 401,
+        "insufficient_scope": 403,
+    }
 
     class FakeResponse:
         headers = {"Content-Type": "application/json"}
@@ -8527,13 +8736,28 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
                 Message(),
                 io.BytesIO(b'{"ok":false,"updated":false,"conflict":"stale_revision","current_revision":3}'),
             )
+        for code, status in authentication_failures.items():
+            if req.full_url.endswith(f"/auth-failure/{code}"):
+                payload = json.dumps({
+                    "error": {
+                        "code": code,
+                        "message": f"contract response for {code}",
+                    },
+                }).encode("utf-8")
+                raise urllib.error.HTTPError(
+                    req.full_url,
+                    status,
+                    "Authentication failed",
+                    Message(),
+                    io.BytesIO(payload),
+                )
         return FakeResponse()
 
     monkeypatch.setattr(client_module.urllib.request, "urlopen", fake_urlopen)
-    client = DarklabClient(DarklabConfig("http://example.test", "tok_cli", 2, team="team_cli"))
+    client = DarklabClient(DarklabConfig("http://example.test", "dlp_v1_pat_cli_secret", 2, team="team_cli"))
 
     assert client.request("GET", "/whoami") == {"ok": True}
-    assert seen == {"authorization": "Bearer tok_cli", "team": "team_cli", "timeout": 2}
+    assert seen == {"authorization": "Bearer dlp_v1_pat_cli_secret", "team": "team_cli", "timeout": 2}
     try:
         client.request("GET", "/missing")
     except DarklabCliError as exc:
@@ -8558,6 +8782,15 @@ def test_darklab_cli_client_sends_bearer_header_and_formats_http_errors(monkeypa
         }
     else:
         raise AssertionError("expected mutation conflict to fail")
+    for code, status in authentication_failures.items():
+        try:
+            client.request("GET", f"/auth-failure/{code}")
+        except DarklabCliError as exc:
+            assert exc.status == status
+            assert exc.code == code
+            assert str(exc) == f"{code}: contract response for {code}"
+        else:
+            raise AssertionError(f"expected {code} to fail")
 
 
 def test_darklab_cli_config_preserves_http_scheme_and_port():
@@ -8567,7 +8800,7 @@ def test_darklab_cli_config_preserves_http_scheme_and_port():
     DarklabClient = client_module.DarklabClient
     load_config = client_module.load_config
 
-    config = load_config(Namespace(api_url="http://192.168.1.3:9999/", token="tok_flag", timeout=2))
+    config = load_config(Namespace(api_url="http://192.168.1.3:9999/", pat="dlp_v1_pat_flag_secret", timeout=2))
     client = DarklabClient(config)
 
     assert config.api_url == "http://192.168.1.3:9999"
@@ -8583,7 +8816,7 @@ def test_darklab_cli_config_file_uses_toml(monkeypatch, tmp_path):
     (config_dir / "config.toml").write_text(
         """
 api_url = "http://config.example:9999" # inline comments are TOML
-token = "tok_config"
+pat = "dlp_v1_pat_config_secret"
 team = "team_config"
 timeout = 2.5
 ignored = "value"
@@ -8595,10 +8828,10 @@ ignored = true
     )
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    config = load_config(Namespace(api_url=None, token=None, timeout=None))
+    config = load_config(Namespace(api_url=None, pat=None, timeout=None))
 
     assert config.api_url == "http://config.example:9999"
-    assert config.token == "tok_config"
+    assert config.pat == "dlp_v1_pat_config_secret"
     assert config.team == "team_config"
     assert config.timeout == 2.5
 
@@ -8610,7 +8843,7 @@ def test_darklab_cli_config_save_enforces_owner_only_permissions(monkeypatch, tm
     path.parent.mkdir(parents=True)
     path.write_text(
         "# local darklab settings\n"
-        'token = "tok_existing" # keep this comment\n'
+        'pat = "dlp_v1_pat_existing_secret" # keep this comment\n'
         'unknown = "preserved"\n'
         "\n"
         "[nested]\n"
@@ -8624,7 +8857,7 @@ def test_darklab_cli_config_save_enforces_owner_only_permissions(monkeypatch, tm
     saved = path.read_text(encoding="utf-8")
 
     assert "# local darklab settings\n" in saved
-    assert 'token = "tok_existing" # keep this comment\n' in saved
+    assert 'pat = "dlp_v1_pat_existing_secret" # keep this comment\n' in saved
     assert 'unknown = "preserved"\n' in saved
     assert 'team = "team_cli"\n[nested]\nignored = true\n' in saved
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -8638,7 +8871,7 @@ def test_darklab_cli_config_requires_explicit_http_scheme():
     load_config = client_module.load_config
 
     try:
-        load_config(Namespace(api_url="192.168.1.3:9999", token="tok_flag", timeout=2))
+        load_config(Namespace(api_url="192.168.1.3:9999", pat="dlp_v1_pat_flag_secret", timeout=2))
     except DarklabCliError as exc:
         assert "http:// or https://" in str(exc)
     else:
@@ -8660,7 +8893,7 @@ def test_darklab_cli_run_requires_no_follow_for_json_start_payload(monkeypatch, 
             assert body == {"command": "echo ok", "project_id": None}
             return {"id": "run_cli_json", "status": "running"}
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr("darklab_cli.__main__.DarklabClient", FakeClient)
 
     assert main(["run", "echo ok", "--format", "json"]) == 1
@@ -8881,7 +9114,7 @@ def test_darklab_cli_probe_commands_preview_and_confirm_through_api_v1(monkeypat
                 }
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_probe_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert cli_main.main(["probe", "list", "--project", "probe-project"]) == 0
@@ -9134,7 +9367,7 @@ def test_darklab_cli_probe_requires_exactly_one_target_selector(monkeypatch, cap
         def request(self, *_args, **_kwargs):
             raise AssertionError("invalid target selectors must fail before an API request")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_probe_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_probe_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
     assert (
         cli_main.main(
@@ -9159,21 +9392,30 @@ def test_darklab_cli_live_server_smoke_covers_real_http_auth_and_history(monkeyp
     server = _LiveCliServer()
     server.start()
     try:
-        token = _live_session_token(server.base_url)
+        token = _live_pat(server.base_url)
+        workspace_id = json.loads(
+            urllib.request.urlopen(  # nosec
+                urllib.request.Request(
+                    f"{server.base_url}/api/v1/whoami",
+                    headers={"Authorization": f"Bearer {token}"},
+                ),
+                timeout=5,
+            ).read().decode("utf-8")
+        )["personal_workspace_id"]
         run_id = _seed_run(
-            token,
+            workspace_id,
             run_id=f"live_cli_{uuid.uuid4().hex[:12]}",
             command="echo live-cli",
             output="live cli ok",
         )
 
         monkeypatch.setenv("DARKLAB_API_URL", server.base_url)
-        monkeypatch.setenv("DARKLAB_TOKEN", token)
+        monkeypatch.setenv("DARKLAB_PAT", token)
         monkeypatch.delenv("DARKLAB_TEAM", raising=False)
 
         assert cli_main.main(["whoami", "--format", "json"]) == 0
         whoami = json.loads(capsys.readouterr().out)
-        assert whoami["token_created"]
+        assert whoami["credential"]["created_at"]
         assert whoami["last_seen_at"]
 
         assert cli_main.main(["history", "--type", "external", "--format", "json"]) == 0
@@ -9263,7 +9505,7 @@ def test_darklab_cli_run_follow_interrupt_reports_run_id(monkeypatch, capsys):
                 return FakeResponse()
             raise cli_main.DarklabCliError("unexpected request")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
     assert cli_main.main(["run", "sleep 30"]) == cli_main.STREAM_INTERRUPTED_EXIT_CODE

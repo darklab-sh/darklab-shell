@@ -238,6 +238,23 @@ def get_log_session_id(session_id=None):
             value = ""
     else:
         value = str(session_id or "")
+        # Callers that still use the historical ``session`` log field often
+        # pass the personal workspace or principal identifier needed by the
+        # storage layer.  When that identifier belongs to the authenticated
+        # request, correlate by the safe credential lookup id instead of
+        # emitting a durable ownership identifier.
+        if value.startswith(("wsp_", "prn_")):
+            try:
+                from services.auth.resolver import AuthenticatedContext  # noqa: PLC0415
+
+                context = get_authentication_result().context
+                if isinstance(context, AuthenticatedContext) and value in {
+                    context.personal_workspace_id,
+                    context.principal_id,
+                }:
+                    value = context.credential_id
+            except (AuthenticationRejected, RuntimeError):
+                pass
     if value.startswith("tok_"):
         return f"{value[:8]}********"
     if value.startswith(("crd_", "pat_")):

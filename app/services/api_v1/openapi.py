@@ -8,8 +8,10 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
+from services.api_v1.auth import required_api_scope
 from services.api_v1 import openapi_assessments as assessments, openapi_manual_findings as manual
 from services.api_v1 import openapi_run_evidence as run_evidence
+from services.api_v1.openapi_access import access_paths, access_schemas, pat_scope_descriptions, pat_security_scheme  # noqa: E501
 from services.api_v1.openapi_assessment_actions import assessment_action_paths, assessment_action_schemas
 from services.api_v1.openapi_assessment_oast import assessment_oast_paths, assessment_oast_schemas
 from services.api_v1.openapi_assessment_zap import assessment_zap_paths, assessment_zap_schemas
@@ -63,7 +65,7 @@ def _error_response(description: str = "Error") -> dict:
 
 def _common_errors(*, not_found: str | None = None) -> dict:
     responses = {
-        "401": _error_response("Missing, invalid, or revoked token"),
+        "401": _error_response("Missing, malformed, expired, revoked, or otherwise invalid PAT"),
         "429": _error_response("Rate limit exceeded"),
     }
     if not_found:
@@ -161,9 +163,11 @@ OPENAPI_SPEC: dict = {
     "servers": [{"url": "/api/v1"}],
     "components": {
         "securitySchemes": {
-            "bearerToken": {"type": "http", "scheme": "bearer"},
+            "personalAccessToken": pat_security_scheme(),
         },
+        "x-pat-scopes": pat_scope_descriptions(),
         "schemas": {
+            **access_schemas(_ref),
             "Health": {
                 "type": "object",
                 "required": ["ok", "version"],
@@ -618,18 +622,6 @@ OPENAPI_SPEC: dict = {
                 "type": "object",
                 "required": ["artifacts"],
                 "properties": {"artifacts": {"type": "array", "items": _ref("ArtifactSummary")}},
-            },
-            "Whoami": {
-                "type": "object",
-                "required": ["token_created", "last_seen_at"],
-                "properties": {
-                    "token_created": {"type": "string", "nullable": True},
-                    "last_seen_at": {
-                        "type": "string",
-                        "nullable": True,
-                        "description": "Timestamp recorded for the current successful API authentication.",
-                    },
-                },
             },
             "Project": {
                 "type": "object",
@@ -1530,7 +1522,7 @@ OPENAPI_SPEC: dict = {
             },
         },
     },
-    "security": [{"bearerToken": []}],
+    "security": [{"personalAccessToken": []}],
     "paths": (
         assessments.assessment_paths()
         | assessment_action_paths()
@@ -1544,6 +1536,7 @@ OPENAPI_SPEC: dict = {
         | probe_paths()
         | run_evidence.run_evidence_paths()
         | action_paths()
+        | access_paths(_ref, _json_response, _error_response, _common_errors)
         | {
             "/health": {
                 "get": {
@@ -2555,4 +2548,16 @@ OPENAPI_SPEC: dict = {
 
 
 def openapi_spec() -> dict:
-    return deepcopy(OPENAPI_SPEC)
+    spec = deepcopy(OPENAPI_SPEC)
+    for path, path_item in spec["paths"].items():
+        for method, operation in path_item.items():
+            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+                continue
+            if operation.get("security") == []:
+                continue
+            operation["x-required-pat-scope"] = required_api_scope(method, f"/api/v1{path}")
+            operation.setdefault("responses", {}).setdefault(
+                "403",
+                _error_response("PAT lacks the required scope or team capability"),
+            )
+    return spec
