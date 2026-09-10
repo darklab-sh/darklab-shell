@@ -391,6 +391,8 @@ def confirm_and_queue_assessment_zap_job(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     cfg: Mapping[str, Any] | None = None,
     resolve_addresses: Callable[[str], Iterable[str]] | None = None,
     review_scanner_scope: Callable[
@@ -442,6 +444,8 @@ def confirm_and_queue_assessment_zap_job(
             team_id=team_id,
             actor_member_id=actor_member_id,
             actor_role=actor_role,
+            principal_id=principal_id,
+            originating_credential_id=originating_credential_id,
             cfg=cfg,
         )
     except (ZapJobError, ZapJobArtifactError) as exc:

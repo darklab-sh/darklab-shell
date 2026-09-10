@@ -856,6 +856,9 @@ OPENAPI_SPEC: dict = {
                     "last_error",
                     "created",
                     "updated",
+                    "principal_id",
+                    "created_by_credential_id",
+                    "last_changed_by_credential_id",
                 ],
                 "properties": {
                     "id": {"type": "string"},
@@ -878,6 +881,9 @@ OPENAPI_SPEC: dict = {
                     "last_error": {"type": "string"},
                     "created": {"type": "string", "nullable": True},
                     "updated": {"type": "string", "nullable": True},
+                    "principal_id": {"type": "string"},
+                    "created_by_credential_id": {"type": "string"},
+                    "last_changed_by_credential_id": {"type": "string"},
                 },
             },
             "SchedulePage": {
@@ -939,6 +945,8 @@ OPENAPI_SPEC: dict = {
                     "run_id",
                     "status",
                     "reason",
+                    "principal_id",
+                    "originating_credential_id",
                 ],
                 "properties": {
                     "id": {"type": "string"},
@@ -953,6 +961,8 @@ OPENAPI_SPEC: dict = {
                         "enum": ["skipped_overlap", "skipped_revoked", "fired", "fire_failed"],
                     },
                     "reason": {"type": "string"},
+                    "principal_id": {"type": "string"},
+                    "originating_credential_id": {"type": "string"},
                 },
             },
             "ScheduleFirePage": {
@@ -1029,6 +1039,9 @@ OPENAPI_SPEC: dict = {
                     "consecutive_failures",
                     "created",
                     "updated",
+                    "principal_id",
+                    "created_by_credential_id",
+                    "last_changed_by_credential_id",
                 ],
                 "properties": {
                     "id": {"type": "string"},
@@ -1050,6 +1063,9 @@ OPENAPI_SPEC: dict = {
                     "consecutive_failures": {"type": "integer"},
                     "created": {"type": "string", "nullable": True},
                     "updated": {"type": "string", "nullable": True},
+                    "principal_id": {"type": "string"},
+                    "created_by_credential_id": {"type": "string"},
+                    "last_changed_by_credential_id": {"type": "string"},
                     "schedule": _ref("Schedule"),
                 },
             },
@@ -1129,6 +1145,8 @@ OPENAPI_SPEC: dict = {
                     "ack_by",
                     "ack_at",
                     "created",
+                    "principal_id",
+                    "originating_credential_id",
                 ],
                 "properties": {
                     "id": {"type": "string"},
@@ -1148,6 +1166,8 @@ OPENAPI_SPEC: dict = {
                     "ack_by": {"type": "string"},
                     "ack_at": {"type": "string"},
                     "created": {"type": "string", "nullable": True},
+                    "principal_id": {"type": "string"},
+                    "originating_credential_id": {"type": "string"},
                 },
             },
             "WatcherFirePage": {

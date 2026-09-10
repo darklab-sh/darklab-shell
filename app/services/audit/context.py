@@ -44,6 +44,25 @@ def request_audit_fields(request: Request) -> dict[str, Any]:
 
 def scope_audit_fields(session_id: str, scope: RequestScope | None = None) -> dict[str, Any]:
     """Return stable actor fields for a personal or team request scope."""
+    if scope is None:
+        try:
+            from core.helpers import get_authentication_result  # noqa: PLC0415
+            from services.auth.resolver import AuthenticatedContext  # noqa: PLC0415
+            from services.teams.scope import OwnerContext  # noqa: PLC0415
+
+            authenticated = get_authentication_result().context
+            if isinstance(authenticated, AuthenticatedContext):
+                scope = RequestScope(OwnerContext(
+                    scope="personal",
+                    owner_id=authenticated.personal_workspace_id,
+                    workspace_storage_key=authenticated.workspace_storage_key,
+                    actor_principal_id=authenticated.principal_id,
+                    actor_credential_id=authenticated.credential_id,
+                ))
+        except RuntimeError:
+            # Audit helpers are also used by service tests and local operators
+            # without an active Flask request context.
+            pass
     member: Mapping[str, Any] = scope.member if scope and isinstance(scope.member, Mapping) else {}
     context = scope.context if scope else None
     workspace_id = (

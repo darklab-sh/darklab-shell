@@ -77,6 +77,7 @@ def projects_assessment_batch_retry(project_id, batch_id):
         confirmation = normalize_batch_start_request(_body())
         from blueprints import run as run_routes  # noqa: PLC0415
 
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
         result = start_confirmed_assessment_batch_retry(
             session_id,
             project_id,
@@ -88,6 +89,10 @@ def projects_assessment_batch_retry(project_id, batch_id):
                 session_id, team_id
             ),
             actor_role=_actor_role(session_id, team_id),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(
+                audit_fields.get("actor_credential_id") or ""
+            ),
             owner_client_id=run_routes._active_run_owner_value(
                 request.headers.get("X-Client-ID", "")
             ),

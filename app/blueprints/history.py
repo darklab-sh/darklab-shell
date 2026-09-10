@@ -677,6 +677,8 @@ def history_run_ai_summary(run_id):
             run_id,
             team_id=owner_scope.team_id,
             force=_parse_history_bool((data or {}).get("force")),
+            principal_id=owner_scope.context.actor_principal_id,
+            originating_credential_id=owner_scope.context.actor_credential_id,
         )
     except AIAssistRouteError as exc:
         return _ai_route_error(exc)
@@ -704,6 +706,8 @@ def history_run_ai_next_commands(run_id):
             run_id,
             team_id=owner_scope.team_id,
             force=_parse_history_bool((data or {}).get("force")),
+            principal_id=owner_scope.context.actor_principal_id,
+            originating_credential_id=owner_scope.context.actor_credential_id,
         )
     except AIAssistRouteError as exc:
         return _ai_route_error(exc)

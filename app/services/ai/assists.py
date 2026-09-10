@@ -55,6 +55,8 @@ def enqueue_summary_assist(
     team_id: str = "",
     force: bool = False,
     cfg: Mapping[str, Any] | None = None,
+    principal_id: str = "",
+    originating_credential_id: str = "",
 ) -> tuple[dict[str, Any], int]:
     active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
@@ -101,6 +103,8 @@ def enqueue_summary_assist(
                 active_project_id=active_project_id,
                 project_target_snapshot=project_targets,
                 force=force,
+                principal_id=principal_id,
+                originating_credential_id=originating_credential_id,
             )
     except AICoordinationUnavailable as exc:
         raise AIAssistRouteError("ai_unavailable", str(exc), status_code=503) from exc
@@ -132,6 +136,8 @@ def enqueue_next_commands_assist(
     team_id: str = "",
     force: bool = False,
     cfg: Mapping[str, Any] | None = None,
+    principal_id: str = "",
+    originating_credential_id: str = "",
 ) -> tuple[dict[str, Any], int]:
     active_cfg = resolve_effective_cfg(cfg)
     settings = ai_cfg(active_cfg)
@@ -178,6 +184,8 @@ def enqueue_next_commands_assist(
                 active_project_id=active_project_id,
                 project_target_snapshot=project_targets,
                 force=force,
+                principal_id=principal_id,
+                originating_credential_id=originating_credential_id,
             )
     except AICoordinationUnavailable as exc:
         raise AIAssistRouteError("ai_unavailable", str(exc), status_code=503) from exc

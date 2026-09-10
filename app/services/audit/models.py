@@ -322,6 +322,7 @@ PROBE_LAUNCH_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({
 })
 
 ASSESSMENT_BATCH_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({"source_batch_id"})
+CREDENTIAL_REVOKE_DETAIL_KEYS = COMMON_DETAIL_KEYS | frozenset({"pause_related_work"})
 
 
 @dataclass(frozen=True)
@@ -368,7 +369,10 @@ EVENT_SPECS: dict[str, EventSpec] = {
         AuditEventType.CREDENTIAL_ROTATE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.CREDENTIAL_REVOKE.value: _spec(
-        AuditEventType.CREDENTIAL_REVOKE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED
+        AuditEventType.CREDENTIAL_REVOKE,
+        AuditTargetType.CREDENTIAL,
+        RecordingMode.FAIL_CLOSED,
+        detail_keys=CREDENTIAL_REVOKE_DETAIL_KEYS,
     ),
     AuditEventType.CREDENTIAL_AUTHENTICATION_FAILURE.value: _spec(
         AuditEventType.CREDENTIAL_AUTHENTICATION_FAILURE,

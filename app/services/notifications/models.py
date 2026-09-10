@@ -137,6 +137,9 @@ class NotificationChannel:
     muted: bool
     created: str
     updated: str
+    principal_id: str = ""
+    created_by_credential_id: str = ""
+    last_changed_by_credential_id: str = ""
 
     @property
     def secret_owner_token(self) -> str:
@@ -156,6 +159,15 @@ class NotificationChannel:
             muted=bool(row["muted"]),
             created=str(row["created"]),
             updated=str(row["updated"]),
+            principal_id=str(row["principal_id"] or "") if "principal_id" in row.keys() else "",
+            created_by_credential_id=(
+                str(row["created_by_credential_id"] or "") if "created_by_credential_id" in row.keys() else ""
+            ),
+            last_changed_by_credential_id=(
+                str(row["last_changed_by_credential_id"] or "")
+                if "last_changed_by_credential_id" in row.keys()
+                else ""
+            ),
         )
 
 
@@ -175,6 +187,8 @@ class NotificationEvent:
     run_id: str
     created: str
     dead_at: str
+    principal_id: str = ""
+    originating_credential_id: str = ""
 
     @classmethod
     def from_row(cls, row: Any) -> "NotificationEvent":
@@ -193,6 +207,12 @@ class NotificationEvent:
             run_id=str(row["run_id"] or ""),
             created=str(row["created"]),
             dead_at=str(row["dead_at"] or ""),
+            principal_id=str(row["principal_id"] or "") if "principal_id" in row.keys() else "",
+            originating_credential_id=(
+                str(row["originating_credential_id"] or "")
+                if "originating_credential_id" in row.keys()
+                else ""
+            ),
         )
 
 

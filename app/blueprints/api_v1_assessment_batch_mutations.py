@@ -90,6 +90,7 @@ def api_assessment_batch_start(project_id, assessment_id):
         owner_scope = api_routes._api_request_scope()
         api_routes._require_api_team_capability(owner_scope, Capability.RUN_COMMANDS)
         confirmation = normalize_batch_start_request(_body())
+        audit_fields = route_audit_fields(session_id, request, owner_scope)
         result = start_confirmed_assessment_batch(
             session_id,
             project_id,
@@ -101,6 +102,10 @@ def api_assessment_batch_start(project_id, assessment_id):
                 str((owner_scope.member or {}).get("role") or "")
                 if owner_scope.is_team
                 else ""
+            ),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(
+                audit_fields.get("actor_credential_id") or ""
             ),
         )
     except (AssessmentBatchError, TeamPermissionDenied) as exc:

@@ -72,6 +72,7 @@ def start_interactive_pty_run():
         run = run_routes.start_pty_run(
             session_id=session_id,
             team_id=owner_scope.team_id,
+            owner_context=owner_scope.context,
             client_ip=client_ip,
             command=original_command,
             argv=argv,

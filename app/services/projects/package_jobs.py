@@ -19,11 +19,14 @@ import time
 
 from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
+from core.database_access import get_db_connect
+from services.auth.background_authorization import resolve_background_authorization
 from services.metrics_lazy import app_metrics
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.package_archive import build_evidence_package_archive
+from services.teams.capabilities import Capability
 
 _JOB_ID_RE = re.compile(r"^epj_[a-f0-9]{24}$")
 _JOB_TTL = timedelta(hours=2)
@@ -218,6 +221,8 @@ def _audit_log_extra(job, *, details):
         "package_id": str(job.get("package_id") or ""),
         "team_id": str(job.get("team_id") or ""),
         "actor_member_id": str(job.get("actor_member_id") or ""),
+        "principal_id": str(job.get("principal_id") or ""),
+        "credential_id": str(job.get("originating_credential_id") or ""),
         **log_details,
     }
 
@@ -247,6 +252,8 @@ def _record_job_audit(job, *, status, error="", archive_bytes=0, metrics=None):
             correlation_id=str(job.get("id") or ""),
             session_id=str(job.get("personal_workspace_id") or ""),
             actor_session_id=str(job.get("personal_workspace_id") or ""),
+            actor_principal_id=str(job.get("principal_id") or ""),
+            actor_credential_id=str(job.get("originating_credential_id") or ""),
             team_id=str(job.get("team_id") or ""),
             actor_member_id=str(job.get("actor_member_id") or ""),
             details=details,
@@ -272,8 +279,15 @@ def _run_job(job_id, cfg_snapshot):
         _write_job(current)
 
     def _progress(phase, message):
+        _require_job_authorization(job)
         _update("running", phase, message)
 
+    try:
+        _require_job_authorization(job)
+    except RuntimeError as exc:
+        _record_job_audit(job, status="failed", error=str(exc))
+        _update("failed", "authorization", str(exc), error=str(exc), error_status=403)
+        return
     _update("running", "loading", "Loading package")
     try:
         archive = build_evidence_package_archive(
@@ -322,6 +336,18 @@ def _run_job(job_id, cfg_snapshot):
         _record_job_audit(job, status="failed", error="package not found")
         _update("failed", "not_found", "Package not found.", error="package not found", error_status=404)
         return
+    try:
+        _require_job_authorization(job)
+    except RuntimeError as exc:
+        archive_path = str(archive.get("path") or "")
+        if archive_path:
+            try:
+                Path(archive_path).unlink()
+            except OSError:
+                pass
+        _record_job_audit(job, status="failed", error=str(exc))
+        _update("failed", "authorization", str(exc), error=str(exc), error_status=403)
+        return
     destination = _archive_path(job_id)
     if destination is None:
         app_metrics.record_evidence_package_build("error", time.perf_counter() - started)
@@ -355,7 +381,31 @@ def _run_job(job_id, cfg_snapshot):
     )
 
 
-def start_evidence_package_archive_job(session_id, project_id, package_id, *, cfg=None, team_id="", actor_member_id=""):
+def _require_job_authorization(job):
+    with get_db_connect()() as conn:
+        authorization = resolve_background_authorization(
+            conn,
+            principal_id=str(job.get("principal_id") or ""),
+            personal_workspace_id=str(job.get("personal_workspace_id") or ""),
+            team_id=str(job.get("team_id") or ""),
+            originating_credential_id=str(job.get("originating_credential_id") or ""),
+            required_capability=Capability.MUTATE_PROJECTS,
+        )
+    if not authorization.allowed:
+        raise RuntimeError(authorization.message)
+
+
+def start_evidence_package_archive_job(
+    session_id,
+    project_id,
+    package_id,
+    *,
+    cfg=None,
+    team_id="",
+    actor_member_id="",
+    principal_id="",
+    originating_credential_id="",
+):
     cleanup_evidence_package_archive_jobs()
     _ensure_job_dir()
     created = _iso(_now())
@@ -364,6 +414,8 @@ def start_evidence_package_archive_job(session_id, project_id, package_id, *, cf
         "personal_workspace_id": session_id,
         "team_id": str(team_id or ""),
         "actor_member_id": str(actor_member_id or ""),
+        "principal_id": str(principal_id or ""),
+        "originating_credential_id": str(originating_credential_id or ""),
         "project_id": project_id,
         "package_id": package_id,
         "status": "queued",
@@ -376,3 +428,26 @@ def start_evidence_package_archive_job(session_id, project_id, package_id, *, cf
     cfg_snapshot = dict(resolve_effective_cfg(cfg))
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)
+
+
+def stop_evidence_package_archive_jobs_for_principal(principal_id: str) -> tuple[str, ...]:
+    """Mark queued and running archive jobs stopped after principal disablement."""
+    stopped: list[str] = []
+    for path in _JOB_DIR.glob("epj_*.json"):
+        job = _read_job(path.stem)
+        if not isinstance(job, dict):
+            continue
+        if str(job.get("principal_id") or "") != str(principal_id or ""):
+            continue
+        if str(job.get("status") or "") not in {"queued", "running"}:
+            continue
+        job.update({
+            "status": "failed",
+            "phase": "authorization",
+            "message": "The principal was disabled.",
+            "error": "The principal was disabled.",
+            "error_status": 403,
+        })
+        _write_job(job)
+        stopped.append(str(job.get("id") or ""))
+    return tuple(stopped)

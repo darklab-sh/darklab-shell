@@ -14,6 +14,9 @@ from typing import Any
 
 from config import resolve_effective_cfg
 from runtime_bootstrap import bootstrap_runtime
+from core.database_access import get_db_connect
+from services.auth.background_authorization import resolve_background_authorization
+from services.teams.capabilities import Capability
 from services.atlas.import_workflow import preview_atlas_import
 from services.connectors.zap_config import (
     ZapConnectorSettings,
@@ -162,6 +165,27 @@ def process_zap_job(
     status = str(job.get("status") or "")
     claimed_download = False
     try:
+        with get_db_connect()() as conn:
+            authorization = resolve_background_authorization(
+                conn,
+                principal_id=str(job.get("principal_id") or ""),
+                personal_workspace_id=str(job.get("personal_workspace_id") or ""),
+                team_id=str(job.get("team_id") or ""),
+                originating_credential_id=str(job.get("originating_credential_id") or ""),
+                required_capability=Capability.MUTATE_PROJECTS,
+            )
+        if not authorization.allowed:
+            log.warning(
+                "ZAP_JOB_AUTHORIZATION_REJECTED",
+                extra={
+                    "job_id": str(job.get("id") or ""),
+                    "principal_id": authorization.principal_id,
+                    "credential_id": authorization.originating_credential_id,
+                    "team_id": authorization.team_id,
+                    "reason": authorization.state.value,
+                },
+            )
+            raise ZapJobError(authorization.state.value, authorization.message)
         if status == "queued":
             _review_job_scope_policy(job, settings, scope_policy_token)
             job = observed_zap_state_change(

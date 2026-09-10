@@ -181,6 +181,26 @@ def _process_assist(assist: dict, *, cfg: Mapping[str, Any] | None = None) -> No
     variant = str(assist.get("variant") or "")
     provider_request_started = False
     try:
+        from core.database_access import get_db_connect  # noqa: PLC0415
+        from services.auth.background_authorization import resolve_background_authorization  # noqa: PLC0415
+        from services.teams.capabilities import Capability  # noqa: PLC0415
+
+        with get_db_connect()() as conn:
+            authorization = resolve_background_authorization(
+                conn,
+                principal_id=str(assist.get("principal_id") or ""),
+                personal_workspace_id=session_id,
+                team_id=team_id,
+                originating_credential_id=str(assist.get("originating_credential_id") or ""),
+                required_capability=Capability.RUN_COMMANDS,
+            )
+        if not authorization.allowed:
+            fail_assist(assist_id, error_code=authorization.state.value, error_message=authorization.message)
+            log.warning(
+                "AI_ASSIST_AUTHORIZATION_REJECTED",
+                extra={**_assist_scope_log_fields(assist), "assist_id": assist_id, "reason": authorization.state.value},
+            )
+            return
         runner = _VARIANT_RUNNERS.get(variant)
         if runner is None:
             raise AIClientError("ai_unsupported_variant", f"AI worker does not support variant {variant}")
@@ -282,6 +302,8 @@ def _assist_scope_log_fields(assist: dict) -> dict[str, str]:
     fields = {
         "team_id": team_id,
         "session": get_log_session_id(assist.get("personal_workspace_id")),
+        "principal_id": str(assist.get("principal_id") or ""),
+        "credential_id": str(assist.get("originating_credential_id") or ""),
         "secret_scope": "team" if team_id else "personal",
     }
     actor_member_id = str(assist.get("actor_member_id") or "")

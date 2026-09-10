@@ -16,6 +16,10 @@ from core.process import active_runs_for_session
 from services.notifications.dispatcher import enqueue as enqueue_notification
 from services.notifications.models import TRIGGER_SCHEDULED_RUN_FAILED
 from services.notifications.payloads import build_scheduled_run_failed_payload
+from services.auth.background_authorization import (
+    BackgroundAuthorization,
+    resolve_background_authorization,
+)
 from services.scheduler.models import (
     FIRE_STATUS_FAILED,
     FIRE_STATUS_FIRED,
@@ -33,6 +37,7 @@ from services.teams.ownership_queries import (
     composite_owner_predicate,
 )
 from services.teams.scope import team_owner_context
+from services.teams.capabilities import Capability
 
 log = logging.getLogger("shell")
 _FIRE_CLAIM_PREFIX = "__schedule_firing__:"
@@ -50,6 +55,8 @@ def _schedule_log_payload(schedule: Schedule, **extra) -> dict[str, object]:
         "owner_id": schedule.owner_id,
         "team_id": schedule.team_id,
         "session": get_log_session_id(schedule.session_token),
+        "principal_id": schedule.principal_id,
+        "credential_id": schedule.last_changed_by_credential_id,
         "next_run_at": schedule.next_run_at,
         "last_run_id": schedule.last_run_id,
         "command_root": command_root(str(schedule.command_text or "")),
@@ -74,13 +81,40 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
             extra=_schedule_log_payload(schedule, fired_at=fired_at),
         )
         return FIRE_STATUS_FAILED
+    required_capability = (
+        Capability.MANAGE_NOTIFICATIONS
+        if schedule.owner_kind == OWNER_KIND_PROJECT_DIGEST
+        else Capability.RUN_COMMANDS
+    )
+    authorization = resolve_background_authorization(
+        conn,
+        principal_id=schedule.principal_id,
+        personal_workspace_id=schedule.session_token,
+        team_id=schedule.team_id,
+        required_capability=required_capability,
+        originating_credential_id=schedule.last_changed_by_credential_id,
+    )
+    if not authorization.allowed:
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_REVOKED,
+            fired_at=fired_at,
+            reason=authorization.state.value,
+        )
+        _disable_unauthorized_schedule(conn, schedule, fired_at=fired_at, reason=authorization.state.value)
+        log.warning(
+            "SCHEDULE_FIRE_AUTHORIZATION_DENIED",
+            extra=_schedule_log_payload(schedule, fired_at=fired_at, reason=authorization.state.value),
+        )
+        return FIRE_STATUS_SKIPPED_REVOKED
     try:
         if schedule.owner_kind == OWNER_KIND_USER:
-            status, run_id = _fire_user_schedule(conn, schedule, fired_at=fired_at)
+            status, run_id = _fire_user_schedule(conn, schedule, fired_at=fired_at, authorization=authorization)
         elif schedule.owner_kind == OWNER_KIND_WATCHER:
-            status, run_id = _fire_watcher_schedule(conn, schedule, fired_at=fired_at)
+            status, run_id = _fire_watcher_schedule(conn, schedule, fired_at=fired_at, authorization=authorization)
         elif schedule.owner_kind == OWNER_KIND_PROJECT_DIGEST:
-            status, run_id = _fire_project_digest_schedule(conn, schedule, fired_at=fired_at)
+            status, run_id = _fire_project_digest_schedule(conn, schedule, fired_at=fired_at, authorization=authorization)
         else:
             raise ValueError(f"unsupported schedule owner kind {schedule.owner_kind!r}")
         if status == FIRE_STATUS_SKIPPED_REVOKED:
@@ -141,21 +175,13 @@ def _disable_archived_team_schedule(conn, schedule: Schedule, *, fired_at: str) 
         )
 
 
-def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
-    if not _session_token_exists(conn, schedule.session_token):
-        record_schedule_fire(
-            conn,
-            schedule,
-            status=FIRE_STATUS_SKIPPED_REVOKED,
-            fired_at=fired_at,
-            reason="session token revoked",
-        )
-        log.warning(
-            "SCHEDULE_DISABLED_REVOKED",
-            extra=_schedule_log_payload(schedule, fired_at=fired_at),
-        )
-        return FIRE_STATUS_SKIPPED_REVOKED, ""
-
+def _fire_user_schedule(
+    conn,
+    schedule: Schedule,
+    *,
+    fired_at: str,
+    authorization: BackgroundAuthorization,
+) -> tuple[str, str]:
     if _schedule_has_fresh_fire_claim(schedule):
         record_schedule_fire(
             conn,
@@ -214,7 +240,7 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
         )
         return FIRE_STATUS_SKIPPED_OVERLAP, ""
 
-    run_id = _launch_user_schedule_run(schedule)
+    run_id = _launch_user_schedule_run(schedule, authorization=authorization)
     record_schedule_fire(
         conn,
         schedule,
@@ -230,21 +256,13 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
     return FIRE_STATUS_FIRED, run_id
 
 
-def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
-    if not _session_token_exists(conn, schedule.session_token):
-        record_schedule_fire(
-            conn,
-            schedule,
-            status=FIRE_STATUS_SKIPPED_REVOKED,
-            fired_at=fired_at,
-            reason="session token revoked",
-        )
-        log.warning(
-            "SCHEDULE_DISABLED_REVOKED",
-            extra=_schedule_log_payload(schedule, fired_at=fired_at),
-        )
-        return FIRE_STATUS_SKIPPED_REVOKED, ""
-
+def _fire_watcher_schedule(
+    conn,
+    schedule: Schedule,
+    *,
+    fired_at: str,
+    authorization: BackgroundAuthorization,
+) -> tuple[str, str]:
     if _schedule_has_fresh_fire_claim(schedule):
         record_schedule_fire(
             conn,
@@ -305,7 +323,16 @@ def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[
 
     from services.watchers import runner as watcher_runner  # noqa: PLC0415
 
-    run_id = watcher_runner.handle_fire(conn, schedule, fired_at=fired_at, launch_run=_launch_user_schedule_run)
+    run_id = watcher_runner.handle_fire(
+        conn,
+        schedule,
+        fired_at=fired_at,
+        launch_run=lambda schedule, **kwargs: _launch_user_schedule_run(
+            schedule,
+            authorization=authorization,
+            **kwargs,
+        ),
+    )
     record_schedule_fire(
         conn,
         schedule,
@@ -321,21 +348,14 @@ def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[
     return FIRE_STATUS_FIRED, run_id
 
 
-def _fire_project_digest_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
-    if not _session_token_exists(conn, schedule.session_token):
-        record_schedule_fire(
-            conn,
-            schedule,
-            status=FIRE_STATUS_SKIPPED_REVOKED,
-            fired_at=fired_at,
-            reason="session token revoked",
-        )
-        log.warning(
-            "PROJECT_DIGEST_DISABLED_REVOKED",
-            extra=_schedule_log_payload(schedule, fired_at=fired_at),
-        )
-        return FIRE_STATUS_SKIPPED_REVOKED, ""
-
+def _fire_project_digest_schedule(
+    conn,
+    schedule: Schedule,
+    *,
+    fired_at: str,
+    authorization: BackgroundAuthorization,
+) -> tuple[str, str]:
+    del authorization
     from services.projects import digests as project_digests  # noqa: PLC0415
 
     result = project_digests.evaluate_due_digest(
@@ -383,11 +403,6 @@ def _project_digest_reason_code(reason: str, queued: int) -> str:
         return "queued"
     normalized = reason.removeprefix("digest skipped:").strip().replace(" ", "_")
     return f"skipped_{normalized}" if normalized else "skipped_unknown"
-
-
-def _session_token_exists(conn, session_token: str) -> bool:
-    row = conn.execute("SELECT 1 FROM session_tokens WHERE token = ?", (session_token,)).fetchone()
-    return row is not None
 
 
 def _previous_run_is_active(schedule: Schedule) -> tuple[bool, int]:
@@ -445,6 +460,19 @@ def _disable_revoked_schedule(conn, schedule: Schedule, *, fired_at: str) -> Non
     )
 
 
+def _disable_unauthorized_schedule(conn, schedule: Schedule, *, fired_at: str, reason: str) -> None:
+    conn.execute(
+        "UPDATE schedules SET enabled = FALSE, last_run_at = ?, last_error = ?, paused_reason = ?, updated = ? "
+        "WHERE id = ?",
+        (fired_at, reason, reason, fired_at, schedule.id),
+    )
+    if schedule.owner_kind == OWNER_KIND_WATCHER and schedule.owner_id:
+        conn.execute(
+            "UPDATE watchers SET state = 'paused', state_reason = ?, updated = ? WHERE id = ?",
+            (reason, fired_at, schedule.owner_id),
+        )
+
+
 def _enqueue_scheduled_fire_failed(conn, schedule: Schedule, error: str) -> None:
     if schedule.owner_kind != OWNER_KIND_USER:
         return
@@ -464,6 +492,7 @@ def _launch_user_schedule_run(
     schedule: Schedule,
     *,
     link_project_id: str | None = "",
+    authorization: BackgroundAuthorization | None = None,
 ) -> str:
     from blueprints import run as run_blueprint  # noqa: PLC0415
     from services.commands.builtins import (  # noqa: PLC0415
@@ -477,7 +506,7 @@ def _launch_user_schedule_run(
         split_command_argv,
     )
     from services.runs.broker import broker_available, broker_unavailable_reason, publish_run_event  # noqa: PLC0415
-    from services.teams.scope import personal_owner_context, team_owner_context  # noqa: PLC0415
+    from services.teams.scope import OwnerContext, personal_owner_context, team_owner_context  # noqa: PLC0415
 
     original_command = str(schedule.command_text or "").strip()
     if not original_command:
@@ -487,11 +516,28 @@ def _launch_user_schedule_run(
 
     client_ip = "scheduler"
     owner_tab_id = f"schedule:{schedule.id}"
-    owner_context = (
-        team_owner_context(schedule.team_id, actor_session_id=schedule.session_token)
-        if schedule.team_id
-        else personal_owner_context(schedule.session_token)
-    )
+    owner_context = authorization.owner_context if authorization else None
+    if owner_context is None and schedule.principal_id:
+        owner_context = (
+            team_owner_context(
+                schedule.team_id,
+                actor_principal_id=schedule.principal_id,
+                actor_credential_id=schedule.last_changed_by_credential_id,
+            )
+            if schedule.team_id
+            else OwnerContext(
+                scope="personal",
+                owner_id=schedule.session_token,
+                actor_principal_id=schedule.principal_id,
+                actor_credential_id=schedule.last_changed_by_credential_id,
+            )
+        )
+    if owner_context is None:
+        owner_context = (
+            team_owner_context(schedule.team_id, actor_session_id=schedule.session_token)
+            if schedule.team_id
+            else personal_owner_context(schedule.session_token)
+        )
     interactive_spec = interactive_pty_spec_for_command(original_command)
     interactive_trigger = str((interactive_spec or {}).get("trigger_flag") or "").strip()
     if interactive_trigger and interactive_trigger in split_command_argv(original_command)[1:]:
@@ -526,7 +572,7 @@ def _launch_user_schedule_run(
             schedule.session_token,
             client_ip,
             owner_context=owner_context,
-            team_role="operator" if schedule.team_id else "",
+            team_role=(authorization.role if authorization and schedule.team_id else ""),
         )
     except run_blueprint._RunPreparationError as exc:  # noqa: SLF001
         raise ScheduleFireError(str(exc)) from exc

@@ -17,7 +17,12 @@ from core.database_access import get_db_connect
 from core.helpers import LEGACY_SESSION_ADAPTER_REMOVAL_ITEM
 from core.migrations import MIGRATIONS, v0078_principal_credential_persistence, v0079_credential_scopes
 from core.migrations.runner import run_migrations
-from services.auth import storage
+from services.auth import lifecycle, storage
+from services.auth.background_authorization import (
+    BackgroundAuthorizationState,
+    durable_work_for_credential,
+    resolve_background_authorization,
+)
 from services.auth.contracts import LastCredentialLockout, PAT_DEFAULT_EXPIRY_DAYS
 from services.auth.rate_limit import (
     ANONYMOUS_ISSUANCE_LIMIT_PER_HOUR,
@@ -594,6 +599,24 @@ def test_anonymous_upgrade_rekeys_rows_in_place_and_preserves_fts_and_workspace(
             "2026-09-08T12:00:01+00:00",
         ),
     )
+    schedule_id = "schedule_cutover_actor"
+    conn.execute(
+        "INSERT INTO schedules "
+        "(id, personal_workspace_id, command_text, cron_expr, cadence_preset, created, updated) "
+        "VALUES (?, ?, 'true', '0 * * * *', 'hourly', ?, ?)",
+        (
+            schedule_id,
+            anonymous_id,
+            "2026-09-08T12:00:01+00:00",
+            "2026-09-08T12:00:01+00:00",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO schedule_fires "
+        "(id, schedule_id, team_id, owner_kind, owner_id, fired_at, run_id, status, reason) "
+        "VALUES ('fire_cutover_actor', ?, '', 'user', '', ?, '', 'fired', '')",
+        (schedule_id, "2026-09-08T12:00:02+00:00"),
+    )
     conn.commit()
     before_rowid = conn.execute("SELECT rowid FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
 
@@ -624,6 +647,21 @@ def test_anonymous_upgrade_rekeys_rows_in_place_and_preserves_fts_and_workspace(
     assert batch["actor_session_id"] == anonymous_id
     assert batch["actor_principal_id"] == bundle.principal.id
     assert batch["actor_credential_id"] == bundle.credential.metadata.id
+    attached_schedule = conn.execute(
+        "SELECT personal_workspace_id, principal_id, created_by_credential_id, "
+        "last_changed_by_credential_id FROM schedules WHERE id = ?",
+        (schedule_id,),
+    ).fetchone()
+    assert attached_schedule["personal_workspace_id"] == bundle.workspace.id
+    assert attached_schedule["principal_id"] == bundle.principal.id
+    assert attached_schedule["created_by_credential_id"] is None
+    assert attached_schedule["last_changed_by_credential_id"] is None
+    attached_fire = conn.execute(
+        "SELECT principal_id, originating_credential_id FROM schedule_fires WHERE id = ?",
+        ("fire_cutover_actor",),
+    ).fetchone()
+    assert attached_fire["principal_id"] == bundle.principal.id
+    assert attached_fire["originating_credential_id"] is None
     assert bundle.workspace.storage_key == storage_key
     assert workspace_path.is_dir()
     assert evidence.read_text(encoding="utf-8") == "cutover evidence\n"
@@ -760,6 +798,250 @@ def test_principal_team_membership_and_owned_rows_survive_credential_changes(
     )
     assert owner_membership is not None
     assert owner_membership["role"] == "owner"
+
+
+def test_stolen_credential_can_enumerate_and_optionally_pause_attributed_work(
+    ownership_cutover_db,
+    tmp_path,
+):
+    conn = ownership_cutover_db
+    bundle = storage.create_principal_with_credential(
+        settings=_settings(tmp_path),
+        conn=conn,
+    )
+    stolen = storage.issue_credential(
+        bundle.principal.id,
+        label="Stolen laptop",
+        created_by_credential_id=bundle.credential.metadata.id,
+        conn=conn,
+    )
+    continues = create_schedule(
+        bundle.workspace.id,
+        command_text="true",
+        cadence_preset="hourly",
+        label="Continue by default",
+        principal_id=bundle.principal.id,
+        credential_id=stolen.metadata.id,
+        conn=conn,
+    )
+    conn.commit()
+    current = resolve_authentication(
+        {"X-Darklab-Credential": bundle.credential.secret},
+        conn=conn,
+    )
+    assert isinstance(current.context, AuthenticatedContext)
+
+    revoked, disposition = lifecycle.revoke(
+        current.context,
+        stolen.metadata.id,
+        reason="device stolen",
+        include_durable_work=True,
+        connect=lambda: conn,
+    )
+    assert revoked.id == stolen.metadata.id
+    assert [(item.kind, item.id) for item in disposition.affected] == [
+        ("schedule", continues.id)
+    ]
+    assert disposition.paused == ()
+    assert conn.execute(
+        "SELECT enabled FROM schedules WHERE id = ?", (continues.id,)
+    ).fetchone()[0] == 1
+    assert resolve_authentication(
+        {"X-Darklab-Credential": stolen.secret}, conn=conn
+    ).state == AuthenticationState.REVOKED_CREDENTIAL
+    # Workers rebuild authority from durable ids. The revoked secret itself is
+    # neither needed nor consulted, and the principal-owned definition keeps
+    # running under the default policy.
+    worker_auth = resolve_background_authorization(
+        conn,
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        originating_credential_id=stolen.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert worker_auth.allowed
+    assert durable_work_for_credential(
+        conn, bundle.principal.id, stolen.metadata.id
+    )[0].id == continues.id
+    conn.execute("DELETE FROM credentials WHERE id = ?", (stolen.metadata.id,))
+    historical = conn.execute(
+        "SELECT created_by_credential_id, last_changed_by_credential_id "
+        "FROM schedules WHERE id = ?",
+        (continues.id,),
+    ).fetchone()
+    assert historical["created_by_credential_id"] == stolen.metadata.id
+    assert historical["last_changed_by_credential_id"] == stolen.metadata.id
+    assert durable_work_for_credential(
+        conn, bundle.principal.id, stolen.metadata.id
+    )[0].id == continues.id
+
+    suspicious = storage.issue_credential(
+        bundle.principal.id,
+        label="Unknown device",
+        created_by_credential_id=bundle.credential.metadata.id,
+        conn=conn,
+    )
+    paused = create_schedule(
+        bundle.workspace.id,
+        command_text="true",
+        cadence_preset="daily",
+        label="Pause after review",
+        principal_id=bundle.principal.id,
+        credential_id=suspicious.metadata.id,
+        conn=conn,
+    )
+    conn.commit()
+    _, paused_disposition = lifecycle.revoke(
+        current.context,
+        suspicious.metadata.id,
+        reason="unrecognized device",
+        pause_related_work=True,
+        include_durable_work=True,
+        connect=lambda: conn,
+    )
+    assert [(item.kind, item.id) for item in paused_disposition.paused] == [
+        ("schedule", paused.id)
+    ]
+    paused_row = conn.execute(
+        "SELECT enabled, paused_reason FROM schedules WHERE id = ?", (paused.id,)
+    ).fetchone()
+    assert paused_row["enabled"] == 0
+    assert paused_row["paused_reason"] == "credential_revoked"
+
+
+def test_background_authorization_rechecks_team_role_and_membership(
+    ownership_cutover_db,
+    tmp_path,
+):
+    conn = ownership_cutover_db
+    owner = storage.create_principal_with_credential(
+        settings=_settings(tmp_path), conn=conn
+    )
+    member = storage.create_principal_with_credential(
+        settings=_settings(tmp_path), conn=conn
+    )
+    team = team_storage.create_team(
+        conn,
+        name="Background authorization",
+        creator_session_token=owner.principal.id,
+        creator_credential_id=owner.credential.metadata.id,
+    )
+    membership = team_storage.add_team_member(
+        conn,
+        team_id=team["id"],
+        session_token=member.principal.id,
+        joined_by_credential_id=owner.credential.metadata.id,
+        role="operator",
+    )
+    conn.commit()
+
+    allowed = resolve_background_authorization(
+        conn,
+        principal_id=member.principal.id,
+        personal_workspace_id=member.workspace.id,
+        team_id=team["id"],
+        originating_credential_id=member.credential.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert allowed.allowed
+    assert allowed.role == "operator"
+    assert allowed.member_id == membership["id"]
+
+    team_storage.update_team_member(conn, membership["id"], role="viewer")
+    downgraded = resolve_background_authorization(
+        conn,
+        principal_id=member.principal.id,
+        personal_workspace_id=member.workspace.id,
+        team_id=team["id"],
+        originating_credential_id=member.credential.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert downgraded.state == BackgroundAuthorizationState.CAPABILITY_REVOKED
+    assert downgraded.role == "viewer"
+
+    team_storage.update_team_member(conn, membership["id"], role="operator")
+    team_storage.update_team_status(conn, team["id"], status="archived")
+    archived = resolve_background_authorization(
+        conn,
+        principal_id=member.principal.id,
+        personal_workspace_id=member.workspace.id,
+        team_id=team["id"],
+        originating_credential_id=member.credential.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert archived.state == BackgroundAuthorizationState.TEAM_UNAVAILABLE
+
+    team_storage.update_team_status(conn, team["id"], status="active")
+    team_storage.soft_remove_team_member(conn, membership["id"])
+    removed = resolve_background_authorization(
+        conn,
+        principal_id=member.principal.id,
+        personal_workspace_id=member.workspace.id,
+        team_id=team["id"],
+        originating_credential_id=member.credential.metadata.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert removed.state == BackgroundAuthorizationState.MEMBERSHIP_REVOKED
+
+
+def test_principal_disable_suspends_work_without_automatic_resume(
+    ownership_cutover_db,
+    tmp_path,
+    monkeypatch,
+):
+    conn = ownership_cutover_db
+    bundle = storage.create_principal_with_credential(
+        settings=_settings(tmp_path), conn=conn
+    )
+    schedule = create_schedule(
+        bundle.workspace.id,
+        command_text="true",
+        cadence_preset="hourly",
+        principal_id=bundle.principal.id,
+        credential_id=bundle.credential.metadata.id,
+        conn=conn,
+    )
+    conn.commit()
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "services.auth.background_runtime.stop_principal_active_work",
+        lambda principal_id: stopped.append(principal_id) or (),
+    )
+
+    lifecycle.set_principal_enabled(
+        bundle.principal.id,
+        enabled=False,
+        reason="incident response",
+        connect=lambda: conn,
+    )
+    assert stopped == [bundle.principal.id]
+    denied = resolve_background_authorization(
+        conn,
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        required_capability=Capability.RUN_COMMANDS,
+    )
+    assert denied.state == BackgroundAuthorizationState.PRINCIPAL_DISABLED
+    disabled_schedule = conn.execute(
+        "SELECT enabled, paused_reason FROM schedules WHERE id = ?", (schedule.id,)
+    ).fetchone()
+    assert disabled_schedule["enabled"] == 0
+    assert disabled_schedule["paused_reason"] == "principal_disabled"
+
+    lifecycle.set_principal_enabled(
+        bundle.principal.id,
+        enabled=True,
+        connect=lambda: conn,
+    )
+    assert resolve_background_authorization(
+        conn,
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        required_capability=Capability.RUN_COMMANDS,
+    ).allowed
+    assert conn.execute(
+        "SELECT enabled FROM schedules WHERE id = ?", (schedule.id,)
+    ).fetchone()[0] == 0
 
 
 def test_public_share_survives_upgrade_and_mutation_rekeys_to_workspace(anonymous_identity_factory):

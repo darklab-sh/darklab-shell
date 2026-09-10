@@ -204,7 +204,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget(
         "app/services/connectors/oast_provider_transport.py", 189, "split-package-ratchet"
     ),
-    ModuleSizeBudget("app/services/connectors/oast_worker.py", 291, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/oast_worker.py", 309, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/connectors/oast_worker_ingestion.py", 76, "split-package-ratchet"
     ),
@@ -218,7 +218,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_http.py", 172, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_artifacts.py", 195, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_job_lifecycle.py", 271, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/connectors/zap_job_queue.py", 57, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_job_queue.py", 58, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_jobs.py", 288, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/connectors/zap_observability.py", 104, "split-package-ratchet"
@@ -230,7 +230,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/connectors/zap_scope.py", 121, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_scope_policy.py", 263, "split-package-ratchet"),
     ModuleSizeBudget("app/services/connectors/zap_transport.py", 174, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/connectors/zap_worker.py", 361, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/connectors/zap_worker.py", 382, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/services/connectors/zap_worker_observability.py", 65, "split-package-ratchet"
     ),
@@ -273,7 +273,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/run_broker.py", 149, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/run_pty.py", 259, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_pty.py", 260, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects.py", 577, "split-target-phase3"),
     ModuleSizeBudget(
@@ -286,7 +286,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_assessment_batches.py", 120, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/projects_assessment_batch_mutations.py",
-        175,
+        180,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -296,7 +296,7 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/blueprints/projects_assessment_batch_retries.py",
-        124,
+        128,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -305,7 +305,7 @@ _MODULE_SIZE_RATCHET = (
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/blueprints/projects_assessment_checks.py", 238, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 165, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_assessment_oast.py", 168, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/projects_assessment_oast_launch.py", 221, "split-package-ratchet"
     ),
@@ -324,9 +324,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/projects_retest_queue.py", 165, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_links.py", 242, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_metadata.py", 158, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 239, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_monitoring.py", 247, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_monitoring_risk.py", 65, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/projects_packages.py", 386, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/projects_packages.py", 391, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_probes.py", 84, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_probe_launch.py", 180, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects_probe_targets.py", 40, "split-package-ratchet"),
@@ -341,7 +341,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_assessment_batches.py", 145, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_mutations.py",
-        172,
+        177,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -351,11 +351,11 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_batch_retries.py",
-        115,
+        118,
         "split-package-ratchet",
     ),
     ModuleSizeBudget("app/blueprints/api_v1_assessment_checks.py", 267, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/api_v1_assessment_oast.py", 169, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_assessment_oast.py", 171, "split-package-ratchet"),
     ModuleSizeBudget(
         "app/blueprints/api_v1_assessment_oast_launch.py", 220, "split-package-ratchet"
     ),
@@ -375,7 +375,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_probes.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_read.py", 401, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_run_evidence.py", 24, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 340, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 344, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
@@ -686,7 +686,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/assessments/storage.py", 379, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/summary.py", 106, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/target_rollups.py", 32, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/zap_connector.py", 545, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/zap_connector.py", 546, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/actors.py", 39, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/artifact_queries.py", 249, "split-package-ratchet"),
     ModuleSizeBudget("app/services/projects/entity_monitoring.py", 139, "split-package-ratchet"),
@@ -708,7 +708,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workspace/settings.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/core/migrations/baseline.py", 1689, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/pty/runtime.py", 106, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/pty/service.py", 1191, "split-target-phase4"),
+    ModuleSizeBudget("app/services/pty/service.py", 1198, "split-target-phase4"),
     ModuleSizeBudget("app/services/pty/settings.py", 95, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/snapshots.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/state.py", 155, "split-package-ratchet"),
@@ -741,7 +741,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/assets.py", 403, "split-target-phase4"),
     ModuleSizeBudget("app/blueprints/assets_audit.py", 391, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/assets_diag.py", 657, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/process.py", 1170, "ratchet-only"),
+    ModuleSizeBudget("app/core/process.py", 1243, "ratchet-only"),
     ModuleSizeBudget("app/services/metrics/__init__.py", 987, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/metrics/assessments.py", 340, "split-package-ratchet"),
     ModuleSizeBudget(
@@ -1147,7 +1147,7 @@ _MODULE_SIZE_RATCHET = (
     ),
     ModuleSizeBudget(
         "app/services/assessments/batch/lifecycle_actions.py",
-        88,
+        90,
         "split-package-ratchet",
     ),
     ModuleSizeBudget(
@@ -1215,7 +1215,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/batch/retention.py", 110, "split-package-ratchet"
     ),
     ModuleSizeBudget(
-        "app/services/assessments/batch/retry_actions.py", 57, "split-package-ratchet"
+        "app/services/assessments/batch/retry_actions.py", 61, "split-package-ratchet"
     ),
     ModuleSizeBudget(
         "app/services/assessments/batch/retry_compiler.py", 34, "split-package-ratchet"
@@ -1245,7 +1245,7 @@ _MODULE_SIZE_RATCHET = (
         "app/services/assessments/batch/start_replay.py", 60, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/services/assessments/batch/start_storage.py", 315, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/assessments/batch/storage.py", 324, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/assessments/batch/storage.py", 332, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/storage_read.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/services/assessments/batch/batch_parent.py", 125, "split-package-ratchet"),
     ModuleSizeBudget(

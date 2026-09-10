@@ -15,6 +15,7 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceNotFound
+from services.auth.background_authorization import principal_id_for_workspace
 from services.projects.monitoring import get_project_monitoring_summary
 from services.projects.scope import shared_owner_where
 from services.teams.ownership_queries import PersonalTeamRows, token_keyed_owner_predicate
@@ -255,6 +256,8 @@ def _sync_digest_schedule(
     team_id: str,
     enabled: bool,
     cadence_preset: str,
+    principal_id: str = "",
+    credential_id: str = "",
 ) -> None:
     row = _schedule_for_digest(conn, session_id, project_id, team_id=team_id)
     if row is None and enabled:
@@ -266,6 +269,8 @@ def _sync_digest_schedule(
             label="Project digest",
             owner_kind=OWNER_KIND_PROJECT_DIGEST,
             owner_id=project_id,
+            principal_id=principal_id,
+            credential_id=credential_id,
             conn=conn,
         )
         return
@@ -281,10 +286,11 @@ def _sync_digest_schedule(
                 "enabled": True,
                 "paused_reason": "",
             },
+            credential_id=credential_id,
             conn=conn,
         )
     else:
-        pause_schedule(schedule_id, "digest disabled", conn=conn)
+        pause_schedule(schedule_id, "digest disabled", credential_id=credential_id, conn=conn)
 
 
 def _row_to_settings(
@@ -405,11 +411,21 @@ def save_digest_settings(
     payload: dict[str, Any],
     *,
     team_id: str = "",
+    principal_id: str = "",
+    credential_id: str = "",
     conn: Any | None = None,
 ) -> dict[str, Any]:
     if conn is None:
         with get_db_connect()() as opened:
-            settings = save_digest_settings(session_id, project_id, payload, team_id=team_id, conn=opened)
+            settings = save_digest_settings(
+                session_id,
+                project_id,
+                payload,
+                team_id=team_id,
+                principal_id=principal_id,
+                credential_id=credential_id,
+                conn=opened,
+            )
             opened.commit()
             return settings
 
@@ -431,16 +447,23 @@ def save_digest_settings(
     quiet_no_change = _bool_flag(payload.get("quiet_no_change"), default=False)
     risk_escalations_enabled = _bool_flag(payload.get("risk_escalations_enabled"), default=False)
     now = _now()
+    resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+        conn, settings_session_id
+    )
     conn.execute(
         "INSERT INTO project_digest_settings "
         "(project_id, personal_workspace_id, team_id, enabled, cadence_preset, "
         "channel_ids_json, quiet_no_change, risk_escalations_enabled, "
-        "last_evaluated_at, last_sent_at, created, updated) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?) "
+        "last_evaluated_at, last_sent_at, created, updated, principal_id, "
+        "created_by_credential_id, last_changed_by_credential_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?) "
         "ON CONFLICT(project_id, personal_workspace_id, team_id) DO UPDATE SET "
         "enabled = excluded.enabled, cadence_preset = excluded.cadence_preset, "
         "channel_ids_json = excluded.channel_ids_json, quiet_no_change = excluded.quiet_no_change, "
         "risk_escalations_enabled = excluded.risk_escalations_enabled, "
+        "principal_id = COALESCE(excluded.principal_id, project_digest_settings.principal_id), "
+        "last_changed_by_credential_id = COALESCE("
+        "excluded.last_changed_by_credential_id, project_digest_settings.last_changed_by_credential_id), "
         "updated = excluded.updated",
         (
             project_id,
@@ -453,6 +476,9 @@ def save_digest_settings(
             int(risk_escalations_enabled),
             now,
             now,
+            resolved_principal_id or None,
+            str(credential_id or "").strip() or None,
+            str(credential_id or "").strip() or None,
         ),
     )
     _sync_digest_schedule(
@@ -462,6 +488,8 @@ def save_digest_settings(
         team_id=team_id,
         enabled=enabled,
         cadence_preset=cadence,
+        principal_id=resolved_principal_id,
+        credential_id=credential_id,
     )
     settings = get_digest_settings(settings_session_id, project_id, team_id=team_id, conn=conn)
     if settings is None:

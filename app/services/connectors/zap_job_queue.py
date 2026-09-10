@@ -28,6 +28,8 @@ def queue_zap_job(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     cfg: Mapping[str, Any] | None = None,
     conn=None,
 ) -> dict[str, Any]:
@@ -47,6 +49,8 @@ def queue_zap_job(
             team_id=team_id,
             actor_member_id=actor_member_id,
             actor_role=actor_role,
+            principal_id=principal_id,
+            originating_credential_id=originating_credential_id,
             conn=conn,
         )
     except Exception:

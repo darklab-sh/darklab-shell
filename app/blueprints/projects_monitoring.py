@@ -92,7 +92,15 @@ def projects_digest_settings_update(project_id):
     if not isinstance(data, dict):
         raise BadRequest("digest settings payload must be a JSON object")
     try:
-        settings = project_digests.save_digest_settings(session_id, project_id, data, team_id=team_id)
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
+        settings = project_digests.save_digest_settings(
+            session_id,
+            project_id,
+            data,
+            team_id=team_id,
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
+        )
     except ProjectWorkspaceError as exc:
         project_routes.log.warning("PROJECT_DIGEST_SETTINGS_REJECTED", extra={
             "ip": project_routes.get_client_ip(),

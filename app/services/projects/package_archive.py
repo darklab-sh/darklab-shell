@@ -883,7 +883,7 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes, *, t
     raise ProjectWorkspaceError("could not allocate an entity note id")
 
 
-def create_evidence_package(session_id, project_id, data, *, team_id=""):
+def create_evidence_package(session_id, project_id, data, *, team_id="", audit_fields=None):
     payload = _normalize_evidence_package_payload(data)
     summary = get_project_summary(
         session_id,
@@ -924,6 +924,12 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
         payload["description"] = apply_redaction_rules(payload["description"], redaction_rules)
     created = _now()
     with get_db_connect()() as conn:
+        from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+        principal_id = str((audit_fields or {}).get("actor_principal_id") or "") or principal_id_for_workspace(
+            conn, session_id
+        )
+        credential_id = str((audit_fields or {}).get("actor_credential_id") or "")
         package_where = "project_id = ?"
         package_params = [project_id]
         if not team_id:
@@ -945,8 +951,9 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
             result = conn.execute(
                 "INSERT INTO evidence_packages "
                 "(id, personal_workspace_id, project_id, name, description, redaction_mode, "
-                "include_artifacts, manifest, status, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?) "
+                "include_artifacts, manifest, status, created, updated, principal_id, "
+                "created_by_credential_id, last_changed_by_credential_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO NOTHING",
                 (
                     package_id,
@@ -959,6 +966,9 @@ def create_evidence_package(session_id, project_id, data, *, team_id=""):
                     dialect_for_backend(get_db_backend()).json_param(manifest),
                     created,
                     created,
+                    principal_id or None,
+                    credential_id or None,
+                    credential_id or None,
                 ),
             )
             if result.rowcount:

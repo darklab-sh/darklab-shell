@@ -104,6 +104,8 @@ def api_project_assessment_oast_correlations(project_id, assessment_id, check_id
                 if owner_scope.is_team
                 else ""
             ),
+            principal_id=owner_scope.context.actor_principal_id,
+            originating_credential_id=owner_scope.context.actor_credential_id,
         )
     except (
         AssessmentActionError,

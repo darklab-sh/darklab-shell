@@ -18,10 +18,13 @@ from typing import Any, cast
 
 from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
+from core.database_access import get_db_connect
+from services.auth.background_authorization import resolve_background_authorization
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.queries import get_project
+from services.teams.capabilities import Capability
 
 from .export import build_report_export_archive
 
@@ -98,6 +101,8 @@ def _job_log_extra(job, **extra):
         "project_id": str(job.get("project_id") or ""),
         "team_id": str(job.get("team_id") or ""),
         "actor_member_id": str(job.get("actor_member_id") or ""),
+        "principal_id": str(job.get("principal_id") or ""),
+        "credential_id": str(job.get("originating_credential_id") or ""),
         **extra,
     }
 
@@ -357,6 +362,8 @@ def _record_job_audit(
         event_fields = {
             "personal_workspace_id": str(job.get("personal_workspace_id") or ""),
             "actor_session_id": str(job.get("personal_workspace_id") or ""),
+            "actor_principal_id": str(job.get("principal_id") or ""),
+            "actor_credential_id": str(job.get("originating_credential_id") or ""),
             "team_id": str(job.get("team_id") or ""),
             "actor_member_id": str(job.get("actor_member_id") or ""),
         }
@@ -393,8 +400,22 @@ def _run_job(job_id, cfg_snapshot):
         _write_job(current)
 
     def _progress(phase, message):
+        _require_job_authorization(job)
         _update("running", phase, message)
 
+    try:
+        _require_job_authorization(job)
+    except RuntimeError as exc:
+        _record_job_audit(job, status="failed", reason="authorization")
+        _update(
+            "failed",
+            "authorization",
+            str(exc),
+            error=str(exc),
+            error_code="authorization_revoked",
+            error_status=403,
+        )
+        return
     _update("running", "loading", "Loading report inputs")
     try:
         project = get_project(
@@ -468,6 +489,25 @@ def _run_job(job_id, cfg_snapshot):
             error_status=error["status"],
         )
         return
+    try:
+        _require_job_authorization(job)
+    except RuntimeError as exc:
+        archive_path = str(archive.get("path") or "")
+        if archive_path:
+            try:
+                Path(archive_path).unlink()
+            except OSError:
+                pass
+        _record_job_audit(job, status="failed", reason="authorization")
+        _update(
+            "failed",
+            "authorization",
+            str(exc),
+            error=str(exc),
+            error_code="authorization_revoked",
+            error_status=403,
+        )
+        return
     destination = _archive_path(job_id)
     if destination is None:
         error = _job_error("invalid_job_id")
@@ -508,6 +548,20 @@ def _run_job(job_id, cfg_snapshot):
     )
 
 
+def _require_job_authorization(job):
+    with get_db_connect()() as conn:
+        authorization = resolve_background_authorization(
+            conn,
+            principal_id=str(job.get("principal_id") or ""),
+            personal_workspace_id=str(job.get("personal_workspace_id") or ""),
+            team_id=str(job.get("team_id") or ""),
+            originating_credential_id=str(job.get("originating_credential_id") or ""),
+            required_capability=Capability.MUTATE_PROJECTS,
+        )
+    if not authorization.allowed:
+        raise RuntimeError(authorization.message)
+
+
 def start_report_export_job(
     session_id,
     project_id,
@@ -517,6 +571,8 @@ def start_report_export_job(
     team_id="",
     actor_member_id="",
     audit_fields=None,
+    principal_id="",
+    originating_credential_id="",
 ):
     cleanup_report_export_jobs()
     _ensure_job_dir()
@@ -526,6 +582,10 @@ def start_report_export_job(
         "personal_workspace_id": session_id,
         "team_id": str(team_id or ""),
         "actor_member_id": str(actor_member_id or ""),
+        "principal_id": str(principal_id or (audit_fields or {}).get("actor_principal_id") or ""),
+        "originating_credential_id": str(
+            originating_credential_id or (audit_fields or {}).get("actor_credential_id") or ""
+        ),
         "project_id": project_id,
         "draft": draft if isinstance(draft, dict) else {},
         "status": "queued",
@@ -540,3 +600,27 @@ def start_report_export_job(
     cfg_snapshot = dict(resolve_effective_cfg(cfg))
     _EXECUTOR.submit(_run_job, job["id"], cfg_snapshot)
     return _public_job(job)
+
+
+def stop_report_export_jobs_for_principal(principal_id: str) -> tuple[str, ...]:
+    """Mark queued and running report jobs stopped after principal disablement."""
+    stopped: list[str] = []
+    for path in _JOB_DIR.glob("rpj_*.json"):
+        job = _read_job(path.stem)
+        if not isinstance(job, dict):
+            continue
+        if str(job.get("principal_id") or "") != str(principal_id or ""):
+            continue
+        if str(job.get("status") or "") not in {"queued", "running"}:
+            continue
+        job.update({
+            "status": "failed",
+            "phase": "authorization",
+            "message": "The principal was disabled.",
+            "error": "The principal was disabled.",
+            "error_code": "authorization_revoked",
+            "error_status": 403,
+        })
+        _write_job(job)
+        stopped.append(str(job.get("id") or ""))
+    return tuple(stopped)

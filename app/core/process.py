@@ -679,6 +679,8 @@ def active_run_register(
     owner_tab_id: str = "",
     run_type: str = "command",
     team_id: str = "",
+    principal_id: str = "",
+    credential_id: str = "",
 ) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     from services import metrics as app_metrics  # noqa: PLC0415
@@ -689,6 +691,8 @@ def active_run_register(
         "pid_start_time": _pid_start_time(pid),
         "session_id": session_id,
         "team_id": team_id,
+        "principal_id": str(principal_id or ""),
+        "credential_id": str(credential_id or ""),
         "command": command,
         "started": started,
         "owner_client_id": owner_client_id,
@@ -707,6 +711,10 @@ def active_run_register(
             team_key = f"teamprocs:{team_id}"
             redis_client.sadd(team_key, run_id)
             redis_client.expire(team_key, _PID_TTL)
+        if principal_id:
+            principal_key = f"principalprocs:{principal_id}"
+            redis_client.sadd(principal_key, run_id)
+            redis_client.expire(principal_key, _PID_TTL)
     else:
         with _pid_lock:
             _active_run_meta[run_id] = payload
@@ -740,6 +748,9 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         team_id = str(payload.get("team_id", "") or "")
         if team_id:
             redis_client.expire(f"teamprocs:{team_id}", _PID_TTL)
+        principal_id = str(payload.get("principal_id", "") or "")
+        if principal_id:
+            redis_client.expire(f"principalprocs:{principal_id}", _PID_TTL)
         return True
 
     with _pid_lock:
@@ -777,6 +788,9 @@ def active_run_claim_owner_transition(run_id: str, owner_client_id: str = "", ow
         team_id = str(payload.get("team_id", "") or "")
         if team_id:
             redis_client.expire(f"teamprocs:{team_id}", _PID_TTL)
+        principal_id = str(payload.get("principal_id", "") or "")
+        if principal_id:
+            redis_client.expire(f"principalprocs:{principal_id}", _PID_TTL)
         return {
             "claimed": True,
             "changed_client": bool(previous_client_id and previous_client_id != owner_client_id),
@@ -889,6 +903,9 @@ def active_run_remove(run_id: str) -> None:
                 redis_client.srem(f"sessionprocs:{session_id}", run_id)
             if team_id:
                 redis_client.srem(f"teamprocs:{team_id}", run_id)
+            principal_id = str(payload.get("principal_id", "") or "") if payload else ""
+            if principal_id:
+                redis_client.srem(f"principalprocs:{principal_id}", run_id)
         redis_client.delete(meta_key)
         if payload:
             app_metrics.record_run_removed(run_type)
@@ -909,14 +926,21 @@ def active_run_remove(run_id: str) -> None:
 def cleanup_stale_active_run_metadata() -> dict[str, int]:
     """Remove Redis active-run metadata left behind by dead app containers."""
     if not redis_client:
-        return {"metadata_removed": 0, "session_members_removed": 0, "team_members_removed": 0}
+        return {
+            "metadata_removed": 0,
+            "session_members_removed": 0,
+            "team_members_removed": 0,
+            "principal_members_removed": 0,
+        }
 
     current_namespace = _process_namespace_id()
     removed_meta = 0
     removed_session_members = 0
     removed_team_members = 0
+    removed_principal_members = 0
     session_member_removals: dict[str, set[str]] = {}
     team_member_removals: dict[str, set[str]] = {}
+    principal_member_removals: dict[str, set[str]] = {}
 
     for meta_key in _redis_scan_strings("procmeta:*"):
         raw = redis_client.get(meta_key)
@@ -927,6 +951,7 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
         proc_key = f"proc:{run_id}"
         session_id = str((payload or {}).get("session_id", "") or "")
         team_id = str((payload or {}).get("team_id", "") or "")
+        principal_id = str((payload or {}).get("principal_id", "") or "")
         namespace = str((payload or {}).get("process_namespace_id", "") or "")
         stale = (
             not payload
@@ -942,6 +967,8 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
             session_member_removals.setdefault(f"sessionprocs:{session_id}", set()).add(run_id)
         if team_id:
             team_member_removals.setdefault(f"teamprocs:{team_id}", set()).add(run_id)
+        if principal_id:
+            principal_member_removals.setdefault(f"principalprocs:{principal_id}", set()).add(run_id)
 
     for session_key in _redis_scan_strings("sessionprocs:*"):
         stale_members = session_member_removals.setdefault(session_key, set())
@@ -955,6 +982,12 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
             if redis_client.get(f"procmeta:{run_id}") is None or redis_client.get(f"proc:{run_id}") is None:
                 stale_members.add(run_id)
 
+    for principal_key in _redis_scan_strings("principalprocs:*"):
+        stale_members = principal_member_removals.setdefault(principal_key, set())
+        for run_id in _redis_smembers_strings(principal_key):
+            if redis_client.get(f"procmeta:{run_id}") is None or redis_client.get(f"proc:{run_id}") is None:
+                stale_members.add(run_id)
+
     for session_key, run_ids in session_member_removals.items():
         if not run_ids:
             continue
@@ -965,10 +998,16 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
             continue
         removed_team_members += int(cast(int, redis_client.srem(team_key, *sorted(run_ids))) or 0)
 
+    for principal_key, run_ids in principal_member_removals.items():
+        if not run_ids:
+            continue
+        removed_principal_members += int(cast(int, redis_client.srem(principal_key, *sorted(run_ids))) or 0)
+
     return {
         "metadata_removed": removed_meta,
         "session_members_removed": removed_session_members,
         "team_members_removed": removed_team_members,
+        "principal_members_removed": removed_principal_members,
     }
 
 
@@ -1149,7 +1188,6 @@ def active_runs_for_team(team_id: str, client_id: str = "") -> list[dict]:
             if item.get("run_id") and item.get("command") and item.get("started")
         ]
         return sorted(public_items, key=_active_run_started_sort_key)
-
     with _pid_lock:
         items = []
         stale_memory: list[str] = []
@@ -1171,3 +1209,38 @@ def active_runs_for_team(team_id: str, client_id: str = "") -> list[dict]:
                     _session_run_ids.pop(session_id, None)
         public_items = [item for item in items if item["run_id"] and item["command"] and item["started"]]
         return sorted(public_items, key=_active_run_started_sort_key)
+
+
+def active_runs_for_principal(principal_id: str) -> list[dict[str, object]]:
+    """Return live run metadata for one principal without request credentials."""
+    normalized = str(principal_id or "").strip()
+    if not normalized:
+        return []
+    if redis_client:
+        _maybe_cleanup_stale_active_run_metadata()
+        key = f"principalprocs:{normalized}"
+        items: list[dict[str, object]] = []
+        stale: list[str] = []
+        for run_id in sorted(_redis_smembers_strings(key)):
+            meta_key = f"procmeta:{run_id}"
+            payload = _load_active_run_payload(redis_client.get(meta_key), meta_key)
+            if not payload or str(payload.get("principal_id") or "") != normalized or not _active_run_is_alive(payload):
+                stale.append(run_id)
+                continue
+            item = dict(_active_run_public_item(payload, "redis"))
+            item["session_id"] = str(payload.get("session_id") or "")
+            item["team_id"] = str(payload.get("team_id") or "")
+            items.append(item)
+        if stale:
+            redis_client.srem(key, *stale)
+        return sorted(items, key=_active_run_started_sort_key)
+    with _pid_lock:
+        items = []
+        for payload in _active_run_meta.values():
+            if str(payload.get("principal_id") or "") != normalized or not _active_run_is_alive(payload):
+                continue
+            item = dict(_active_run_public_item(payload, "memory"))
+            item["session_id"] = str(payload.get("session_id") or "")
+            item["team_id"] = str(payload.get("team_id") or "")
+            items.append(item)
+    return sorted(items, key=_active_run_started_sort_key)

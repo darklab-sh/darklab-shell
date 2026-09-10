@@ -96,6 +96,7 @@ def project_assessment_oast_correlations(project_id, assessment_id, check_id):
                 team_id=team_id,
             )
             return jsonify({"correlations": correlations})
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
         correlation = reserve_assessment_oast(
             session_id,
             project_id,
@@ -107,6 +108,8 @@ def project_assessment_oast_correlations(project_id, assessment_id, check_id):
                 session_id, team_id
             ),
             actor_role=_actor_role(session_id, team_id),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(audit_fields.get("actor_credential_id") or ""),
         )
     except (
         AssessmentActionError,
