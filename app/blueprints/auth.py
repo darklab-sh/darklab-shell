@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Additive v3 principal and credential lifecycle routes."""
+"""Browser principal and credential lifecycle routes."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 # This list is intentionally small and test-audited. No GET route may return a
 # reusable secret.
 SECRET_BEARING_ENDPOINTS = frozenset({
-    "auth.upgrade",
+    "auth.create_principal",
     "auth.redeem",
     "auth.create_credential",
     "auth.rotate_credential",
@@ -83,8 +83,8 @@ def _request_fields() -> dict:
     return request_audit_fields(request)
 
 
-@auth_bp.post("/upgrade")
-def upgrade():
+@auth_bp.post("/principals")
+def create_principal():
     result = get_authentication_result()
     if result.failed:
         raise AuthenticationRejected(result.error_code, result.message)
@@ -118,7 +118,7 @@ def upgrade():
     return _no_store(response), 201
 
 
-@auth_bp.post("/redeem")
+@auth_bp.post("/credentials/redeem")
 def redeem():
     secret = str(_payload().get("secret") or "")
     result = redeem_portable_credential(secret)
@@ -156,8 +156,8 @@ def _require_pat_scope(context: AuthenticatedContext, scope: str) -> None:
         raise PermissionError(f"PAT requires the {scope} scope")
 
 
-@auth_bp.get("/context")
-def current_context():
+@auth_bp.get("/principal")
+def current_principal():
     try:
         context = require_authenticated_context()
         _require_pat_scope(context, "identity:read")
@@ -165,7 +165,22 @@ def current_context():
         return _error(exc)
     except AuthenticationRejected as exc:
         return jsonify({"error": exc.code, "message": exc.message}), 401
-    return jsonify({"authentication": _context_payload(context)})
+    return jsonify({
+        "principal": {
+            "id": context.principal_id,
+            "status": "active",
+            "personal_workspace_id": context.personal_workspace_id,
+        },
+        "authentication": _context_payload(context),
+    })
+
+
+@auth_bp.post("/local-access/clear")
+def clear_local_access():
+    """Ask the browser to clear local identity and credential storage."""
+    response = current_app.response_class(status=204)
+    response.headers["Clear-Site-Data"] = '"storage"'
+    return _no_store(response)
 
 
 @auth_bp.get("/credentials")

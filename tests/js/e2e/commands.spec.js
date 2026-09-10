@@ -36,6 +36,22 @@ test.describe('command execution', () => {
     await expect(page.locator('#hud-last-exit')).not.toHaveText('—')
     await expect(page.locator('.tab-panel.active .output')).toContainText('[denied]')
   })
+
+  test('credential lifecycle commands open Access and reject secret arguments', async ({ page }) => {
+    const output = page.locator('.tab-panel.active .output')
+
+    await runCommand(page, 'credential create')
+    await expect(output).toContainText('Opening Access for credential create')
+    await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
+
+    await page.locator('#options-overlay .options-close').click()
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await runCommand(page, 'credential use reusable-secret-must-not-be-recorded')
+    await expect(output).toContainText("credential values aren't accepted in shell commands")
+    await expect(output).toContainText('reusable secrets never enter command history')
+    await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
+  })
 })
 
 test.describe('interactive PTY command execution', () => {

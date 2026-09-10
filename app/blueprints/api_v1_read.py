@@ -54,7 +54,19 @@ def api_openapi():
 def api_whoami():
     session = current_api_session()
     return jsonify({
-        "token_created": session.created,
+        "principal_id": session.principal_id,
+        "personal_workspace_id": session.owner_id,
+        "credential": {
+            "id": session.credential_id,
+            "type": "pat",
+            "created_at": session.created_at,
+            "last_used_at": session.last_seen_at,
+            "expires_at": session.expires_at,
+            "scopes": sorted(session.scopes),
+        },
+        # Keep this top-level timestamp while CLI formatters move to the richer
+        # credential object. It contains no secret or stable deployment-wide
+        # fingerprint.
         "last_seen_at": session.last_seen_at,
     })
 

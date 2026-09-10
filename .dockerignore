@@ -32,6 +32,7 @@ scripts/*
 !scripts/container/prepare_nuclei_template_cache.sh
 !scripts/operations/
 !scripts/operations/backup_system.py
+!scripts/operations/manage_principal_access.py
 !scripts/operations/migrate_sqlite_to_postgres.py
 !scripts/operations/restore_system.py
 config/

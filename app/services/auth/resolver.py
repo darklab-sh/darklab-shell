@@ -63,6 +63,9 @@ class AuthenticatedContext:
     credential_id: str
     credential_type: Literal["portable", "pat"]
     authentication_method: AuthenticationMethod
+    credential_created_at: str = ""
+    credential_last_used_at: str | None = None
+    credential_expires_at: str | None = None
     selected_team_id: str = ""
     role: str = ""
     capabilities: frozenset[str] = field(default_factory=frozenset)
@@ -249,6 +252,11 @@ def _as_utc(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _stored_context_timestamp(value: Any) -> str | None:
+    parsed = _as_utc(value)
+    return parsed.isoformat() if parsed is not None else None
+
+
 def _last_used_write_is_due(value: Any, cutoff: datetime) -> bool:
     last_used = _as_utc(value)
     return last_used is None or last_used <= cutoff
@@ -346,12 +354,14 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
                 "The supplied credential has invalid scopes.",
             )
     cutoff = now - timedelta(seconds=LAST_USED_WRITE_INTERVAL_SECONDS)
+    context_last_used = _stored_context_timestamp(data.get("last_used_at"))
     if touch_last_used and _last_used_write_is_due(data.get("last_used_at"), cutoff):
         conn.execute(
             "UPDATE credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL "
             "AND (last_used_at IS NULL OR last_used_at <= ?)",
             (timestamp(now), parsed.credential_id, timestamp(cutoff)),
         )
+        context_last_used = timestamp(now)
     capabilities = scopes if parsed.credential_type == "pat" else PAT_SCOPES
     return AuthenticationResult(
         state=AuthenticationState.VALID,
@@ -362,6 +372,9 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
             credential_id=parsed.credential_id,
             credential_type=parsed.credential_type,
             authentication_method=parsed.method,
+            credential_created_at=_stored_context_timestamp(data.get("created_at")) or "",
+            credential_last_used_at=context_last_used,
+            credential_expires_at=_stored_context_timestamp(data.get("expires_at")),
             capabilities=frozenset(capabilities),
         ),
         credential_supplied=True,

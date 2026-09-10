@@ -11,8 +11,6 @@ from services.commands.builtin_registry import (
     build_builtin_command_spec,
 )
 from services.commands.builtins_format import (
-    ansi_dim,
-    ansi_green,
     format_native_record,
     output_line,
 )
@@ -34,42 +32,9 @@ def mask_session_token(token: str) -> str:
     return token[:8] + "••••••••"
 
 
-def run_builtin_session_token(cmd: str, session_id: str) -> list[dict[str, object]]:
-    parts = split_command_argv(cmd)
-    subcommand = parts[1].lower() if len(parts) > 1 else ""
-
-    if subcommand in ("generate", "set", "copy", "clear", "rotate", "list", "revoke"):
-        # These subcommands are intercepted and executed client-side; they
-        # should never reach the server. Return a safe fallback message.
-        return [output_line("session-token: subcommands run client-side — reload the page and try again.")]
-
-    if subcommand:
-        return [
-            output_line(f"session-token: unknown subcommand '{subcommand}'"),
-            output_line("Usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]"),
-        ]
-
-    # Bare session-token shows status from the server-side session_id.
-    masked = mask_session_token(session_id)
-    width = 14
-    if session_id.startswith("tok_"):
-        return [
-            output_line(format_native_record("session token", masked, width), "builtin-kv"),
-            output_line(format_native_record("status", ansi_green("active"), width), "builtin-kv"),
-            output_line(format_native_record("storage", "localStorage (session_token)", width), "builtin-kv"),
-        ]
-    return [
-        output_line(format_native_record("session", masked, width), "builtin-kv"),
-        output_line(format_native_record("status", ansi_dim("anonymous (no session token set)"), width), "builtin-kv"),
-        output_line(
-            format_native_record(
-                "tip",
-                "run 'session-token generate' to create a persistent token",
-                width,
-            ),
-            "builtin-kv",
-        ),
-    ]
+def run_builtin_credential(_cmd: str, _session_id: str) -> list[dict[str, object]]:
+    """Return the fail-safe stub for the browser-owned credential command."""
+    return [output_line("credential: access controls run in the browser — reload the page and try again.")]
 
 
 def run_builtin_var(cmd: str, session_id: str) -> list[dict[str, object]]:
@@ -129,38 +94,19 @@ def run_builtin_var(cmd: str, session_id: str) -> list[dict[str, object]]:
 
 
 _BUILTIN_AUTOCOMPLETE = {
-    "session-token": {
-        "root": "session-token",
-        "description": "built-in: show or manage persistent session tokens",
+    "credential": {
+        "root": "credential",
+        "description": "built-in: inspect or manage access credentials",
         "autocomplete": {
             "subcommands": [
-                {"value": "generate", "description": "Generate a new session token and save it to this browser", "closes": True},
-                {
-                    "value": "set",
-                    "description": "Activate an existing session token from another device",
-                    "takes_value": True,
-                    "insert": "set ",
-                    "value_hint": {
-                        "value": "<token>",
-                        "hint_only": True,
-                        "description": "Paste a tok_... token or UUID from another device",
-                    },
-                },
-                {"value": "copy", "description": "Copy the active session token to the clipboard", "closes": True},
-                {"value": "clear", "description": "Confirm before removing the active session token", "closes": True},
-                {"value": "rotate", "description": "Generate a new token and migrate all history to it", "closes": True},
-                {"value": "list", "description": "Show the active session token and its creation date", "closes": True},
-                {
-                    "value": "revoke",
-                    "description": "Permanently invalidate a tok_ token on this server",
-                    "takes_value": True,
-                    "insert": "revoke ",
-                    "value_hint": {
-                        "value": "<token>",
-                        "hint_only": True,
-                        "description": "tok_ token to permanently invalidate on the server",
-                    },
-                },
+                {"value": "status", "description": "Show the current principal and authentication method", "closes": True},
+                {"value": "list", "description": "List safe credential metadata", "closes": True},
+                {"value": "create", "description": "Open Access to create a credential", "closes": True},
+                {"value": "use", "description": "Open Access to use a credential", "closes": True},
+                {"value": "expiry", "description": "Open Access to change credential expiry", "closes": True},
+                {"value": "rotate", "description": "Open Access to rotate a credential", "closes": True},
+                {"value": "revoke", "description": "Open Access to revoke a credential", "closes": True},
+                {"value": "recover", "description": "Open Access recovery guidance", "closes": True},
             ]
         },
     },
@@ -182,16 +128,16 @@ _BUILTIN_AUTOCOMPLETE = {
 def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
     return (
         build_builtin_command_spec(
-            _BUILTIN_AUTOCOMPLETE["session-token"],
-            handler_key="session-token",
-            handler=lambda command, context: run_builtin_session_token(
+            _BUILTIN_AUTOCOMPLETE["credential"],
+            handler_key="credential",
+            handler=lambda command, context: run_builtin_credential(
                 command,
                 context.session_id,
             ),
-            name="session-token",
-            description="Show session token status.",
-            execution_owner=BuiltinExecutionOwner.MIXED,
-            browser_owned_subcommands=("*",),
+            name="credential",
+            description="Inspect or manage access credentials.",
+            execution_owner=BuiltinExecutionOwner.BROWSER,
+            browser_fallback_stub=True,
         ),
         build_builtin_command_spec(
             _BUILTIN_AUTOCOMPLETE["var"],

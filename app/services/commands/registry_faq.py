@@ -219,33 +219,24 @@ def _builtin_faq(app_name="darklab_shell", project_source=None, cfg=None):
             ),
         },
         {
-            "question": "How do session tokens work?",
+            "question": "How do access credentials work?",
             "category": "Privacy & sessions",
             "answer": (
-                "Without a session token, your history is tied to your current browser — switch browsers "
-                "or workstations and you start fresh. Set a token and any browser that uses the same "
-                "token shares your run history, starred commands, and saved user options."
+                "You can keep using a private browser-local workspace, or protect it with a pseudonymous "
+                "access credential and use that credential from another device."
             ),
             "answer_html": (
-                "Without a session token, your history is tied to your current browser. Switch to a "
-                "different browser or workstation and you start fresh.<br><br>"
-                "Set a <strong>session token</strong> and any browser that uses the same token shares "
-                "your run history, starred commands, and saved user options — useful if you work across "
-                "multiple machines or want to pick up where you left off after clearing your browser.<br><br>"
-                "Use these commands to manage your session token:<br><br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token\">session-token</span>"
-                " — show whether a token is active.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token generate\">session-token generate</span>"
-                " — create and activate a new random token.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token set \">session-token set</span>"
-                " — activate a specific token you already have.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token rotate\">session-token rotate</span>"
-                " — replace your current token with a new random one.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token clear\">session-token clear</span>"
-                " — remove your token and return to a browser-local session.<br><br>"
-                "You can also use the <strong>Generate</strong>, <strong>Set</strong>, "
-                "<strong>Rotate</strong>, and <strong>Clear</strong> buttons in the "
-                "<strong>Options</strong> panel."
+                "Without an access credential, your workspace stays tied to this browser. A portable "
+                "credential lets the same pseudonymous workspace follow you to another device without "
+                "asking for a name, email address, or password.<br><br>"
+                "Use <span class=\"allowed-chip faq-chip\" data-faq-command=\"credential status\">credential status</span>"
+                " to inspect the current identity or "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"credential list\">credential list</span>"
+                " to see safe credential metadata. Commands such as "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"credential create\">credential create</span>, "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"credential use\">credential use</span>, and "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"credential rotate\">credential rotate</span>"
+                " open the access controls so reusable secrets don't enter the terminal transcript or history."
             ),
         },
         {

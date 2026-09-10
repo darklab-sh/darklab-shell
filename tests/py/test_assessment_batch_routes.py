@@ -12,7 +12,12 @@ import uuid
 import pytest
 
 from conftest import reusable_test_app
-from identity_helpers import register_durable_session_token
+from identity_helpers import (
+    anonymous_session_id,
+    api_identity_headers,
+    browser_identity_headers,
+    principal_identity,
+)
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.base_action_catalog import ACTIONS
@@ -32,8 +37,8 @@ from services.projects.crud import create_project, delete_project
 from services.projects.targets import add_project_target
 
 
-def _register_token(token: str) -> None:
-    register_durable_session_token(token)
+def _principal_owner(label: str) -> str:
+    return principal_identity(label).owner_id
 
 
 def _runtime() -> ProbePlanningRuntime:
@@ -83,8 +88,7 @@ def client():
 
 @pytest.fixture
 def route_cycle(monkeypatch: pytest.MonkeyPatch):
-    session_id = "tok_batch_routes_" + uuid.uuid4().hex
-    _register_token(session_id)
+    session_id = _principal_owner("batch-routes-" + uuid.uuid4().hex)
     project = create_project(session_id, {"name": "Batch route Project"})
     assert project is not None
     project_id = str(project["id"])
@@ -129,17 +133,11 @@ def route_cycle(monkeypatch: pytest.MonkeyPatch):
 
 
 def _browser_headers(session_id: str, team_id: str = "") -> dict[str, str]:
-    headers = {"X-Session-ID": session_id}
-    if team_id:
-        headers["X-Team-ID"] = team_id
-    return headers
+    return browser_identity_headers(session_id, team_id=team_id)
 
 
 def _api_headers(session_id: str, team_id: str = "") -> dict[str, str]:
-    headers = {"Authorization": f"Bearer {session_id}"}
-    if team_id:
-        headers["X-Team-ID"] = team_id
-    return headers
+    return api_identity_headers(session_id, team_id=team_id)
 
 
 def _join_team_member(
@@ -272,8 +270,7 @@ def test_browser_preview_create_read_and_page_are_owner_scoped_and_side_effect_f
     assert [item["item_index"] for item in second.get_json()["items"]] == [1, 2]
     assert second.get_json()["next_cursor"] is None
 
-    foreign = "tok_batch_routes_foreign_" + uuid.uuid4().hex
-    _register_token(foreign)
+    foreign = _principal_owner("batch-routes-foreign-" + uuid.uuid4().hex)
     hidden = client.get(
         f"/assessment-batch-previews/{preview_id}",
         headers=_browser_headers(foreign),
@@ -669,7 +666,7 @@ def test_active_batch_monitor_state_is_owner_scoped_and_keeps_live_commands_publ
     }
     assert "execution_command" not in command
     assert active_assessment_batch_monitor_state(
-        "tok_batch_monitor_foreign_" + uuid.uuid4().hex
+        anonymous_session_id("batch-monitor-foreign-" + uuid.uuid4().hex)
     ) == {"batches": [], "truncated": False}
 
 
@@ -780,8 +777,7 @@ def test_browser_and_api_batch_reads_share_bounded_pages_and_stable_rollups(
         assert event_page["next_cursor"] == 1
         assert event_page["events"][0]["event_type"] == "parent_created"
 
-    foreign = "tok_batch_routes_read_foreign_" + uuid.uuid4().hex
-    _register_token(foreign)
+    foreign = _principal_owner("batch-routes-foreign-" + uuid.uuid4().hex)
     hidden = client.get(
         f"/api/v1/assessment-batches/{first_batch_id}",
         headers=_api_headers(foreign),
@@ -853,10 +849,8 @@ def test_preview_routes_reject_invalid_and_oversized_request_bodies(
 
 
 def test_team_viewer_can_compile_and_read_a_batch_preview(client, monkeypatch):
-    owner = "tok_batch_owner_" + uuid.uuid4().hex
-    viewer = "tok_batch_viewer_" + uuid.uuid4().hex
-    _register_token(owner)
-    _register_token(viewer)
+    owner = _principal_owner("batch-owner-" + uuid.uuid4().hex)
+    viewer = _principal_owner("batch-viewer-" + uuid.uuid4().hex)
     team_response = client.post(
         "/session/teams",
         headers=_browser_headers(owner),
@@ -980,12 +974,10 @@ def test_team_batch_role_matrix_keeps_preview_readable_and_writes_capability_gat
     client,
     monkeypatch,
 ):
-    owner = "tok_batch_matrix_owner_" + uuid.uuid4().hex
-    viewer = "tok_batch_matrix_viewer_" + uuid.uuid4().hex
-    operator = "tok_batch_matrix_operator_" + uuid.uuid4().hex
-    admin = "tok_batch_matrix_admin_" + uuid.uuid4().hex
-    for token in (owner, viewer, operator, admin):
-        _register_token(token)
+    owner = _principal_owner("batch-matrix-owner-" + uuid.uuid4().hex)
+    viewer = _principal_owner("batch-matrix-viewer-" + uuid.uuid4().hex)
+    operator = _principal_owner("batch-matrix-operator-" + uuid.uuid4().hex)
+    admin = _principal_owner("batch-matrix-admin-" + uuid.uuid4().hex)
     team_response = client.post(
         "/session/teams",
         headers=_browser_headers(owner),

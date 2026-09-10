@@ -20278,7 +20278,9 @@ class TestDerivedCommandRegistry:
         ]
         assert shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value"] == "<ip-or-cidr>"
         assert shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value_type"] == "target"
-        assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert [
+            item["value"] for item in context["credential"]["arg_hints"]["__positional__"]
+        ] == ["status", "list", "create", "use", "expiry", "rotate", "revoke", "recover"]
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
             "list",
             "create",

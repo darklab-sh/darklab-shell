@@ -22,7 +22,7 @@ CLIENT_SIDE_RUN_ROOTS = {
     "mkdir",
     "pwd",
     "rm",
-    "session-token",
+    "credential",
     "sort",
     "tail",
     "theme",

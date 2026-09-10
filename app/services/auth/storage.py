@@ -608,6 +608,20 @@ def list_credentials(
     return _run_read(operation, conn=conn, connect=connect)
 
 
+def get_principal(
+    principal_id: str,
+    *,
+    conn: Any | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> PrincipalRecord:
+    """Return safe principal metadata for an exact validated id."""
+    return _run_read(
+        lambda active_conn: _principal_record(_principal_row(active_conn, principal_id)),
+        conn=conn,
+        connect=connect,
+    )
+
+
 def rename_credential(
     principal_id: str,
     credential_id: str,

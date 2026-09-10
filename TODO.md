@@ -137,8 +137,8 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - [ ] Replace the `session-token` command family with the `credential` command root. Status and list operations may render safe metadata in the terminal; create, use, rotate, and recovery operations that handle a raw secret open the shared Access UI instead of accepting secrets on the command line.
 - [ ] Replace the legacy session routes with principal/credential endpoints for anonymous upgrade, credential redemption/verification, current-principal summary, credential lifecycle management, and local access clearing. Regenerate the API v1 OpenAPI document after final route shapes settle.
 - [ ] Replace `X-Session-ID` with the recorded `X-Darklab-Credential`/`X-Darklab-Anonymous-ID` browser transport, and replace token-shaped CLI configuration with scoped PAT configuration. Keep CLI files owner-only and make diagnostics show only credential type, safe prefix, expiry, and principal state.
-- [ ] Remove API v1's explicit `X-Session-ID` fallback from `token_from_request()` and require scoped PATs through `Authorization: Bearer`. Treat this as its own API-visible breaking change with focused contract tests, CLI migration guidance, changelog entry, and release-note callout.
-- [ ] Add an operator lifecycle command for safe principal lookup, credential issuance, expiry, rotation, revocation, disable/enable, and recovery. Newly issued secrets print once and require an explicit output destination or interactive acknowledgement when appropriate.
+- [x] Remove API v1's explicit `X-Session-ID` fallback from `token_from_request()` and require scoped PATs through `Authorization: Bearer`. Treat this as its own API-visible breaking change with focused contract tests, CLI migration guidance, changelog entry, and release-note callout.
+- [x] Add an operator lifecycle command for safe principal lookup, credential issuance, expiry, rotation, revocation, disable/enable, and recovery. Newly issued secrets print once and require an explicit output destination or interactive acknowledgement when appropriate.
 - [ ] Update command discovery, autocomplete, help, FAQ data, config validation, masking, audit classification, notification redaction, and administrative-command persistence rules for the replacement terminology.
 
 **Acceptance criteria**
@@ -146,7 +146,7 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - [ ] No supported browser, API, CLI, or operator path accepts a legacy `tok_` credential, `X-Session-ID`, `/session/migrate`, or `session-token` command.
 - [ ] Secret-bearing values cannot enter terminal prompt history, command recents, saved client runs, shell history through documented CLI examples, URLs, or generated OpenAPI examples.
 - [ ] Browser portable credentials and PATs resolve the same principal while retaining separate credential type, scope, expiry, audit, and revocation behavior.
-- [ ] CLI/API contract tests cover valid, missing, malformed, expired, revoked, under-scoped, and disabled-principal credentials.
+- [x] CLI/API contract tests cover valid, missing, malformed, expired, revoked, under-scoped, and disabled-principal credentials.
 
 #### Phase 6 — Replace the session-token UI with principal and credential management
 

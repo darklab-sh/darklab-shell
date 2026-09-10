@@ -951,10 +951,10 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
       const sawNewLine = rawLines.length > previousLineCount
       const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
       const sensitivePrefix = expectedCmd.match(
-        /^(session-token\s+(?:set|revoke))\b/i,
+        /^((?:session-token\s+(?:set|revoke)|credential\s+(?:create|use|expiry|rotate|revoke|recover)))\b/i,
       )?.[1] || ''
       const sawMaskedEcho = sensitivePrefix && (
-        text.includes(`$${sensitivePrefix} `) || text.includes(`$ ${sensitivePrefix} `)
+        text.includes(`$${sensitivePrefix}`) || text.includes(`$ ${sensitivePrefix}`)
       )
       if (tab.command === expectedCmd && sawNewLine) return true
       return sawNewLine && (sawEcho || sawMaskedEcho)

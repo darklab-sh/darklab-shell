@@ -39,7 +39,7 @@ import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
 from conftest import reusable_test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import anonymous_session_id, principal_identity, register_durable_session_token
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -5671,21 +5671,24 @@ class TestTeamRoutes:
     def test_active_team_scope_shares_atlas_reads_for_team_runs(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_atlas_owner"
-            operator_token = "tok_team_atlas_operator"
-            outsider_token = "tok_team_atlas_outsider"
-            self._register_session_token(operator_token)
-            self._register_session_token(outsider_token)
-            created = self._create_team(client, owner_token, name="Atlas Operators")
+            owner = principal_identity("team-atlas-owner")
+            operator = principal_identity("team-atlas-operator")
+            outsider = principal_identity("team-atlas-outsider")
+            owner_token = owner.owner_id
+            created = client.post(
+                "/session/teams",
+                headers=owner.browser_headers(),
+                json={"name": "Atlas Operators", "display_name": "Owner"},
+            )
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers=owner.browser_headers(),
                 json={"role": "operator", "label": "Atlas operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers=operator.browser_headers(),
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Atlas operator"},
             )
             assert joined.status_code == 201
@@ -5781,24 +5784,28 @@ class TestTeamRoutes:
                     )
                 conn.commit()
 
-            personal_summary = client.get("/atlas", headers={"X-Session-ID": owner_token})
-            team_summary = client.get("/atlas", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
-            team_runs = client.get("/atlas/runs", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
+            personal_summary = client.get("/atlas", headers=owner.browser_headers())
+            team_summary = client.get("/atlas", headers=operator.browser_headers(team_id=team_id))
+            team_runs = client.get("/atlas/runs", headers=operator.browser_headers(team_id=team_id))
             team_entities = client.get(
                 "/atlas/entities?type=domain",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers=operator.browser_headers(team_id=team_id),
             )
             team_entity_detail = client.get(
                 f"/atlas/entities/{team_entity_id}",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers=operator.browser_headers(team_id=team_id),
             )
-            team_findings = client.get("/atlas/findings", headers={"X-Session-ID": operator_token, "X-Team-ID": team_id})
+            team_findings = client.get("/atlas/findings", headers=operator.browser_headers(team_id=team_id))
             api_team_entity = client.get(
                 f"/api/v1/atlas/entities/{team_entity_id}",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers=operator.api_headers(team_id=team_id),
             )
-            operator_personal_entity = client.get(f"/atlas/entities/{team_entity_id}", headers={"X-Session-ID": operator_token})
-            outsider_summary = client.get("/atlas", headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id})
+            operator_personal_entity = client.get(
+                f"/atlas/entities/{team_entity_id}", headers=operator.browser_headers()
+            )
+            outsider_summary = client.get(
+                "/atlas", headers=outsider.browser_headers(team_id=team_id)
+            )
 
             assert personal_summary.status_code == 200
             assert personal_summary.get_json()["counts"]["domain"] == 1

@@ -109,7 +109,7 @@ _EXPECTED_BUILTIN_ROOTS = {
     "runs",
     "schedule",
     "secret",
-    "session-token",
+    "credential",
     "shortcuts",
     "sort",
     "stats",

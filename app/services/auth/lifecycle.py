@@ -137,6 +137,207 @@ def issue(
     return run_transaction(operation, connect=connect)
 
 
+def operator_issue(
+    principal_id: str,
+    *,
+    credential_type: str = "portable",
+    label: str = "",
+    expires_at: str | datetime | None = None,
+    scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> IssuedCredential:
+    """Issue a credential through the local operator boundary."""
+    def operation(conn: Any) -> IssuedCredential:
+        issued = storage.issue_credential(
+            principal_id,
+            credential_type=credential_type,
+            label=label,
+            expires_at=expires_at,
+            scopes=scopes,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_CREATE,
+            target_type=AuditTargetType.CREDENTIAL,
+            target_id=issued.metadata.id,
+            details=_credential_details(issued.metadata, source="local_operator"),
+            conn=conn,
+        )
+        return issued
+
+    return run_transaction(operation, connect=connect)
+
+
+def operator_recover(
+    principal_id: str,
+    *,
+    label: str = "Recovered access",
+    connect: Callable[[], Any] | None = None,
+) -> IssuedCredential:
+    """Revoke existing credentials and return one replacement exactly once."""
+    def operation(conn: Any) -> IssuedCredential:
+        from .background_authorization import pause_durable_work_for_credential  # noqa: PLC0415
+
+        current = storage.list_credentials(principal_id, conn=conn)
+        for credential in current:
+            if credential.revoked_at is not None:
+                continue
+            storage.revoke_credential(
+                principal_id,
+                credential.id,
+                reason="operator recovery",
+                allow_lockout=True,
+                conn=conn,
+            )
+            pause_durable_work_for_credential(conn, principal_id, credential.id)
+            record_event(
+                AuditEventType.CREDENTIAL_REVOKE,
+                target_type=AuditTargetType.CREDENTIAL,
+                target_id=credential.id,
+                details={"credential_type": credential.credential_type, "source": "local_operator_recovery"},
+                conn=conn,
+            )
+        replacement = storage.issue_credential(
+            principal_id,
+            credential_type="portable",
+            label=label,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_CREATE,
+            target_type=AuditTargetType.CREDENTIAL,
+            target_id=replacement.metadata.id,
+            details=_credential_details(replacement.metadata, source="local_operator_recovery"),
+            conn=conn,
+        )
+        return replacement
+
+    return run_transaction(operation, connect=connect)
+
+
+def operator_summary(
+    principal_id: str,
+    *,
+    connect: Callable[[], Any] | None = None,
+) -> tuple[PrincipalRecord, tuple[CredentialMetadata, ...]]:
+    """Return non-secret principal and credential metadata to a local operator."""
+    def operation(conn: Any) -> tuple[PrincipalRecord, tuple[CredentialMetadata, ...]]:
+        return (
+            storage.get_principal(principal_id, conn=conn),
+            storage.list_credentials(principal_id, conn=conn),
+        )
+
+    return run_read(operation, connect=connect)
+
+
+def operator_change_expiry(
+    principal_id: str,
+    credential_id: str,
+    expires_at: str | datetime | None,
+    *,
+    connect: Callable[[], Any] | None = None,
+) -> CredentialMetadata:
+    """Change credential expiry through the local operator boundary."""
+    def operation(conn: Any) -> CredentialMetadata:
+        metadata = storage.set_credential_expiry(
+            principal_id,
+            credential_id,
+            expires_at,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_EXPIRY,
+            target_id=metadata.id,
+            details=_credential_details(
+                metadata,
+                expires_at=metadata.expires_at or "",
+                source="local_operator",
+            ),
+            conn=conn,
+        )
+        return metadata
+
+    return run_transaction(operation, connect=connect)
+
+
+def operator_rotate(
+    principal_id: str,
+    credential_id: str,
+    *,
+    label: str | None = None,
+    expires_at: str | datetime | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> IssuedCredential:
+    """Rotate a credential through the local operator boundary."""
+    def operation(conn: Any) -> IssuedCredential:
+        replacement = storage.rotate_credential(
+            principal_id,
+            credential_id,
+            label=label,
+            expires_at=expires_at,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_ROTATE,
+            target_id=credential_id,
+            details=_credential_details(
+                replacement.metadata,
+                target_id=replacement.metadata.id,
+                source="local_operator",
+            ),
+            conn=conn,
+        )
+        return replacement
+
+    return run_transaction(operation, connect=connect)
+
+
+def operator_revoke(
+    principal_id: str,
+    credential_id: str,
+    *,
+    reason: str,
+    confirm_lockout: bool = False,
+    pause_related_work: bool = False,
+    connect: Callable[[], Any] | None = None,
+) -> tuple[CredentialMetadata, Any]:
+    """Revoke a credential and report its durable-work disposition."""
+    def operation(conn: Any) -> tuple[CredentialMetadata, Any]:
+        from .background_authorization import (  # noqa: PLC0415
+            DurableWorkDisposition,
+            durable_work_for_credential,
+            pause_durable_work_for_credential,
+        )
+
+        metadata = storage.revoke_credential(
+            principal_id,
+            credential_id,
+            reason=reason,
+            allow_lockout=confirm_lockout,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_REVOKE,
+            target_id=metadata.id,
+            details=_credential_details(
+                metadata,
+                reason=metadata.revocation_reason,
+                pause_related_work=bool(pause_related_work),
+                source="local_operator",
+            ),
+            conn=conn,
+        )
+        if pause_related_work:
+            disposition = pause_durable_work_for_credential(conn, principal_id, metadata.id)
+        else:
+            disposition = DurableWorkDisposition(
+                affected=durable_work_for_credential(conn, principal_id, metadata.id),
+            )
+        return metadata, disposition
+
+    return run_transaction(operation, connect=connect)
+
+
 def rename(
     context: AuthenticatedContext,
     credential_id: str,

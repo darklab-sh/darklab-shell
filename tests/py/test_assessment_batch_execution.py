@@ -15,7 +15,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import make_test_app
-from identity_helpers import anonymous_session_id
+from identity_helpers import anonymous_session_id, principal_identity
 from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from services.assessments.batch.cancellation import cancel_assessment_batch
@@ -399,8 +399,8 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
     batch_builder,
 ):
     client = make_test_app().test_client()
-    token = client.get("/session/token/generate").get_json()["session_token"]
-    batch = batch_builder(session_id=token)
+    identity = principal_identity("batch-provenance-" + uuid.uuid4().hex)
+    batch = batch_builder(session_id=identity.owner_id)
     run_id = "run-batch-provenance-" + uuid.uuid4().hex
     check_id = "chk-batch-provenance-" + uuid.uuid4().hex
     evidence_id = "ase-batch-provenance-" + uuid.uuid4().hex
@@ -447,7 +447,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
         )
         conn.commit()
 
-    headers = {"X-Session-ID": batch["session_id"]}
+    headers = identity.browser_headers()
     linked = client.post(
         f"/projects/{batch['project_id']}/links",
         json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
@@ -464,7 +464,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
         f"/projects/{batch['project_id']}/assessments/{batch['assessment_id']}",
         headers=headers,
     ).get_json()
-    api_headers = {"Authorization": f"Bearer {token}"}
+    api_headers = identity.api_headers()
     api_history_run = client.get(
         f"/api/v1/history/{run_id}",
         headers=api_headers,

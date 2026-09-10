@@ -2288,11 +2288,8 @@ function _isExactSpecialBuiltInCommand(cmd) {
 
 // ── Session token client-side command handlers ─────────────────────────────
 
-function _isSessionTokenSubcommand(cmd) {
-  // Only intercept subcommand variants; bare 'session-token' (status) goes to
-  // the server so it can be handled as a normal built-in command with ANSI styling.
-  const lower = (cmd || '').trim().toLowerCase();
-  return lower.startsWith('session-token ');
+function _isCredentialCommand(cmd) {
+  return String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'credential';
 }
 
 function _isClientSideUiCommand(cmd) {
@@ -3586,6 +3583,63 @@ async function _handleSessionTokenCommand(cmd, tabId, execution) {
   }
 }
 
+async function _handleCredentialCommand(cmd, tabId, execution) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[1] || 'status').toLowerCase();
+  const append = (text, cls = '') => execution.appendLine(text, cls, tabId);
+  if (parts.length > 2) {
+    append('[error] credential values aren\'t accepted in shell commands', 'exit-fail');
+    append('Use the Access panel so reusable secrets never enter command history.', 'notice');
+    emitUiEvent('app:open-access', { action: sub });
+    execution.setStatus('fail');
+    return;
+  }
+  if (sub === 'status') {
+    try {
+      const resp = await apiFetch('/auth/principal', { cache: 'no-store' });
+      if (!resp?.ok) throw new Error(await describeFetchError(resp, 'unable to load access status'));
+      const payload = await resp.json();
+      const principal = payload?.principal || {};
+      const authentication = payload?.authentication || {};
+      append(`principal      ${principal.id || '(none)'}`, 'builtin-kv');
+      append(`workspace      ${principal.personal_workspace_id || '(none)'}`, 'builtin-kv');
+      append(`authentication ${authentication.authentication_method || '(none)'}`, 'builtin-kv');
+      execution.setStatus('ok');
+    } catch (err) {
+      append(`[error] ${err?.message || 'unable to load access status'}`, 'exit-fail');
+      execution.setStatus('fail');
+    }
+    return;
+  }
+  if (sub === 'list') {
+    try {
+      const resp = await apiFetch('/auth/credentials', { cache: 'no-store' });
+      if (!resp?.ok) throw new Error(await describeFetchError(resp, 'unable to list credentials'));
+      const payload = await resp.json();
+      const credentials = Array.isArray(payload?.credentials) ? payload.credentials : [];
+      if (!credentials.length) append('No access credentials found.', 'builtin-note');
+      credentials.forEach((item) => {
+        const state = item.revoked_at ? 'revoked' : (item.expires_at ? `expires ${item.expires_at}` : 'active');
+        append(`${item.id}  ${item.credential_type}  ${item.label || '(unlabeled)'}  ${state}`, 'builtin-kv');
+      });
+      execution.setStatus('ok');
+    } catch (err) {
+      append(`[error] ${err?.message || 'unable to list credentials'}`, 'exit-fail');
+      execution.setStatus('fail');
+    }
+    return;
+  }
+  if (!['create', 'use', 'expiry', 'rotate', 'revoke', 'recover'].includes(sub)) {
+    append(`credential: unknown subcommand '${sub}'`, 'exit-fail');
+    append('usage: credential [status | list | create | use | expiry | rotate | revoke | recover]', '');
+    execution.setStatus('fail');
+    return;
+  }
+  append(`Opening Access for credential ${sub}…`, 'builtin-note');
+  emitUiEvent('app:open-access', { action: sub });
+  execution.setStatus('ok');
+}
+
 async function _handleWorkspaceDeleteCommand(cmd, tabId, execution) {
   const parsedDelete = _runnerWorkspaceDeleteCommandAdapter(cmd);
   let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
@@ -4122,11 +4176,11 @@ function submitCommand(rawCmd) {
     return true;
   }
 
-  // Session-token subcommands (generate / set / clear / rotate) run entirely
-  // client-side.  The bare 'session-token' status command goes to the server.
-  if (_isSessionTokenSubcommand(cmd)) {
+  // Credential operations stay in the browser. Secret-bearing actions open
+  // Access so reusable values never enter command history or saved runs.
+  if (_isCredentialCommand(cmd)) {
     void _runBufferedBrowserCommandWithOptionalPipe(cmd, _runnerActiveTabId(), (baseCommand, execution) => (
-      _handleSessionTokenCommand(baseCommand, _runnerActiveTabId(), execution)
+      _handleCredentialCommand(baseCommand, _runnerActiveTabId(), execution)
     ));
     return true;
   }
