@@ -6,9 +6,12 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta, timezone
 import json
+import os
 import sqlite3
+import stat
 import threading
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -23,7 +26,7 @@ from services.auth.background_authorization import (
     durable_work_for_credential,
     resolve_background_authorization,
 )
-from services.auth.contracts import LastCredentialLockout, PAT_DEFAULT_EXPIRY_DAYS
+from services.auth.contracts import LastCredentialLockout, PAT_DEFAULT_EXPIRY_DAYS, PAT_SCOPES
 from services.auth.rate_limit import (
     ANONYMOUS_ISSUANCE_LIMIT_PER_HOUR,
     FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE,
@@ -231,6 +234,23 @@ def test_pat_is_typed_scoped_expiring_and_bearer_only(auth_db, tmp_path):
     wrong_transport = resolve_authentication({"X-Darklab-Credential": pat.secret}, conn=auth_db, now=now)
     assert wrong_transport.state == AuthenticationState.MALFORMED_CREDENTIAL
 
+    fully_scoped = storage.issue_credential(
+        bundle.principal.id,
+        credential_type="pat",
+        created_by_credential_id=bundle.credential.metadata.id,
+        scopes=PAT_SCOPES,
+        now=now,
+        conn=auth_db,
+    )
+    full_result = resolve_authentication(
+        {"Authorization": f"Bearer {fully_scoped.secret}"},
+        conn=auth_db,
+        now=now,
+    )
+    assert isinstance(full_result.context, AuthenticatedContext)
+    assert full_result.context.capabilities == PAT_SCOPES
+    assert set(fully_scoped.metadata.scopes) == set(PAT_SCOPES)
+
 
 @pytest.mark.parametrize("owner_id", ["", "anonymous", "../bad", "../other-session", "not-a-uuid"])
 def test_owner_context_rejects_missing_shared_or_invalid_personal_owner(owner_id):
@@ -357,7 +377,7 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
     flask_app.config["RATELIMIT_ENABLED"] = False
     client = flask_app.test_client()
     anonymous = anonymous_identity_factory("principal-auth-upgrade")
-    response = client.post("/auth/upgrade", headers=anonymous.headers, json={"label": "Laptop"})
+    response = client.post("/auth/principals", headers=anonymous.headers, json={"label": "Laptop"})
     assert response.status_code == 201
     secret = response.get_json()["secret"]
     assert secret.startswith("dlc_v1_crd_")
@@ -377,7 +397,7 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
     assert pat_secret.startswith("dlp_v1_pat_")
     assert pat_secret not in client.get("/auth/credentials", headers=headers).get_data(as_text=True)
     pat_context = client.get(
-        "/auth/context",
+        "/auth/principal",
         headers={"Authorization": f"Bearer {pat_secret}"},
     )
     assert pat_context.status_code == 200
@@ -385,13 +405,13 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
         "identity:read",
         "projects:read",
     ]
-    pending_api_cutover = client.get(
+    pat_api = client.get(
         "/api/v1/whoami",
         headers={"Authorization": f"Bearer {pat_secret}"},
     )
-    assert pending_api_cutover.status_code == 409
-    assert pending_api_cutover.get_json()["error"]["code"] == "principal_cutover_pending"
-    redeemed = client.post("/auth/redeem", json={"secret": secret})
+    assert pat_api.status_code == 200
+    assert pat_api.get_json()["credential"]["id"] == created.get_json()["credential"]["id"]
+    redeemed = client.post("/auth/credentials/redeem", json={"secret": secret})
     assert redeemed.status_code == 200
     assert secret not in redeemed.get_data(as_text=True)
 
@@ -421,7 +441,7 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     flask_app.config["RATELIMIT_ENABLED"] = False
     client = flask_app.test_client()
     anonymous = anonymous_identity_factory("principal-auth-lifecycle")
-    upgraded = client.post("/auth/upgrade", headers=anonymous.headers, json={"label": "First"})
+    upgraded = client.post("/auth/principals", headers=anonymous.headers, json={"label": "First"})
     first = upgraded.get_json()
     first_headers = {"X-Darklab-Credential": first["secret"]}
     first_id = first["credential"]["id"]
@@ -457,9 +477,9 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     assert rotated.status_code == 201
     replacement = rotated.get_json()
     replacement_headers = {"X-Darklab-Credential": replacement["secret"]}
-    assert client.get("/auth/context", headers=replacement_headers).status_code == 200
+    assert client.get("/auth/principal", headers=replacement_headers).status_code == 200
     assert client.get(
-        "/auth/context",
+        "/auth/principal",
         headers={"X-Darklab-Credential": second["secret"]},
     ).get_json()["error"] == "revoked_credential"
 
@@ -476,7 +496,7 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     )
     assert protected.status_code == 409
     assert protected.get_json()["error"] == "last_credential_lockout"
-    assert client.get("/auth/context", headers=replacement_headers).status_code == 200
+    assert client.get("/auth/principal", headers=replacement_headers).status_code == 200
     with get_db_connect()() as conn:
         audit_rows = conn.execute(
             "SELECT event_type, target_id, details FROM audit_events "
@@ -504,7 +524,7 @@ def test_pat_can_revoke_itself_without_affecting_portable_access(anonymous_ident
     flask_app.config["RATELIMIT_ENABLED"] = False
     client = flask_app.test_client()
     upgraded = client.post(
-        "/auth/upgrade",
+        "/auth/principals",
         headers=anonymous_identity_factory("principal-auth-pat-revoke").headers,
         json={},
     ).get_json()
@@ -521,8 +541,8 @@ def test_pat_can_revoke_itself_without_affecting_portable_access(anonymous_ident
         json={"reason": "finished"},
     )
     assert revoked.status_code == 200
-    assert client.get("/auth/context", headers=pat_headers).status_code == 401
-    assert client.get("/auth/context", headers=portable_headers).status_code == 200
+    assert client.get("/auth/principal", headers=pat_headers).status_code == 401
+    assert client.get("/auth/principal", headers=portable_headers).status_code == 200
 
 
 def test_pat_scopes_are_enforced_on_identity_routes(anonymous_identity_factory):
@@ -532,7 +552,7 @@ def test_pat_scopes_are_enforced_on_identity_routes(anonymous_identity_factory):
     flask_app.config["RATELIMIT_ENABLED"] = False
     client = flask_app.test_client()
     upgraded = client.post(
-        "/auth/upgrade",
+        "/auth/principals",
         headers=anonymous_identity_factory("principal-auth-pat-scope").headers,
         json={},
     ).get_json()
@@ -544,7 +564,7 @@ def test_pat_scopes_are_enforced_on_identity_routes(anonymous_identity_factory):
     ).get_json()
     pat_headers = {"Authorization": f"Bearer {created['secret']}"}
 
-    context = client.get("/auth/context", headers=pat_headers)
+    context = client.get("/auth/principal", headers=pat_headers)
     assert context.status_code == 403
     assert context.get_json()["error"] == "credential_forbidden"
     credentials = client.get("/auth/credentials", headers=pat_headers)
@@ -1044,6 +1064,102 @@ def test_principal_disable_suspends_work_without_automatic_resume(
     ).fetchone()[0] == 0
 
 
+def test_operator_lifecycle_covers_safe_lookup_and_recovery(ownership_cutover_db, tmp_path):
+    conn = ownership_cutover_db
+    bundle = storage.create_principal_with_credential(settings=_settings(tmp_path), conn=conn)
+    def connect():
+        return conn
+
+    principal, credentials = lifecycle.operator_summary(bundle.principal.id, connect=connect)
+    assert principal.id == bundle.principal.id
+    assert [item.id for item in credentials] == [bundle.credential.metadata.id]
+
+    second = lifecycle.operator_issue(
+        bundle.principal.id,
+        label="Operator-issued laptop",
+        connect=connect,
+    )
+    expiring = lifecycle.operator_change_expiry(
+        bundle.principal.id,
+        second.metadata.id,
+        "2027-01-01T00:00:00+00:00",
+        connect=connect,
+    )
+    assert expiring.expires_at == "2027-01-01T00:00:00+00:00"
+
+    rotated = lifecycle.operator_rotate(
+        bundle.principal.id,
+        second.metadata.id,
+        label="Replacement laptop",
+        connect=connect,
+    )
+    assert rotated.metadata.id != second.metadata.id
+    assert resolve_authentication(
+        {"X-Darklab-Credential": second.secret},
+        conn=conn,
+    ).state == AuthenticationState.REVOKED_CREDENTIAL
+
+    pat = lifecycle.operator_issue(
+        bundle.principal.id,
+        credential_type="pat",
+        scopes={"identity:read"},
+        connect=connect,
+    )
+    revoked, disposition = lifecycle.operator_revoke(
+        bundle.principal.id,
+        pat.metadata.id,
+        reason="operator incident response",
+        connect=connect,
+    )
+    assert revoked.revocation_reason == "operator incident response"
+    assert disposition.to_safe_dict()["affected_count"] == 0
+
+    lifecycle.set_principal_enabled(
+        bundle.principal.id,
+        enabled=False,
+        reason="operator lockout",
+        connect=connect,
+    )
+    assert lifecycle.operator_summary(bundle.principal.id, connect=connect)[0].status == "disabled"
+    lifecycle.set_principal_enabled(bundle.principal.id, enabled=True, connect=connect)
+
+    recovered = lifecycle.operator_recover(bundle.principal.id, connect=connect)
+    assert recovered.secret.startswith("dlc_v1_crd_")
+    active = [item for item in storage.list_credentials(bundle.principal.id, conn=conn) if item.revoked_at is None]
+    assert [item.id for item in active] == [recovered.metadata.id]
+
+    serialized_audit = json.dumps(
+        [dict(row) for row in conn.execute("SELECT * FROM audit_events").fetchall()],
+        default=str,
+    )
+    for secret in (second.secret, rotated.secret, pat.secret, recovered.secret):
+        assert secret not in serialized_audit
+
+
+def test_operator_secret_output_requires_a_new_owner_only_file(tmp_path):
+    import importlib.util
+
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "operations" / "manage_principal_access.py"
+    spec = importlib.util.spec_from_file_location("manage_principal_access_test", script_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    destination = tmp_path / "replacement.txt"
+    issued = type("Issued", (), {
+        "secret": "dlc_v1_crd_one-time-secret",
+        "metadata": type("Metadata", (), {"to_safe_dict": lambda self: {"id": "crd_test"}})(),
+    })()
+    payload = module._issue_to_file(str(destination), lambda: issued)
+
+    assert destination.read_text(encoding="utf-8") == issued.secret + "\n"
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert payload == {"credential": {"id": "crd_test"}, "secret_file": str(destination)}
+    with pytest.raises(RuntimeError, match="securely"):
+        module._issue_to_file(str(destination), lambda: issued)
+    assert os.path.islink(destination) is False
+
+
 def test_public_share_survives_upgrade_and_mutation_rekeys_to_workspace(anonymous_identity_factory):
     from conftest import make_test_app
 
@@ -1059,7 +1175,7 @@ def test_public_share_survives_upgrade_and_mutation_rekeys_to_workspace(anonymou
     assert created.status_code == 200
     share_id = created.get_json()["id"]
 
-    upgraded = client.post("/auth/upgrade", headers=anonymous.headers, json={})
+    upgraded = client.post("/auth/principals", headers=anonymous.headers, json={})
     assert upgraded.status_code == 201
     headers = {"X-Darklab-Credential": upgraded.get_json()["secret"]}
     assert client.get(f"/share/{share_id}").status_code == 200

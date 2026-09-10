@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test'
 import {
   runCommand,
+  browserSessionId,
   openHistoryWithEntries,
   createShareSnapshot,
   ensurePromptReady,
@@ -34,15 +35,14 @@ test.describe('permalink / share', () => {
   })
 
   test('permalink button shows the "copied" toast after a successful run', async ({ page }) => {
-    await runCommand(page, 'session-token generate')
-    const sessionToken = await page.evaluate(() => SESSION_ID)
-    expect(sessionToken).toMatch(/^tok_[a-f0-9]{32}$/)
+    const sessionId = await browserSessionId(page)
+    expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     await runCommand(page, CMD)
 
     // Intercept the POST /share response so we can capture the share URL
     const shareResp = await createShareSnapshot(page)
     expect(shareResp.status()).toBe(200)
-    expect(shareResp.request().headers()['x-session-id']).toBe(sessionToken)
+    expect(shareResp.request().headers()['x-session-id']).toBe(sessionId)
     const data = await shareResp.json()
     expect(data.url).toMatch(/^\/share\//)
 

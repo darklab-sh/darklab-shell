@@ -7,7 +7,7 @@ from darklab_cli_test_support import load_cli_main
 def test_darklab_cli_help_and_completion_contract(monkeypatch, capsys, tmp_path):
     cli_main = load_cli_main()
     help_text = cli_main._parser().format_help()
-    assert "active            List active runs for the current token." in help_text
+    assert "active            List active runs for the current principal." in help_text
     assert "completion        Print or install shell completion for bash, zsh, or" in help_text
     assert "fish." in help_text
     assert "download          Download one artifact by id." in help_text
@@ -21,9 +21,11 @@ def test_darklab_cli_help_and_completion_contract(monkeypatch, capsys, tmp_path)
     bash_completion = capsys.readouterr().out
     assert "complete -F _darklab_completion darklab" in bash_completion
     assert (
-        "active advisory artifacts assessment atlas cancel completion download "
+        "active advisory artifacts assessment atlas cancel completion credential download "
         "evidence finding grep history http-profile notify"
     ) in bash_completion
+    assert "credential) _darklab_comp_words 'list revoke status'" in bash_completion
+    assert "credential:list:--format) _darklab_comp_words 'text json ndjson'; return ;;" in bash_completion
     assert (
         "assessment) _darklab_comp_words 'archive batch checks clear-state complete "
         "create delete list set-state show start-action'"

@@ -209,7 +209,7 @@ def assessment_cli(monkeypatch):
                     }
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
     return SimpleNamespace(cli_main=cli_main, calls=calls)
 
@@ -759,7 +759,7 @@ def assessment_batch_cli(monkeypatch):
                 return {"batch": {**batch, "status": "canceled"}, "signal_failures": 0}
             raise cli_main.DarklabCliError(f"unexpected request: {method} {path}")
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
     return SimpleNamespace(cli_main=cli_main, calls=calls, digest=digest)
 
@@ -964,7 +964,7 @@ def test_darklab_cli_assessment_batch_follow_reports_resumable_interrupt(monkeyp
                 }
             return {"batch": {"batch_id": "wfx_running", "status": "running"}}
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
     monkeypatch.setattr(batch_reads.time, "sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
 
@@ -1013,7 +1013,7 @@ def test_darklab_cli_assessment_batch_follow_rejects_invalid_event_page(monkeypa
             return {"events": "not-a-page"}
 
 
-    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setenv("DARKLAB_PAT", "dlp_v1_pat_cli_secret")
     monkeypatch.setattr(cli_main, "DarklabClient", BrokenClient)
     assert cli_main.main([
         "assessment", "batch", "follow", "wfx_broken",

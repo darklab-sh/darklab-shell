@@ -32,6 +32,7 @@ import {
   getAutocompleteState as importedGetAutocompleteState,
   getComposerState as importedGetComposerState,
   getTabs as importedGetTabs,
+  onUiEvent as importedOnUiEvent,
   setAutocompleteState as importedSetAutocompleteState,
   setComposerState as importedSetComposerState,
 } from './core/state.js';
@@ -866,6 +867,9 @@ function _setTsMode(mode) {
 }
 
 if (typeof window !== 'undefined') {
+  if (typeof importedOnUiEvent === 'function') {
+    importedOnUiEvent('app:open-access', () => openOptions());
+  }
   if (typeof importedSetComposerPromptHandlers === 'function') {
     importedSetComposerPromptHandlers({
       getComposerPromptMode: () => _composerPromptMode,

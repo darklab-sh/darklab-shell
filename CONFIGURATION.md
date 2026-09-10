@@ -134,8 +134,8 @@ The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side setti
 
 Resolution order is:
 
-1. command flags: `--api-url`, `--token`, `--team`, and `--timeout`
-2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`
+1. command flags: `--api-url`, `--pat`, `--team`, and `--timeout`
+2. environment variables: `DARKLAB_API_URL`, `DARKLAB_PAT`, `DARKLAB_TEAM`, and `DARKLAB_TIMEOUT`
 3. `~/.config/darklab/config.toml`
 4. built-in defaults
 
@@ -143,14 +143,32 @@ Example:
 
 ```toml
 api_url = "https://shell.example.com"
-token = "tok_your_session_token"
+pat = "dlp_v1_pat_your_one_time_secret"
 team = "team_optional_scope"
 timeout = 30
 ```
 
-`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally. When the CLI writes this file, it keeps owner-only `0600` permissions because the file can store a session token and active team scope.
+`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally. When the CLI writes this file, it keeps owner-only `0600` permissions because the file can store a PAT and active team scope.
 
 Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
+
+---
+
+## Principal Access Operations
+
+The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.
+
+Run it through the installed Compose project:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py expiry prn_example crd_example 2026-12-31T23:59:59Z
+docker compose exec -T shell python /app/tools/manage_principal_access.py revoke prn_example crd_example --reason "lost device" --pause-related-work
+docker compose exec -T shell python /app/tools/manage_principal_access.py disable prn_example --reason "incident review"
+docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
+```
+
+`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
 
 ---
 
@@ -375,12 +393,12 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `scheduler` | see nested defaults | Server-side only. Cadence and recovery settings for scheduled runs and watcher-owned schedules. See [docs/schedules.md](docs/schedules.md) for behavior details |
 | `scheduler.lock_path` | `APP_DATA_DIR/scheduler.lock` | SQLite scheduler worker lock path. Leave empty to use the app data directory default. Postgres deployments use an advisory lock instead |
 | `scheduler.tick_seconds` | `5` | How often the scheduler worker checks for due schedules when no immediate fire is found |
-| `scheduler.max_per_session` | `32` | Maximum normal schedules a durable session token can own |
+| `scheduler.max_per_session` | `32` | Maximum normal schedules a durable personal workspace can own |
 | `scheduler.missed_fire_policy` | `coalesce` | Missed-fire behavior. The worker coalesces recent missed windows into one catch-up fire |
 | `scheduler.max_catchup_window_seconds` | `3600` | Maximum age for a missed schedule to receive one catch-up fire on worker startup |
 | `scheduler.default_timezone` | `UTC` | Default IANA timezone used when a schedule does not set its own timezone |
 | `watchers` | see nested defaults | Server-side only. Change-detection monitor limits. Watchers use scheduler-owned cadence rows and notification triggers |
-| `watchers.max_per_session` | `32` | Maximum change-detection watchers a durable session token can own |
+| `watchers.max_per_session` | `32` | Maximum change-detection watchers a durable personal workspace can own |
 | `project_digests` | see nested defaults | Server-side only. Defaults used when a project opts into attack-surface digest notifications |
 | `project_digests.default_cadence_preset` | `daily` | Initial digest cadence for project digest settings. Projects can choose `hourly`, `daily`, or `weekly`; unsupported values fall back to `daily` and log a warning |
 | `project_digests.first_send_lookback_hours` | `24` | Maximum lookback window used for a project's first digest before it has a successful sent timestamp. Values are clamped between 1 hour and the selected cadence's natural window |
@@ -837,19 +855,16 @@ nmap:
         - value: "80,443"
           description: Common web ports
 
-session-token:
+credential:
   subcommands:
-    - value: set
-      description: Activate an existing session token
-      takes_value: true
-      value_hint:
-        placeholder: "<token>"
-        description: Paste a tok_... token or UUID from another device
-    - value: generate
-      description: Generate a new session token
+    - value: status
+      description: Show the current access status
       closes: true
-    - value: clear
-      description: Remove the active session token after confirmation
+    - value: create
+      description: Open the access controls to create a credential
+      closes: true
+    - value: use
+      description: Open the access controls to use an existing credential
       closes: true
 ```
 

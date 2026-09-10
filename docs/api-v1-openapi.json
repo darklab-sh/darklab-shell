@@ -165,6 +165,39 @@
         ],
         "type": "object"
       },
+      "ApiAuthentication": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_type": {
+            "enum": [
+              "pat"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "enum": [
+              "pat_bearer"
+            ],
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "method",
+          "credential_id",
+          "credential_type",
+          "scopes"
+        ],
+        "type": "object"
+      },
       "ApiError": {
         "properties": {
           "error": {
@@ -185,6 +218,45 @@
         },
         "required": [
           "error"
+        ],
+        "type": "object"
+      },
+      "ApiPrincipal": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "personal_workspace_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "personal_workspace_id"
+        ],
+        "type": "object"
+      },
+      "ApiPrincipalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authentication": {
+            "$ref": "#/components/schemas/ApiAuthentication"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/ApiPrincipal"
+          }
+        },
+        "required": [
+          "principal",
+          "authentication"
         ],
         "type": "object"
       },
@@ -6393,6 +6465,111 @@
           "total",
           "counts",
           "findings"
+        ],
+        "type": "object"
+      },
+      "CredentialList": {
+        "additionalProperties": false,
+        "properties": {
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialMetadata"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "credentials"
+        ],
+        "type": "object"
+      },
+      "CredentialMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by_credential_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "credential_type": {
+            "enum": [
+              "pat"
+            ],
+            "type": "string"
+          },
+          "digest_algorithm": {
+            "type": "string"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "public_prefix": {
+            "type": "string"
+          },
+          "revocation_reason": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "verifier_root_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "public_prefix",
+          "principal_id",
+          "credential_type",
+          "label",
+          "verifier_root_version",
+          "digest_algorithm",
+          "created_by_credential_id",
+          "created_at",
+          "updated_at",
+          "last_used_at",
+          "expires_at",
+          "revoked_at",
+          "revocation_reason",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "CredentialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/CredentialMetadata"
+          }
+        },
+        "required": [
+          "credential"
         ],
         "type": "object"
       },
@@ -12941,29 +13118,93 @@
         "type": "object"
       },
       "Whoami": {
+        "additionalProperties": false,
         "properties": {
+          "credential": {
+            "additionalProperties": false,
+            "properties": {
+              "created_at": {
+                "nullable": true,
+                "type": "string"
+              },
+              "expires_at": {
+                "nullable": true,
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "last_used_at": {
+                "nullable": true,
+                "type": "string"
+              },
+              "scopes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "enum": [
+                  "pat"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "created_at",
+              "last_used_at",
+              "expires_at",
+              "scopes"
+            ],
+            "type": "object"
+          },
           "last_seen_at": {
             "description": "Timestamp recorded for the current successful API authentication.",
             "nullable": true,
             "type": "string"
           },
-          "token_created": {
-            "nullable": true,
+          "personal_workspace_id": {
+            "type": "string"
+          },
+          "principal_id": {
             "type": "string"
           }
         },
         "required": [
-          "token_created",
+          "principal_id",
+          "personal_workspace_id",
+          "credential",
           "last_seen_at"
         ],
         "type": "object"
       }
     },
     "securitySchemes": {
-      "bearerToken": {
+      "personalAccessToken": {
+        "bearerFormat": "dlp_v1_pat_\u2026",
+        "description": "A scoped darklab_shell personal access token.",
         "scheme": "bearer",
         "type": "http"
       }
+    },
+    "x-pat-scopes": {
+      "atlas:read": "Read Atlas entities and findings.",
+      "atlas:write": "Perform explicit Atlas lookups and mutations.",
+      "automation:read": "Read schedules and watchers.",
+      "automation:write": "Create or change schedules and watchers.",
+      "history:read": "Read run history, output, artifacts, and active-run state.",
+      "identity:read": "Read the current principal and PAT metadata.",
+      "notifications:read": "Read notification channels and delivery events.",
+      "notifications:write": "Create, change, test, or remove notification channels.",
+      "projects:read": "Read projects, assessments, findings, and risk data.",
+      "projects:write": "Create or change projects, assessments, findings, and risk data.",
+      "runs:execute": "Start, wait for, summarize, or cancel command runs.",
+      "secrets:manage": "Manage secret metadata and values without reading stored values.",
+      "teams:read": "Read teams and membership metadata.",
+      "teams:write": "Create or change teams, membership, invites, and recovery state."
     }
   },
   "info": {
@@ -13057,7 +13298,8 @@
             "description": "Error"
           }
         },
-        "summary": "Look up one exact package version in OSV"
+        "summary": "Look up one exact package version in OSV",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/assessment-batch-previews/{preview_id}": {
@@ -13103,6 +13345,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -13134,7 +13386,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Read a current assessment batch preview summary"
+        "summary": "Read a current assessment batch preview summary",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/assessment-batch-previews/{preview_id}/items": {
@@ -13199,6 +13452,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -13230,7 +13493,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Page through assessment batch preview items"
+        "summary": "Page through assessment batch preview items",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/assessment-batches/{batch_id}": {
@@ -13276,6 +13540,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -13297,7 +13571,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Read one durable assessment batch"
+        "summary": "Read one durable assessment batch",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/assessment-batches/{batch_id}/events": {
@@ -13362,6 +13637,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -13383,7 +13668,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Follow sanitized assessment-batch events"
+        "summary": "Follow sanitized assessment-batch events",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/assessment-batches/{batch_id}/items": {
@@ -13448,6 +13734,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -13469,7 +13765,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Page through assessment-batch items"
+        "summary": "Page through assessment-batch items",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/atlas": {
@@ -13535,7 +13832,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -13547,7 +13854,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
       }
     },
     "/atlas/entities": {
@@ -13654,7 +13962,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -13666,7 +13984,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
       }
     },
     "/atlas/entities/{entity_id}": {
@@ -13758,7 +14077,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -13780,7 +14109,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
       }
     },
     "/atlas/findings": {
@@ -13884,7 +14214,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -13896,7 +14236,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
       }
     },
     "/atlas/findings/{finding_id}": {
@@ -13931,7 +14272,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -13953,7 +14304,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
       }
     },
     "/atlas/lookup": {
@@ -13997,7 +14349,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14009,7 +14371,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:write"
       }
     },
     "/atlas/runs": {
@@ -14059,7 +14422,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14071,7 +14444,129 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "atlas:read"
+      }
+    },
+    "/credentials": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialList"
+                }
+              }
+            },
+            "description": "Current PAT metadata"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "x-required-pat-scope": "identity:read"
+      }
+    },
+    "/credentials/current/revoke": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialResponse"
+                }
+              }
+            },
+            "description": "Current PAT revoked"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid revocation request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "x-required-pat-scope": "identity:read"
       }
     },
     "/health": {
@@ -14283,7 +14778,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14295,7 +14800,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/history/search": {
@@ -14502,7 +15008,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14514,7 +15030,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/history/{run_id}": {
@@ -14549,7 +15066,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -14571,7 +15098,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/history/{run_id}/artifacts": {
@@ -14606,7 +15134,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -14628,7 +15166,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/history/{run_id}/artifacts/{artifact_id}": {
@@ -14705,7 +15244,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/history/{run_id}/output": {
@@ -14866,7 +15406,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -14888,7 +15438,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/notification-channel-kinds": {
@@ -14912,7 +15463,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14924,7 +15485,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:read"
       }
     },
     "/notification-channels": {
@@ -14948,7 +15510,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -14960,7 +15532,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:read"
       },
       "post": {
         "requestBody": {
@@ -15004,6 +15577,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -15024,7 +15607,8 @@
             },
             "description": "Vault unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:write"
       }
     },
     "/notification-channels/{channel_id}": {
@@ -15059,7 +15643,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -15081,7 +15675,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:write"
       },
       "patch": {
         "parameters": [
@@ -15136,6 +15731,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -15166,7 +15771,8 @@
             },
             "description": "Vault unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:write"
       }
     },
     "/notification-channels/{channel_id}/test": {
@@ -15203,6 +15809,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -15233,7 +15849,8 @@
             },
             "description": "Vault unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:write"
       }
     },
     "/notification-events": {
@@ -15324,7 +15941,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -15336,7 +15963,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "notifications:read"
       }
     },
     "/openapi.json": {
@@ -15365,6 +15993,53 @@
           }
         },
         "security": []
+      }
+    },
+    "/principal": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiPrincipalResponse"
+                }
+              }
+            },
+            "description": "Current principal and PAT context"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        },
+        "x-required-pat-scope": "identity:read"
       }
     },
     "/projects": {
@@ -15417,7 +16092,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -15429,7 +16114,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}": {
@@ -15464,7 +16150,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -15486,7 +16182,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/assessment-batches": {
@@ -15556,6 +16253,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -15577,7 +16284,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "List durable assessment batches for a Project"
+        "summary": "List durable assessment batches for a Project",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/assessment-batches/{batch_id}/cancel": {
@@ -15682,7 +16390,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Request truthful assessment-batch cancellation"
+        "summary": "Request truthful assessment-batch cancellation",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessment-batches/{batch_id}/retry": {
@@ -15797,7 +16506,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Start a confirmed immutable assessment-batch retry"
+        "summary": "Start a confirmed immutable assessment-batch retry",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessment-batches/{batch_id}/retry-previews": {
@@ -15861,6 +16571,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -15902,7 +16622,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Preview failed or unfinished assessment-batch work"
+        "summary": "Preview failed or unfinished assessment-batch work",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments": {
@@ -16029,7 +16750,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -16124,7 +16846,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}": {
@@ -16220,7 +16943,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       },
       "get": {
         "parameters": [
@@ -16424,7 +17148,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "patch": {
         "parameters": [
@@ -16528,7 +17253,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/assessment-batches": {
@@ -16643,7 +17369,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Start a confirmed bounded assessment batch"
+        "summary": "Start a confirmed bounded assessment batch",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/batch-previews": {
@@ -16707,6 +17434,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -16748,7 +17485,8 @@
             "description": "Rate limit exceeded"
           }
         },
-        "summary": "Compile a bounded assessment batch preview"
+        "summary": "Compile a bounded assessment batch preview",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}": {
@@ -16863,7 +17601,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/evidence": {
@@ -16978,7 +17717,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/evidence/{evidence_link_id}": {
@@ -17092,7 +17832,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations": {
@@ -17207,7 +17948,8 @@
             },
             "description": "Private OAST state could not be read"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -17330,7 +18072,8 @@
             },
             "description": "Private OAST state could not be read"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations/{correlation_id}": {
@@ -17454,7 +18197,8 @@
             },
             "description": "Private OAST state could not be read"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/oast-correlations/{correlation_id}/launch": {
@@ -17598,7 +18342,8 @@
             },
             "description": "Run broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/recommended-action": {
@@ -17759,7 +18504,8 @@
             },
             "description": "Run broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -17892,7 +18638,8 @@
             },
             "description": "Run broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-jobs": {
@@ -18007,7 +18754,8 @@
             },
             "description": "ZAP job could not be queued"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -18130,7 +18878,8 @@
             },
             "description": "ZAP job could not be queued"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-jobs/{job_id}": {
@@ -18254,7 +19003,8 @@
             },
             "description": "ZAP job could not be queued"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       },
       "get": {
         "parameters": [
@@ -18376,7 +19126,8 @@
             },
             "description": "ZAP job could not be queued"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}/zap-plan": {
@@ -18501,7 +19252,8 @@
             },
             "description": "ZAP job could not be queued"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/assessments/{assessment_id}/delete-preview": {
@@ -18597,7 +19349,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/entities": {
@@ -18690,7 +19443,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -18712,7 +19475,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/findings": {
@@ -18851,7 +19615,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -18873,7 +19647,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -18975,7 +19750,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/findings/{finding_id}": {
@@ -19088,7 +19864,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/findings/{finding_id}/evidence": {
@@ -19184,7 +19961,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -19298,7 +20076,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/findings/{finding_id}/evidence/{evidence_link_id}": {
@@ -19403,7 +20182,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/findings/{finding_id}/verification-actions/{check_id}": {
@@ -19528,7 +20308,8 @@
             },
             "description": "Run broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -19661,7 +20442,8 @@
             },
             "description": "Run broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/http-profiles": {
@@ -19748,7 +20530,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "post": {
         "parameters": [
@@ -19843,7 +20626,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/http-profiles/{profile_id}": {
@@ -19939,7 +20723,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       },
       "get": {
         "parameters": [
@@ -20033,7 +20818,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       },
       "patch": {
         "parameters": [
@@ -20137,7 +20923,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/packages": {
@@ -20191,7 +20978,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -20213,7 +21010,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/probes": {
@@ -20424,7 +21222,8 @@
             "description": "Stable probe error"
           }
         },
-        "summary": "List reviewed probes and profiles for a Project"
+        "summary": "List reviewed probes and profiles for a Project",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/projects/{project_id}/probes/plan": {
@@ -20704,7 +21503,8 @@
             "description": "Stable probe error"
           }
         },
-        "summary": "Preview one bounded Project probe"
+        "summary": "Preview one bounded Project probe",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/probes/run": {
@@ -20953,7 +21753,8 @@
             "description": "Run broker unavailable"
           }
         },
-        "summary": "Confirm and start one bounded Project probe"
+        "summary": "Confirm and start one bounded Project probe",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/probes/targets/resolve": {
@@ -21097,7 +21898,8 @@
             "description": "Stable probe error"
           }
         },
-        "summary": "Resolve one exact confirmed Project target for a probe"
+        "summary": "Resolve one exact confirmed Project target for a probe",
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/projects/{project_id}/runs": {
@@ -21151,7 +21953,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -21173,7 +21985,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/risk/feeds": {
@@ -21200,6 +22013,16 @@
             },
             "description": "Error"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -21211,7 +22034,8 @@
             "description": "Error"
           }
         },
-        "summary": "Read configured CVE risk feed status"
+        "summary": "Read configured CVE risk feed status",
+        "x-required-pat-scope": "projects:read"
       }
     },
     "/runs": {
@@ -21235,7 +22059,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -21247,7 +22081,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       },
       "post": {
         "requestBody": {
@@ -21291,6 +22126,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -21321,7 +22166,8 @@
             },
             "description": "Broker unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "runs:execute"
       }
     },
     "/runs/{run_id}": {
@@ -21356,7 +22202,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -21378,7 +22234,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/runs/{run_id}/ai-assists": {
@@ -21413,7 +22270,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -21435,7 +22302,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/runs/{run_id}/ai-next-commands": {
@@ -21552,7 +22420,8 @@
             },
             "description": "AI coordination or provider unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "runs:execute"
       }
     },
     "/runs/{run_id}/ai-summary": {
@@ -21669,7 +22538,8 @@
             },
             "description": "AI coordination or provider unavailable"
           }
-        }
+        },
+        "x-required-pat-scope": "runs:execute"
       }
     },
     "/runs/{run_id}/cancel": {
@@ -21704,7 +22574,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -21726,7 +22606,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "runs:execute"
       }
     },
     "/runs/{run_id}/output": {
@@ -21887,7 +22768,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -21909,7 +22800,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/runs/{run_id}/projects/{project_id}": {
@@ -21965,6 +22857,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -21995,7 +22897,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       },
       "post": {
         "parameters": [
@@ -22049,6 +22952,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -22079,7 +22992,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "projects:write"
       }
     },
     "/runs/{run_id}/service-evidence": {
@@ -22135,6 +23049,16 @@
             },
             "description": "Error"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -22155,7 +23079,8 @@
             },
             "description": "Error"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/runs/{run_id}/stream": {
@@ -22221,7 +23146,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22243,7 +23178,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "history:read"
       }
     },
     "/runs/{run_id}/wait": {
@@ -22288,7 +23224,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22320,7 +23266,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "runs:execute"
       }
     },
     "/schedules": {
@@ -22365,7 +23312,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -22377,7 +23334,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       },
       "post": {
         "requestBody": {
@@ -22421,6 +23379,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -22441,7 +23409,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/schedules/{schedule_id}": {
@@ -22476,7 +23445,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22498,7 +23477,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       },
       "get": {
         "parameters": [
@@ -22531,7 +23511,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22553,7 +23543,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       },
       "patch": {
         "parameters": [
@@ -22608,6 +23599,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -22638,7 +23639,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/schedules/{schedule_id}/fires": {
@@ -22692,7 +23694,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22714,7 +23726,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       }
     },
     "/schedules/{schedule_id}/run-now": {
@@ -22759,7 +23772,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -22781,7 +23804,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/teams": {
@@ -22805,7 +23829,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -22817,7 +23851,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:read"
       },
       "post": {
         "requestBody": {
@@ -22859,7 +23894,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "409": {
             "content": {
@@ -22881,7 +23926,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/join": {
@@ -22925,7 +23971,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "409": {
             "content": {
@@ -22947,7 +24003,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/recovery/redeem": {
@@ -22991,7 +24048,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "409": {
             "content": {
@@ -23013,7 +24080,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}": {
@@ -23048,7 +24116,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -23070,7 +24148,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:read"
       },
       "patch": {
         "parameters": [
@@ -23113,7 +24192,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23155,7 +24234,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}/invites": {
@@ -23200,7 +24280,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23242,7 +24322,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}/invites/{invite_id}": {
@@ -23286,7 +24367,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23328,7 +24409,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}/leave": {
@@ -23363,7 +24445,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -23395,7 +24487,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}/members/{member_id}": {
@@ -23439,7 +24532,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23481,7 +24574,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       },
       "patch": {
         "parameters": [
@@ -23533,7 +24627,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23575,7 +24669,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/teams/{team_id}/recovery/rotate": {
@@ -23610,7 +24705,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
           },
           "403": {
             "content": {
@@ -23652,7 +24747,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "teams:write"
       }
     },
     "/watchers": {
@@ -23697,7 +24793,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -23709,7 +24815,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       },
       "post": {
         "requestBody": {
@@ -23753,6 +24860,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -23783,7 +24900,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/watchers/{watcher_id}": {
@@ -23818,7 +24936,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -23840,7 +24968,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       },
       "get": {
         "parameters": [
@@ -23873,7 +25002,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -23895,7 +25034,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       },
       "patch": {
         "parameters": [
@@ -23950,6 +25090,16 @@
             },
             "description": "Missing, invalid, or revoked token"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -23980,7 +25130,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/watchers/{watcher_id}/accept-baseline": {
@@ -24035,7 +25186,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -24057,7 +25218,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/watchers/{watcher_id}/fires": {
@@ -24111,7 +25273,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -24133,7 +25305,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:read"
       }
     },
     "/watchers/{watcher_id}/run-now": {
@@ -24178,7 +25351,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "404": {
             "content": {
@@ -24200,7 +25383,8 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "automation:write"
       }
     },
     "/whoami": {
@@ -24224,7 +25408,17 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, malformed, expired, revoked, or otherwise invalid PAT"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "PAT lacks the required scope or team capability"
           },
           "429": {
             "content": {
@@ -24236,13 +25430,14 @@
             },
             "description": "Rate limit exceeded"
           }
-        }
+        },
+        "x-required-pat-scope": "identity:read"
       }
     }
   },
   "security": [
     {
-      "bearerToken": []
+      "personalAccessToken": []
     }
   ],
   "servers": [

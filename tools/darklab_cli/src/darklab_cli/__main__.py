@@ -18,13 +18,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json, save_config_value
 from .commands import handle_advisory, handle_assessment, handle_evidence, handle_finding, handle_http_profile, handle_probe, handle_risk  # noqa: E501
-from .formatting import (
-    print_collection as _print_collection,
-    print_payload as _print_payload,
-    print_table as _print_table,
-)
+from .commands.access import handle_access
+from .formatting import print_collection as _print_collection, print_payload as _print_payload, print_table as _print_table  # noqa: E501
 from .parsers import (register_advisory_parser, register_assessment_parser,
                       register_evidence_parser, register_finding_parser, register_http_profile_parser, register_probe_parser, register_risk_parser)  # noqa: E501
+from .parsers.access import register_access_parser
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
 STREAM_INTERRUPTED_EXIT_CODE = 130
@@ -43,7 +41,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--api-url", help="darklab_shell base URL")
-    parser.add_argument("--token", help="tok_ session token")
+    parser.add_argument("--pat", help="Scoped personal access token; DARKLAB_PAT also works.")
     parser.add_argument("--team", help="Team id for this request; DARKLAB_TEAM also works.")
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
@@ -55,15 +53,14 @@ def _parser() -> argparse.ArgumentParser:
         default="auto",
         help="Shell to install for; default auto.",
     )
-    whoami = sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
-    whoami.add_argument("--format", choices=("text", "json"), default="text")
+    register_access_parser(sub)
     team = sub.add_parser("team", help="Create, join, inspect, and manage teams.")
     team_sub = team.add_subparsers(dest="team_command", required=True)
 
     team_status = team_sub.add_parser("status", help="Show the active CLI team scope.")
     team_status.add_argument("--format", choices=("text", "json"), default="text")
 
-    team_list = team_sub.add_parser("list", help="List teams for the current token.")
+    team_list = team_sub.add_parser("list", help="List teams for the current principal.")
     team_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     team_create = team_sub.add_parser("create", help="Create a team and print its one-time recovery code.")
@@ -146,7 +143,7 @@ def _parser() -> argparse.ArgumentParser:
     run_follow.add_argument("--follow", dest="follow", action="store_true", default=True)
     run_follow.add_argument("--no-follow", dest="follow", action="store_false")
 
-    active = sub.add_parser("active", help="List active runs for the current token.")
+    active = sub.add_parser("active", help="List active runs for the current principal.")
     active.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     tail = sub.add_parser("tail", help="Follow an active run stream.")
@@ -850,8 +847,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
     match args.command:
-        case "whoami":
-            return _print_payload(client.request("GET", "/whoami"), args.format)
+        case "whoami" | "credential":
+            return handle_access(client, args)
         case "team":
             return _team(client, args)
         case "run":

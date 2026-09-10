@@ -23,7 +23,7 @@ from .errors import DarklabCliError, error_from_http_error
 @dataclass(frozen=True)
 class DarklabConfig:
     api_url: str
-    token: str
+    pat: str
     timeout: float = 30.0
     team: str = ""
 
@@ -36,10 +36,10 @@ def load_config(args: Any) -> DarklabConfig:
         or file_config.get("api_url")
         or "http://localhost:8888"
     )
-    token = (
-        getattr(args, "token", None)
-        or os.environ.get("DARKLAB_TOKEN")
-        or file_config.get("token")
+    pat = (
+        getattr(args, "pat", None)
+        or os.environ.get("DARKLAB_PAT")
+        or file_config.get("pat")
         or ""
     )
     team = (
@@ -53,7 +53,7 @@ def load_config(args: Any) -> DarklabConfig:
         timeout = float(timeout_value)
     except (TypeError, ValueError):
         timeout = 30.0
-    return DarklabConfig(api_url=_normalize_api_url(api_url), token=str(token), timeout=max(1.0, timeout), team=str(team))
+    return DarklabConfig(api_url=_normalize_api_url(api_url), pat=str(pat), timeout=max(1.0, timeout), team=str(team))
 
 
 def _normalize_api_url(value: object) -> str:
@@ -76,7 +76,7 @@ def _load_config_file() -> dict[str, Any]:
         raise DarklabCliError(f"invalid CLI config TOML: {exc}") from exc
     if not isinstance(payload, dict):
         return {}
-    supported = {"api_url", "token", "timeout", "team"}
+    supported = {"api_url", "pat", "timeout", "team"}
     return {key: value for key, value in payload.items() if key in supported}
 
 
@@ -173,7 +173,7 @@ def _update_config_text(text: str, key: str, value: str) -> str:
 
 
 def save_config_value(key: str, value: str) -> None:
-    if key not in {"api_url", "token", "timeout", "team"}:
+    if key not in {"api_url", "pat", "timeout", "team"}:
         raise DarklabCliError(f"unsupported config key: {key}")
     _load_config_file()
     path = config_file_path()
@@ -202,8 +202,8 @@ class DarklabClient:
         url = self._url(path, params)
         data = None
         headers = {"Accept": "application/json"}
-        if self.config.token:
-            headers["Authorization"] = f"Bearer {self.config.token}"
+        if self.config.pat:
+            headers["Authorization"] = f"Bearer {self.config.pat}"
         if self.config.team:
             headers["X-Team-ID"] = self.config.team
         if body is not None:

@@ -74,6 +74,78 @@ class IdentityFixture:
         return identity_headers(self.value)
 
 
+@dataclass(frozen=True)
+class PrincipalIdentityFixture:
+    """A principal's owner id plus its distinct browser and API credentials."""
+
+    principal_id: str
+    personal_workspace_id: str
+    portable_secret: str
+    pat_secret: str
+
+    @property
+    def owner_id(self) -> str:
+        return self.personal_workspace_id
+
+    def browser_headers(self, *, team_id: str = "") -> dict[str, str]:
+        headers = {"X-Darklab-Credential": self.portable_secret}
+        if team_id:
+            headers["X-Team-ID"] = team_id
+        return headers
+
+    def api_headers(self, *, team_id: str = "") -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self.pat_secret}"}
+        if team_id:
+            headers["X-Team-ID"] = team_id
+        return headers
+
+
+_PRINCIPAL_IDENTITIES_BY_WORKSPACE: dict[str, PrincipalIdentityFixture] = {}
+
+
+def principal_identity(label: str | None = None) -> PrincipalIdentityFixture:
+    """Issue separate production-shaped browser and API credentials."""
+    from services.auth import storage  # noqa: PLC0415
+    from services.auth.contracts import PAT_SCOPES  # noqa: PLC0415
+
+    bundle = storage.create_principal_with_credential(credential_label=label or "Test browser")
+    pat = storage.issue_credential(
+        bundle.principal.id,
+        credential_type="pat",
+        label=f"{label or 'Test'} API",
+        scopes=PAT_SCOPES,
+        created_by_credential_id=bundle.credential.metadata.id,
+    )
+    fixture = PrincipalIdentityFixture(
+        principal_id=bundle.principal.id,
+        personal_workspace_id=bundle.workspace.id,
+        portable_secret=bundle.credential.secret,
+        pat_secret=pat.secret,
+    )
+    _PRINCIPAL_IDENTITIES_BY_WORKSPACE[fixture.personal_workspace_id] = fixture
+    return fixture
+
+
+def browser_identity_headers(identity: str, *, team_id: str = "") -> dict[str, str]:
+    """Use a portable credential for principals and a UUID for anonymous owners."""
+    principal = _PRINCIPAL_IDENTITIES_BY_WORKSPACE.get(str(identity))
+    if principal is not None:
+        return principal.browser_headers(team_id=team_id)
+    headers = identity_headers(identity)
+    if team_id:
+        headers["X-Team-ID"] = team_id
+    return headers
+
+
+def api_identity_headers(identity: str, *, team_id: str = "") -> dict[str, str]:
+    """Use the PAT paired with a registered principal workspace owner."""
+    try:
+        principal = _PRINCIPAL_IDENTITIES_BY_WORKSPACE[str(identity)]
+    except KeyError as exc:
+        raise ValueError("API test identities must be created with principal_identity()") from exc
+    return principal.api_headers(team_id=team_id)
+
+
 class IdentityClient:
     """Thin Flask test-client adapter that applies one identity by default."""
 

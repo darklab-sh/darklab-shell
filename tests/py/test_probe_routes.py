@@ -14,7 +14,12 @@ from unittest import mock
 import pytest
 
 from conftest import reusable_test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import (
+    anonymous_session_id,
+    api_identity_headers,
+    browser_identity_headers,
+    principal_identity,
+)
 from core.database import db_connect
 from services.assessments.coverage import reconcile_run_evidence_on_conn
 from services.assessments.storage import create_assessment_cycle
@@ -51,10 +56,7 @@ def _probe_runtime(monkeypatch):
 
 
 def _headers(session_id: str, team_id: str = "") -> dict[str, str]:
-    headers = {"X-Session-ID": session_id}
-    if team_id:
-        headers["X-Team-ID"] = team_id
-    return headers
+    return browser_identity_headers(session_id, team_id=team_id)
 
 
 def _create_project(client, session_id: str, *, team_id: str = "") -> dict:
@@ -94,8 +96,8 @@ def _table_counts() -> tuple[int, int, int]:
     return counts[0], counts[1], counts[2]
 
 
-def _register_token(token: str) -> None:
-    register_durable_session_token(token)
+def _principal_owner(label: str) -> str:
+    return principal_identity(label).owner_id
 
 
 def _create_protected_http_profile(
@@ -111,13 +113,13 @@ def _create_protected_http_profile(
     resolved_base_url = base_url or f"https://{target_value}/app"
     stored = client.post(
         "/session/secrets",
-        headers={"X-Session-ID": token},
+        headers=_headers(token),
         json={"name": "PROBE_HTTP_TOKEN", "value": secret_value},
     )
     assert stored.status_code == 201
     created = client.post(
         f"/api/v1/projects/{project_id}/http-profiles",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=api_identity_headers(token),
         json={
             "name": "Protected probe application",
             "role": "user",
@@ -160,8 +162,7 @@ def _join_team_member(
 
 
 def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
-    session_id = "tok_probe_routes_" + uuid.uuid4().hex
-    _register_token(session_id)
+    session_id = _principal_owner("probe-routes-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     before = _table_counts()
@@ -221,7 +222,7 @@ def test_probe_routes_list_resolve_and_plan_without_writes(client, caplog):
 
     for prefix, headers in (
         (f"/projects/{project['id']}", _headers(session_id)),
-        (f"/api/v1/projects/{project['id']}", {"Authorization": f"Bearer {session_id}"}),
+        (f"/api/v1/projects/{project['id']}", api_identity_headers(session_id)),
     ):
         invalid_catalog = client.get(
             f"{prefix}/probes?target_type=cidr",
@@ -262,10 +263,8 @@ def test_probe_routes_fail_closed_for_foreign_archived_and_value_only_plans(clie
 
 
 def test_team_viewer_can_read_probe_catalog_and_plan(client):
-    owner = "tok_" + uuid.uuid4().hex
-    viewer = "tok_" + uuid.uuid4().hex
-    _register_token(owner)
-    _register_token(viewer)
+    owner = _principal_owner("probe-owner-" + uuid.uuid4().hex)
+    viewer = _principal_owner("probe-viewer-" + uuid.uuid4().hex)
     team_response = client.post(
         "/session/teams",
         headers=_headers(owner),
@@ -330,12 +329,10 @@ def test_team_viewer_can_read_probe_catalog_and_plan(client):
 
 
 def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monkeypatch):
-    owner = "tok_" + uuid.uuid4().hex
-    viewer = "tok_" + uuid.uuid4().hex
-    operator = "tok_" + uuid.uuid4().hex
-    admin = "tok_" + uuid.uuid4().hex
-    for token in (owner, viewer, operator, admin):
-        _register_token(token)
+    owner = _principal_owner("probe-matrix-owner-" + uuid.uuid4().hex)
+    viewer = _principal_owner("probe-matrix-viewer-" + uuid.uuid4().hex)
+    operator = _principal_owner("probe-matrix-operator-" + uuid.uuid4().hex)
+    admin = _principal_owner("probe-matrix-admin-" + uuid.uuid4().hex)
     team_response = client.post(
         "/session/teams",
         headers=_headers(owner),
@@ -348,7 +345,7 @@ def test_team_probe_role_matrix_keeps_protected_launches_admin_only(client, monk
     project = _create_project(client, owner, team_id=team_id)
     target = _create_target(client, owner, project["id"], team_id=team_id)
     def api_headers(token: str) -> dict[str, str]:
-        return {"Authorization": f"Bearer {token}", "X-Team-ID": team_id}
+        return api_identity_headers(token, team_id=team_id)
     profile = client.post(
         f"/api/v1/projects/{project['id']}/http-profiles",
         headers=api_headers(owner),
@@ -561,12 +558,11 @@ def test_probe_launch_rejects_a_target_changed_after_preview(
     surface,
     mutation,
 ):
-    session_id = "tok_probe_target_recheck_" + uuid.uuid4().hex
-    _register_token(session_id)
+    session_id = _principal_owner("probe-target-recheck-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     browser_headers = _headers(session_id)
-    api_headers = {"Authorization": f"Bearer {session_id}"}
+    api_headers = api_identity_headers(session_id)
     plan_body = {"action_id": "ping", "entity_id": target["id"]}
     if surface == "browser":
         plan_response = client.get(
@@ -636,8 +632,7 @@ def test_probe_launch_rejects_a_target_changed_after_preview(
 
 @pytest.mark.parametrize("surface", ("browser", "api"))
 def test_probe_plan_rejects_a_same_owner_target_from_another_project(client, surface):
-    session_id = "tok_probe_project_boundary_" + uuid.uuid4().hex
-    _register_token(session_id)
+    session_id = _principal_owner("probe-project-boundary-" + uuid.uuid4().hex)
     project_a = _create_project(client, session_id)
     project_b = _create_project(client, session_id)
     target_b = _create_target(
@@ -657,7 +652,7 @@ def test_probe_plan_rejects_a_same_owner_target_from_another_project(client, sur
     else:
         response = client.post(
             f"/api/v1/projects/{project_a['id']}/probes/plan",
-            headers={"Authorization": f"Bearer {session_id}"},
+            headers=api_identity_headers(session_id),
             json=body,
         )
 
@@ -811,12 +806,11 @@ def test_probe_launch_rejects_stale_targets_unknown_fields_and_unavailable_broke
 def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
     client, monkeypatch
 ):
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-api-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
     api_headers = {
-        "Authorization": f"Bearer {token}", "X-Request-ID": "probe-api-request",
+        **api_identity_headers(token), "X-Request-ID": "probe-api-request",
     }
 
     catalog = client.get(f"/api/v1/projects/{project['id']}/probes", headers=api_headers)
@@ -872,8 +866,7 @@ def test_api_v1_probe_catalog_plan_and_launch_share_the_project_bound_service(
 
 
 def test_api_v1_probe_routes_require_auth_and_reject_client_owned_plan_fields(client):
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-api-rejection-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
     route = f"/api/v1/projects/{project['id']}/probes/plan"
@@ -881,7 +874,7 @@ def test_api_v1_probe_routes_require_auth_and_reject_client_owned_plan_fields(cl
     assert client.get(f"/api/v1/projects/{project['id']}/probes").status_code == 401
     rejected = client.post(
         route,
-        headers={"Authorization": f"Bearer {token}"},
+        headers=api_identity_headers(token),
         json={
             "action_id": "ping",
             "entity_id": target["id"],
@@ -895,7 +888,7 @@ def test_api_v1_probe_routes_require_auth_and_reject_client_owned_plan_fields(cl
     assert client.post(resolve_route, json={"target_value": target["value"]}).status_code == 401
     malformed = client.post(
         resolve_route,
-        headers={"Authorization": f"Bearer {token}"},
+        headers=api_identity_headers(token),
         json={"target_value": target["value"], "entity_id": target["id"]},
     )
     assert malformed.status_code == 400
@@ -903,8 +896,7 @@ def test_api_v1_probe_routes_require_auth_and_reject_client_owned_plan_fields(cl
 
 
 def test_protected_probe_preview_explains_disabled_and_unsupported_profiles(client):
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-profile-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
     profile_id, _secret_value = _create_protected_http_profile(
@@ -913,7 +905,7 @@ def test_protected_probe_preview_explains_disabled_and_unsupported_profiles(clie
         project["id"],
         target["value"],
     )
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = api_identity_headers(token)
     unsupported = client.post(
         f"/api/v1/projects/{project['id']}/probes/plan",
         headers=headers,
@@ -957,8 +949,7 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
 ):
     from services.assessments import http_profile_runtime
 
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-protected-api-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
     profile_id, secret_value = _create_protected_http_profile(
@@ -967,7 +958,7 @@ def test_api_v1_protected_probe_is_redacted_project_bound_and_cleanup_safe(
         project["id"],
         target["value"],
     )
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = api_identity_headers(token)
     plan_body = {
         "action_id": "httpx",
         "entity_id": target["id"],
@@ -1063,8 +1054,7 @@ def test_browser_protected_probe_is_redacted_project_bound_and_cleanup_safe(
 ):
     from services.assessments import http_profile_runtime
 
-    session_id = "tok_probe_browser_protected_" + uuid.uuid4().hex
-    _register_token(session_id)
+    session_id = _principal_owner("probe-browser-protected-" + uuid.uuid4().hex)
     project = _create_project(client, session_id)
     target = _create_target(client, session_id, project["id"])
     profile_id, secret_value = _create_protected_http_profile(
@@ -1141,8 +1131,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
 ):
     from services.assessments import probe_runtime
 
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-scope-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(
         client,
@@ -1162,7 +1151,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
 
     response = client.post(
         f"/api/v1/projects/{project['id']}/probes/plan",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=api_identity_headers(token),
         json={"action_id": "httpx", "entity_id": target["id"], "http_profile_id": profile_id},
     )
 
@@ -1195,7 +1184,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
         }
         nuclei_response = client.post(
             f"/api/v1/projects/{project['id']}/probes/plan",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=api_identity_headers(token),
             json=nuclei_body,
         )
         assert nuclei_response.status_code == 200
@@ -1208,7 +1197,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
 
         blocked = client.post(
             f"/api/v1/projects/{project['id']}/probes/run",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=api_identity_headers(token),
             json={
                 **nuclei_body,
                 "confirmed": True,
@@ -1221,8 +1210,7 @@ def test_protected_probe_plan_shows_the_same_redacted_scope_for_each_web_target(
 
 
 def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(client):
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-ipv6-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target_value = "2001:db8::21"
     target = _create_target(
@@ -1241,7 +1229,7 @@ def test_ipv6_web_probe_plans_use_bracketed_urls_with_and_without_a_profile(clie
         allowed_host=target_value,
     )
     route = f"/api/v1/projects/{project['id']}/probes/plan"
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = api_identity_headers(token)
 
     for action_id in ("curl", "httpx", "dalfox"):
         for protected in (False, True):
@@ -1277,8 +1265,7 @@ def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(
 ):
     from services.assessments import http_profile_runtime
 
-    token = "tok_" + uuid.uuid4().hex
-    _register_token(token)
+    token = _principal_owner("probe-stale-profile-" + uuid.uuid4().hex)
     project = _create_project(client, token)
     target = _create_target(client, token, project["id"])
     profile_id, _secret_value = _create_protected_http_profile(
@@ -1287,7 +1274,7 @@ def test_protected_probe_rejects_stale_profile_and_cleans_failed_spawn(
         project["id"],
         target["value"],
     )
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = api_identity_headers(token)
     plan_body = {
         "action_id": "httpx",
         "entity_id": target["id"],
