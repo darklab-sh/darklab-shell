@@ -24,6 +24,8 @@ def start_confirmed_assessment_batch(
     team_id: str = "",
     actor_member_id: str = "",
     actor_role: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
     owner_client_id: str = "",
     owner_tab_id: str = "",
 ) -> dict[str, object]:
@@ -41,6 +43,8 @@ def start_confirmed_assessment_batch(
             team_id=team_id,
             actor_member_id=actor_member_id,
             actor_role=actor_role,
+            principal_id=principal_id,
+            originating_credential_id=originating_credential_id,
             owner_client_id=owner_client_id,
             owner_tab_id=owner_tab_id,
         )

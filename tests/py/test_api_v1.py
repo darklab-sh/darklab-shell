@@ -6053,7 +6053,11 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     token = _token(client)
     other_token = _token(client)
     monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
-    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_schedule")
+    monkeypatch.setattr(
+        dispatch,
+        "_launch_user_schedule_run",
+        lambda _schedule, **_kwargs: "run_api_schedule",
+    )
 
     create = client.post(
         "/api/v1/schedules",

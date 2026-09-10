@@ -30,6 +30,8 @@ from services.notifications.models import (
     NotificationChannel,
     NotificationEvent,
 )
+from services.auth.background_authorization import resolve_background_authorization
+from services.teams.capabilities import Capability
 from services.teams.ownership_queries import (
     OwnerKeyShape,
     PersonalTeamRows,
@@ -145,7 +147,7 @@ def _channel_rows_for_trigger(
     owner_sql, owner_params = owner.as_tuple()
     rows = conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
-        "muted, created, updated "
+        "muted, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
         f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
         owner_params,
     ).fetchall()
@@ -227,8 +229,9 @@ def enqueue(
             active_conn.execute(
                 "INSERT INTO notification_events "
                 "(id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
-                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at, "
+                "principal_id, originating_credential_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     event_id,
                     session_token,
@@ -244,6 +247,12 @@ def enqueue(
                     run_id or str(event_payload.get("run_id") or ""),
                     now,
                     "",
+                    str(channel_row["principal_id"] or "") or None,
+                    (
+                        str(channel_row["last_changed_by_credential_id"] or "")
+                        or str(channel_row["created_by_credential_id"] or "")
+                        or None
+                    ),
                 ),
             )
         if dispatch_sync and queued_ids:
@@ -280,7 +289,8 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
         where_sql, params = _where_ids("id", event_ids)
         return conn.execute(
             "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
-            "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
+            "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at, "
+            "principal_id, originating_credential_id "
             "FROM notification_events "
             f"WHERE {where_sql} AND status IN (?, ?) "  # nosec
             "AND (next_attempt_at = '' OR next_attempt_at <= ?) "
@@ -289,7 +299,8 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
         ).fetchall()
     return conn.execute(
         "SELECT id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
-        "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
+        "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at, "
+        "principal_id, originating_credential_id "
         "FROM notification_events WHERE status IN (?, ?) "
         "AND (next_attempt_at = '' OR next_attempt_at <= ?) "
         "ORDER BY created ASC LIMIT ?",
@@ -322,13 +333,23 @@ def _channel_sends_this_minute(conn, channel_id: str, *, now: str, exclude_event
 def _load_channel(conn, channel_id: str) -> NotificationChannel | None:
     row = conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, "
-        "config_json, triggers_json, muted, created, updated "
+        "config_json, triggers_json, muted, created, updated, principal_id, "
+        "created_by_credential_id, last_changed_by_credential_id "
         "FROM notification_channels WHERE id = ?",
         (channel_id,),
     ).fetchone()
     if row is None:
         return None
     return NotificationChannel.from_row(row)
+
+
+def _event_log_scope(event: NotificationEvent) -> dict[str, str]:
+    return {
+        "session": get_log_session_id(event.session_token),
+        "principal_id": event.principal_id,
+        "credential_id": event.originating_credential_id,
+        "team_id": event.team_id,
+    }
 
 
 def _mark_sent(conn, event: NotificationEvent, now: str) -> None:
@@ -344,7 +365,7 @@ def _mark_sent(conn, event: NotificationEvent, now: str) -> None:
             "event_id": event.id,
             "channel_id": event.channel_id,
             "trigger": event.trigger,
-            "session": get_log_session_id(event.session_token),
+            **_event_log_scope(event),
         },
     )
     _mark_project_digest_sent(conn, event, now)
@@ -360,8 +381,7 @@ def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
                     "event_id": event.id,
                     "channel_id": event.channel_id,
                     "trigger": event.trigger,
-                    "session": get_log_session_id(event.session_token),
-                    "team_id": event.team_id,
+                    **_event_log_scope(event),
                     "has_digest_identity": False,
                     "has_project_id": False,
                     "has_session_id": False,
@@ -380,7 +400,7 @@ def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
                     "event_id": event.id,
                     "channel_id": event.channel_id,
                     "trigger": event.trigger,
-                    "session": get_log_session_id(event.session_token),
+                    **_event_log_scope(event),
                     "team_id": team_id,
                     "has_digest_identity": True,
                     "has_project_id": bool(project_id),
@@ -404,6 +424,7 @@ def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
                 "event_id": event.id,
                 "channel_id": event.channel_id,
                 "project_id": project_id,
+                **_event_log_scope(event),
                 "session": get_log_session_id(session_id),
                 "team_id": team_id,
                 "window_start": str(identity.get("window_start") or ""),
@@ -418,6 +439,7 @@ def _mark_project_digest_sent(conn, event: NotificationEvent, now: str) -> None:
             extra={
                 "event_id": event.id,
                 "project_id": project_id,
+                **_event_log_scope(event),
                 "session": get_log_session_id(session_id),
                 "team_id": team_id,
             },
@@ -447,7 +469,7 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
                 "event_id": event.id,
                 "channel_id": event.channel_id,
                 "trigger": event.trigger,
-                "session": get_log_session_id(event.session_token),
+                **_event_log_scope(event),
                 "attempts": attempts,
                 "next_attempt_at": next_attempt,
                 "retryable": result.retryable,
@@ -469,7 +491,7 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
             "event_id": event.id,
             "channel_id": event.channel_id,
             "trigger": event.trigger,
-            "session": get_log_session_id(event.session_token),
+            **_event_log_scope(event),
             "attempts": attempts,
             "retryable": result.retryable,
             "age_expired": age_expired,
@@ -491,7 +513,7 @@ def _defer_event(conn, event: NotificationEvent, now: str, *, reason: str, delay
             "event_id": event.id,
             "channel_id": event.channel_id,
             "trigger": event.trigger,
-            "session": get_log_session_id(event.session_token),
+            **_event_log_scope(event),
             "reason": reason[:80],
         },
     )
@@ -499,6 +521,17 @@ def _defer_event(conn, event: NotificationEvent, now: str, *, reason: str, delay
 
 def _dispatch_event(conn, row: Any, *, now: str, include_muted_channel_ids: set[str] | None = None) -> bool:
     event = NotificationEvent.from_row(row)
+    authorization = resolve_background_authorization(
+        conn,
+        principal_id=event.principal_id,
+        personal_workspace_id=event.session_token,
+        team_id=event.team_id,
+        originating_credential_id=event.originating_credential_id,
+        required_capability=Capability.MANAGE_NOTIFICATIONS,
+    )
+    if not authorization.allowed:
+        _mark_failed(conn, event, ChannelResult.terminal(authorization.message), now)
+        return False
     channel = _load_channel(conn, event.channel_id)
     muted_allowed = channel is not None and channel.id in (include_muted_channel_ids or set())
     if channel is None or (channel.muted and not muted_allowed):

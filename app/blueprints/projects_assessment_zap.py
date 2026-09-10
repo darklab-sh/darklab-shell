@@ -108,6 +108,7 @@ def project_assessment_zap_jobs(project_id, assessment_id, check_id):
                 team_id=team_id,
             )
             return jsonify({"jobs": jobs})
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
         job = confirm_and_queue_assessment_zap_job(
             session_id,
             project_id,
@@ -119,6 +120,8 @@ def project_assessment_zap_jobs(project_id, assessment_id, check_id):
                 session_id, team_id
             ),
             actor_role=_actor_role(session_id, team_id),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(audit_fields.get("actor_credential_id") or ""),
         )
     except (AssessmentZapError, ProjectWorkspaceError) as exc:
         if request.method == "POST":

@@ -175,7 +175,7 @@ def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
     owner_sql, owner_params = _owner_where(session_token, team_id)
     return conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
-        "muted, created, updated "
+        "muted, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
         f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
         owner_params,
     ).fetchall()
@@ -185,7 +185,7 @@ def _get_channel(conn, session_token: str, channel_id: str, team_id: str = "") -
     owner_sql, owner_params = _owner_where(session_token, team_id)
     row = conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
-        "muted, created, updated "
+        "muted, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
         f"FROM notification_channels WHERE {owner_sql} AND id = ?",  # nosec
         (*owner_params, channel_id),
     ).fetchone()
@@ -256,13 +256,30 @@ def _secret_refs_for_values(channel_id: str, kind: str, raw_secret_values: Any) 
     return {field: channel_secret_name(channel_id, field) for field in allowed if field in values}
 
 
-def _store_secret_values(conn, session_token: str, channel_id: str, kind: str, raw_secret_values: Any) -> list[tuple[dict, bool]]:
+def _store_secret_values(
+    conn,
+    session_token: str,
+    channel_id: str,
+    kind: str,
+    raw_secret_values: Any,
+    *,
+    principal_id: str = "",
+    credential_id: str = "",
+) -> list[tuple[dict, bool]]:
     values = _secret_values(raw_secret_values)
     allowed = set(CHANNEL_SECRET_FIELDS[kind])
     audit_records = []
     for field in allowed:
         if field in values:
-            _, metadata, created = store_channel_secret_with_connection(conn, session_token, channel_id, field, values[field])
+            _, metadata, created = store_channel_secret_with_connection(
+                conn,
+                session_token,
+                channel_id,
+                field,
+                values[field],
+                principal_id=principal_id,
+                credential_id=credential_id,
+            )
             audit_records.append((metadata, created))
     return audit_records
 
@@ -504,6 +521,8 @@ def create_notification_channel(
     kind = _normalize_kind(data.get("kind"))
     channel_id = _channel_id()
     now = _utc_now()
+    actor_principal_id = str((audit_fields or {}).get("actor_principal_id") or "")
+    actor_credential_id = str((audit_fields or {}).get("actor_credential_id") or "")
     secrets = _secret_refs_for_values(channel_id, kind, data.get("secret_values"))
     channel = NotificationChannel(
         id=channel_id,
@@ -517,6 +536,9 @@ def create_notification_channel(
         muted=bool(data.get("muted")),
         created=now,
         updated=now,
+        principal_id=actor_principal_id,
+        created_by_credential_id=actor_credential_id,
+        last_changed_by_credential_id=actor_credential_id,
     )
     _validate_channel(channel)
     audit_records = []
@@ -527,12 +549,15 @@ def create_notification_channel(
             channel_id,
             kind,
             data.get("secret_values"),
+            principal_id=actor_principal_id,
+            credential_id=actor_credential_id,
         )
         conn.execute(
             "INSERT INTO notification_channels "
             "(id, personal_workspace_id, team_id, kind, label, secrets_json, "
-            "config_json, triggers_json, muted, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "config_json, triggers_json, muted, created, updated, principal_id, "
+            "created_by_credential_id, last_changed_by_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 channel.id,
                 channel.session_token,
@@ -545,6 +570,9 @@ def create_notification_channel(
                 dialect_for_backend(database.DB_BACKEND).boolean_param(channel.muted),
                 channel.created,
                 channel.updated,
+                channel.principal_id or None,
+                channel.created_by_credential_id or None,
+                channel.last_changed_by_credential_id or None,
             ),
         )
         _record_config_change(
@@ -588,13 +616,28 @@ def update_notification_channel(
             muted=bool(data.get("muted", existing.muted)),
             created=existing.created,
             updated=_utc_now(),
+            principal_id=existing.principal_id,
+            created_by_credential_id=existing.created_by_credential_id,
+            last_changed_by_credential_id=(
+                str((audit_fields or {}).get("actor_credential_id") or "")
+                or existing.last_changed_by_credential_id
+            ),
         )
         _validate_channel(channel)
-        audit_records = _store_secret_values(conn, channel.secret_owner_token, channel_id, kind, secret_values)
+        audit_records = _store_secret_values(
+            conn,
+            channel.secret_owner_token,
+            channel_id,
+            kind,
+            secret_values,
+            principal_id=channel.principal_id,
+            credential_id=channel.last_changed_by_credential_id,
+        )
         owner_sql, owner_params = _owner_where(session_token, team_id)
         conn.execute(
             "UPDATE notification_channels "
-            "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, updated = ? "
+            "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, "
+            "last_changed_by_credential_id = ?, updated = ? "
             f"WHERE {owner_sql} AND id = ?",  # nosec
             (
                 channel.label,
@@ -602,6 +645,7 @@ def update_notification_channel(
                 _json_param(channel.config),
                 _json_param(list(channel.triggers)),
                 dialect_for_backend(database.DB_BACKEND).boolean_param(channel.muted),
+                channel.last_changed_by_credential_id or None,
                 channel.updated,
                 *owner_params,
                 channel.id,

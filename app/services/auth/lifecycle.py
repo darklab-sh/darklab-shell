@@ -11,11 +11,11 @@ from typing import Any
 
 from services.audit.models import AuditEventType, AuditTargetType
 from services.audit.recorder import record_event
-from services.storage.transactions import run_transaction
+from services.storage.transactions import run_read, run_transaction
 from services.workspace.models import WorkspaceSettings
 
 from . import storage
-from .contracts import CredentialMetadata, IssuedCredential, PrincipalBundle, PrincipalRecord
+from .contracts import CredentialMetadata, IssuedCredential, PrincipalBundle, PrincipalRecord, timestamp
 from .resolver import AuthenticatedContext, AuthenticationResult
 
 
@@ -77,6 +77,28 @@ def list_safe_credentials(
     connect: Callable[[], Any] | None = None,
 ) -> tuple[CredentialMetadata, ...]:
     return storage.list_credentials(context.principal_id, connect=connect)
+
+
+def list_credential_durable_work(
+    context: AuthenticatedContext,
+    credential_id: str,
+    *,
+    connect: Callable[[], Any] | None = None,
+) -> Any:
+    if context.credential_type == "pat" and credential_id != context.credential_id:
+        raise PermissionError("PATs may inspect only themselves")
+
+    def operation(conn: Any) -> Any:
+        from .background_authorization import DurableWorkDisposition, durable_work_for_credential  # noqa: PLC0415
+
+        # Reuse the owner-scoped lookup so an id from another principal is
+        # indistinguishable from a missing credential.
+        storage._credential_row(conn, context.principal_id, credential_id)  # noqa: SLF001
+        return DurableWorkDisposition(
+            affected=durable_work_for_credential(conn, context.principal_id, credential_id),
+        )
+
+    return run_read(operation, connect=connect)
 
 
 def issue(
@@ -208,13 +230,21 @@ def revoke(
     *,
     reason: str = "",
     confirm_lockout: bool = False,
+    pause_related_work: bool = False,
+    include_durable_work: bool = False,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
-) -> CredentialMetadata:
+) -> Any:
     if context.credential_type == "pat" and credential_id != context.credential_id:
         raise PermissionError("PATs may revoke only themselves")
 
-    def operation(conn: Any) -> CredentialMetadata:
+    def operation(conn: Any) -> tuple[CredentialMetadata, Any]:
+        from .background_authorization import (  # noqa: PLC0415
+            DurableWorkDisposition,
+            durable_work_for_credential,
+            pause_durable_work_for_credential,
+        )
+
         metadata = storage.revoke_credential(
             context.principal_id,
             credential_id,
@@ -225,13 +255,24 @@ def revoke(
         record_event(
             AuditEventType.CREDENTIAL_REVOKE,
             target_id=metadata.id,
-            details=_credential_details(metadata, reason=metadata.revocation_reason),
+            details=_credential_details(
+                metadata,
+                reason=metadata.revocation_reason,
+                pause_related_work=bool(pause_related_work),
+            ),
             conn=conn,
             **_audit_fields(request_fields),
         )
-        return metadata
+        if pause_related_work:
+            disposition = pause_durable_work_for_credential(conn, context.principal_id, metadata.id)
+        else:
+            disposition = DurableWorkDisposition(
+                affected=durable_work_for_credential(conn, context.principal_id, metadata.id),
+            )
+        return metadata, disposition
 
-    return run_transaction(operation, connect=connect)
+    metadata, disposition = run_transaction(operation, connect=connect)
+    return (metadata, disposition) if include_durable_work else metadata
 
 
 def set_principal_enabled(
@@ -248,6 +289,10 @@ def set_principal_enabled(
             if enabled
             else storage.disable_principal(principal_id, reason=reason, conn=conn)
         )
+        if not enabled:
+            from .background_authorization import suspend_principal_background_work  # noqa: PLC0415
+
+            suspend_principal_background_work(conn, principal_id, now=timestamp())
         record_event(
             AuditEventType.PRINCIPAL_ENABLE if enabled else AuditEventType.PRINCIPAL_DISABLE,
             target_id=principal.id,
@@ -257,7 +302,12 @@ def set_principal_enabled(
         )
         return principal
 
-    return run_transaction(operation, connect=connect)
+    principal = run_transaction(operation, connect=connect)
+    if not enabled:
+        from .background_runtime import stop_principal_active_work  # noqa: PLC0415
+
+        stop_principal_active_work(principal_id)
+    return principal
 
 
 def record_redemption(

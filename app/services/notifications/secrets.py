@@ -37,9 +37,20 @@ def store_channel_secret_with_connection(
     channel_id: str,
     field: str,
     value: str,
+    *,
+    principal_id: str = "",
+    credential_id: str = "",
 ) -> tuple[str, dict, bool]:
     secret_name = channel_secret_name(channel_id, field)
-    metadata, created = upsert_secret_with_connection(conn, session_token, secret_name, value, [secret_name])
+    metadata, created = upsert_secret_with_connection(
+        conn,
+        session_token,
+        secret_name,
+        value,
+        [secret_name],
+        principal_id=principal_id,
+        credential_id=credential_id,
+    )
     return secret_name, metadata, created
 
 

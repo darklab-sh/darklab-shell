@@ -130,25 +130,6 @@ This entry is the foundation for the restricted deployment and OIDC entries belo
 - [ ] Repository schema/query scans find no remaining token owner or token foreign key outside intentionally historical migration fixtures.
 - [ ] The semantic diff is concentrated in the authentication-to-owner context boundary and explicit schema/storage adapters; it does not repeat Phase 3A's mechanical query churn or rely on compatibility shims.
 
-#### Phase 4 — Move durable and background work onto principal authorization
-
-**Steps**
-
-- [ ] Store schedules, watchers, workflow executions, notifications, provider secrets, package jobs, and other durable work against the personal workspace or team scope captured at creation time, with stable principal attribution.
-- [ ] Preserve safe `created_by_credential_id` and, where changes affect later execution, `last_changed_by_credential_id` metadata on durable definitions. These references support audit and stolen-device response but never become ownership or worker authentication keys.
-- [ ] Give scheduler, watcher, notification, workflow, and other supervised workers a principal-resolution path that does not depend on Flask request context or a reusable browser credential.
-- [ ] Re-check principal state, team membership, and required role capability immediately before each team-owned launch or mutation so removal or downgrade takes effect before later work executes.
-- [ ] Implement the recorded revocation policy: durable definitions continue by default, credential revocation can also pause related definitions, and attribution supports a focused review of work created or last changed through that credential. Principal disablement disconnects streams, terminates PTYs and active runs, cancels queued launches, suppresses notification delivery and retries, and suspends assigned durable definitions; re-enabling never replays missed work or resumes suspended definitions without an explicit review.
-- [ ] Keep historical attribution stable after credential rotation, credential deletion, principal disablement, display-name changes, or team membership removal.
-
-**Acceptance criteria**
-
-- [ ] Revoking one device credential immediately blocks new authentication and applies the recorded continue/pause policy to attributable durable work without orphaning it; disabling the principal prevents every new personal and team-owned execution.
-- [ ] A stolen-device exercise can identify the credential, revoke it, enumerate affected durable definitions, and stop any related future fires without guessing from logs or unnecessarily disabling the entire principal unless the recorded policy explicitly requires that fallback.
-- [ ] A removed or downgraded team member cannot exercise stale capabilities through schedules, watchers, workflow continuations, queued jobs, or retries.
-- [ ] Worker logs and audit rows use safe principal/credential hints and never need a raw credential to authorize work.
-- [ ] Restart and recovery tests prove durable work resumes with the captured owner/scope without reconstructing identity from request-local state.
-
 #### Phase 5 — Replace browser, API, CLI, and operator interfaces
 
 **Steps**

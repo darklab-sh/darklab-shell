@@ -161,6 +161,8 @@ class PtyRun:
     brokered: bool
     terminal_capture: PtyTerminalCapture
     owner_tab_id: str = ""
+    principal_id: str = ""
+    credential_id: str = ""
     completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, object]]], dict[str, object]] | None = None
     events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_pty_buffer_limit()))
     seq: int = 0
@@ -797,6 +799,7 @@ def start_pty_run(
     command: str,
     argv: list[str],
     team_id: str = "",
+    owner_context: Any | None = None,
     rows: object = None,
     cols: object = None,
     default_rows: object = 24,
@@ -861,6 +864,8 @@ def start_pty_run(
             brokered=bool(redis_client),
             terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
             owner_tab_id=owner_tab_id,
+            principal_id=str(getattr(owner_context, "actor_principal_id", "") or ""),
+            credential_id=str(getattr(owner_context, "actor_credential_id", "") or ""),
             completion_callback=completion_callback,
         )
         with _runs_lock:
@@ -879,6 +884,8 @@ def start_pty_run(
             owner_tab_id=owner_tab_id,
             run_type="pty",
             team_id=str(team_id or ""),
+            principal_id=run.principal_id,
+            credential_id=run.credential_id,
         )
         active_registered = True
         log.info("RUN_START", extra={

@@ -1587,6 +1587,7 @@ If a session has run history, workspace files, project workspace records or asse
 - Team secrets are separate from personal secrets. Personal provider keys are not inherited by teams, and team secret values stay write-only after save.
 - Archived teams stay visible for review and reactivation, but they cannot start new team-scoped work, accept invite/recovery redemption, edit members, rotate recovery codes, or dispatch stale schedules until reactivated. Schedules and watchers paused during archival stay paused until someone resumes them.
 - Team-owned Projects, Atlas rows, schedules, watchers, notification channels, workflows, AI assists, packages, and artifacts keep personal data out of the team scope while letting members work from the same shared evidence.
+- Scheduled and queued Team work rechecks the principal's current membership and role before it runs, continues, retries, or delivers a notification. Removing a member or lowering their role therefore applies to future background activity as well as new browser requests.
 - Live team runs and interactive PTY sessions can be watched by other team members with the right scope. Team-scoped kill and run-control actions use the same role checks as starting a command.
 - Team-aware API and CLI calls use `X-Team-ID`, `DARKLAB_TEAM`, or the saved CLI team config. `darklab team switch` validates the team before saving, preserves unknown config keys and comments, and keeps token-bearing config files owner-readable only.
 

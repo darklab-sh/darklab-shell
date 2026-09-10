@@ -82,7 +82,14 @@ def create_watcher_from_body_for_api(
             conn=conn,
             command_validator=command_validator,
         )
-        watcher = create_watcher(session_id, team_id=team_id, **payload, conn=conn)
+        watcher = create_watcher(
+            session_id,
+            team_id=team_id,
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            credential_id=str(audit_fields.get("actor_credential_id") or ""),
+            **payload,
+            conn=conn,
+        )
         schedule = get_schedule(watcher.schedule_id, conn=conn)
         record_watcher_event(
             AuditEventType.WATCHER_CREATE,
@@ -106,15 +113,19 @@ def update_watcher_for_api(
 ):
     def _update(conn):
         watcher = watcher_for_api_session(watcher_id, session_id, team_id=team_id, conn=conn)
-        updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
+        credential_id = str(audit_fields.get("actor_credential_id") or "")
+        updated = (
+            update_watcher(watcher.id, route_update.updates, credential_id=credential_id, conn=conn)
+            if route_update.updates else watcher
+        )
         if updated is None:
             raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
         event_type = AuditEventType.WATCHER_UPDATE
         if route_update.pause_requested:
-            updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+            updated = pause_watcher(updated.id, route_update.reason, credential_id=credential_id, conn=conn)
             event_type = AuditEventType.WATCHER_PAUSE
         elif route_update.resume_requested:
-            updated = resume_watcher(updated.id, conn=conn)
+            updated = resume_watcher(updated.id, credential_id=credential_id, conn=conn)
             event_type = AuditEventType.WATCHER_RESUME
         if updated is None:
             raise ApiAuthError("not_found", "Watcher not found.", status_code=404)

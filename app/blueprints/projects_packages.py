@@ -53,11 +53,13 @@ def projects_packages_create(project_id):
     if error_response:
         return error_response
     try:
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
         package = create_evidence_package(
             session_id,
             project_id,
             request.get_json(silent=True) or {},
             team_id=team_id,
+            audit_fields=audit_fields,
         )
     except ProjectWorkspaceError as exc:
         return project_routes._project_error_response(exc)
@@ -195,6 +197,7 @@ def projects_packages_download_job_create(project_id, package_id):
     if get_evidence_package(session_id, project_id, package_id, team_id=team_id) is None:
         return project_routes._project_not_found("package not found")
     actor_member_id = project_routes._project_actor_member_id(session_id, team_id)
+    audit_fields = project_routes._project_audit_fields(session_id, team_id)
     job = start_evidence_package_archive_job(
         session_id,
         project_id,
@@ -202,6 +205,8 @@ def projects_packages_download_job_create(project_id, package_id):
         cfg=CFG,
         team_id=team_id,
         actor_member_id=actor_member_id,
+        principal_id=str(audit_fields.get("actor_principal_id") or ""),
+        originating_credential_id=str(audit_fields.get("actor_credential_id") or ""),
     )
     job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
     project_routes.record_event(

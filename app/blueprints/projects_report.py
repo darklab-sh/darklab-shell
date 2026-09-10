@@ -66,12 +66,15 @@ def projects_report_save(project_id):
     try:
         data = project_routes._report_request_payload()
         draft = normalize_report_draft(data.get("draft") if isinstance(data.get("draft"), dict) else data)
+        audit_fields = project_routes._project_audit_fields(session_id, team_id)
         report = save_report_draft(
             session_id,
             project_id,
             draft,
             team_id=team_id,
             expected_updated=str(data.get("expected_updated") or data.get("updated") or "").strip(),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(audit_fields.get("actor_credential_id") or ""),
         )
     except ReportDraftConflict as exc:
         return project_routes._project_json_error(str(exc), 409)

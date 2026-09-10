@@ -21756,6 +21756,8 @@ class TestRunRoute:
         assert active_register.call_args_list[0].kwargs == {
             "owner_client_id": "client-1",
             "owner_tab_id": "tab-1",
+            "principal_id": "",
+            "credential_id": "",
         }
         assert active_register.call_args_list[1].args[:4] == (
             "run-real",
@@ -21766,6 +21768,8 @@ class TestRunRoute:
         assert active_register.call_args_list[1].kwargs == {
             "owner_client_id": "client-workflow",
             "owner_tab_id": "tab-workflow",
+            "principal_id": "",
+            "credential_id": "",
         }
         assert publish.call_count == 2
         assert publish.call_args_list[0].args[:2] == ("run-real", "started")

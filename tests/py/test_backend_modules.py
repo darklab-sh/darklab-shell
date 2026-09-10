@@ -510,11 +510,33 @@ class TestAIAssistContextAndStorage:
         return fake
 
     def _ai_db(self, monkeypatch, tmp_path):
+        from services.teams.storage import token_hash
+
         db_path = os.path.join(tmp_path, "ai-assist.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         database.db_init()
-        return database.db_connect()
+        conn = database.db_connect()
+        created = "2026-05-23T10:00:00+00:00"
+        legacy_hash = token_hash("tok_ai")
+        conn.execute(
+            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
+            ("tok_ai", created),
+        )
+        conn.execute(
+            "INSERT INTO teams "
+            "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_at, updated_at) "
+            "VALUES ('team_ai', 'AI test team', 'ai-test-team', 'active', 'mem_ai', ?, ?, ?)",
+            (legacy_hash, created, created),
+        )
+        conn.execute(
+            "INSERT INTO team_members "
+            "(id, team_id, session_token, session_token_hash, role, status, joined_at) "
+            "VALUES ('mem_ai', 'team_ai', 'tok_ai', ?, 'operator', 'active', ?)",
+            (legacy_hash, created),
+        )
+        conn.commit()
+        return conn
 
     def _insert_run_context_rows(self, conn):
         from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal, to_wire
@@ -1864,6 +1886,8 @@ class TestAIAssistContextAndStorage:
         assert warning.call_args.args == ("AI_ASSIST_FAILED",)
         assert warning.call_args.kwargs["extra"] == {
             "team_id": "",
+            "principal_id": "",
+            "credential_id": "",
             "session": "tok_ai********",
             "secret_scope": "personal",
             "model": "llama3.1:8b",
@@ -3797,6 +3821,15 @@ class TestLoadConfig:
             zap_report_workspace_path,
         )
         from services.connectors.zap_transport import DownloadedZapReport
+
+        database.db_init()
+        with database.db_connect() as auth_conn:
+            auth_conn.execute(
+                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
+                "ON CONFLICT (token) DO NOTHING",
+                ("tok_session-a", "2026-08-09T15:00:00+00:00"),
+            )
+            auth_conn.commit()
 
         artifact_job = {
             "id": job_id,
@@ -8453,6 +8486,7 @@ class TestPostgresMigrations:
             "0078",
             "0079",
             "0080",
+            "0081",
         ]
         for table_name in (
             "runs",
@@ -9865,7 +9899,7 @@ class TestPostgresMigrations:
         assert [(row["version"], row["name"]) for row in rows] == [
             (migration.version, migration.name) for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0080"
+        assert rows[-1]["version"] == "0081"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10339,6 +10373,7 @@ class TestPostgresMigrations:
             "0078",
             "0079",
             "0080",
+            "0081",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10383,7 +10418,8 @@ class TestPostgresMigrations:
         assert "0078" in conn.applied_versions
         assert "0079" in conn.applied_versions
         assert "0080" in conn.applied_versions
-        assert conn.commit_count == 42
+        assert "0081" in conn.applied_versions
+        assert conn.commit_count == 43
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -11198,7 +11234,11 @@ class TestSchedulerFoundation:
 
         now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
         missed_at = (now - timedelta(minutes=50)).isoformat()
-        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_scheduled")
+        monkeypatch.setattr(
+            dispatch,
+            "_launch_user_schedule_run",
+            lambda _schedule, **_kwargs: "run_scheduled",
+        )
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             conn.execute(
                 "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
@@ -11243,10 +11283,13 @@ class TestSchedulerFoundation:
             refreshed = service.get_schedule(schedule.id, conn=conn)
 
         assert status == "skipped_revoked"
-        assert dict(fire_row) == {"status": "skipped_revoked", "reason": "session token revoked"}
+        assert dict(fire_row) == {
+            "status": "skipped_revoked",
+            "reason": "legacy_session_revoked",
+        }
         assert refreshed is not None
         assert refreshed.enabled is False
-        assert refreshed.paused_reason == "session token revoked"
+        assert refreshed.paused_reason == "legacy_session_revoked"
 
     def test_scheduler_fire_skips_when_previous_run_active(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch, service
@@ -11287,7 +11330,7 @@ class TestSchedulerFoundation:
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
         launched_schedule_ids = []
 
-        def _launch(schedule):
+        def _launch(schedule, **_kwargs):
             launched_schedule_ids.append(schedule.id)
             return "run_claimed"
 
@@ -11328,7 +11371,7 @@ class TestSchedulerFoundation:
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
         enqueued = []
 
-        def _launch(_schedule):
+        def _launch(_schedule, **_kwargs):
             raise dispatch.ScheduleFireError("broker unavailable")
 
         monkeypatch.setattr(dispatch, "_launch_user_schedule_run", _launch)
@@ -13901,6 +13944,8 @@ class TestWatchersFoundation:
             }
 
             def launch_run(fired_schedule, **kwargs):
+                authorization = kwargs.pop("authorization")
+                assert authorization.allowed
                 launch_calls.append((fired_schedule.owner_id, kwargs))
                 return run_ids[fired_schedule.owner_id]
 
@@ -14435,6 +14480,15 @@ class TestNotificationsPhase0:
         database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute(
+            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+            (
+                "tok_notifications",
+                datetime.now(timezone.utc).isoformat(),
+                None,
+            ),
+        )
+        conn.commit()
         return conn
 
     def _insert_channel(self, conn, channel_id: str, *, trigger: str = "test") -> None:
@@ -23419,7 +23473,12 @@ class TestActiveRunMetadata:
 
             result = process.cleanup_stale_active_run_metadata()
 
-        assert result == {"metadata_removed": 2, "session_members_removed": 2, "team_members_removed": 2}
+        assert result == {
+            "metadata_removed": 2,
+            "session_members_removed": 2,
+            "team_members_removed": 2,
+            "principal_members_removed": 0,
+        }
         assert fake_redis.get("procmeta:run-missing-proc") is None
         assert fake_redis.get("procmeta:run-old-container") is None
         assert fake_redis.get("proc:run-old-container") is None
@@ -28723,7 +28782,9 @@ class TestAuditEvents:
 
         package_job = {
             "id": "epj_0123456789abcdef01234567",
-            "session_id": "tok_package",
+            "personal_workspace_id": "wsp_package",
+            "principal_id": "prn_package",
+            "originating_credential_id": "crd_package",
             "project_id": "proj_1",
             "package_id": "pkg_1",
             "team_id": "team_1",
@@ -28731,7 +28792,9 @@ class TestAuditEvents:
         }
         report_job = {
             "id": "rpj_0123456789abcdef01234567",
-            "session_id": "tok_report",
+            "personal_workspace_id": "wsp_report",
+            "principal_id": "prn_report",
+            "originating_credential_id": "crd_report",
             "project_id": "proj_1",
             "team_id": "team_1",
             "actor_member_id": "tmem_1",
@@ -28766,6 +28829,10 @@ class TestAuditEvents:
         assert report_details["archive_bytes"] == 456
         assert package_details["run_count"] == 2
         assert report_details["target_count"] == 5
+        assert package_record.call_args.kwargs["actor_principal_id"] == "prn_package"
+        assert package_record.call_args.kwargs["actor_credential_id"] == "crd_package"
+        assert report_record.call_args.kwargs["actor_principal_id"] == "prn_report"
+        assert report_record.call_args.kwargs["actor_credential_id"] == "crd_report"
 
         with mock.patch.object(package_jobs, "record_event", side_effect=RuntimeError(raw_error)):
             with mock.patch.object(package_jobs.log, "exception") as package_log:

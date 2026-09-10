@@ -89,6 +89,8 @@ def save_report_draft_on_conn(
     *,
     team_id: str = "",
     expected_updated: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
 ) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
     normalized_team_id = str(team_id or "").strip()
@@ -106,10 +108,13 @@ def save_report_draft_on_conn(
             raise ReportDraftConflict("report draft changed; reload before saving")
         timestamp = _now()
         conn.execute(
-            "UPDATE project_reports SET draft = ?, report_format_version = ?, updated = ? WHERE id = ?",
+            "UPDATE project_reports SET draft = ?, report_format_version = ?, "
+            "last_changed_by_credential_id = COALESCE(?, last_changed_by_credential_id), "
+            "updated = ? WHERE id = ?",
             (
                 dialect_for_backend(get_db_backend()).json_param(normalized_draft),
                 REPORT_FORMAT_VERSION,
+                str(originating_credential_id or "").strip() or None,
                 timestamp,
                 existing["id"],
             ),
@@ -128,11 +133,17 @@ def save_report_draft_on_conn(
         raise ReportDraftConflict("report draft changed; reload before saving")
     timestamp = _now()
     report_id = _new_report_id()
+    from services.auth.background_authorization import principal_id_for_workspace  # noqa: PLC0415
+
+    resolved_principal_id = str(principal_id or "").strip() or principal_id_for_workspace(
+        conn, normalized_session_id
+    )
     try:
         conn.execute(
             "INSERT INTO project_reports "
-            "(id, personal_workspace_id, team_id, project_id, draft, report_format_version, created, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, personal_workspace_id, team_id, project_id, draft, report_format_version, created, updated, "
+            "principal_id, created_by_credential_id, last_changed_by_credential_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 report_id,
                 normalized_session_id,
@@ -142,6 +153,9 @@ def save_report_draft_on_conn(
                 REPORT_FORMAT_VERSION,
                 timestamp,
                 timestamp,
+                resolved_principal_id or None,
+                str(originating_credential_id or "").strip() or None,
+                str(originating_credential_id or "").strip() or None,
             ),
         )
     except integrity_error_types(get_db_backend()) as exc:
@@ -164,6 +178,8 @@ def save_report_draft(
     *,
     team_id: str = "",
     expected_updated: str = "",
+    principal_id: str = "",
+    originating_credential_id: str = "",
 ) -> dict[str, Any]:
     with get_db_connect()() as conn:
         saved = save_report_draft_on_conn(
@@ -173,6 +189,8 @@ def save_report_draft(
             draft,
             team_id=team_id,
             expected_updated=expected_updated,
+            principal_id=principal_id,
+            originating_credential_id=originating_credential_id,
         )
         conn.commit()
         return saved

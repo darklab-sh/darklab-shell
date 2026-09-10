@@ -4004,7 +4004,13 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         active_run_register_fn=lambda *args, **kwargs: None,
         output_signal_classifier_cls=cast(Any, Classifier),
         workspace_path_filter_cls=lambda *args, **kwargs: object(),
-        owner_context_for_scope_fn=cast(Any, lambda *args, **kwargs: object()),
+        owner_context_for_scope_fn=cast(
+            Any,
+            lambda *args, **kwargs: SimpleNamespace(
+                actor_principal_id="",
+                actor_credential_id="",
+            ),
+        ),
         scanner_prefix=(),
         stdbuf_bin=None,
         shell_bin="/bin/sh",

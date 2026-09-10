@@ -5,7 +5,7 @@
 
 from typing import Any, cast
 
-from flask import jsonify
+from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
 from blueprints.api_v1_assessment_batch_mutations import _audit, _body, _error, _mapping
@@ -16,6 +16,7 @@ from services.assessments.batch.lifecycle_contracts import normalize_batch_start
 from services.assessments.batch.read_model import require_batch_parent
 from services.assessments.batch.retry_actions import start_confirmed_assessment_batch_retry
 from services.assessments.batch.retry_compiler import compile_batch_retry_preview
+from services.audit.context import route_audit_fields
 from services.audit.models import AuditEventType
 from services.teams.capabilities import Capability
 from services.teams.contracts import TeamPermissionDenied
@@ -71,6 +72,7 @@ def api_assessment_batch_retry(project_id, batch_id):
         api_routes._require_api_team_capability(owner_scope, Capability.RUN_COMMANDS)
         source = _source(session_id, owner_scope.team_id, project_id, batch_id)
         confirmation = normalize_batch_start_request(_body())
+        audit_fields = route_audit_fields(session_id, request, owner_scope)
         result = start_confirmed_assessment_batch_retry(
             session_id,
             project_id,
@@ -83,6 +85,10 @@ def api_assessment_batch_retry(project_id, batch_id):
                 str((owner_scope.member or {}).get("role") or "")
                 if owner_scope.is_team
                 else ""
+            ),
+            principal_id=str(audit_fields.get("actor_principal_id") or ""),
+            originating_credential_id=str(
+                audit_fields.get("actor_credential_id") or ""
             ),
         )
     except (AssessmentBatchError, TeamPermissionDenied) as exc:

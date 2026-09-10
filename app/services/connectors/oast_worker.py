@@ -15,6 +15,9 @@ from typing import Any
 
 from config import resolve_effective_cfg
 from runtime_bootstrap import bootstrap_runtime
+from core.database_access import get_db_connect
+from services.auth.background_authorization import resolve_background_authorization
+from services.teams.capabilities import Capability
 from services.connectors.oast_config import (
     OastConnectorSettings,
     oast_connector_settings,
@@ -146,6 +149,35 @@ def process_oast_correlation(
     cfg: Mapping[str, Any],
 ) -> None:
     """Register or poll one live correlation without exposing provider material."""
+    with get_db_connect()() as conn:
+        authorization = resolve_background_authorization(
+            conn,
+            principal_id=str(correlation.get("principal_id") or ""),
+            personal_workspace_id=str(correlation.get("personal_workspace_id") or ""),
+            team_id=str(correlation.get("team_id") or ""),
+            originating_credential_id=str(correlation.get("originating_credential_id") or ""),
+            required_capability=Capability.MUTATE_PROJECTS,
+        )
+    if not authorization.allowed:
+        log.warning(
+            "OAST_CORRELATION_AUTHORIZATION_REJECTED",
+            extra={
+                "correlation_id": str(correlation.get("id") or ""),
+                "principal_id": authorization.principal_id,
+                "credential_id": authorization.originating_credential_id,
+                "team_id": authorization.team_id,
+                "reason": authorization.state.value,
+            },
+        )
+        close_oast_correlation(
+            str(correlation.get("personal_workspace_id") or ""),
+            str(correlation.get("id") or ""),
+            team_id=str(correlation.get("team_id") or ""),
+            failed=True,
+            error_code=authorization.state.value,
+            error_detail=authorization.message,
+        )
+        return
     if not oast_provider_scope_matches(correlation, settings):
         log_oast_retry(
             "OAST_PROVIDER_SCOPE_RETRY",

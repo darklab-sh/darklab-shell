@@ -287,18 +287,21 @@ def schedules_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         payload = normalize_schedule_create_payload(data, session_id)
+        audit_fields = route_audit_fields(session_id, request, owner_scope)
 
         def _create(conn):
             schedule = create_schedule(
                 session_id,
                 team_id=owner_scope.team_id,
+                principal_id=str(audit_fields.get("actor_principal_id") or ""),
+                credential_id=str(audit_fields.get("actor_credential_id") or ""),
                 **payload,
                 conn=conn,
             )
             record_schedule_event(
                 AuditEventType.SCHEDULE_CREATE,
                 schedule,
-                audit_fields=route_audit_fields(session_id, request, owner_scope),
+                audit_fields=audit_fields,
                 source="browser",
                 conn=conn,
             )
@@ -344,14 +347,20 @@ def schedules_update(schedule_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         updates = normalize_schedule_update_payload(data, session_id)
+        audit_fields = route_audit_fields(session_id, request, owner_scope)
 
         def _update(conn):
-            updated = update_schedule(schedule.id, updates, conn=conn)
+            updated = update_schedule(
+                schedule.id,
+                updates,
+                credential_id=str(audit_fields.get("actor_credential_id") or ""),
+                conn=conn,
+            )
             if updated is not None:
                 record_schedule_event(
                     AuditEventType.SCHEDULE_UPDATE,
                     updated,
-                    audit_fields=route_audit_fields(session_id, request, owner_scope),
+                    audit_fields=audit_fields,
                     source="browser",
                     details={"changed_fields": sorted(key for key in updates if key != "workspace_cwd")},
                     conn=conn,
