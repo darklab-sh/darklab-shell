@@ -208,8 +208,18 @@ NAMED_SOURCE_HASH_EXCEPTIONS = {
     (
         "app/services/projects/actors.py",
         "team_actor_map",
-        "448a23d94d",
-    ): "team-member lookup resolves display attribution from legacy token hashes",
+        "8a731762a1",
+    ): "team-member lookup resolves display attribution from principal membership",
+    (
+        "app/services/teams/storage.py",
+        "list_teams_for_principal",
+        "369526e875",
+    ): "team listing resolves active memberships for one authenticated principal",
+    (
+        "app/services/teams/storage.py",
+        "get_team_membership",
+        "72abecfd4e",
+    ): "team authorization resolves one active principal membership in one team",
     (
         "app/services/projects/digests.py",
         "_schedule_for_digest",

@@ -184,14 +184,15 @@ def test_owner_query_adapters_preserve_mixed_postgres_result_sets(postgres_schem
     conn.executemany(
         "INSERT INTO owner_adapter_rows (id, personal_workspace_id, team_id) VALUES (?, ?, ?)",
         (
-            ("owner-a-null", "tok_owner_a", None),
-            ("owner-a-empty", "tok_owner_a", ""),
-            ("owner-b-empty", "tok_owner_b", ""),
-            ("team-row", "tok_owner_a", "team_red"),
+            ("owner-a-null", anonymous_session_id("postgres-owner-adapter-a"), None),
+            ("owner-a-empty", anonymous_session_id("postgres-owner-adapter-a"), ""),
+            ("owner-b-empty", anonymous_session_id("postgres-owner-adapter-b"), ""),
+            ("team-row", anonymous_session_id("postgres-owner-adapter-a"), "team_red"),
         ),
     )
-    owner_a = personal_owner_context("tok_owner_a")
-    team = team_owner_context("team_red", actor_session_id="tok_owner_a")
+    owner_a_id = anonymous_session_id("postgres-owner-adapter-a")
+    owner_a = personal_owner_context(owner_a_id)
+    team = team_owner_context("team_red", actor_session_id=owner_a_id)
 
     def selected_ids(predicate):
         return [
@@ -391,7 +392,7 @@ def test_project_and_atlas_owner_clauses_preserve_mixed_postgres_result_sets(pos
 def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgres_schema):
     from services.secrets.storage import _secret_scope_owner
     from services.session.storage import _recent_values_owner
-    from services.teams.ownership_queries import token_keyed_owner_predicate
+    from services.teams.ownership_queries import workspace_keyed_owner_predicate
     from services.teams.request_scope import RequestScope
     from services.teams.scope import personal_owner_context, team_owner_context
     from services.workflows.storage import _owner_where
@@ -466,9 +467,9 @@ def test_files_workflows_and_secrets_preserve_mixed_postgres_result_sets(postgre
         "team-red-flat-empty",
         "team-red-flat-null",
     ]
-    secret_owner = token_keyed_owner_predicate(
+    secret_owner = workspace_keyed_owner_predicate(
         _secret_scope_owner("team-red"),
-        token_column="owner_id",
+        workspace_column="owner_id",
     )
     assert selected_ids(secret_owner.sql, secret_owner.params) == [
         "team-red",
@@ -502,8 +503,8 @@ def test_automation_notification_owner_clauses_preserve_mixed_postgres_result_se
         "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, "
         "team_id TEXT, state TEXT NOT NULL, enabled BOOLEAN NOT NULL)"
     )
-    owner_a = "tok_postgres_automation_owner_a"
-    owner_b = "tok_postgres_automation_owner_b"
+    owner_a = anonymous_session_id("postgres-automation-owner-a")
+    owner_b = anonymous_session_id("postgres-automation-owner-b")
     conn.executemany(
         "INSERT INTO owner_automation_rows "
         "(id, personal_workspace_id, team_id, state, enabled) "
@@ -1397,6 +1398,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0079",
         "0080",
         "0081",
+        "0082",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -4071,6 +4073,7 @@ def test_configured_postgres_app_startup_smoke_uses_real_pool(postgres_dsn, post
     data_dir = tmp_path / "data"
     code = """
 import json
+import uuid
 from runtime_bootstrap import bootstrap
 app = bootstrap()
 app.config["TESTING"] = True
@@ -4079,16 +4082,14 @@ from core.database_backend import close_postgres_pool
 try:
     client = app.test_client()
     status = client.get("/status")
-    token_resp = client.get("/session/token/generate")
-    token = token_resp.get_json()["session_token"]
-    info_resp = client.get("/session/token/info", headers={"X-Session-ID": token})
-    history_resp = client.get("/history", headers={"X-Session-ID": token})
+    anonymous_id = str(uuid.uuid4())
+    history_resp = client.get(
+        "/history",
+        headers={"X-Darklab-Anonymous-ID": anonymous_id},
+    )
     print(json.dumps({
         "status": status.status_code,
         "db": status.get_json().get("db"),
-        "token_status": token_resp.status_code,
-        "info_status": info_resp.status_code,
-        "info_token": info_resp.get_json().get("token"),
         "history_status": history_resp.status_code,
     }))
 finally:
@@ -4118,9 +4119,6 @@ finally:
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["status"] == 200
     assert payload["db"] == "ok"
-    assert payload["token_status"] == 200
-    assert payload["info_status"] == 200
-    assert str(payload["info_token"]).startswith("tok_")
     assert payload["history_status"] == 200
 
 
@@ -4163,7 +4161,7 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
 
     resp = app.test_client().get(
         "/history/commands?limit=3",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     data = json.loads(resp.data)
 
@@ -4254,7 +4252,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
     resp = app.test_client().get(
         "/history?q=104.21&scope=all&include_total=1",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     data = json.loads(resp.data)
 
@@ -4265,7 +4263,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
     offloaded_resp = app.test_client().get(
         "/history?q=needle-after-pg-pointer-preview&scope=all&include_total=1",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     offloaded_data = json.loads(offloaded_resp.data)
 
@@ -4276,7 +4274,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
     delete_preview = app.test_client().get(
         "/history/delete-preview?q=104.21&scope=all",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     assert delete_preview.status_code == 200
     assert delete_preview.get_json() == {
@@ -4287,7 +4285,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
     deleted = app.test_client().delete(
         "/history?q=104.21&scope=all",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     assert deleted.status_code == 200
     assert deleted.get_json() == {"ok": True, "deleted_count": 1}
@@ -4354,7 +4352,7 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
 
-    resp = app.test_client().get("/history/stats", headers={"X-Session-ID": session_id})
+    resp = app.test_client().get("/history/stats", headers={**browser_identity_headers(session_id)})
     data = json.loads(resp.data)
 
     assert resp.status_code == 200
@@ -4442,7 +4440,7 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
 
     resp = app.test_client().post(
         "/run/client",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "command": "theme current",
             "exit_code": 0,
@@ -4644,7 +4642,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     ).fetchone()
     history_resp = app.test_client().get(
         "/history?q=admin&scope=all&include_total=1",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     history_data = json.loads(history_resp.data)
 
@@ -4868,7 +4866,7 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
     client = app.test_client()
     create_resp = client.post(
         "/share",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "label": "postgres snapshot",
             "content": [{"text": "line one", "cls": "output"}],
@@ -4876,8 +4874,8 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
         },
     )
     share_id = json.loads(create_resp.data)["id"]
-    fetch_resp = client.get(f"/share/{share_id}?json", headers={"X-Session-ID": session_id})
-    delete_resp = client.delete(f"/share/{share_id}", headers={"X-Session-ID": session_id})
+    fetch_resp = client.get(f"/share/{share_id}?json", headers={**browser_identity_headers(session_id)})
+    delete_resp = client.delete(f"/share/{share_id}", headers={**browser_identity_headers(session_id)})
     row = conn.execute("SELECT id FROM snapshots WHERE id = %s", (share_id,)).fetchone()
 
     assert create_resp.status_code == 200
@@ -4979,27 +4977,27 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     client = app.test_client()
     preferences_resp = client.post(
         "/session/preferences",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"preferences": {"pref_theme_name": "darklab_obsidian.yaml", "pref_timestamps": "on"}},
     )
     recent_resp = client.post(
         "/session/recent-values",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"values": [{"kind": "domain", "value": "darklab.sh"}, {"kind": "ip", "value": "8.8.8.8"}]},
     )
     starred_resp = client.post(
         "/session/starred",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"command": "nmap darklab.sh"},
     )
     duplicate_starred_resp = client.post(
         "/session/starred",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"command": "nmap darklab.sh"},
     )
     workflow_resp = client.post(
         "/session/workflows",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "title": "Postgres workflow",
             "description": "smoke",
@@ -5014,7 +5012,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     )
     playbook_resp = client.post(
         "/session/workflows",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "version": 2,
             "id": "postgres_playbook",
@@ -5040,7 +5038,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     playbook = json.loads(playbook_resp.data)["workflow"]
     execution_resp = client.post(
         "/workflow-executions",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"workflow_id": playbook["id"], "inputs": {"target": "darklab.sh"}},
     )
     execution = json.loads(execution_resp.data)["execution"]
@@ -5067,15 +5065,15 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     assert finalized is not None and finalized["destination"] == "complete"
     execution_list_resp = client.get(
         "/workflow-executions?limit=10",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     filtered_execution_list_resp = client.get(
         f"/workflow-executions?limit=10&workflow_id={playbook['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     unrelated_execution_list_resp = client.get(
         "/workflow-executions?limit=10&workflow_id=unrelated_playbook",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE personal_workspace_id = %s",
@@ -5480,54 +5478,17 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
 
 
 @pytest.mark.postgres
-def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, postgres_schema):
+def test_retired_session_identity_surfaces_stay_unavailable_on_postgres(
+    monkeypatch,
+    postgres_schema,
+):
     from app import create_app
-    app = create_app()
-    app.config["TESTING"] = True
-    import blueprints.session as session_blueprint
     from core import database as core_database
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
-    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    source_session_id = str(uuid.uuid4())
-    timestamp = "2026-05-17T00:00:00Z"
-    conn.execute(
-        """
-        INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output)
-        VALUES (%s, %s, 'host darklab.sh', %s, %s, 0, '[]')
-        """,
-        ("run-session-migrate-pg", source_session_id, timestamp, timestamp),
-    )
-    conn.execute(
-        "INSERT INTO snapshots "
-        "(id, personal_workspace_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
-        ("snap-session-migrate-pg", source_session_id, "session migrate", timestamp, "[]"),
-    )
-    conn.execute(
-        "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (%s, %s)",
-        (source_session_id, "host darklab.sh"),
-    )
-    conn.execute(
-        "INSERT INTO session_preferences "
-        "(personal_workspace_id, preferences, updated) VALUES (%s, %s, %s)",
-        (source_session_id, Jsonb({"pref_theme_name": "darklab_obsidian.yaml"}), timestamp),
-    )
-    conn.execute(
-        "INSERT INTO session_variables "
-        "(personal_workspace_id, name, value, updated) VALUES (%s, %s, %s, %s)",
-        (source_session_id, "target", "darklab.sh", timestamp),
-    )
-    conn.execute(
-        """
-        INSERT INTO recent_values (personal_workspace_id, kind, value, last_used, use_count)
-        VALUES (%s, 'domain', 'darklab.sh', %s, 2)
-        """,
-        (source_session_id, timestamp),
-    )
-    conn.commit()
 
     @contextmanager
     def _postgres_db_connect():
@@ -5535,261 +5496,22 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
 
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(session_blueprint, "migrate_session_workspace", lambda _from_id, _to_id: SimpleNamespace(
-        migrated_files=0,
-        skipped_files=0,
-        migrated_directories=0,
-        skipped_directories=0,
-    ))
-    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    client = create_app().test_client()
 
-    from services.workflows.storage import (
-        bind_step_run,
-        claim_step_for_launch,
-        create_execution,
-        finalize_run_step,
-        get_execution,
-    )
+    for method, path in (
+        ("get", "/session/token/generate"),
+        ("get", "/session/token/info"),
+        ("post", "/session/token/verify"),
+        ("post", "/session/token/revoke"),
+        ("post", "/session/migrate"),
+    ):
+        response = getattr(client, method)(path, json={} if method == "post" else None)
+        assert response.status_code == 404, path
 
-    workflow_execution = create_execution(
-        session_id=source_session_id,
-        team_id="",
-        workflow_id="postgres_migrated_execution",
-        workflow_source="personal",
-        definition={
-            "version": 2,
-            "id": "postgres_migrated_execution",
-            "title": "Postgres migrated execution",
-            "inputs": [],
-            "steps": [{
-                "id": "finish",
-                "cmd": "true",
-                "next": {"success": "complete", "failure": "stop"},
-            }],
-        },
-        inputs={},
-    )
-    workflow_run_id = "run-postgres-migrated-" + uuid.uuid4().hex
-    assert claim_step_for_launch(workflow_execution["id"], "finish") is not None
-    assert bind_step_run(workflow_execution["id"], "finish", workflow_run_id)
-    assert finalize_run_step(workflow_run_id, 0) is not None
-
-    client = app.test_client()
-    token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
-    destination_token = json.loads(token_resp.data)["session_token"]
-    disposition_sql = (
-        "INSERT INTO finding_remediation_dispositions "
-        "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
-        "rule_identity, review_state, remediation, created_at, updated_at, "
-        "remediation_updated_at) "
-        "VALUES (%s, '', 'subject:postgres-migration', 'rule', "
-        "'RULE:postgres-migration', 'postgres-migration', %s, %s, %s, %s, %s)"
-    )
-    conn.execute(
-        disposition_sql,
-        (
-            source_session_id,
-            "reviewed",
-            "Use the source guidance.",
-            "2026-05-16T00:00:00Z",
-            "2026-05-17T00:00:00Z",
-            "2026-05-19T00:00:00Z",
-        ),
-    )
-    conn.execute(
-        disposition_sql,
-        (
-            destination_token,
-            "important",
-            "Keep the older destination guidance only when it is newer.",
-            "2026-05-15T00:00:00Z",
-            "2026-05-18T00:00:00Z",
-            "2026-05-16T00:00:00Z",
-        ),
-    )
-    conn.execute(
-        "INSERT INTO finding_remediation_merge_members "
-        "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, identity_value, "
-        "vulnerability_id, rule_identity, created_by_session_id, created_at) "
-        "VALUES (%s, '', 'rmg_postgres_migration', 'entity:postgres-migration', "
-        "'vulnerability', 'CVE-2026-12345', 'CVE-2026-12345', "
-        "'observation:postgres-migration', %s, '2026-05-19T00:00:00Z')",
-        (source_session_id, source_session_id),
-    )
-    conn.commit()
-    info_resp = client.get("/session/token/info", headers={"X-Session-ID": destination_token})
-    verify_resp = client.post(
-        "/session/token/verify",
-        headers={"X-Session-ID": source_session_id},
-        json={"token": destination_token},
-    )
-    missing_body_resp = client.post(
-        "/session/migrate",
-        headers={"X-Session-ID": source_session_id},
-        json={},
-    )
-    mismatch_resp = client.post(
-        "/session/migrate",
-        headers={"X-Session-ID": source_session_id},
-        json={"from_session_id": str(uuid.uuid4()), "to_session_id": destination_token},
-    )
-    unknown_token_resp = client.post(
-        "/session/migrate",
-        headers={"X-Session-ID": source_session_id},
-        json={"from_session_id": source_session_id, "to_session_id": "tok_" + uuid.uuid4().hex},
-    )
-    migrate_resp = client.post(
-        "/session/migrate",
-        headers={"X-Session-ID": source_session_id},
-        json={"from_session_id": source_session_id, "to_session_id": destination_token},
-    )
-    revoke_resp = client.post(
-        "/session/token/revoke",
-        headers={"X-Session-ID": destination_token},
-        json={"token": destination_token},
-    )
-    revoked_verify_resp = client.post(
-        "/session/token/verify",
-        headers={"X-Session-ID": str(uuid.uuid4())},
-        json={"token": destination_token},
-    )
-    migrated_run = conn.execute(
-        "SELECT personal_workspace_id FROM runs WHERE id = %s",
-        ("run-session-migrate-pg",),
-    ).fetchone()
-    migrated_snapshot = conn.execute(
-        "SELECT personal_workspace_id FROM snapshots WHERE id = %s",
-        ("snap-session-migrate-pg",),
-    ).fetchone()
-    migrated_prefs = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE personal_workspace_id = %s",
-        (destination_token,),
-    ).fetchone()
-    source_prefs = conn.execute(
-        "SELECT 1 FROM session_preferences WHERE personal_workspace_id = %s",
-        (source_session_id,),
-    ).fetchone()
-    migrated_recent = conn.execute(
-        "SELECT kind, value, use_count FROM recent_values WHERE personal_workspace_id = %s",
-        (destination_token,),
-    ).fetchone()
-    source_recent_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = %s",
-        (source_session_id,),
-    ).fetchone()["count"]
-    migrated_stars = conn.execute(
-        "SELECT COUNT(*) AS count FROM starred_commands WHERE personal_workspace_id = %s",
-        (destination_token,),
-    ).fetchone()["count"]
-    migrated_variables = conn.execute(
-        "SELECT COUNT(*) AS count FROM session_variables WHERE personal_workspace_id = %s",
-        (destination_token,),
-    ).fetchone()["count"]
-    migrated_disposition = conn.execute(
-        "SELECT personal_workspace_id, review_state, remediation, created_at, updated_at, "
-        "remediation_updated_at "
-        "FROM finding_remediation_dispositions "
-        "WHERE affected_subject = 'subject:postgres-migration'",
-    ).fetchone()
-    migrated_merge_member = conn.execute(
-        "SELECT personal_workspace_id, merge_id, created_by_session_id "
-        "FROM finding_remediation_merge_members "
-        "WHERE affected_subject = 'entity:postgres-migration'",
-    ).fetchone()
-    source_workflow_execution = get_execution(source_session_id, workflow_execution["id"])
-    migrated_workflow_execution = get_execution(destination_token, workflow_execution["id"])
-
-    assert token_resp.status_code == 200
-    assert info_resp.status_code == 200
-    assert json.loads(info_resp.data)["token"] == destination_token
-    assert verify_resp.status_code == 200
-    assert json.loads(verify_resp.data)["exists"] is True
-    assert missing_body_resp.status_code == 400
-    assert mismatch_resp.status_code == 403
-    assert unknown_token_resp.status_code == 400
-    assert migrate_resp.status_code == 200
-    assert json.loads(migrate_resp.data)["migrated_runs"] == 1
-    assert json.loads(migrate_resp.data)["migrated_snapshots"] == 1
-    assert json.loads(migrate_resp.data)["migrated_stars"] == 1
-    assert json.loads(migrate_resp.data)["migrated_preferences"] == 1
-    assert json.loads(migrate_resp.data)["migrated_variables"] == 1
-    assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
-    assert json.loads(migrate_resp.data)["migrated_workflow_executions"] == 1
-    assert json.loads(migrate_resp.data)["migrated_finding_remediation_dispositions"] == 1
-    assert json.loads(migrate_resp.data)["migrated_finding_remediation_guidance"] == 1
-    assert json.loads(migrate_resp.data)["migrated_finding_remediation_merge_members"] == 1
-    assert migrated_run["personal_workspace_id"] == destination_token
-    assert migrated_snapshot["personal_workspace_id"] == destination_token
-    assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
-    assert source_prefs is None
-    assert migrated_recent["kind"] == "domain"
-    assert migrated_recent["value"] == "darklab.sh"
-    assert migrated_recent["use_count"] == 2
-    assert int(source_recent_count) == 0
-    assert int(migrated_stars) == 1
-    assert int(migrated_variables) == 1
-    assert migrated_disposition["personal_workspace_id"] == destination_token
-    assert migrated_disposition["review_state"] == "important"
-    assert migrated_disposition["remediation"] == "Use the source guidance."
-    assert migrated_disposition["created_at"].isoformat() == "2026-05-15T00:00:00+00:00"
-    assert migrated_disposition["updated_at"].isoformat() == "2026-05-18T00:00:00+00:00"
-    assert migrated_disposition["remediation_updated_at"].isoformat() == "2026-05-19T00:00:00+00:00"
-    assert migrated_merge_member["personal_workspace_id"] == destination_token
-    assert migrated_merge_member["merge_id"] == "rmg_postgres_migration"
-    assert migrated_merge_member["created_by_session_id"] == destination_token
-    assert source_workflow_execution is None
-    assert migrated_workflow_execution is not None
-    assert migrated_workflow_execution["personal_workspace_id"] == destination_token
-    assert migrated_workflow_execution["steps"][0]["run_id"] == workflow_run_id
-    assert revoke_resp.status_code == 200
-    assert revoked_verify_resp.status_code == 200
-    assert json.loads(revoked_verify_resp.data)["exists"] is False
-
-
-@pytest.mark.postgres
-def test_secret_session_migration_uses_postgres_conflict_handling(monkeypatch, postgres_schema):
-    from core.migrations import MIGRATIONS
-    from core.migrations.runner import run_migrations_with_advisory_lock
-    from services.secrets import storage as secrets_storage
-
-    conn = postgres_schema.conn
-    run_migrations_with_advisory_lock(conn, MIGRATIONS)
-    conn.execute(
-        """
-        INSERT INTO secrets (owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        ("old-session", "VT_API_KEY", b"source", b"nonce1", '["VT_API_KEY"]', "created", "updated"),
-    )
-    conn.execute(
-        """
-        INSERT INTO secrets (owner_id, name, ciphertext, nonce, consumer_envs, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        ("new-session", "VT_API_KEY", b"destination", b"nonce2", '["VT_API_KEY"]', "created", "updated"),
-    )
-    conn.commit()
-    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-
-    migrated = secrets_storage.migrate_session_secrets(
-        PostgresSqliteCompatConnection(conn),
-        "old-session",
-        "new-session",
-    )
-    old_row = conn.execute(
-        "SELECT ciphertext FROM secrets WHERE owner_id = %s AND name = %s",
-        ("old-session", "VT_API_KEY"),
-    ).fetchone()
-    new_row = conn.execute(
-        "SELECT ciphertext FROM secrets WHERE owner_id = %s AND name = %s",
-        ("new-session", "VT_API_KEY"),
-    ).fetchone()
-
-    assert migrated == 0
-    assert bytes(old_row["ciphertext"]) == b"source"
-    assert bytes(new_row["ciphertext"]) == b"destination"
+    copied_token = "tok_" + uuid.uuid4().hex
+    rejected = client.get("/history", headers={"X-Darklab-Credential": copied_token})
+    assert rejected.status_code == 401
+    assert rejected.get_json()["error"] == "malformed_credential"
 
 
 @pytest.mark.postgres
@@ -6619,19 +6341,19 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
     client = app.test_client()
     project_response = client.post(
         "/projects",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"name": "Postgres Manual Finding"},
     )
     project = project_response.get_json()["project"]
     target_response = client.post(
         f"/projects/{project['id']}/targets",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"type": "domain", "value": "manual-postgres.example"},
     )
     target = target_response.get_json()["target"]
     created_response = client.post(
         f"/projects/{project['id']}/findings",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "target_id": target["id"],
             "title": "Postgres manual finding",
@@ -6642,25 +6364,25 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
     created = created_response.get_json()["finding"]
     updated_response = client.patch(
         f"/projects/{project['id']}/findings/{created['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"expected_revision": 1, "severity": "high"},
     )
     updated = updated_response.get_json()["finding"]
     evidence_route = f"/projects/{project['id']}/findings/{created['id']}/evidence"
     linked_response = client.post(
         evidence_route,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"evidence_type": "atlas_entity", "evidence_id": target["id"]},
     )
     linked = linked_response.get_json()["evidence"]
     duplicate_response = client.post(
         evidence_route,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"evidence_type": "atlas_entity", "evidence_id": target["id"]},
     )
     listed_response = client.get(
         evidence_route,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     stored = conn.execute(
         "SELECT manual_revision, cve_ids_json FROM findings WHERE id = %s",
@@ -6677,11 +6399,11 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
     ).fetchone()
     unlinked_response = client.delete(
         f"{evidence_route}/{linked['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     empty_evidence = client.get(
         evidence_route,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["evidence"]
 
     assert project_response.status_code == 201
@@ -6798,7 +6520,7 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
         "modified": timestamp,
     }])
 
-    resp = app.test_client().get("/workspace/files", headers={"X-Session-ID": session_id})
+    resp = app.test_client().get("/workspace/files", headers={**browser_identity_headers(session_id)})
     data = json.loads(resp.data)
     listed_file = data["files"][0]
 
@@ -6916,25 +6638,25 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
-    summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
-    entities_resp = client.get("/atlas/entities?type=domain&q=darklab", headers={"X-Session-ID": session_id})
-    detail_resp = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
-    export_resp = client.get("/atlas/entities/export?format=jsonl", headers={"X-Session-ID": session_id})
-    findings_resp = client.get("/atlas/findings?q=https", headers={"X-Session-ID": session_id})
-    runs_resp = client.get("/atlas/runs?q=nmap", headers={"X-Session-ID": session_id})
+    summary_resp = client.get("/atlas", headers={**browser_identity_headers(session_id)})
+    entities_resp = client.get("/atlas/entities?type=domain&q=darklab", headers={**browser_identity_headers(session_id)})
+    detail_resp = client.get(f"/atlas/entities/{entity_id}", headers={**browser_identity_headers(session_id)})
+    export_resp = client.get("/atlas/entities/export?format=jsonl", headers={**browser_identity_headers(session_id)})
+    findings_resp = client.get("/atlas/findings?q=https", headers={**browser_identity_headers(session_id)})
+    runs_resp = client.get("/atlas/runs?q=nmap", headers={**browser_identity_headers(session_id)})
     saved_view_resp = client.post(
         "/atlas/views",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "name": "Postgres Atlas",
             "tab": "findings",
             "filters": {"query": "https", "finding_status": "new", "run_id": run_id, "run_label": "nmap darklab.sh"},
         },
     )
-    saved_views_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+    saved_views_resp = client.get("/atlas/views", headers={**browser_identity_headers(session_id)})
     triage_resp = client.put(
         f"/findings/{finding_id}/triage",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "remediation": "Patch the Postgres service.",
             "verification_status": "ready_to_verify",
@@ -6942,7 +6664,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     triage_update_resp = client.put(
         f"/findings/{finding_id}/triage",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={
             "remediation": "Patch and restart the Postgres service.",
             "verification_status": "verified",
@@ -6950,21 +6672,21 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     )
     review_resp = client.post(
         "/atlas/findings/review",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"finding_ids": [finding_id], "review_state": "reviewed"},
     )
     suppression_resp = client.put(
         f"/atlas/findings/{finding_id}/suppression",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
         json={"suppressed": True},
     )
     suppressed_findings_resp = client.get(
         "/atlas/findings?suppression_filter=only",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     delete_preview_resp = client.get(
         f"/atlas/findings/{finding_id}/delete-preview",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
 
     assert summary_resp.status_code == 200

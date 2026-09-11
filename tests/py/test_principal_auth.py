@@ -12,12 +12,12 @@ import stat
 import threading
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from core.database_backend import DatabaseBackend
 from core.database_access import get_db_connect
-from core.helpers import LEGACY_SESSION_ADAPTER_REMOVAL_ITEM
 from core.migrations import MIGRATIONS, v0078_principal_credential_persistence, v0079_credential_scopes
 from core.migrations.runner import run_migrations
 from services.auth import lifecycle, storage
@@ -417,7 +417,6 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
 
     attached_history = client.get("/history", headers=headers)
     assert attached_history.status_code == 200
-    assert LEGACY_SESSION_ADAPTER_REMOVAL_ITEM == 11
 
     unknown = _unknown_secret()
     rejected = client.get("/history", headers={"X-Darklab-Credential": unknown})
@@ -708,11 +707,11 @@ def test_cutover_failure_rolls_back_all_database_ownership_changes(
     def fail_after_first_owner_update(active_conn, **values):
         active_conn.execute(
             "UPDATE runs SET personal_workspace_id = ? WHERE personal_workspace_id = ?",
-            (values["workspace_id"], values["anonymous_id"]),
+            (values["workspace_id"], values["source_owner_id"]),
         )
         raise RuntimeError("injected cutover failure")
 
-    monkeypatch.setattr(storage, "attach_anonymous_ownership", fail_after_first_owner_update)
+    monkeypatch.setattr(storage, "attach_personal_ownership", fail_after_first_owner_update)
     with pytest.raises(RuntimeError, match="injected cutover failure"):
         storage.create_principal_with_credential(
             anonymous_id=anonymous_id,
@@ -739,7 +738,7 @@ def test_principal_team_membership_and_owned_rows_survive_credential_changes(
     team = team_storage.create_team(
         conn,
         name="Principal team",
-        creator_session_token=owner_bundle.principal.id,
+        creator_principal_id=owner_bundle.principal.id,
         creator_credential_id=owner_bundle.credential.metadata.id,
     )
     team_id = team["id"]
@@ -748,7 +747,7 @@ def test_principal_team_membership_and_owned_rows_survive_credential_changes(
         team_storage.add_team_member(
             conn,
             team_id=team_id,
-            session_token=bundle.principal.id,
+            principal_id=bundle.principal.id,
             joined_by_credential_id=owner_bundle.credential.metadata.id,
             role=role,
         )
@@ -943,13 +942,13 @@ def test_background_authorization_rechecks_team_role_and_membership(
     team = team_storage.create_team(
         conn,
         name="Background authorization",
-        creator_session_token=owner.principal.id,
+        creator_principal_id=owner.principal.id,
         creator_credential_id=owner.credential.metadata.id,
     )
     membership = team_storage.add_team_member(
         conn,
         team_id=team["id"],
-        session_token=member.principal.id,
+        principal_id=member.principal.id,
         joined_by_credential_id=owner.credential.metadata.id,
         role="operator",
     )
@@ -1146,10 +1145,10 @@ def test_operator_secret_output_requires_a_new_owner_only_file(tmp_path):
     spec.loader.exec_module(module)
 
     destination = tmp_path / "replacement.txt"
-    issued = type("Issued", (), {
-        "secret": "dlc_v1_crd_one-time-secret",
-        "metadata": type("Metadata", (), {"to_safe_dict": lambda self: {"id": "crd_test"}})(),
-    })()
+    issued = SimpleNamespace(
+        secret="dlc_v1_crd_one-time-secret",
+        metadata=SimpleNamespace(to_safe_dict=lambda: {"id": "crd_test"}),
+    )
     payload = module._issue_to_file(str(destination), lambda: issued)
 
     assert destination.read_text(encoding="utf-8") == issued.secret + "\n"

@@ -2,11 +2,11 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Seed the configured history database with realistic runs for a UUID or tok_ session.
+"""Seed the configured history database with realistic runs for one workspace.
 
 Useful for exercising user-facing flows that only reveal themselves with a
 populated history: the history drawer, fuzzy history search, reverse-i-search,
-date/exit/star filters, and token-migration workflows.
+date/exit/star filters, and workspace-backed history views.
 
 Run this *inside* the running container so it uses the same configured database
 backend as the app. For SQLite, that also keeps writes on the same SQLite
@@ -24,23 +24,21 @@ Examples
 TTY allocation so the redirect works; ``python -`` reads the program from
 stdin and forwards the trailing argv to it.
 
-Inside the container, generate a new token and populate 70 runs:
-
-    docker compose -f compose.dev.yaml exec -T shell python - --new-token < scripts/seed_history.py
-
-Populate runs for an existing token:
+Inside the container, populate 70 runs for a personal workspace:
 
     docker compose -f compose.dev.yaml exec -T shell python - \
-      --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
+      --workspace-id wsp_abcdef0123456789abcdef0123456789 < scripts/development/seed_history.py
 
-Populate runs for an anonymous UUID session:
+Populate runs for an anonymous browser identity:
 
     docker compose -f compose.dev.yaml exec -T shell python - \
-      --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
+      --anonymous-id 11111111-2222-4333-8444-555555555555 < scripts/development/seed_history.py
 
 Pick a custom count and star some of the seeded commands:
 
-    docker compose -f compose.dev.yaml exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
+    docker compose -f compose.dev.yaml exec -T shell python - \
+      --workspace-id wsp_abcdef0123456789abcdef0123456789 --count 40 --star 5 \
+      < scripts/development/seed_history.py
 """
 
 from __future__ import annotations
@@ -51,7 +49,6 @@ import json
 import os
 import random
 import re
-import secrets
 import sqlite3
 import sys
 import uuid
@@ -271,51 +268,34 @@ def _fake_output_for_command(command: str) -> tuple[list[str], int]:
     return ([f"{root}: completed successfully", f"command: {command}"], 0)
 
 
-# ── Session resolution ──────────────────────────────────────────────────────
+# ── Workspace resolution ────────────────────────────────────────────────────
 
 
-def resolve_session(args) -> tuple[str, str | None]:
-    """Return (session_id, maybe_new_token).
-
-    ``maybe_new_token`` is the tok_ we generated if ``--new-token`` was used,
-    so the caller can print it for the operator to stash.  None otherwise.
-    """
-    if args.new_token:
-        token = "tok_" + secrets.token_hex(16)
-        created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+def resolve_owner(args) -> str:
+    """Return a validated personal-workspace id or anonymous UUID."""
+    if args.workspace_id:
+        workspace_id = str(args.workspace_id).strip().lower()
+        if not re.fullmatch(r"wsp_[0-9a-f]{32}", workspace_id):
+            sys.exit("--workspace-id must be wsp_ followed by 32 lowercase hex characters")
         with db_connect() as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
-                "ON CONFLICT(token) DO NOTHING",
-                (token, created),
-            )
-            conn.commit()
-        return token, token
+            found = conn.execute(
+                "SELECT 1 FROM personal_workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        if found is None:
+            sys.exit("--workspace-id was not found in the configured database")
+        return workspace_id
 
-    if args.token:
-        token = args.token.strip()
-        if not re.fullmatch(r"tok_[0-9a-f]{32}", token):
-            sys.exit(
-                f"--token must match 'tok_' + 32 hex chars, got: {token!r}"
-            )
-        created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
-                "ON CONFLICT(token) DO NOTHING",
-                (token, created),
-            )
-            conn.commit()
-        return token, None
-
-    if args.uuid:
+    if args.anonymous_id:
         try:
-            uuid.UUID(args.uuid)
+            parsed = uuid.UUID(args.anonymous_id)
         except ValueError:
-            sys.exit(f"--uuid is not a valid UUID: {args.uuid!r}")
-        return args.uuid, None
+            sys.exit(f"--anonymous-id is not a valid UUID: {args.anonymous_id!r}")
+        if str(parsed) != str(args.anonymous_id).lower() or parsed.version != 4:
+            sys.exit("--anonymous-id must be a canonical UUIDv4")
+        return str(parsed)
 
-    sys.exit("provide one of: --token, --uuid, --new-token")
+    sys.exit("provide one of: --workspace-id or --anonymous-id")
 
 
 # ── Run generation ──────────────────────────────────────────────────────────
@@ -326,7 +306,7 @@ def _preview_entry(text: str, cls: str, ts_clock: str, ts_elapsed: str) -> dict:
 
 
 def _fake_run_row(
-    session_id: str,
+    owner_id: str,
     command: str,
     output_lines: list[str],
     exit_code: int,
@@ -351,7 +331,7 @@ def _fake_run_row(
 
     return (
         str(uuid.uuid4()),                       # id
-        session_id,                              # session_id
+        owner_id,                                # personal_workspace_id
         command,                                 # command
         started_dt.isoformat(),                  # started
         finished_dt.isoformat(),                 # finished
@@ -366,7 +346,7 @@ def _fake_run_row(
     )
 
 
-def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -> list[str]:
+def seed_runs(owner_id: str, count: int, days_span: int, rng: random.Random) -> list[str]:
     """Insert ``count`` fabricated runs and return the commands we inserted."""
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=days_span)
@@ -387,7 +367,7 @@ def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -
         # default "recent" view is not empty.
         offset = rng.random() ** 0.5
         started_dt = earliest + (now - earliest) * offset
-        rows.append(_fake_run_row(session_id, command, output, exit_code, started_dt, rng))
+        rows.append(_fake_run_row(owner_id, command, output, exit_code, started_dt, rng))
         commands_inserted.append(command)
         previous_command = command
 
@@ -397,7 +377,7 @@ def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -
     with db_connect() as conn:
         conn.executemany(
             "INSERT INTO runs ("
-            "id, session_id, command, started, finished, exit_code, output, output_preview, "
+            "id, personal_workspace_id, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
             "output_search_text"
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -408,7 +388,7 @@ def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -
     return commands_inserted
 
 
-def seed_stars(session_id: str, commands: list[str], star_count: int, rng: random.Random) -> list[str]:
+def seed_stars(owner_id: str, commands: list[str], star_count: int, rng: random.Random) -> list[str]:
     """Star ``star_count`` distinct commands from the provided list."""
     unique_cmds = list(dict.fromkeys(commands))
     if not unique_cmds:
@@ -416,9 +396,9 @@ def seed_stars(session_id: str, commands: list[str], star_count: int, rng: rando
     picks = rng.sample(unique_cmds, min(star_count, len(unique_cmds)))
     with db_connect() as conn:
         conn.executemany(
-            "INSERT INTO starred_commands (session_id, command) VALUES (?, ?) "
-            "ON CONFLICT(session_id, command) DO NOTHING",
-            [(session_id, cmd) for cmd in picks],
+            "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?) "
+            "ON CONFLICT(personal_workspace_id, command) DO NOTHING",
+            [(owner_id, cmd) for cmd in picks],
         )
         conn.commit()
     return picks
@@ -509,7 +489,7 @@ def _require_schema() -> None:
             tables = _table_names(conn)
         except Exception as exc:  # noqa: BLE001
             sys.exit(f"could not read schema from {_active_database_label()}: {exc}")
-    required = {"runs", "session_tokens", "starred_commands"}
+    required = {"runs", "personal_workspaces", "starred_commands"}
     missing = required - tables
     if missing:
         sys.exit(
@@ -537,9 +517,8 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ident = parser.add_mutually_exclusive_group(required=True)
-    ident.add_argument("--token", help="existing tok_-prefixed session token (32 hex chars)")
-    ident.add_argument("--uuid", help="anonymous UUID session id")
-    ident.add_argument("--new-token", action="store_true", help="generate a new tok_ token")
+    ident.add_argument("--workspace-id", help="existing personal-workspace id")
+    ident.add_argument("--anonymous-id", help="canonical anonymous UUIDv4")
 
     parser.add_argument(
         "--fixture",
@@ -583,14 +562,12 @@ def main() -> int:
     _require_schema()
 
     rng = random.Random(seed)
-    session_id, new_token = resolve_session(args)
-    commands = seed_runs(session_id, count, days, rng)
-    starred = seed_stars(session_id, commands, star, rng) if star else []
+    owner_id = resolve_owner(args)
+    commands = seed_runs(owner_id, count, days, rng)
+    starred = seed_stars(owner_id, commands, star, rng) if star else []
 
     print(f"database:       {_active_database_label()}")
-    print(f"session_id:     {session_id}")
-    if new_token:
-        print("  (new token — save this in localStorage as session_token to use it)")
+    print(f"workspace:      {owner_id}")
     print(f"inserted runs:  {len(commands)}")
     print(f"distinct cmds:  {len(set(commands))}")
     print(f"time span:      last {days} days")

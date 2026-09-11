@@ -58,13 +58,11 @@ MOBILE_KEYBOARD_GUTTER_COLOR="${DEMO_MOBILE_KEYBOARD_GUTTER_COLOR:-#161617}"
 OBS_CANVAS_TARGET="${MOBILE_OBS_VIEWPORT_WIDTH}x${MOBILE_OBS_VIEWPORT_HEIGHT}"
 CHROMIUM_WINDOW_TARGET="${MOBILE_WINDOW_WIDTH}x${MOBILE_WINDOW_HEIGHT}"
 
-generate_demo_session_token() {
-  local raw
-  raw="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
-  printf 'tok_%s\n' "${raw}"
+generate_demo_anonymous_id() {
+  uuidgen | tr '[:upper:]' '[:lower:]'
 }
 
-DEMO_SESSION_TOKEN="${DEMO_SESSION_TOKEN:-$(generate_demo_session_token)}"
+DEMO_ANONYMOUS_ID="${DEMO_ANONYMOUS_ID:-$(generate_demo_anonymous_id)}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -106,7 +104,7 @@ require_workspace_enabled() {
   local body response status
   response="$(
     curl -sS -w $'\n%{http_code}' \
-      -H "X-Session-ID: ${DEMO_SESSION_TOKEN}" \
+      -H "X-Darklab-Anonymous-ID: ${DEMO_ANONYMOUS_ID}" \
       "${BASE_URL}/workspace/files" || true
   )"
   status="${response##*$'\n'}"
@@ -118,7 +116,7 @@ require_workspace_enabled() {
   echo "Error: mobile OBS demo recording requires Files/workspace API access so the Files panel can show response.html."
   echo "Workspace probe returned HTTP ${status:-000} for GET /workspace/files."
   if [ "$status" = "400" ] && [[ "$body" == *"Files require an active session"* ]]; then
-    echo "The generated demo session token was not accepted by the running app database."
+    echo "The generated demo anonymous identity was not accepted by the running app."
     echo "Make sure the history seed step uses the same DATABASE_BACKEND/DATABASE_URL as the container."
   else
     echo "Add this to app/conf/config.local.yaml and restart the container:"
@@ -141,7 +139,7 @@ seed_demo_history() {
   echo "Seeding demo history fixture (${DEMO_HISTORY_FIXTURE}) ..."
   docker compose -f compose.dev.yaml exec -T shell python - \
     --fixture "$DEMO_HISTORY_FIXTURE" \
-    --token "$DEMO_SESSION_TOKEN" \
+    --anonymous-id "$DEMO_ANONYMOUS_ID" \
     < "$ROOT_DIR/scripts/development/seed_history.py" >/dev/null
 }
 
@@ -153,7 +151,7 @@ if [ "$PLAYBACK_ONLY" = "1" ]; then
   echo "Running the complete mobile demo playback without OBS ..."
   DEMO_BASE_URL="$BASE_URL" \
   DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
-  DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+  DEMO_ANONYMOUS_ID="$DEMO_ANONYMOUS_ID" \
   DEMO_HEADED=0 \
   DEMO_DISABLE_FRAME_CAPTURE=1 \
   DEMO_PLAYBACK_ONLY=1 \
@@ -204,7 +202,7 @@ if [ "$ARM_BEFORE_RECORDING" = "1" ]; then
   echo "Launching mobile Chromium setup window. The app will not load until you press Enter."
   DEMO_BASE_URL="$BASE_URL" \
   DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
-  DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+  DEMO_ANONYMOUS_ID="$DEMO_ANONYMOUS_ID" \
   DEMO_HEADED=1 \
   DEMO_DISABLE_FRAME_CAPTURE=1 \
   DEMO_OBS_ARMING_FILE="$ARMING_FILE" \
@@ -281,7 +279,7 @@ obs_recording_started=1
 set +e
 DEMO_BASE_URL="$BASE_URL" \
 DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
-DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+DEMO_ANONYMOUS_ID="$DEMO_ANONYMOUS_ID" \
 DEMO_HEADED=1 \
 DEMO_DISABLE_FRAME_CAPTURE=1 \
 RUN_DEMO=1 npx playwright test \

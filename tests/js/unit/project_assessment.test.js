@@ -2187,6 +2187,8 @@ describe('project assessment controller', () => {
     list.dispatchEvent(new Event('scroll'))
     controller.renderAssessment(container, 'prj_1')
     const restoredList = container.querySelector('.project-assessment-target-list')
+    list.scrollTop = 0
+    list.dispatchEvent(new Event('scroll'))
     expect(restoredList.isConnected).toBe(true)
     expect(restoredList.scrollTop).toBe(0)
     await new Promise(resolve => requestAnimationFrame(resolve))

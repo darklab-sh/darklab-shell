@@ -5,7 +5,6 @@
 
 function createRunnerPersistence({
   apiFetch,
-  maskSessionToken,
   isHistoryPanelOpen,
   refreshHistoryPanel,
   logClientError,
@@ -13,15 +12,11 @@ function createRunnerPersistence({
   function historySafeCommand(cmd) {
     const value = String(cmd || '').trim();
     if (!value) return '';
-    const mask = typeof maskSessionToken === 'function' ? maskSessionToken : token => token;
     const credentialMatch = value.match(/^credential(?:\s+([^\s|]+))?/i);
     if (credentialMatch) {
       return credentialMatch[1] ? `credential ${credentialMatch[1].toLowerCase()}` : 'credential status';
     }
     return value.replace(
-      /\b(session-token\s+(?:set|revoke)\s+)(tok_[A-Za-z0-9]+|[0-9a-f]{8}-[0-9a-f-]{28,})\b/i,
-      (_match, prefix, token) => `${prefix}${mask(token)}`,
-    ).replace(
       /^(\s*secret\s+set\s+\S+)(?:\s+.+)$/i,
       (_match, prefix) => prefix,
     );

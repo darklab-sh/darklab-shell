@@ -469,9 +469,9 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     } catch (_) {
       payload = {};
     }
-    const payloadSession = payload && typeof payload.session_id === 'string' ? payload.session_id : '';
+    const payloadIdentity = payload && typeof payload.identity_id === 'string' ? payload.identity_id : '';
     const sessionId = _autocompleteSessionId();
-    if (payloadSession && sessionId && payloadSession !== sessionId) return;
+    if (payloadIdentity && sessionId && payloadIdentity !== sessionId) return;
     _autocompleteReloadProjectTargets();
   });
 }

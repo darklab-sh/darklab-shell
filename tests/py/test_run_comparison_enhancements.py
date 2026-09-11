@@ -26,7 +26,7 @@ from services.projects.findings import record_run_findings
 from services.teams.request_scope import RequestScope
 from services.teams.scope import personal_owner_context, team_owner_context
 from conftest import make_test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 
 
 def _comparison_key(text: str) -> str:
@@ -208,7 +208,7 @@ def test_finding_compare_loader_applies_owner_scope_to_run_and_finding():
     _legacy_finding_schema(conn)
     ensure_migration_table(conn, backend=DatabaseBackend.SQLITE)
     apply_migration(conn, MIGRATION, backend=DatabaseBackend.SQLITE)
-    personal_id = "tok_" + "9" * 32
+    personal_id = principal_owner(str("tok_" + "9" * 32))
     for run_id, session_id, team_id in (
         ("personal-run", personal_id, ""),
         ("team-run", "session-b", "team-a"),
@@ -369,7 +369,7 @@ def test_host_and_tls_adapters_use_same_root_and_loaded_entries():
 
         response = client.get(
             f"/history/compare?left={left_id}&right={right_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert response.status_code == 200
         route_group = response.get_json()["derived_changes"]["groups"][0]
@@ -481,7 +481,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
 
         response = client.get(
             f"/history/compare?left={left_id}&right={right_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         payload = response.get_json()
 
@@ -508,7 +508,7 @@ def test_compare_route_reports_severity_change_anchors_and_conditional_workflow_
 
         reversed_response = client.get(
             f"/history/compare?left={right_id}&right={left_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         reversed_payload = reversed_response.get_json()
         assert reversed_response.status_code == 200
@@ -530,8 +530,8 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
     from services.teams.storage import add_team_member, create_team, soft_remove_team_member
 
     personal_session = anonymous_session_id(f"compare-personal-{uuid.uuid4().hex[:8]}")
-    owner_session = f"tok_compare-owner-{uuid.uuid4().hex[:8]}"
-    team_session = f"tok_compare-operator-{uuid.uuid4().hex[:8]}"
+    owner_session = principal_owner(str(f"tok_compare-owner-{uuid.uuid4().hex[:8]}"))
+    team_session = principal_owner(str(f"tok_compare-operator-{uuid.uuid4().hex[:8]}"))
     left_id = f"run-team-left-{uuid.uuid4().hex[:8]}"
     right_id = f"run-team-right-{uuid.uuid4().hex[:8]}"
     hidden_personal_run_id = f"run-personal-hidden-{uuid.uuid4().hex[:8]}"
@@ -545,20 +545,26 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
     operator_member_id = ""
     recorded_finding_ids: list[str] = []
     try:
-        register_durable_session_token(owner_session)
-        register_durable_session_token(team_session)
+        browser_identity_headers(owner_session)
+        browser_identity_headers(team_session)
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             team = create_team(
                 conn,
                 name=f"Comparison team {uuid.uuid4().hex[:8]}",
-                creator_session_token=owner_session,
+                creator_principal_id=conn.execute(
+                    "SELECT principal_id FROM personal_workspaces WHERE id = ?",
+                    (owner_session,),
+                ).fetchone()["principal_id"],
             )
             team_id = str(team["id"])
             operator = add_team_member(
                 conn,
                 team_id=team_id,
-                session_token=team_session,
+                principal_id=conn.execute(
+                    "SELECT principal_id FROM personal_workspaces WHERE id = ?",
+                    (team_session,),
+                ).fetchone()["principal_id"],
                 role="operator",
             )
             operator_member_id = str(operator["id"])
@@ -735,8 +741,8 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             )
             conn.commit()
 
-        personal_headers = {"X-Session-ID": personal_session}
-        team_headers = {"X-Session-ID": team_session, "X-Team-ID": team_id}
+        personal_headers = {**browser_identity_headers(personal_session)}
+        team_headers = {**browser_identity_headers(team_session), "X-Team-ID": team_id}
         compare_url = f"/history/compare?left={left_id}&right={right_id}"
         assert client.get(compare_url, headers=personal_headers).status_code == 404
         assert (
@@ -839,10 +845,6 @@ def test_compare_routes_resolve_real_team_scope_without_leaking_subordinate_rows
             if team_id:
                 conn.execute("DELETE FROM team_members WHERE team_id = ?", (team_id,))
                 conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
-            conn.executemany(
-                "DELETE FROM session_tokens WHERE token = ?",
-                [(owner_session,), (team_session,)],
-            )
             conn.commit()
 
 
@@ -870,7 +872,7 @@ def test_compare_candidates_only_include_older_completed_external_runs():
 
         response = client.get(
             f"/history/{source_id}/compare-candidates",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         payload = response.get_json()
         assert response.status_code == 200

@@ -163,13 +163,13 @@ def _disable_archived_team_schedule(conn, schedule: Schedule, *, fired_at: str) 
     if schedule.owner_kind == OWNER_KIND_WATCHER and schedule.owner_id:
         owner = composite_owner_predicate(
             team_owner_context(schedule.team_id),
-            owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+            owner_key_shape=OwnerKeyShape.PERSONAL_WORKSPACE,
             team_column="team_id",
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
             key_values=(("id", schedule.owner_id),),
         )
         conn.execute(
-            "UPDATE watchers SET state = 'paused', state_reason = ? WHERE "  # nosec B608
+            "UPDATE watchers SET state = 'paused', state_reason = ? WHERE "  # nosec
             + owner.sql,
             ("team_archived", *owner.params),
         )

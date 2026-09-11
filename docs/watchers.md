@@ -20,10 +20,10 @@ Each watcher stores:
 - bounded diff details from the last completed check
 - recent fire audit rows
 
-Watchers belong to the active personal or team scope. Anonymous browser sessions cannot create watchers because the worker needs a durable `tok_` token after the browser closes, and token revocation must still stop later personal fires. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
+Watchers belong to the active personal workspace or team. Anonymous browser workspaces can't create watchers because the worker needs an owner that survives after the browser closes. Team-owned watchers stay with the team and are visible to other members when that team scope is active. Team viewers can read watchers and fire audit rows, while watcher creation, edits, deletes, manual fires, and baseline acceptance require automation-management permission.
 Archived teams pause their team-owned watchers. Reactivating a team restores access, but archive-paused watchers stay paused until someone resumes them.
 
-Project-linked watchers appear in that Project's **Monitoring** tab. Their future external runs and captured Project evidence stay with that Project even if another Project is active when a check finishes. Unassigned watchers remain unassigned instead of inheriting the session's active Project.
+Project-linked watchers appear in that Project's **Monitoring** tab. Their future external runs and captured Project evidence stay with that Project even if another Project is active when a check finishes. Unassigned watchers remain unassigned instead of inheriting the browser's active Project.
 
 A watcher can be assigned to a Project directly, or it can infer the Project from a baseline run when that run has exactly one same-scope Project link. Ambiguous, unlinked, or cross-scope baseline links leave the watcher unassigned. Deleting a Project clears watcher membership instead of deleting the watcher.
 
@@ -202,9 +202,9 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 ## Limits and config
 
 - `watchers.max_per_session` defaults to `32` per durable personal or team scope.
-- Watchers require durable `tok_` sessions.
+- Watchers require a kept personal workspace or team.
 - Watchers monitor one baseline command at a time.
-- Watcher-owned schedules share the scheduler worker, missed-fire recovery, revoked-token handling, overlap policy, and cron rules used by normal schedules.
+- Watcher-owned schedules share the scheduler worker, missed-fire recovery, principal-state checks, overlap policy, and cron rules used by normal schedules.
 - Team-owned watchers pause when their team is archived and stay paused after the team is reactivated until someone resumes them.
 - Multi-command watcher graphs and blackout calendars are not part of this feature.
 

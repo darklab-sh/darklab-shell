@@ -70,7 +70,7 @@ def _required_token_session():
     if not session_id:
         return "", (jsonify({"error": "session_required"}), 401)
     if not is_durable_personal_owner(session_id):
-        return "", (jsonify({"error": "session_token_required"}), 401)
+        return "", (jsonify({"error": "credential_required"}), 401)
     return session_id, None
 
 

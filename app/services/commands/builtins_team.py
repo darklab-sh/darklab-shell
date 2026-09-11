@@ -16,9 +16,9 @@ from core.database_access import get_db_connect
 from core.helpers import get_log_session_id
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
+from services.auth.contracts import InvalidIdentityValue, validate_identifier
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
-from services.notifications.models import is_durable_personal_owner
 from services.teams import storage
 from services.teams.capabilities import Capability, require_capability
 from services.teams.contracts import TeamError, TeamNotFound, TeamPermissionDenied
@@ -46,13 +46,14 @@ def _usage() -> list[dict[str, object]]:
     ]
 
 
-def _require_token(session_id: str) -> str:
-    session_id = str(session_id or "").strip()
-    if not is_durable_personal_owner(session_id):
+def _require_principal(principal_id: str) -> str:
+    principal_id = str(principal_id or "").strip()
+    try:
+        return validate_identifier(principal_id, "principal")
+    except InvalidIdentityValue as exc:
         raise BuiltinTeamError(
             "team: a kept workspace is required. Open Options > Access and choose Keep this workspace."
-        )
-    return session_id
+        ) from exc
 
 
 def _option_value(parts: list[str], option: str) -> str:
@@ -255,7 +256,7 @@ def _team_rows(teams: list[dict[str, Any]]) -> list[dict[str, object]]:
 
 def _status(session_id: str, team_id: str) -> list[dict[str, object]]:
     with get_db_connect()() as conn:
-        teams = storage.list_teams_for_token(conn, session_id)
+        teams = storage.list_teams_for_principal(conn, session_id)
     active = _active_team(team_id, teams)
     width = 13
     lines = [output_line("Team scope:", "builtin-section")]
@@ -288,10 +289,10 @@ def _create(parts: list[str], session_id: str) -> list[dict[str, object]]:
             conn,
             name=name,
             slug=slug,
-            creator_session_token=session_id,
+            creator_principal_id=session_id,
             display_name=display_name,
         )
-        detail = storage.team_detail(conn, team["id"], current_session_token=session_id)
+        detail = storage.team_detail(conn, team["id"], current_principal_id=session_id)
         _record_team_audit(
             AuditEventType.TEAM_CREATE,
             session_id=session_id,
@@ -323,7 +324,7 @@ def _members(parts: list[str], session_id: str, team_id: str) -> list[dict[str, 
         raise BuiltinTeamError("Usage: team members [team-id]")
     with get_db_connect()() as conn:
         _actor(conn, ref, session_id)
-        detail = storage.team_detail(conn, ref, current_session_token=session_id)
+        detail = storage.team_detail(conn, ref, current_principal_id=session_id)
     members = (detail or {}).get("members") or []
     lines = [output_line("Team members:", "builtin-section")]
     rows = []
@@ -435,10 +436,10 @@ def _join(parts: list[str], session_id: str) -> list[dict[str, object]]:
         member = storage.redeem_team_invite(
             conn,
             code=str(parts[2] or ""),
-            session_token=session_id,
+            principal_id=session_id,
             display_name=display_name,
         )
-        detail = storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+        detail = storage.team_detail(conn, member["team_id"], current_principal_id=session_id)
         _record_team_audit(
             AuditEventType.TEAM_JOIN,
             session_id=session_id,
@@ -516,7 +517,7 @@ def _recovery_rotate(parts: list[str], session_id: str, team_id: str) -> list[di
 def run_builtin_team(command: str, session_id: str, *, team_id: str = "", team_role: str = "") -> list[dict[str, object]]:
     parts: list[str] = []
     try:
-        session_id = _require_token(session_id)
+        session_id = _require_principal(session_id)
         parts = split_command_argv(command)
         subcommand = str(parts[1] if len(parts) > 1 else "status").strip().lower()
         if subcommand in {"help", "--help", "-h"}:
@@ -525,7 +526,7 @@ def run_builtin_team(command: str, session_id: str, *, team_id: str = "", team_r
             return _status(session_id, team_id)
         if subcommand in {"list", "ls"}:
             with get_db_connect()() as conn:
-                return _team_rows(storage.list_teams_for_token(conn, session_id))
+                return _team_rows(storage.list_teams_for_principal(conn, session_id))
         if subcommand == "create":
             return _create(parts, session_id)
         if subcommand == "members":
@@ -619,7 +620,7 @@ def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
             handler_key="team",
             handler=lambda command, context: run_builtin_team(
                 command,
-                context.session_id,
+                context.owner_context.actor_principal_id,
                 team_id=context.team_id,
                 team_role=context.team_role,
             ),

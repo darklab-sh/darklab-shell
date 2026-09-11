@@ -1703,7 +1703,7 @@ describe('autocomplete helpers', () => {
 
     window.dispatchEvent(new StorageEvent('storage', {
       key: 'darklab_project_workspace_changed',
-      newValue: JSON.stringify({ session_id: 'session-a', changed_at: Date.now() }),
+      newValue: JSON.stringify({ identity_id: 'session-a', changed_at: Date.now() }),
     }))
     for (let i = 0; i < 8; i += 1) await Promise.resolve()
 
@@ -2486,13 +2486,13 @@ describe('autocomplete helpers', () => {
         },
         acSuggestions: [],
         acContextRegistry: {
-          'session-token': {
+          widget: {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
+              set: [{ value: '<value>', hintOnly: true, description: 'Enter a value' }],
               __positional__: [
                 { value: 'generate' },
-                { value: 'set <token>', insertValue: 'set ' },
+                { value: 'set <value>', insertValue: 'set ' },
                 { value: 'copy' },
                 { value: 'clear' },
               ],
@@ -2509,30 +2509,30 @@ describe('autocomplete helpers', () => {
     }`,
     )
 
-    // After "session-token se", the single positional match has
+    // After "widget se", the single positional match has
     // insertValue: "set " — the trailing space must survive insertion so the
-    // cursor lands after the space, ready for the token argument.
-    const seMatches = getAutocompleteMatches('session-token se', 16)
+    // cursor lands after the space, ready for the value argument.
+    const seMatches = getAutocompleteMatches('widget se', 9)
     expect(seMatches).toHaveLength(1)
-    expect(seMatches[0].value).toBe('set <token>')
+    expect(seMatches[0].value).toBe('set <value>')
     expect(seMatches[0].insertValue).toBe('set ')
     expect(seMatches[0].hintOnly).toBe(false)
 
-    // After "session-token set ", the <token> arg_hint is shown as a display-only
+    // After "widget set ", the <value> arg_hint is shown as a display-only
     // hint — hintOnly:true, insertValue:'' — so Tab cannot insert the literal
-    // "<token>" text.
-    const afterSet = getAutocompleteMatches('session-token set ', 18)
+    // "<value>" text.
+    const afterSet = getAutocompleteMatches('widget set ', 11)
     expect(afterSet).toHaveLength(1)
-    expect(afterSet[0].value).toBe('<token>')
+    expect(afterSet[0].value).toBe('<value>')
     expect(afterSet[0].hintOnly).toBe(true)
     expect(afterSet[0].insertValue).toBe('')
 
     // acAccept on a hintOnly item must leave the input unchanged.
     const cmd = document.getElementById('cmd')
-    cmd.value = 'session-token set '
-    cmd.selectionStart = cmd.selectionEnd = 18
+    cmd.value = 'widget set '
+    cmd.selectionStart = cmd.selectionEnd = 11
     acAccept(afterSet[0])
-    expect(cmd.value).toBe('session-token set ')
+    expect(cmd.value).toBe('widget set ')
   })
 
   it('keeps direct placeholder hints visible while typing the argument value', () => {
@@ -2544,14 +2544,14 @@ describe('autocomplete helpers', () => {
         acDropdown: document.getElementById('ac'),
         mobileComposerHost: document.getElementById('mobile-composer-host'),
         mobileCmdInput: document.getElementById('mobile-cmd'),
-        getComposerValue: () => 'session-token set abc',
+        getComposerValue: () => 'widget set abc',
         acSuggestions: [],
         acContextRegistry: {
-          'session-token': {
+          widget: {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
-              __positional__: [{ value: 'set <token>', insertValue: 'set ' }],
+              set: [{ value: '<value>', hintOnly: true, description: 'Enter a value' }],
+              __positional__: [{ value: 'set <value>', insertValue: 'set ' }],
             },
           },
         },
@@ -2564,9 +2564,9 @@ describe('autocomplete helpers', () => {
     }`,
     )
 
-    const items = getAutocompleteMatches('session-token set abc', 21)
+    const items = getAutocompleteMatches('widget set abc', 14)
     expect(items).toHaveLength(1)
-    expect(items[0].value).toBe('<token>')
+    expect(items[0].value).toBe('<value>')
     expect(items[0].hintOnly).toBe(true)
   })
 

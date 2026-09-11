@@ -18,17 +18,10 @@ from core.database_access import get_db_backend, get_db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
 
-from services.audit.models import AuditEventType
-from services.audit.recorder import record_event
-from services.notifications.channels_store import migrate_notification_channels_session
-from services.projects.migration import migrate_project_workspace_session
-from services.secrets.storage import migrate_session_secrets
 from services.teams.ownership_queries import (
     OwnershipPredicate,
-    PersonalTeamRows,
     composite_owner_predicate,
     personal_only_owner_predicate,
-    team_capable_owner_predicate,
 )
 from services.teams.scope import personal_owner_context
 
@@ -201,7 +194,7 @@ def decode_preferences(value: Any, *, session_id: str = "") -> dict[str, object]
     except json.JSONDecodeError as exc:
         log.warning("SESSION_PREFERENCES_INVALID", extra={
             "session": get_log_session_id(session_id),
-            "session_kind": "token" if str(session_id or "").startswith("tok_") else "anonymous",
+            "session_kind": "workspace" if str(session_id or "").startswith("wsp_") else "anonymous",
             "error_type": type(exc).__name__,
             "json_pos": getattr(exc, "pos", None),
         })
@@ -214,7 +207,7 @@ def decode_preferences(value: Any, *, session_id: str = "") -> dict[str, object]
 def load_session_preferences_from_conn(conn: Any, session_id: str) -> dict[str, object]:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE " + owner.sql,  # nosec B608
+        "SELECT preferences FROM session_preferences WHERE " + owner.sql,  # nosec
         owner.params,
     ).fetchone()
     if not row:
@@ -228,71 +221,6 @@ def save_session_preferences_to_conn(conn: Any, session_id: str, preferences: di
         "ON CONFLICT(personal_workspace_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
         (session_id, dialect_for_backend(get_db_backend()).json_param(preferences), updated),
     )
-
-
-def create_session_token(
-    session_token: str,
-    created: str,
-    *,
-    audit_fields: dict[str, Any],
-    audit_details: dict[str, Any],
-    audit_target_id: str,
-) -> None:
-    with get_db_connect()() as conn:
-        conn.execute(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?) ON CONFLICT(token) DO NOTHING",
-            (session_token, created),
-        )
-        record_event(
-            AuditEventType.SESSION_TOKEN_GENERATE,
-            target_id=audit_target_id,
-            details=audit_details,
-            conn=conn,
-            **audit_fields,
-        )
-        conn.commit()
-
-
-def session_token_created(token: str) -> str | None:
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT created FROM session_tokens WHERE token = ?",
-            (token,),
-        ).fetchone()
-    return str(row["created"]) if row else None
-
-
-def session_token_exists(token: str) -> bool:
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM session_tokens WHERE token = ?",
-            (token,),
-        ).fetchone()
-    return row is not None
-
-
-def revoke_session_token(
-    token: str,
-    *,
-    audit_fields: dict[str, Any],
-    audit_details: dict[str, Any],
-    audit_target_id: str,
-) -> int:
-    with get_db_connect()() as conn:
-        result = conn.execute(
-            "DELETE FROM session_tokens WHERE token = ?",
-            (token,),
-        )
-        if result.rowcount:
-            record_event(
-                AuditEventType.SESSION_TOKEN_REVOKE,
-                target_id=audit_target_id,
-                details=audit_details,
-                conn=conn,
-                **audit_fields,
-            )
-            conn.commit()
-        return int(result.rowcount or 0)
 
 
 def _normalize_recent_domain(value: Any) -> str:
@@ -436,7 +364,7 @@ def list_recent_values_for_conn(
         return {kind: [] for kind in RECENT_VALUE_KINDS}
     owner = _recent_values_owner(session_id, team_id)
     rows = conn.execute(
-        "SELECT kind, value FROM recent_values "  # nosec B608
+        "SELECT kind, value FROM recent_values "  # nosec
         "WHERE " + owner.sql + " ORDER BY kind ASC, last_used DESC, value ASC",
         owner.params,
     ).fetchall()
@@ -456,8 +384,8 @@ def list_recent_values(session_id: str, team_id: str = "", kinds: Sequence[str] 
 def prune_recent_values(conn: Any, session_id: str, team_id: str, kind: str) -> None:
     owner = _recent_values_owner(session_id, team_id, kind=kind)
     conn.execute(
-        "DELETE FROM recent_values "  # nosec B608
-        "WHERE " + owner.sql + " "  # nosec B608
+        "DELETE FROM recent_values "  # nosec
+        "WHERE " + owner.sql + " "  # nosec
         "AND value NOT IN ("
         "    SELECT value FROM recent_values "
         "    WHERE " + owner.sql + " "
@@ -498,137 +426,11 @@ def save_recent_values(session_id: str, team_id: str, values: Any) -> tuple[int,
     return saved, response_values
 
 
-def migrate_recent_values_for_conn(conn: Any, from_session_id: str, to_session_id: str) -> int:
-    source_owner = personal_only_owner_predicate(personal_owner_context(from_session_id))
-    rows = conn.execute(
-        "SELECT team_id, kind, value, last_used, use_count FROM recent_values "  # nosec B608
-        "WHERE " + source_owner.sql + " ORDER BY team_id ASC, kind ASC, last_used DESC, value ASC",
-        source_owner.params,
-    ).fetchall()
-    migrated = 0
-    touched_scopes = set()
-    for row in rows:
-        kind, value = normalize_recent_value(row["kind"], row["value"])
-        if not kind or not value:
-            continue
-        conn.execute(
-            "INSERT INTO recent_values (personal_workspace_id, team_id, kind, value, last_used, use_count) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(personal_workspace_id, team_id, kind, value) DO UPDATE SET "
-            "last_used = CASE "
-            "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
-            "  ELSE recent_values.last_used "
-            "END, "
-            "use_count = recent_values.use_count + excluded.use_count",
-            (to_session_id, str(row["team_id"] or ""), kind, value, row["last_used"], int(row["use_count"] or 1)),
-        )
-        migrated += 1
-        touched_scopes.add((str(row["team_id"] or ""), kind))
-    conn.execute(
-        "DELETE FROM recent_values WHERE " + source_owner.sql,  # nosec B608
-        source_owner.params,
-    )
-    for team_id, kind in touched_scopes:
-        prune_recent_values(conn, to_session_id, team_id, kind)
-    return migrated
-
-
-def migrate_session_records(
-    from_session_id: str,
-    to_session_id: str,
-    *,
-    migrated_workspace_file_paths: Any = (),
-    extra_counts: dict[str, int] | None = None,
-    audit_fields: dict[str, Any],
-    audit_details: dict[str, Any],
-    audit_target_id: str,
-) -> dict[str, int]:
-    source_context = personal_owner_context(from_session_id)
-    source_owner = personal_only_owner_predicate(source_context)
-    source_personal_execution = team_capable_owner_predicate(
-        source_context,
-        personal_team_rows=PersonalTeamRows.EMPTY,
-    )
-    with get_db_connect()() as conn:
-        runs_result = conn.execute(
-            "UPDATE runs SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
-            (to_session_id, *source_owner.params),
-        )
-        snaps_result = conn.execute(
-            "UPDATE snapshots SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
-            (to_session_id, *source_owner.params),
-        )
-        dialect = dialect_for_backend(get_db_backend())
-        stars_insert = conn.execute(
-            "INSERT INTO starred_commands (personal_workspace_id, command) "  # nosec
-            "SELECT ?, command FROM starred_commands WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("personal_workspace_id", "command")),
-            (to_session_id, *source_owner.params),
-        )
-        prefs_insert = conn.execute(
-            "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) "  # nosec
-            "SELECT ?, preferences, updated FROM session_preferences WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("personal_workspace_id",)),
-            (to_session_id, *source_owner.params),
-        )
-        vars_insert = conn.execute(
-            "INSERT INTO session_variables (personal_workspace_id, name, value, updated) "  # nosec
-            "SELECT ?, name, value, updated FROM session_variables WHERE " + source_owner.sql + " "
-            + dialect.insert_or_ignore_clause(("personal_workspace_id", "name")),
-            (to_session_id, *source_owner.params),
-        )
-        workflows_result = conn.execute(
-            "UPDATE user_workflows SET personal_workspace_id = ? WHERE " + source_owner.sql,  # nosec B608
-            (to_session_id, *source_owner.params),
-        )
-        workflow_executions_result = conn.execute(
-            "UPDATE workflow_executions SET personal_workspace_id = ? WHERE " + source_personal_execution.sql,  # nosec B608
-            (to_session_id, *source_personal_execution.params),
-        )
-        project_migration = migrate_project_workspace_session(
-            conn,
-            from_session_id,
-            to_session_id,
-            migrated_workspace_file_paths=migrated_workspace_file_paths,
-        )
-        migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
-        notification_migration = migrate_notification_channels_session(conn, from_session_id, to_session_id)
-        migrated_recent_values = migrate_recent_values_for_conn(conn, from_session_id, to_session_id)
-        conn.execute("DELETE FROM starred_commands WHERE " + source_owner.sql, source_owner.params)  # nosec B608
-        conn.execute("DELETE FROM session_preferences WHERE " + source_owner.sql, source_owner.params)  # nosec B608
-        conn.execute("DELETE FROM session_variables WHERE " + source_owner.sql, source_owner.params)  # nosec B608
-        conn.execute("DELETE FROM user_workflows WHERE " + source_owner.sql, source_owner.params)  # nosec B608
-        counts = {
-            "migrated_runs": int(runs_result.rowcount or 0),
-            "migrated_snapshots": int(snaps_result.rowcount or 0),
-            "migrated_stars": int(stars_insert.rowcount or 0),
-            "migrated_preferences": int(prefs_insert.rowcount or 0),
-            "migrated_variables": int(vars_insert.rowcount or 0),
-            "migrated_workflows": int(workflows_result.rowcount or 0),
-            "migrated_workflow_executions": int(workflow_executions_result.rowcount or 0),
-            **project_migration,
-            **notification_migration,
-            "migrated_recent_values": migrated_recent_values,
-            "migrated_secrets": migrated_secrets,
-        }
-        if extra_counts:
-            counts.update({key: int(value or 0) for key, value in extra_counts.items()})
-        record_event(
-            AuditEventType.SESSION_MIGRATE,
-            target_id=audit_target_id,
-            details={**audit_details, "migration_counts": counts},
-            conn=conn,
-            **audit_fields,
-        )
-        conn.commit()
-        return counts
-
-
 def get_preferences(session_id: str) -> dict[str, Any]:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT preferences, updated FROM session_preferences WHERE " + owner.sql,  # nosec B608
+            "SELECT preferences, updated FROM session_preferences WHERE " + owner.sql,  # nosec
             owner.params,
         ).fetchone()
     if not row:
@@ -660,40 +462,11 @@ def mark_tour_seen(session_id: str, tour_version: int, updated: str) -> dict[str
     return prefs
 
 
-def session_counts(session_id: str) -> dict[str, int]:
-    context = personal_owner_context(session_id)
-    personal_owner = personal_only_owner_predicate(context)
-    personal_execution = team_capable_owner_predicate(
-        context,
-        personal_team_rows=PersonalTeamRows.EMPTY,
-    )
-    with get_db_connect()() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM runs WHERE " + personal_owner.sql,  # nosec B608
-            personal_owner.params,
-        ).fetchone()
-        workflow_row = conn.execute(
-            "SELECT "  # nosec B608
-            "(SELECT COUNT(*) FROM user_workflows WHERE " + personal_owner.sql + ") + "  # nosec B608
-            "(SELECT COUNT(*) FROM workflow_executions WHERE " + personal_execution.sql + ") AS n",
-            (*personal_owner.params, *personal_execution.params),
-        ).fetchone()
-        recent_value_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM recent_values WHERE " + personal_owner.sql,  # nosec B608
-            personal_owner.params,
-        ).fetchone()
-    return {
-        "count": int(row["n"] if row else 0),
-        "workflow_count": int(workflow_row["n"] if workflow_row else 0),
-        "recent_value_count": int(recent_value_row["n"] if recent_value_row else 0),
-    }
-
-
 def list_starred_commands(session_id: str) -> list[str]:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT command FROM starred_commands WHERE " + owner.sql + " ORDER BY command",  # nosec B608
+            "SELECT command FROM starred_commands WHERE " + owner.sql + " ORDER BY command",  # nosec
             owner.params,
         ).fetchall()
     return [str(row["command"]) for row in rows]
@@ -719,13 +492,13 @@ def remove_starred_commands(session_id: str, command: str = "") -> int:
                 key_values=(("command", command),),
             )
             result = conn.execute(
-                "DELETE FROM starred_commands WHERE " + owner.sql,  # nosec B608
+                "DELETE FROM starred_commands WHERE " + owner.sql,  # nosec
                 owner.params,
             )
         else:
             owner = personal_only_owner_predicate(context)
             result = conn.execute(
-                "DELETE FROM starred_commands WHERE " + owner.sql,  # nosec B608
+                "DELETE FROM starred_commands WHERE " + owner.sql,  # nosec
                 owner.params,
             )
         conn.commit()

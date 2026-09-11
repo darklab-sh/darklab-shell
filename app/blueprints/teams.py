@@ -215,7 +215,7 @@ def session_teams_list():
     session_token, error_response = _required_token_session()
     if error_response:
         return error_response
-    teams = storage.run_team_read(lambda conn: storage.list_teams_for_token(conn, session_token))
+    teams = storage.run_team_read(lambda conn: storage.list_teams_for_principal(conn, session_token))
     return jsonify({"teams": teams})
 
 
@@ -234,11 +234,11 @@ def session_teams_create():
                 conn,
                 name=str(data.get("name") or ""),
                 slug=str(data.get("slug") or ""),
-                creator_session_token=session_token,
+                creator_principal_id=session_token,
                 creator_credential_id=current_credential_id(),
                 display_name=str(data.get("display_name") or ""),
             )
-            detail = storage.team_detail(conn, team["id"], current_session_token=session_token)
+            detail = storage.team_detail(conn, team["id"], current_principal_id=session_token)
             _record_team_audit(
                 AuditEventType.TEAM_CREATE,
                 session_token=session_token,
@@ -274,7 +274,7 @@ def session_teams_detail(team_id):
         def _detail(conn):
             nonlocal actor
             actor = _actor_membership(conn, team_id, session_token)
-            return storage.team_detail(conn, team_id, current_session_token=session_token)
+            return storage.team_detail(conn, team_id, current_principal_id=session_token)
 
         detail = storage.run_team_read(_detail)
         if not detail:
@@ -347,7 +347,7 @@ def session_teams_update(team_id):
             paused = {"watchers": 0, "schedules": 0}
             if status == "archived":
                 paused = pause_team_watchers_and_schedules(conn, team_id, reason="team_archived")
-            detail = storage.team_detail(conn, team_id, current_session_token=session_token)
+            detail = storage.team_detail(conn, team_id, current_principal_id=session_token)
             event_type = AuditEventType.TEAM_ARCHIVE if status == "archived" else AuditEventType.TEAM_REACTIVATE
             _record_team_audit(
                 event_type,
@@ -504,11 +504,11 @@ def session_teams_join():
             member = storage.redeem_team_invite(
                 conn,
                 code=str(data.get("code") or ""),
-                session_token=session_token,
+                principal_id=session_token,
                 display_name=str(data.get("display_name") or ""),
                 joined_by_credential_id=current_credential_id(),
             )
-            detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
+            detail = storage.team_detail(conn, member["team_id"], current_principal_id=session_token)
             _record_team_audit(
                 AuditEventType.TEAM_JOIN,
                 session_token=session_token,
@@ -742,11 +742,11 @@ def session_teams_recovery_redeem():
             member = storage.redeem_team_recovery_code(
                 conn,
                 code=str(data.get("code") or ""),
-                session_token=session_token,
+                principal_id=session_token,
                 display_name=str(data.get("display_name") or ""),
                 joined_by_credential_id=current_credential_id(),
             )
-            detail = storage.team_detail(conn, member["team_id"], current_session_token=session_token)
+            detail = storage.team_detail(conn, member["team_id"], current_principal_id=session_token)
             _record_team_audit(
                 AuditEventType.TEAM_RECOVERY_REDEEM,
                 session_token=session_token,

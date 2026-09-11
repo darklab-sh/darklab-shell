@@ -202,7 +202,7 @@ def _baseline_for_session(baseline_run_id: str, session_id: str) -> dict[str, An
     )
     with database.db_connect() as conn:
         row = conn.execute(
-            f"SELECT id, command, finished FROM runs WHERE {owner.sql}",  # nosec B608
+            f"SELECT id, command, finished FROM runs WHERE {owner.sql}",  # nosec
             owner.params,
         ).fetchone()
     if row is None:

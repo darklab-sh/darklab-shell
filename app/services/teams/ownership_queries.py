@@ -26,10 +26,9 @@ class PersonalTeamRows(str, Enum):
 
 
 class OwnerKeyShape(str, Enum):
-    """Historical source shape for a column now keyed by personal workspace."""
+    """Shape of the personal-workspace ownership key."""
 
-    SESSION_ID = "legacy-session-id"
-    SESSION_TOKEN = "legacy-session-token"
+    PERSONAL_WORKSPACE = "personal-workspace"
 
 
 @dataclass(frozen=True)
@@ -132,24 +131,24 @@ def team_capable_owner_predicate(
     return OwnershipPredicate(owner_sql, (context.owner_id,))
 
 
-def token_keyed_owner_predicate(
+def workspace_keyed_owner_predicate(
     context: OwnerContext,
     *,
-    token_column: str = "personal_workspace_id",
+    workspace_column: str = "personal_workspace_id",
     team_column: str | None = None,
     personal_team_rows: PersonalTeamRows | None = None,
 ) -> OwnershipPredicate:
-    """Match tables migrated from a legacy token-shaped owner column."""
+    """Match a table keyed directly by personal workspace."""
     if team_column is None:
         if personal_team_rows is not None:
             raise TeamError("Personal team rows require a team column")
-        token_column = _identifier(token_column, "Token column")
-        return OwnershipPredicate(f"{token_column} = ?", (context.owner_id,))
+        workspace_column = _identifier(workspace_column, "Workspace column")
+        return OwnershipPredicate(f"{workspace_column} = ?", (context.owner_id,))
     if personal_team_rows is None:
-        raise TeamError("Token-keyed team tables require an explicit personal-row representation")
+        raise TeamError("Workspace-keyed team tables require an explicit personal-row representation")
     return team_capable_owner_predicate(
         context,
-        owner_column=token_column,
+        owner_column=workspace_column,
         team_column=team_column,
         personal_team_rows=personal_team_rows,
     )
@@ -159,7 +158,7 @@ def composite_owner_predicate(
     context: OwnerContext,
     *,
     key_values: Sequence[tuple[str, Any]],
-    owner_key_shape: OwnerKeyShape = OwnerKeyShape.SESSION_ID,
+    owner_key_shape: OwnerKeyShape = OwnerKeyShape.PERSONAL_WORKSPACE,
     owner_column: str | None = None,
     team_column: str | None = None,
     personal_team_rows: PersonalTeamRows | None = None,
@@ -171,26 +170,15 @@ def composite_owner_predicate(
         raise TeamError("Composite owner predicate requires a valid owner key shape")
     if owner_column is None:
         owner_column = "personal_workspace_id"
-    if owner_key_shape is OwnerKeyShape.SESSION_TOKEN:
-        owner = token_keyed_owner_predicate(
+    if owner_key_shape is OwnerKeyShape.PERSONAL_WORKSPACE:
+        owner = workspace_keyed_owner_predicate(
             context,
-            token_column=owner_column,
+            workspace_column=owner_column,
             team_column=team_column,
             personal_team_rows=personal_team_rows,
         )
-    elif team_column is None:
-        if personal_team_rows is not None:
-            raise TeamError("Personal team rows require a team column")
-        owner = personal_only_owner_predicate(context, owner_column=owner_column)
     else:
-        if personal_team_rows is None:
-            raise TeamError("Team-capable composite keys require an explicit personal-row representation")
-        owner = team_capable_owner_predicate(
-            context,
-            owner_column=owner_column,
-            team_column=team_column,
-            personal_team_rows=personal_team_rows,
-        )
+        raise TeamError("Composite owner predicate requires a supported owner key shape")
 
     clauses = [owner.sql]
     params = list(owner.params)

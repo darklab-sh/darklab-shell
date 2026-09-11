@@ -10,7 +10,7 @@ import sqlite3
 from identity_helpers import anonymous_session_id
 from services.secrets.storage import _secret_scope_owner
 from services.session.storage import _recent_values_owner
-from services.teams.ownership_queries import token_keyed_owner_predicate
+from services.teams.ownership_queries import workspace_keyed_owner_predicate
 from services.teams.request_scope import RequestScope
 from services.teams.scope import personal_owner_context, team_owner_context
 from services.workflows.storage import _owner_where
@@ -102,9 +102,9 @@ def test_files_workflows_and_secrets_preserve_mixed_sqlite_result_sets():
             "team-red-flat-null",
         ]
 
-        secret_owner = token_keyed_owner_predicate(
+        secret_owner = workspace_keyed_owner_predicate(
             _secret_scope_owner("team-red"),
-            token_column="session_token",
+            workspace_column="session_token",
         )
         assert _selected_ids(conn, secret_owner.sql, secret_owner.params) == [
             "team-red",

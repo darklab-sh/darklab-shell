@@ -565,7 +565,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts the checkout separately and stages a private,
 # read-only runtime snapshot over /app before the app drops privileges.
 COPY app/ /app/
-COPY scripts/operations/backup_system.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
+COPY scripts/operations/backup_system.py scripts/operations/cutover_principal_identity.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

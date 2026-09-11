@@ -170,6 +170,74 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py enable
 
 `issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
 
+### v3 identity cutover
+
+The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before upgrading a SQLite deployment, create a fresh managed backup and run the release image's cutover preflight. The tool verifies the backup, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+
+Run the tool only in a one-off application container. Mount the verified backup read-only and use a private operator directory for any selected credential input or one-time output:
+
+```bash
+mkdir -p cutover
+chmod 700 cutover
+docker compose run --rm --no-deps \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  -v "$PWD/cutover:/cutover" \
+  --entrypoint python shell \
+  /app/tools/cutover_principal_identity.py preflight \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --expected-legacy-credentials <reviewed-count> \
+  --confirm-no-external-users
+```
+
+The preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
+
+```bash
+docker compose stop
+docker compose run --rm --no-deps \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  --entrypoint python shell \
+  /app/tools/cutover_principal_identity.py reset \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --expected-legacy-credentials <reviewed-count> \
+  --confirm-no-external-users \
+  --confirm-application-stopped \
+  --confirm-fresh-reset erase-current-application-data
+```
+
+The reset prints database and workspace rollback directories. Keep both until the upgraded application is healthy. Before creating any new application state, you can restore the staged data with `rollback-reset`; the command refuses to overwrite a non-empty destination:
+
+```bash
+docker compose run --rm --no-deps --entrypoint python shell \
+  /app/tools/cutover_principal_identity.py rollback-reset \
+  --database-rollback-path <printed-database-path> \
+  --workspace-rollback-path <printed-workspace-path> \
+  --confirm-application-stopped \
+  --confirm-reset-rollback restore-staged-application-data
+```
+
+The optional selected conversion is deliberately narrow: use it only for the one operator-owned workspace approved during rehearsal. Put that workspace's old credential in `cutover/selected-credential.txt`, set the file to `0600`, and choose a new output path that doesn't exist:
+
+```bash
+chmod 600 cutover/selected-credential.txt
+docker compose stop
+docker compose run --rm --no-deps \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  -v "$PWD/cutover:/cutover" \
+  --entrypoint python shell \
+  /app/tools/cutover_principal_identity.py convert \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --expected-legacy-credentials <reviewed-count> \
+  --confirm-no-external-users \
+  --confirm-application-stopped \
+  --selected-credential-file /cutover/selected-credential.txt \
+  --new-credential-file /cutover/new-access-credential.txt \
+  --confirm-selected-conversion convert-the-selected-operator
+```
+
+The conversion keeps the existing workspace directory name, updates database ownership in one transaction, preserves `runs.rowid` and History search results, and writes the replacement credential once to the owner-only output file. A non-empty shared-anonymous directory or any data owned by a different old credential stops conversion for an explicit operator decision. If the transaction fails, the old database and workspace remain in place and the output file is removed.
+
+This cutover helper supports SQLite only because it must use the same FTS5 runtime as the application image. Postgres deployments use a fresh v3 schema. The supported SQLite-to-Postgres migration can then copy the principal schema and validates the persisted workspace storage keys without moving workspace files.
+
 ---
 
 ## Application YAML Settings
@@ -190,7 +258,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-session AI assist write quota for operator testing, but the global AI write limit still applies |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
@@ -202,7 +270,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `ai_next_commands_max_output_tokens` | `180` | Provider output cap for next-command JSON responses. This is higher than summaries because suggestions need enough room to close valid JSON |
 | `ai_max_concurrent` | `1` | Global provider-call concurrency target for the AI worker path |
 | `ai_max_queue_depth` | `20` | Maximum queued/in-progress assist backlog before writes should return busy |
-| `ai_rate_limit_per_session_hour` | `5` | Per-session AI write limit enforced through Redis before new assists are queued. Clients allowed by `diagnostics_allowed_cidrs` bypass this per-session quota only |
+| `ai_rate_limit_per_session_hour` | `5` | Per-workspace AI write limit enforced through Redis before new assists are queued. Clients allowed by `diagnostics_allowed_cidrs` bypass this workspace quota only |
 | `ai_rate_limit_global_per_minute` | `2` | Deployment-wide AI write limit enforced through Redis so multiple workers cannot overload a local model |
 | `ai_allow_full_output` | `false` | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
 | `ai_require_private_base_url` | `true` | Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR |
@@ -1563,7 +1631,7 @@ scrape_configs:
 
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
 
-Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
+Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-workspace AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
 
 ### Tune Atlas Import Limits
 

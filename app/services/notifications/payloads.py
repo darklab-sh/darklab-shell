@@ -48,18 +48,18 @@ def _command_root(command: Any) -> str:
     return parts[0] if parts else ""
 
 
-def _session_hint(session_token: Any) -> str:
-    token = str(session_token or "")
-    return token[-4:] if token else ""
+def _workspace_hint(personal_workspace_id: Any) -> str:
+    workspace_id = str(personal_workspace_id or "")
+    return workspace_id[-4:] if workspace_id else ""
 
 
 def build_run_complete_payload(run: Any, findings_summary: dict[str, Any] | None = None) -> dict[str, Any]:
-    session_token = _value(run, "session_token", _value(run, "personal_workspace_id", ""))
+    personal_workspace_id = _value(run, "personal_workspace_id", "")
     return {
         "trigger": TRIGGER_RUN_COMPLETE,
         "app_name": notification_app_name(),
         "occurred_at": _utc_now(),
-        "session_token_hint": _session_hint(session_token),
+        "workspace_hint": _workspace_hint(personal_workspace_id),
         "run_id": str(_value(run, "id", _value(run, "run_id", "")) or ""),
         "command_root": _command_root(_value(run, "command", "")),
         "exit_code": _value(run, "exit_code", None),

@@ -13,7 +13,7 @@ from typing import Any
 
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 from core.database import db_init, db_connect
 from services.commands.builtins import execute_builtin_command
 from services.teams import storage as team_storage
@@ -50,7 +50,7 @@ def _schedule_client(monkeypatch, tmp_path):
 
 
 def _register_token(token: str):
-    register_durable_session_token(token)
+    browser_identity_headers(token)
 
 
 def _create_schedule(client, token: str, **payload):
@@ -60,7 +60,7 @@ def _create_schedule(client, token: str, **payload):
         "label": "Hourly ping",
         **payload,
     }
-    return client.post("/schedules", headers={"X-Session-ID": token}, json=body)
+    return client.post("/schedules", headers={**browser_identity_headers(token)}, json=body)
 
 
 def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict[str, Any]]:
@@ -92,7 +92,10 @@ def _audit_event_rows(*, target_id: str = "", event_type: str = "") -> list[dict
 def _create_team(token: str, *, name: str = "Automation Team") -> str:
     _register_token(token)
     with db_connect() as conn:
-        team = team_storage.create_team(conn, name=name, creator_session_token=token)
+        principal_id = conn.execute("SELECT principal_id FROM personal_workspaces WHERE id = ?", (token,)).fetchone()[
+            "principal_id"
+        ]
+        team = team_storage.create_team(conn, name=name, creator_principal_id=principal_id)
         conn.commit()
     return str(team["id"])
 
@@ -100,10 +103,13 @@ def _create_team(token: str, *, name: str = "Automation Team") -> str:
 def _add_team_member(team_id: str, token: str, *, role: str = "viewer", display_name: str = "Viewer"):
     _register_token(token)
     with db_connect() as conn:
+        principal_id = conn.execute("SELECT principal_id FROM personal_workspaces WHERE id = ?", (token,)).fetchone()[
+            "principal_id"
+        ]
         team_storage.add_team_member(
             conn,
             team_id=team_id,
-            session_token=token,
+            principal_id=principal_id,
             role=role,
             display_name=display_name,
         )
@@ -139,7 +145,7 @@ def _insert_completed_run(
 class TestSchedulesRoutes:
     def test_schedule_crud_for_current_session(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_routes"
+        token = principal_owner(str("tok_schedule_routes"))
         _register_token(token)
 
         created = _create_schedule(client, token)
@@ -151,27 +157,27 @@ class TestSchedulesRoutes:
         assert schedule["cadence_preset"] == "hourly"
         assert schedule["enabled"] is True
 
-        listed = client.get("/schedules", headers={"X-Session-ID": token})
+        listed = client.get("/schedules", headers={**browser_identity_headers(token)})
         assert listed.status_code == 200
         assert [item["id"] for item in listed.get_json()["schedules"]] == [schedule["id"]]
 
-        detail = client.get(f"/schedules/{schedule['id']}", headers={"X-Session-ID": token})
+        detail = client.get(f"/schedules/{schedule['id']}", headers={**browser_identity_headers(token)})
         assert detail.status_code == 200
         assert detail.get_json()["schedule"]["id"] == schedule["id"]
 
         updated = client.patch(
             f"/schedules/{schedule['id']}",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"enabled": False, "label": "Paused ping"},
         )
         assert updated.status_code == 200
         assert updated.get_json()["schedule"]["enabled"] is False
         assert updated.get_json()["schedule"]["label"] == "Paused ping"
 
-        deleted = client.delete(f"/schedules/{schedule['id']}", headers={"X-Session-ID": token})
+        deleted = client.delete(f"/schedules/{schedule['id']}", headers={**browser_identity_headers(token)})
         assert deleted.status_code == 200
         assert deleted.get_json()["removed"] is True
-        listed_after_delete = client.get("/schedules", headers={"X-Session-ID": token})
+        listed_after_delete = client.get("/schedules", headers={**browser_identity_headers(token)})
         assert listed_after_delete.get_json()["schedules"] == []
         audit_rows = _audit_event_rows(target_id=schedule["id"])
         assert [row["event_type"] for row in audit_rows] == [
@@ -187,21 +193,23 @@ class TestSchedulesRoutes:
 
     def test_schedule_routes_hide_cross_session_rows(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_schedule_owner"
-        other = "tok_schedule_other"
+        owner = principal_owner(str("tok_schedule_owner"))
+        other = principal_owner(str("tok_schedule_other"))
         _register_token(owner)
         _register_token(other)
         created = _create_schedule(client, owner)
         schedule_id = created.get_json()["schedule"]["id"]
 
-        other_list = client.get("/schedules", headers={"X-Session-ID": other})
-        other_patch = client.patch(f"/schedules/{schedule_id}", headers={"X-Session-ID": other}, json={"enabled": False})
-        other_delete = client.delete(f"/schedules/{schedule_id}", headers={"X-Session-ID": other})
+        other_list = client.get("/schedules", headers={**browser_identity_headers(other)})
+        other_patch = client.patch(
+            f"/schedules/{schedule_id}", headers={**browser_identity_headers(other)}, json={"enabled": False}
+        )
+        other_delete = client.delete(f"/schedules/{schedule_id}", headers={**browser_identity_headers(other)})
 
         assert other_list.status_code == 200
         assert other_list.get_json()["schedules"] == []
-        assert client.get(f"/schedules/{schedule_id}", headers={"X-Session-ID": other}).status_code == 404
-        assert client.get(f"/schedules/{schedule_id}/fires", headers={"X-Session-ID": other}).status_code == 404
+        assert client.get(f"/schedules/{schedule_id}", headers={**browser_identity_headers(other)}).status_code == 404
+        assert client.get(f"/schedules/{schedule_id}/fires", headers={**browser_identity_headers(other)}).status_code == 404
         assert other_patch.status_code == 404
         assert other_delete.status_code == 404
 
@@ -209,9 +217,9 @@ class TestSchedulesRoutes:
         from services.scheduler import dispatch
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_schedule_team_owner"
-        viewer = "tok_schedule_team_viewer"
-        outsider = "tok_schedule_team_outsider"
+        owner = principal_owner(str("tok_schedule_team_owner"))
+        viewer = principal_owner(str("tok_schedule_team_viewer"))
+        outsider = principal_owner(str("tok_schedule_team_outsider"))
         team_id = _create_team(owner, name="Schedule Operators")
         _add_team_member(team_id, viewer, role="viewer", display_name="Schedule viewer")
         _register_token(outsider)
@@ -224,17 +232,21 @@ class TestSchedulesRoutes:
         )
         created = client.post(
             "/schedules",
-            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner), "X-Team-ID": team_id},
             json={"command": "ping -c 1 darklab.sh", "cadence_preset": "hourly"},
         )
         schedule = created.get_json()["schedule"]
-        personal_list = client.get("/schedules", headers={"X-Session-ID": owner})
-        team_list = client.get("/schedules", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        outsider_list = client.get("/schedules", headers={"X-Session-ID": outsider, "X-Team-ID": team_id})
-        fired = client.post(f"/schedules/{schedule['id']}/run-now", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        fires = client.get(f"/schedules/{schedule['id']}/fires", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        blocked_personal_detail = client.get(f"/schedules/{schedule['id']}", headers={"X-Session-ID": owner})
-        viewer_headers = {"X-Session-ID": viewer, "X-Team-ID": team_id}
+        personal_list = client.get("/schedules", headers={**browser_identity_headers(owner)})
+        team_list = client.get("/schedules", headers={**browser_identity_headers(owner), "X-Team-ID": team_id})
+        outsider_list = client.get("/schedules", headers={**browser_identity_headers(outsider), "X-Team-ID": team_id})
+        fired = client.post(
+            f"/schedules/{schedule['id']}/run-now", headers={**browser_identity_headers(owner), "X-Team-ID": team_id}
+        )
+        fires = client.get(
+            f"/schedules/{schedule['id']}/fires", headers={**browser_identity_headers(owner), "X-Team-ID": team_id}
+        )
+        blocked_personal_detail = client.get(f"/schedules/{schedule['id']}", headers={**browser_identity_headers(owner)})
+        viewer_headers = {**browser_identity_headers(viewer), "X-Team-ID": team_id}
         viewer_list = client.get("/schedules", headers=viewer_headers)
         viewer_detail = client.get(f"/schedules/{schedule['id']}", headers=viewer_headers)
         viewer_fires = client.get(f"/schedules/{schedule['id']}/fires", headers=viewer_headers)
@@ -268,7 +280,7 @@ class TestSchedulesRoutes:
         import blueprints.schedules as schedules_blueprint
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_preview"
+        token = principal_owner(str("tok_schedule_preview"))
         _register_token(token)
 
         class FixedDatetime(datetime):
@@ -278,7 +290,7 @@ class TestSchedulesRoutes:
 
         monkeypatch.setattr(schedules_blueprint, "datetime", FixedDatetime)
 
-        resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={"X-Session-ID": token})
+        resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={**browser_identity_headers(token)})
 
         assert resp.status_code == 200
         payload = resp.get_json()
@@ -293,29 +305,31 @@ class TestSchedulesRoutes:
 
         valid_custom = client.get(
             "/schedules/preview?cron=*/5%20*%20*%20*%20*&tz=America/Chicago",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
         )
-        invalid_custom = client.get("/schedules/preview?cron=*/4%20*%20*%20*%20*&tz=UTC", headers={"X-Session-ID": token})
+        invalid_custom = client.get(
+            "/schedules/preview?cron=*/4%20*%20*%20*%20*&tz=UTC", headers={**browser_identity_headers(token)}
+        )
 
         assert valid_custom.status_code == 200
         assert valid_custom.get_json()["timezone"] == "America/Chicago"
         assert invalid_custom.status_code == 400
         assert "every 5 minutes" in invalid_custom.get_json()["message"]
 
-    def test_schedule_preview_requires_durable_session_token(self, monkeypatch, tmp_path):
+    def test_schedule_preview_requires_a_durable_credential(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
 
         resp = client.get(
             "/schedules/preview?cadence_preset=hourly&tz=UTC",
-            headers={"X-Session-ID": anonymous_session_id("anon")},
+            headers={**browser_identity_headers(anonymous_session_id("anon"))},
         )
 
         assert resp.status_code == 401
-        assert resp.get_json()["error"] == "session_token_required"
+        assert resp.get_json()["error"] == "credential_required"
 
     def test_schedule_create_rejects_disallowed_command(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_reject_create"
+        token = principal_owner(str("tok_schedule_reject_create"))
         _register_token(token)
 
         resp = _create_schedule(client, token, command="rm -rf /")
@@ -326,14 +340,14 @@ class TestSchedulesRoutes:
 
     def test_schedule_patch_revalidates_changed_command(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_reject_patch"
+        token = principal_owner(str("tok_schedule_reject_patch"))
         _register_token(token)
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
         resp = client.patch(
             f"/schedules/{schedule_id}",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"command": "rm -rf /"},
         )
 
@@ -345,7 +359,7 @@ class TestSchedulesRoutes:
         from services.scheduler import dispatch
 
         client, db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_run_now"
+        token = principal_owner(str("tok_schedule_run_now"))
         _register_token(token)
         monkeypatch.setattr(
             dispatch,
@@ -355,7 +369,7 @@ class TestSchedulesRoutes:
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
-        resp = client.post(f"/schedules/{schedule_id}/run-now", headers={"X-Session-ID": token})
+        resp = client.post(f"/schedules/{schedule_id}/run-now", headers={**browser_identity_headers(token)})
 
         assert resp.status_code == 200
         payload = resp.get_json()
@@ -374,7 +388,7 @@ class TestSchedulesRoutes:
             "reason": "started scheduled run",
         }
 
-        fires = client.get(f"/schedules/{schedule_id}/fires", headers={"X-Session-ID": token})
+        fires = client.get(f"/schedules/{schedule_id}/fires", headers={**browser_identity_headers(token)})
         assert fires.status_code == 200
         fires_payload = fires.get_json()
         assert fires_payload["total"] == 1
@@ -389,7 +403,7 @@ class TestSchedulesRoutes:
         from services.scheduler import dispatch
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_history_link"
+        token = principal_owner(str("tok_schedule_history_link"))
         run_id = "run_schedule_history_link"
         _register_token(token)
         monkeypatch.setattr(
@@ -400,7 +414,7 @@ class TestSchedulesRoutes:
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
-        fired = client.post(f"/schedules/{schedule_id}/run-now", headers={"X-Session-ID": token})
+        fired = client.post(f"/schedules/{schedule_id}/run-now", headers={**browser_identity_headers(token)})
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
@@ -416,7 +430,7 @@ class TestSchedulesRoutes:
             )
             conn.commit()
 
-        history = client.get("/history?include_total=1", headers={"X-Session-ID": token})
+        history = client.get("/history?include_total=1", headers={**browser_identity_headers(token)})
         payload = history.get_json()
 
         assert fired.status_code == 200
@@ -427,7 +441,7 @@ class TestSchedulesRoutes:
 
     def test_active_history_skips_scheduled_runs_unless_requested(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_active_restore"
+        token = principal_owner(str("tok_schedule_active_restore"))
         scheduled_run_id = "run_scheduled_active_restore"
         manual_run_id = "run_manual_active_restore"
         _register_token(token)
@@ -461,8 +475,8 @@ class TestSchedulesRoutes:
             ]
 
         with mock.patch("blueprints.history.active_runs_for_session", side_effect=active_runs):
-            default_resp = client.get("/history/active", headers={"X-Session-ID": token})
-            inclusive_resp = client.get("/history/active?include_scheduled=1", headers={"X-Session-ID": token})
+            default_resp = client.get("/history/active", headers={**browser_identity_headers(token)})
+            inclusive_resp = client.get("/history/active?include_scheduled=1", headers={**browser_identity_headers(token)})
 
         default_payload = default_resp.get_json()
         inclusive_payload = inclusive_resp.get_json()
@@ -477,7 +491,7 @@ class TestSchedulesRoutes:
 
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_cap"
+        token = principal_owner(str("tok_schedule_cap"))
         _register_token(token)
         with mock.patch.dict(
             "config.CFG",
@@ -500,7 +514,7 @@ class TestSchedulesRoutes:
 
     def test_schedule_create_and_patch_normalize_edge_inputs(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_edges"
+        token = principal_owner(str("tok_schedule_edges"))
         _register_token(token)
 
         disabled = _create_schedule(client, token, enabled="false", label="  Edge schedule  ", timezone="America/Chicago")
@@ -508,12 +522,12 @@ class TestSchedulesRoutes:
         invalid_timezone = _create_schedule(client, token, label="Bad timezone", timezone="Not/A_Timezone")
         blank_patch = client.patch(
             f"/schedules/{schedule['id']}",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"command": "   "},
         )
         paused_update = client.patch(
             f"/schedules/{schedule['id']}",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"cadence_preset": "daily", "timezone": "America/Los_Angeles", "label": "  Daily edge  "},
         )
 
@@ -534,7 +548,7 @@ class TestSchedulesRoutes:
 
     def test_schedule_fires_pagination_bounds(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_fire_pages"
+        token = principal_owner(str("tok_schedule_fire_pages"))
         _register_token(token)
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
@@ -554,8 +568,8 @@ class TestSchedulesRoutes:
                 )
             conn.commit()
 
-        first = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=0", headers={"X-Session-ID": token})
-        second = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=2", headers={"X-Session-ID": token})
+        first = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=0", headers={**browser_identity_headers(token)})
+        second = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=2", headers={**browser_identity_headers(token)})
 
         assert first.status_code == 200
         first_payload = first.get_json()
@@ -574,29 +588,31 @@ class TestSchedulesRoutes:
 class TestWatchersRoutes:
     def test_watcher_routes_crud_and_cascade_owned_schedule(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_watcher_routes_owner"
-        other = "tok_watcher_routes_other"
+        owner = principal_owner(str("tok_watcher_routes_owner"))
+        other = principal_owner(str("tok_watcher_routes_other"))
         _register_token(owner)
         _register_token(other)
         _insert_completed_run(owner, "run_watcher_baseline", command="nmap -sV darklab.sh")
 
         created = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"baseline_run_id": "run_watcher_baseline", "cadence_preset": "hourly", "label": "Nmap drift"},
         )
         watcher = created.get_json()["watcher"]
-        other_patch = client.patch(f"/watchers/{watcher['id']}", headers={"X-Session-ID": other}, json={"state": "paused"})
-        other_delete = client.delete(f"/watchers/{watcher['id']}", headers={"X-Session-ID": other})
-        listed = client.get("/watchers", headers={"X-Session-ID": owner})
-        other_listed = client.get("/watchers", headers={"X-Session-ID": other})
-        paused = client.patch(f"/watchers/{watcher['id']}", headers={"X-Session-ID": owner}, json={"state": "paused"})
+        other_patch = client.patch(
+            f"/watchers/{watcher['id']}", headers={**browser_identity_headers(other)}, json={"state": "paused"}
+        )
+        other_delete = client.delete(f"/watchers/{watcher['id']}", headers={**browser_identity_headers(other)})
+        listed = client.get("/watchers", headers={**browser_identity_headers(owner)})
+        other_listed = client.get("/watchers", headers={**browser_identity_headers(other)})
+        paused = client.patch(f"/watchers/{watcher['id']}", headers={**browser_identity_headers(owner)}, json={"state": "paused"})
         resumed = client.patch(
             f"/watchers/{watcher['id']}",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"state": "ok", "label": "Nmap drift v2"},
         )
-        deleted = client.delete(f"/watchers/{watcher['id']}", headers={"X-Session-ID": owner})
+        deleted = client.delete(f"/watchers/{watcher['id']}", headers={**browser_identity_headers(owner)})
 
         assert created.status_code == 201
         assert watcher["command_text"] == "nmap -sV darklab.sh"
@@ -643,9 +659,9 @@ class TestWatchersRoutes:
         from services.scheduler import dispatch
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_watcher_team_owner"
-        viewer = "tok_watcher_team_viewer"
-        outsider = "tok_watcher_team_outsider"
+        owner = principal_owner(str("tok_watcher_team_owner"))
+        viewer = principal_owner(str("tok_watcher_team_viewer"))
+        outsider = principal_owner(str("tok_watcher_team_outsider"))
         team_id = _create_team(owner, name="Watcher Operators")
         _add_team_member(team_id, viewer, role="viewer", display_name="Watcher viewer")
         _register_token(outsider)
@@ -659,22 +675,24 @@ class TestWatchersRoutes:
 
         created = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner), "X-Team-ID": team_id},
             json={"baseline_run_id": "run_watcher_team_baseline", "cadence_preset": "hourly", "label": "Team drift"},
         )
         watcher = created.get_json()["watcher"]
         blocked_personal_baseline = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner), "X-Team-ID": team_id},
             json={"baseline_run_id": "run_watcher_personal_baseline", "cadence_preset": "hourly"},
         )
-        personal_list = client.get("/watchers", headers={"X-Session-ID": owner})
-        team_list = client.get("/watchers", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        outsider_list = client.get("/watchers", headers={"X-Session-ID": outsider, "X-Team-ID": team_id})
-        fired = client.post(f"/watchers/{watcher['id']}/run-now", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        fires = client.get(f"/watchers/{watcher['id']}/fires", headers={"X-Session-ID": owner, "X-Team-ID": team_id})
-        blocked_personal_detail = client.get(f"/watchers/{watcher['id']}/fires", headers={"X-Session-ID": owner})
-        viewer_headers = {"X-Session-ID": viewer, "X-Team-ID": team_id}
+        personal_list = client.get("/watchers", headers={**browser_identity_headers(owner)})
+        team_list = client.get("/watchers", headers={**browser_identity_headers(owner), "X-Team-ID": team_id})
+        outsider_list = client.get("/watchers", headers={**browser_identity_headers(outsider), "X-Team-ID": team_id})
+        fired = client.post(
+            f"/watchers/{watcher['id']}/run-now", headers={**browser_identity_headers(owner), "X-Team-ID": team_id}
+        )
+        fires = client.get(f"/watchers/{watcher['id']}/fires", headers={**browser_identity_headers(owner), "X-Team-ID": team_id})
+        blocked_personal_detail = client.get(f"/watchers/{watcher['id']}/fires", headers={**browser_identity_headers(owner)})
+        viewer_headers = {**browser_identity_headers(viewer), "X-Team-ID": team_id}
         viewer_list = client.get("/watchers", headers=viewer_headers)
         viewer_fires = client.get(f"/watchers/{watcher['id']}/fires", headers=viewer_headers)
         viewer_create = client.post(
@@ -710,23 +728,23 @@ class TestWatchersRoutes:
         from services.scheduler.service import get_schedule
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_team_archive_owner"
+        owner = principal_owner(str("tok_team_archive_owner"))
         team_id = _create_team(owner, name="Archive Operators")
         _insert_completed_run(owner, "run_archive_baseline", team_id=team_id, command="nmap -sV darklab.sh")
         schedule = client.post(
             "/schedules",
-            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner), "X-Team-ID": team_id},
             json={"command": "ping -c 1 darklab.sh", "cadence_preset": "hourly"},
         ).get_json()["schedule"]
         watcher = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner), "X-Team-ID": team_id},
             json={"baseline_run_id": "run_archive_baseline", "cadence_preset": "hourly"},
         ).get_json()["watcher"]
 
         archived = client.patch(
             f"/session/teams/{team_id}",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"status": "archived"},
         )
         with db_connect() as conn:
@@ -777,8 +795,8 @@ class TestWatchersRoutes:
 
     def test_watcher_create_validates_baseline_visibility_and_completion(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        owner = "tok_watcher_baseline_owner"
-        other = "tok_watcher_baseline_other"
+        owner = principal_owner(str("tok_watcher_baseline_owner"))
+        other = principal_owner(str("tok_watcher_baseline_other"))
         _register_token(owner)
         _register_token(other)
         _insert_completed_run(other, "run_other_baseline")
@@ -786,17 +804,17 @@ class TestWatchersRoutes:
 
         missing = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"baseline_run_id": "run_other_baseline", "cadence_preset": "hourly"},
         )
         unfinished = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"baseline_run_id": "run_unfinished_baseline", "cadence_preset": "hourly"},
         )
         first_run = client.post(
             "/watchers",
-            headers={"X-Session-ID": owner},
+            headers={**browser_identity_headers(owner)},
             json={"baseline_mode": "first_run", "command": "nmap -sV darklab.sh", "cadence_preset": "hourly"},
         )
 
@@ -815,13 +833,13 @@ class TestWatchersRoutes:
         from services.watchers import service as watcher_service
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watcher_accept"
+        token = principal_owner(str("tok_watcher_accept"))
         _register_token(token)
         _insert_completed_run(token, "run_accept_baseline")
         _insert_completed_run(token, "run_accept_latest")
         created = client.post(
             "/watchers",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"baseline_run_id": "run_accept_baseline", "cadence_preset": "hourly"},
         )
         watcher_id = created.get_json()["watcher"]["id"]
@@ -835,7 +853,7 @@ class TestWatchersRoutes:
             )
             conn.commit()
 
-        accepted = client.post(f"/watchers/{watcher_id}/accept-baseline", headers={"X-Session-ID": token}, json={})
+        accepted = client.post(f"/watchers/{watcher_id}/accept-baseline", headers={**browser_identity_headers(token)}, json={})
 
         assert accepted.status_code == 200
         payload = accepted.get_json()["watcher"]
@@ -851,8 +869,8 @@ class TestWatchersRoutes:
         from services.watchers import service as watcher_service
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watcher_accept_rejects"
-        other = "tok_watcher_accept_foreign"
+        token = principal_owner(str("tok_watcher_accept_rejects"))
+        other = principal_owner(str("tok_watcher_accept_foreign"))
         _register_token(token)
         _register_token(other)
         _insert_completed_run(token, "run_accept_base")
@@ -862,7 +880,7 @@ class TestWatchersRoutes:
         _insert_completed_run(other, "run_accept_foreign")
         created = client.post(
             "/watchers",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"baseline_run_id": "run_accept_base", "cadence_preset": "hourly"},
         )
         assert created.status_code == 201
@@ -878,7 +896,7 @@ class TestWatchersRoutes:
         for rejected_run_id in ("missing", "run_accept_unrelated", "run_accept_unfinished", "run_accept_foreign"):
             rejected = client.post(
                 f"/watchers/{watcher_id}/accept-baseline",
-                headers={"X-Session-ID": token},
+                headers={**browser_identity_headers(token)},
                 json={"run_id": rejected_run_id},
             )
             assert rejected.status_code == 400
@@ -891,7 +909,7 @@ class TestWatchersRoutes:
         assert refreshed.baseline_run_id == "run_accept_base"
         accepted = client.post(
             f"/watchers/{watcher_id}/accept-baseline",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"run_id": "run_accept_fire"},
         )
         assert accepted.status_code == 200
@@ -901,18 +919,18 @@ class TestWatchersRoutes:
         from services.scheduler import dispatch
 
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watcher_run_now"
+        token = principal_owner(str("tok_watcher_run_now"))
         _register_token(token)
         _insert_completed_run(token, "run_first_baseline", command="nmap -sV darklab.sh")
         _insert_completed_run(token, "run_second_baseline", command="nmap -sV darklab.sh")
         first = client.post(
             "/watchers",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"baseline_run_id": "run_first_baseline", "cadence_preset": "hourly"},
         ).get_json()["watcher"]
         second = client.post(
             "/watchers",
-            headers={"X-Session-ID": token},
+            headers={**browser_identity_headers(token)},
             json={"baseline_run_id": "run_second_baseline", "cadence_preset": "hourly"},
         ).get_json()["watcher"]
         monkeypatch.setattr(
@@ -921,9 +939,9 @@ class TestWatchersRoutes:
             lambda schedule, **_kwargs: f"run_fire_{schedule.owner_id[-8:]}",
         )
 
-        fired = client.post(f"/watchers/{first['id']}/run-now", headers={"X-Session-ID": token})
-        first_fires = client.get(f"/watchers/{first['id']}/fires", headers={"X-Session-ID": token})
-        second_fires = client.get(f"/watchers/{second['id']}/fires", headers={"X-Session-ID": token})
+        fired = client.post(f"/watchers/{first['id']}/run-now", headers={**browser_identity_headers(token)})
+        first_fires = client.get(f"/watchers/{first['id']}/fires", headers={**browser_identity_headers(token)})
+        second_fires = client.get(f"/watchers/{second['id']}/fires", headers={**browser_identity_headers(token)})
 
         assert fired.status_code == 200
         assert fired.get_json()["status"] == "fired"
@@ -942,7 +960,7 @@ class TestWatchersRoutes:
 class TestWatchBuiltin:
     def test_watch_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watch_builtin"
+        token = principal_owner(str("tok_watch_builtin"))
         baseline_run_id = "run_watch_builtin_baseline"
         _insert_completed_run(token, baseline_run_id, command="nmap -sV darklab.sh")
 
@@ -1006,7 +1024,7 @@ class TestWatchBuiltin:
 
     def test_watch_builtin_validates_baseline_and_command_policy(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watch_builtin_validation"
+        token = principal_owner(str("tok_watch_builtin_validation"))
         _insert_completed_run(token, "run_watch_unfinished", finished=None)
         _insert_completed_run(token, "run_watch_disallowed", command="rm -rf /")
 
@@ -1040,7 +1058,7 @@ class TestWatchBuiltin:
         from services.scheduler import dispatch
 
         _client, db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_watch_builtin_run"
+        token = principal_owner(str("tok_watch_builtin_run"))
         baseline_run_id = "run_watch_fire_baseline"
         _register_token(token)
         _insert_completed_run(token, baseline_run_id)
@@ -1094,15 +1112,14 @@ class TestWatchBuiltin:
 
         assert exit_code == 0
         assert _line_text(lines[0]) == (
-            "watch: a kept workspace is required. "
-            "Open Options > Access and choose Keep this workspace."
+            "watch: a kept workspace is required. Open Options > Access and choose Keep this workspace."
         )
 
 
 class TestScheduleBuiltin:
     def test_schedule_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_builtin"
+        token = principal_owner(str("tok_schedule_builtin"))
 
         lines, exit_code = execute_builtin_command(
             "schedule create --every hourly -- ping -c 1 darklab.sh",
@@ -1162,7 +1179,7 @@ class TestScheduleBuiltin:
 
     def test_schedule_builtin_rejects_disallowed_command(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_builtin_reject"
+        token = principal_owner(str("tok_schedule_builtin_reject"))
 
         lines, exit_code = execute_builtin_command("schedule create --every hourly -- rm -rf /", token)
 
@@ -1176,7 +1193,7 @@ class TestScheduleBuiltin:
         from services.scheduler import dispatch
 
         _client, db_path = _schedule_client(monkeypatch, tmp_path)
-        token = "tok_schedule_builtin_run"
+        token = principal_owner(str("tok_schedule_builtin_run"))
         _register_token(token)
         monkeypatch.setattr(
             dispatch,
@@ -1215,6 +1232,5 @@ class TestScheduleBuiltin:
 
         assert exit_code == 0
         assert _line_text(lines[0]) == (
-            "schedule: a kept workspace is required. "
-            "Open Options > Access and choose Keep this workspace."
+            "schedule: a kept workspace is required. Open Options > Access and choose Keep this workspace."
         )

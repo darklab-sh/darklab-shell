@@ -28,7 +28,7 @@ When the bundled llama.cpp sidecar is used, assist requests ask the provider to 
 
 By default, `AI_REQUIRE_PRIVATE_BASE_URL=true` requires the provider host to resolve to loopback, private, link-local, or explicitly allowed CIDR ranges. Hosted providers require an explicit configuration change.
 
-AI write actions use Redis-backed per-session and global rate limits, a short enqueue lock, and a heartbeat-backed global worker slot before a provider call starts. If Redis is unavailable, new AI writes fail closed instead of letting multiple web or worker processes fan out against a local model. Cached read routes remain scoped to the active personal or team owner, and team-owned runs reuse team-owned assist rows without mixing them into personal scope. Team viewers can read cached and in-flight assists, but triggering a new team AI assist requires run-command permission.
+AI write actions use Redis-backed per-workspace and global rate limits, a short enqueue lock, and a heartbeat-backed global worker slot before a provider call starts. If Redis is unavailable, new AI writes fail closed instead of letting multiple web or worker processes fan out against a local model. Cached read routes remain scoped to the active personal or team owner, and team-owned runs reuse team-owned assist rows without mixing them into personal scope. Team viewers can read cached and in-flight assists, but triggering a new team AI assist requires run-command permission.
 
 ## Operator checks
 

@@ -82,7 +82,7 @@ def list_session_variables(session_id: str) -> dict[str, str]:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         rows = conn.execute(
-            "SELECT name, value FROM session_variables WHERE " + owner.sql + " ORDER BY name",  # nosec B608
+            "SELECT name, value FROM session_variables WHERE " + owner.sql + " ORDER BY name",  # nosec
             owner.params,
         ).fetchall()
     return {str(row["name"]): str(row["value"]) for row in rows}
@@ -109,7 +109,7 @@ def unset_session_variable(session_id: str, name: str) -> bool:
     )
     with get_db_connect()() as conn:
         result = conn.execute(
-            "DELETE FROM session_variables WHERE " + owner.sql,  # nosec B608
+            "DELETE FROM session_variables WHERE " + owner.sql,  # nosec
             owner.params,
         )
         conn.commit()

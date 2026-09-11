@@ -85,6 +85,22 @@ def _extract_and_verify(archive_path: Path, destination: Path) -> tuple[Path, di
     return root, manifest
 
 
+def verify_backup_archive(archive_path: Path) -> dict[str, Any]:
+    """Verify a managed backup without restoring it or exposing sensitive values."""
+    candidate = archive_path.expanduser().resolve()
+    if not candidate.is_file():
+        raise RestoreError("backup archive was not found")
+    with tempfile.TemporaryDirectory(prefix="darklab-backup-verify-") as destination:
+        root, manifest = _extract_and_verify(candidate, Path(destination))
+        checked_files = sum(1 for path in root.rglob("*") if path.is_file())
+    return {
+        "format": str(manifest.get("format") or ""),
+        "created_at": str(manifest.get("created_at") or ""),
+        "repository_free": bool(manifest.get("repository_free")),
+        "checked_files": checked_files,
+    }
+
+
 def _remove_path(path: Path) -> None:
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)

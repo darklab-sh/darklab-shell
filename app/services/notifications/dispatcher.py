@@ -36,7 +36,7 @@ from services.teams.ownership_queries import (
     OwnerKeyShape,
     PersonalTeamRows,
     composite_owner_predicate,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
 from services.teams.scope import owner_context_for_scope, personal_owner_context
 
@@ -139,7 +139,7 @@ def _channel_rows_for_trigger(
     require_trigger_match: bool = True,
 ) -> list[Any]:
     selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
         team_column="team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
@@ -168,7 +168,7 @@ def _existing_event_id(conn, *, session_token: str, team_id: str, channel_id: st
         return ""
     owner = composite_owner_predicate(
         personal_owner_context(session_token),
-        owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_key_shape=OwnerKeyShape.PERSONAL_WORKSPACE,
         key_values=(
             ("team_id", team_id),
             ("channel_id", channel_id),
@@ -177,7 +177,7 @@ def _existing_event_id(conn, *, session_token: str, team_id: str, channel_id: st
         ),
     )
     row = conn.execute(
-        "SELECT id FROM notification_events WHERE "  # nosec B608
+        "SELECT id FROM notification_events WHERE "  # nosec
         + owner.sql
         + " ORDER BY created ASC, id ASC LIMIT 1",
         owner.params,

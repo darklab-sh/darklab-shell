@@ -330,7 +330,7 @@ def test_run_complete_payload_exposes_command_root_without_full_command(monkeypa
     payload = build_run_complete_payload(
         {
             "id": "run-1",
-            "session_token": "tok_abcdef",
+            "personal_workspace_id": "wsp_abcdef",
             "command": "curl -H 'Authorization: Bearer secret' https://example.invalid",
             "exit_code": 0,
         },
@@ -341,7 +341,7 @@ def test_run_complete_payload_exposes_command_root_without_full_command(monkeypa
         "trigger": "run_complete",
         "app_name": "Ops Shell",
         "occurred_at": payload["occurred_at"],
-        "session_token_hint": "cdef",
+        "workspace_hint": "cdef",
         "run_id": "run-1",
         "command_root": "curl",
         "exit_code": 0,

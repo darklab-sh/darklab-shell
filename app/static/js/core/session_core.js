@@ -65,19 +65,6 @@ const DarklabSessionCore = (function (global) {
     });
   }
 
-  // Compatibility alias for cache-key callers during the staged cutover.
-  function resolveSessionId(storage, sessionUuid) {
-    return resolveBrowserIdentity(storage, sessionUuid).publicId;
-  }
-
-  function maskSessionToken(token) {
-    if (typeof token !== 'string' || !token) return '(none)';
-    const credentialId = credentialPublicId(token);
-    if (credentialId) return `${credentialId.slice(0, 12)}••••`;
-    if (token.startsWith('tok_')) return 'tok_' + token.slice(4, 8) + '••••';
-    return token.slice(0, 8) + '••••••••';
-  }
-
   function describeFetchError(err, context = 'server') {
     const offlineMessage = `Unable to contact the ${context} right now. Please try again in a moment. If this keeps happening, contact the shell operator.`;
     const message = (err && typeof err.message === 'string') ? err.message.trim() : '';
@@ -97,7 +84,7 @@ const DarklabSessionCore = (function (global) {
   function withIdentityHeaders(options = {}, identity, clientId) {
     const headers = Object.assign({}, options.headers || {});
     Object.keys(headers).forEach((name) => {
-      if (['x-session-id', 'x-darklab-credential', 'x-darklab-anonymous-id'].includes(name.toLowerCase())) {
+      if (['x-darklab-credential', 'x-darklab-anonymous-id'].includes(name.toLowerCase())) {
         delete headers[name];
       }
     });
@@ -113,20 +100,13 @@ const DarklabSessionCore = (function (global) {
     };
   }
 
-  function withSessionHeaders(options = {}, sessionId, clientId) {
-    return withIdentityHeaders(options, { kind: 'anonymous', anonymousId: sessionId }, clientId);
-  }
-
   const api = Object.freeze({
     credentialPublicId,
     generateUUID,
     getOrCreateStorageValue,
-    resolveSessionId,
-    maskSessionToken,
     resolveBrowserIdentity,
     describeFetchError,
     withIdentityHeaders,
-    withSessionHeaders,
   });
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -136,10 +116,7 @@ export const {
   describeFetchError,
   generateUUID,
   getOrCreateStorageValue,
-  maskSessionToken,
   resolveBrowserIdentity,
-  resolveSessionId,
   withIdentityHeaders,
-  withSessionHeaders,
 } = DarklabSessionCore;
 export { DarklabSessionCore };

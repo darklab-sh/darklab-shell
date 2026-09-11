@@ -25,7 +25,6 @@ from runtime_bootstrap import bootstrap_runtime
 from extensions import limiter
 from core.helpers import (
     AuthenticationRejected,
-    LegacyIdentityAdapterUnavailable,
     get_authentication_result,
     get_client_ip,
     get_log_session_id,
@@ -396,13 +395,6 @@ def _authentication_rejected_handler(exc):
     return jsonify({"error": exc.code, "message": exc.message}), 401
 
 
-def _legacy_identity_adapter_handler(_exc):
-    message = "This route still uses the v2 session owner adapter and cannot accept a v3 credential yet."
-    if request.path.startswith("/api/v1/"):
-        return jsonify(json_error("principal_cutover_pending", message)), 409
-    return jsonify({"error": "principal_cutover_pending", "message": message}), 409
-
-
 def _enforce_authentication_resolution():
     result = get_authentication_result()
     if not result.failed:
@@ -584,7 +576,6 @@ def create_app(config=None):
             429: _rate_limit_handler,
             500: _server_error_handler,
             AuthenticationRejected: _authentication_rejected_handler,
-            LegacyIdentityAdapterUnavailable: _legacy_identity_adapter_handler,
         },
         before_request_handlers=(
             _log_request,

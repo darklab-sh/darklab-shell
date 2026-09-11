@@ -114,7 +114,7 @@ def manual_finding_paths() -> dict[str, Any]:
     finding_id = _param("finding_id", "Finding id")
     errors = {
         "400": _response("Invalid manual finding request", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot triage findings", _ref("ApiError")),
         "404": _response("Project target or manual finding not found", _ref("ApiError")),
         "409": _response("Duplicate, stale revision, or quota conflict", _mutation_or_error()),
@@ -151,7 +151,7 @@ def manual_finding_create_operation() -> dict[str, Any]:
         "responses": {
             "201": _response("Manual finding created", _ref("ManualFindingMutationResponse")),
             "400": _response("Invalid manual finding", _ref("ApiError")),
-            "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+            "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
             "403": _response("Team role cannot triage findings", _ref("ApiError")),
             "404": _response("Project target not found", _ref("ApiError")),
             "409": _response("Possible duplicate or owner quota exceeded", _mutation_or_error()),

@@ -363,7 +363,7 @@ def active_execution_count_for_actor(session_id: str) -> int:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workflow_executions "  # nosec B608
+            "SELECT COUNT(*) AS n FROM workflow_executions "  # nosec
             "WHERE execution_kind IN (?, ?) AND " + owner.sql + " "
             "AND status IN ('queued', 'running', 'canceling')",
             (WORKFLOW_EXECUTION_KIND, ASSESSMENT_BATCH_EXECUTION_KIND, *owner.params),

@@ -23,7 +23,6 @@ class BackgroundAuthorizationState(str, Enum):
     TEAM_UNAVAILABLE = "team_unavailable"
     MEMBERSHIP_REVOKED = "membership_revoked"
     CAPABILITY_REVOKED = "capability_revoked"
-    LEGACY_SESSION_REVOKED = "legacy_session_revoked"
 
 
 @dataclass(frozen=True)
@@ -37,7 +36,6 @@ class BackgroundAuthorization:
     originating_credential_id: str = ""
     owner_context: OwnerContext | None = None
     message: str = ""
-    legacy_adapter: bool = False
 
     @property
     def allowed(self) -> bool:
@@ -88,7 +86,6 @@ def _denied(
     message: str,
     member_id: str = "",
     role: str = "",
-    legacy_adapter: bool = False,
 ) -> BackgroundAuthorization:
     return BackgroundAuthorization(
         state=state,
@@ -99,7 +96,6 @@ def _denied(
         role=role,
         originating_credential_id=originating_credential_id,
         message=message,
-        legacy_adapter=legacy_adapter,
     )
 
 
@@ -166,8 +162,8 @@ def resolve_background_authorization(
     selected_team = str(team_id or "").strip()
     credential_id = str(originating_credential_id or "").strip()
     # The historical member id is attribution only. Current authorization is
-    # always resolved from the principal (or the temporary legacy identity),
-    # so removing and later re-adding a member doesn't revive stale authority.
+    # always resolved from the principal, so removing and later re-adding a
+    # member doesn't revive stale authority.
     del actor_member_id
 
     if not principal:
@@ -184,84 +180,6 @@ def resolve_background_authorization(
         principal = principal_id_for_workspace(conn, workspace_id)
 
     if not principal:
-        # Temporary v2 bridge. It is deliberately isolated here for removal by
-        # the clean-cutover work; new workspace-owned records never use it.
-        if workspace_id.startswith("tok_"):
-            token = conn.execute(
-                "SELECT 1 FROM session_tokens WHERE token = ?",
-                (workspace_id,),
-            ).fetchone()
-            if token is None:
-                return _denied(
-                    BackgroundAuthorizationState.LEGACY_SESSION_REVOKED,
-                    principal_id="",
-                    personal_workspace_id=workspace_id,
-                    team_id=selected_team,
-                    originating_credential_id="",
-                    message="The legacy durable session is no longer active.",
-                    legacy_adapter=True,
-                )
-            if selected_team:
-                member = get_team_membership(conn, selected_team, workspace_id)
-                if not member:
-                    return _denied(
-                        BackgroundAuthorizationState.MEMBERSHIP_REVOKED,
-                        principal_id="",
-                        personal_workspace_id=workspace_id,
-                        team_id=selected_team,
-                        originating_credential_id="",
-                        message="The legacy durable session is no longer an active team member.",
-                        legacy_adapter=True,
-                    )
-                role = str(member.get("role") or "")
-                if str(member.get("team_status") or "") != "active":
-                    return _denied(
-                        BackgroundAuthorizationState.TEAM_UNAVAILABLE,
-                        principal_id="",
-                        personal_workspace_id=workspace_id,
-                        team_id=selected_team,
-                        originating_credential_id="",
-                        message="The durable work team is no longer active.",
-                        member_id=str(member.get("id") or ""),
-                        role=role,
-                        legacy_adapter=True,
-                    )
-                if required_capability is not None and not role_can(role, required_capability):
-                    return _denied(
-                        BackgroundAuthorizationState.CAPABILITY_REVOKED,
-                        principal_id="",
-                        personal_workspace_id=workspace_id,
-                        team_id=selected_team,
-                        originating_credential_id="",
-                        message="The current team role no longer permits this work.",
-                        member_id=str(member.get("id") or ""),
-                        role=role,
-                        legacy_adapter=True,
-                    )
-                context = team_owner_context(
-                    selected_team,
-                    actor_member_id=str(member.get("id") or ""),
-                    actor_session_id=workspace_id,
-                )
-                return BackgroundAuthorization(
-                    state=BackgroundAuthorizationState.AUTHORIZED,
-                    personal_workspace_id=workspace_id,
-                    team_id=selected_team,
-                    member_id=str(member.get("id") or ""),
-                    role=role,
-                    owner_context=context,
-                    legacy_adapter=True,
-                )
-            return BackgroundAuthorization(
-                state=BackgroundAuthorizationState.AUTHORIZED,
-                personal_workspace_id=workspace_id,
-                owner_context=OwnerContext(
-                    scope="personal",
-                    owner_id=workspace_id,
-                    actor_session_id=workspace_id,
-                ),
-                legacy_adapter=True,
-            )
         return _denied(
             BackgroundAuthorizationState.PRINCIPAL_MISSING,
             principal_id="",
@@ -413,9 +331,9 @@ def durable_work_for_credential(conn: Any, principal_id: str, credential_id: str
     items: list[DurableWorkItem] = []
     for kind, table, id_column, label_column, state_sql, pausable in _DURABLE_WORK_QUERIES:
         rows = conn.execute(
-            f"SELECT {id_column} AS id, {label_column} AS label, {state_sql} AS state, "  # nosec B608
+            f"SELECT {id_column} AS id, {label_column} AS label, {state_sql} AS state, "  # nosec
             "created_by_credential_id, last_changed_by_credential_id "
-            f"FROM {table} WHERE principal_id = ? AND "  # nosec B608
+            f"FROM {table} WHERE principal_id = ? AND "  # nosec
             "(created_by_credential_id = ? OR last_changed_by_credential_id = ?) "
             "ORDER BY id",
             (principal_id, credential_id, credential_id),
@@ -447,19 +365,19 @@ def pause_durable_work_for_credential(
     match = "principal_id = ? AND (created_by_credential_id = ? OR last_changed_by_credential_id = ?)"
     params = (principal_id, credential_id, credential_id)
     conn.execute(
-        f"UPDATE schedules SET enabled = FALSE, paused_reason = 'credential_revoked' WHERE {match}",  # nosec B608
+        f"UPDATE schedules SET enabled = FALSE, paused_reason = 'credential_revoked' WHERE {match}",  # nosec
         params,
     )
     conn.execute(
-        f"UPDATE watchers SET state = 'paused', state_reason = 'credential_revoked' WHERE {match}",  # nosec B608
+        f"UPDATE watchers SET state = 'paused', state_reason = 'credential_revoked' WHERE {match}",  # nosec
         params,
     )
     conn.execute(
-        f"UPDATE notification_channels SET muted = TRUE WHERE {match}",  # nosec B608
+        f"UPDATE notification_channels SET muted = TRUE WHERE {match}",  # nosec
         params,
     )
     conn.execute(
-        f"UPDATE project_digest_settings SET enabled = FALSE WHERE {match}",  # nosec B608
+        f"UPDATE project_digest_settings SET enabled = FALSE WHERE {match}",  # nosec
         params,
     )
     return DurableWorkDisposition(

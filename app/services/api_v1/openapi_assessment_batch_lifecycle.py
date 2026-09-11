@@ -306,7 +306,7 @@ def assessment_batch_lifecycle_paths() -> dict[str, Any]:
     )
     errors = {
         "400": _error("Invalid assessment batch page or cursor"),
-        "401": _error("Missing, invalid, or revoked token"),
+        "401": _error("Missing, invalid, expired, or revoked PAT"),
         "404": _error("Project or assessment batch not found"),
         "429": _error("Rate limit exceeded"),
     }

@@ -170,7 +170,7 @@ def verification_action_paths() -> dict[str, Any]:
     ]
     errors = {
         "400": _response("Invalid verification action request", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot start runs", _ref("ApiError")),
         "404": _response("Project finding or origin check not found", _ref("ApiError")),
         "409": _response("Plan is stale or the action is unavailable", _ref("ApiError")),

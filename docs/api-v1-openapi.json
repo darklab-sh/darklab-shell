@@ -13343,7 +13343,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -13450,7 +13450,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -13538,7 +13538,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -13635,7 +13635,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -13732,7 +13732,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -15212,7 +15212,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -15575,7 +15575,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -15729,7 +15729,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -15807,7 +15807,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16251,7 +16251,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16337,7 +16337,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16453,7 +16453,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16569,7 +16569,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16708,7 +16708,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16804,7 +16804,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -16901,7 +16901,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17106,7 +17106,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17211,7 +17211,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17316,7 +17316,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17432,7 +17432,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17559,7 +17559,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17675,7 +17675,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17790,7 +17790,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -17896,7 +17896,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18020,7 +18020,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18145,7 +18145,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18280,7 +18280,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18442,7 +18442,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18576,7 +18576,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18702,7 +18702,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18826,7 +18826,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -18951,7 +18951,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19074,7 +19074,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19200,7 +19200,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19307,7 +19307,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19701,7 +19701,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19815,7 +19815,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -19919,7 +19919,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20034,7 +20034,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20140,7 +20140,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20246,7 +20246,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20380,7 +20380,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20488,7 +20488,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20584,7 +20584,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20681,7 +20681,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20776,7 +20776,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -20881,7 +20881,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -22124,7 +22124,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -22358,7 +22358,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -22476,7 +22476,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -22855,7 +22855,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -22950,7 +22950,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -23377,7 +23377,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -23597,7 +23597,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -24858,7 +24858,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {
@@ -25088,7 +25088,7 @@
                 }
               }
             },
-            "description": "Missing, invalid, or revoked token"
+            "description": "Missing, invalid, expired, or revoked PAT"
           },
           "403": {
             "content": {

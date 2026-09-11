@@ -12,6 +12,7 @@ import {
   waitForActiveOutputSettled,
   waitForHistoryRuns,
   browserSessionId,
+  browserRequestIdentityHeaders,
   atlasQuickLookupDetail,
   seedExternalHistoryRuns,
   seedProjectMonitoringFixture,
@@ -2015,7 +2016,7 @@ test.describe('project workspace modal', () => {
     const sessionId = await page.evaluate(() => (
       typeof SESSION_ID === 'string' && SESSION_ID
         ? SESSION_ID
-        : localStorage.getItem('session_id')
+        : localStorage.getItem('anonymous_id')
     ))
     const fixture = seedProjectEvidenceFixture(testInfo, { sessionId, projectId })
 
@@ -2585,10 +2586,10 @@ test.describe('workflows modal', () => {
   })
 
   test('runs a real capture-fed playbook and reopens its linked run', async ({ page }) => {
-    const sessionId = await browserSessionId(page)
+    const identityHeaders = await browserRequestIdentityHeaders(page)
     const title = `Live capture playbook ${Date.now()}`
     const workflowResponse = await page.request.post('/session/workflows', {
-      headers: { 'X-Session-ID': sessionId },
+      headers: identityHeaders,
       data: {
         version: 2,
         id: `live_capture_${Date.now()}`,

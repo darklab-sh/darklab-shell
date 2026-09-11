@@ -65,7 +65,7 @@ def test_httpx_screenshot_directory_metadata_requires_one_validated_output():
 
 def test_httpx_screenshot_artifacts_are_bounded_to_verified_image_children(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("tok_" + "1" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-1"))
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -132,7 +132,7 @@ def test_httpx_screenshot_artifacts_are_bounded_to_verified_image_children(tmp_p
 
 def test_httpx_screenshot_artifacts_keep_earlier_files_and_clean_new_byte_overage(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("tok_" + "2" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-2"))
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -173,7 +173,7 @@ def test_httpx_screenshot_artifacts_keep_earlier_files_and_clean_new_byte_overag
 
 def test_httpx_screenshot_cleanup_preserves_paths_registered_by_an_earlier_owner_run(tmp_path):
     cfg = {**_cfg(tmp_path), "workspace_max_files": 1}
-    owner = personal_owner_context("tok_" + "3" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-3"))
     root = ensure_owner_workspace(owner, cfg)
     shots = root / "shots"
     shots.mkdir()
@@ -273,7 +273,7 @@ def test_protected_screenshot_paths_follow_personal_and_team_ownership():
 
 def test_httpx_screenshot_cleanup_fails_safe_when_protected_path_lookup_fails(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("tok_" + "4" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-4"))
     root = ensure_owner_workspace(owner, cfg)
     (root / "shots").mkdir()
     (root / "shots" / "capture.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
@@ -309,7 +309,7 @@ def test_httpx_screenshot_cleanup_fails_safe_when_protected_path_lookup_fails(tm
 
 def test_httpx_screenshot_artifacts_reject_ambiguous_output_directories(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("tok_" + "5" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-5"))
     root = ensure_owner_workspace(owner, cfg)
     for directory in ("one", "two"):
         (root / directory).mkdir()
@@ -324,7 +324,7 @@ def test_httpx_screenshot_artifacts_reject_ambiguous_output_directories(tmp_path
 
 def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
     cfg = _cfg(tmp_path)
-    owner = personal_owner_context("tok_" + "6" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-6"))
     root = ensure_owner_workspace(owner, cfg)
     (root / "shots" / "screenshot" / "app.example.test").mkdir(parents=True)
     screenshot_path = "shots/screenshot/app.example.test/app.webp"
@@ -382,7 +382,7 @@ def test_run_finalization_records_verified_httpx_screenshot_children(tmp_path):
 
 def test_run_finalization_keeps_validated_artifacts_when_screenshot_discovery_fails():
     base = [{"workspace_path": "shots", "kind": "output"}]
-    owner = personal_owner_context("tok_" + "7" * 32)
+    owner = personal_owner_context(anonymous_session_id("web-artifacts-7"))
     with (
         mock.patch(
             "services.runs.finalization_artifacts.append_httpx_screenshot_artifacts",

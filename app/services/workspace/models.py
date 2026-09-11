@@ -78,13 +78,3 @@ class WorkspacePathMatch:
     path: str
     kind: str
     file_count: int
-
-
-@dataclass(frozen=True)
-class WorkspaceMigrationResult:
-    migrated_files: int = 0
-    skipped_files: int = 0
-    migrated_directories: int = 0
-    skipped_directories: int = 0
-    migrated_file_paths: tuple[str, ...] = ()
-    skipped_file_paths: tuple[str, ...] = ()

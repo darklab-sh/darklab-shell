@@ -1460,6 +1460,7 @@ function createProjectAssessmentRenderer(context, actions) {
     const savedScrollTop = Math.max(0, Number(st.checksScrollTop || 0));
     const list = makeElement('div', 'project-assessment-target-list nice-scroll');
     list.addEventListener('scroll', () => {
+      if (!list.isConnected) return;
       st.checksScrollTop = list.scrollTop;
     }, { passive: true });
     groups.forEach(group => list.appendChild(renderTargetGroup(

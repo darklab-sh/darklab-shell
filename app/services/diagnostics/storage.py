@@ -65,8 +65,7 @@ _STORAGE_BUCKETS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "run_file_artifacts",
         "evidence_packages",
     )),
-    ("Session data", (
-        "session_tokens",
+    ("Workspace data", (
         "session_preferences",
         "starred_commands",
         "session_variables",
@@ -108,13 +107,12 @@ _PAYLOAD_COLUMNS = {
     "projects": ("name", "slug", "description", "status", "color"),
     "project_links": ("entity_type", "entity_id", "source", "review_state", "source_detail"),
     "evidence_packages": ("name", "description", "redaction_mode", "manifest", "status"),
-    "session_tokens": ("token",),
     "session_preferences": ("personal_workspace_id", "preferences"),
     "starred_commands": ("personal_workspace_id", "command"),
     "session_variables": ("personal_workspace_id", "name", "value"),
     "user_workflows": ("personal_workspace_id", "title", "description", "inputs", "steps"),
     "recent_values": ("personal_workspace_id", "kind", "value"),
-    "secrets": ("session_token", "name", "ciphertext", "nonce", "consumer_envs"),
+    "secrets": ("owner_id", "name", "ciphertext", "nonce", "consumer_envs"),
     "entity_labels": ("entity_type", "entity_id", "label", "source"),
     "entity_notes": ("entity_type", "entity_id", "body"),
 }

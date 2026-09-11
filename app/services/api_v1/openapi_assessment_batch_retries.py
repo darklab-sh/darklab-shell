@@ -59,7 +59,7 @@ def assessment_batch_retry_paths() -> dict[str, Any]:
     batch = _path("batch_id")
     errors = {
         "400": _error("Invalid assessment-batch retry request"),
-        "401": _error("Missing, invalid, or revoked token"),
+        "401": _error("Missing, invalid, expired, or revoked PAT"),
         "404": _error("Project or source assessment batch not found"),
         "409": _error("Retry source, preview, or confirmation conflict"),
         "413": _error("Request exceeds its bounded size limit"),

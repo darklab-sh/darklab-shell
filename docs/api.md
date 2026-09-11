@@ -56,7 +56,7 @@ names, and fixed choices such as output formats and notification channel kinds.
 
 ## Auth
 
-Use a scoped PAT in the standard bearer header. Browser credentials, anonymous IDs, and the legacy `X-Session-ID` header aren't accepted by `/api/v1`.
+Use a scoped PAT in the standard bearer header. Browser credentials and anonymous browser identities aren't accepted by `/api/v1`.
 
 ```bash
 curl -H "Authorization: Bearer $DARKLAB_PAT" \

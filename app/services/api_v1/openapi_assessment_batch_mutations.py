@@ -89,7 +89,7 @@ def assessment_batch_mutation_paths() -> dict[str, Any]:
     batch = _path("batch_id")
     errors = {
         "400": _error("Invalid assessment-batch lifecycle request"),
-        "401": _error("Missing, invalid, or revoked token"),
+        "401": _error("Missing, invalid, expired, or revoked PAT"),
         "403": _error("Team role cannot run assessment commands"),
         "404": _error("Project, assessment, preview, or batch not found"),
         "409": _error("Confirmation, lifecycle, or concurrency conflict"),

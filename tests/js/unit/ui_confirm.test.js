@@ -406,11 +406,11 @@ describe('showConfirm', () => {
     it('renders a single Node into the content slot', async () => {
       const input = document.createElement('input')
       input.type = 'text'
-      input.id = 'session-token-set-input'
+      input.id = 'credential-confirm-input'
       const promise = g.showConfirm({ content: input, actions: KILL_ACTIONS })
       const slot = document.querySelector('[data-confirm-content]')
       expect(slot.children.length).toBe(1)
-      expect(slot.querySelector('#session-token-set-input')).toBe(input)
+      expect(slot.querySelector('#credential-confirm-input')).toBe(input)
       g.cancelConfirm()
       await promise
     })

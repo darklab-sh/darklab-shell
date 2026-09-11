@@ -15,7 +15,7 @@ def default_nuclei_config_path() -> Path:
     if base:
         return Path(base) / ".templates-config.json"
     # This is the fixed container-owned sibling of the managed template tree.
-    return Path(  # nosec B108
+    return Path(  # nosec
         "/tmp/nuclei-templates/config/nuclei/.templates-config.json"
     )
 

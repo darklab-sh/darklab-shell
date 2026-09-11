@@ -1,24 +1,31 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""
-Tests for session token routes: /session/token/generate and /session/migrate.
-"""
+"""Tests for browser-session storage routes and removed identity endpoints."""
 
 import json
 import sqlite3
-import uuid
-
-import config as app_config
 from conftest import reusable_test_app
-from identity_helpers import anonymous_session_id
+from identity_helpers import anonymous_session_id, browser_identity_headers
 from core.database import DB_PATH
-from services.teams.storage import token_hash
-import services.workspace.files as workspace
 
 
 def get_client():
     return reusable_test_app(__name__).test_client()
+
+
+def test_legacy_identity_routes_are_gone():
+    client = get_client()
+
+    for method, path in (
+        ("get", "/session/token/generate"),
+        ("get", "/session/token/info"),
+        ("post", "/session/token/verify"),
+        ("post", "/session/token/revoke"),
+        ("post", "/session/migrate"),
+    ):
+        response = getattr(client, method)(path, json={} if method == "post" else None)
+        assert response.status_code == 404, path
 
 
 def _audit_event_rows(event_type):
@@ -37,987 +44,6 @@ def _audit_event_rows(event_type):
         }
         for row in rows
     ]
-
-
-# ── /session/token/generate ───────────────────────────────────────────────────
-
-
-class TestSessionTokenGenerate:
-    def test_returns_200(self):
-        client = get_client()
-        resp = client.get("/session/token/generate")
-        assert resp.status_code == 200
-
-    def test_response_has_session_token_key(self):
-        client = get_client()
-        data = json.loads(client.get("/session/token/generate").data)
-        assert "session_token" in data
-
-    def test_token_has_tok_prefix(self):
-        client = get_client()
-        data = json.loads(client.get("/session/token/generate").data)
-        assert data["session_token"].startswith("tok_")
-
-    def test_token_length(self):
-        # tok_ + 32 hex characters = 36 total
-        client = get_client()
-        data = json.loads(client.get("/session/token/generate").data)
-        assert len(data["session_token"]) == 36
-
-    def test_token_persisted_in_db(self):
-        client = get_client()
-        data = json.loads(client.get("/session/token/generate").data)
-        token = data["session_token"]
-        with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT token FROM session_tokens WHERE token = ?", (token,)).fetchone()
-        assert row is not None
-        assert row[0] == token
-
-    def test_multiple_calls_return_different_tokens(self):
-        client = get_client()
-        t1 = json.loads(client.get("/session/token/generate").data)["session_token"]
-        t2 = json.loads(client.get("/session/token/generate").data)["session_token"]
-        assert t1 != t2
-
-    def test_records_audit_event_without_raw_token(self):
-        client = get_client()
-        source_session = str(uuid.uuid4())
-        data = json.loads(client.get("/session/token/generate", headers={"X-Session-ID": source_session}).data)
-        token = data["session_token"]
-        token_events = [
-            row for row in _audit_event_rows("session_token.generate") if row["details"].get("session_hash") == token_hash(token)
-        ]
-        assert len(token_events) == 1
-        assert token_events[0]["target_type"] == "session_token"
-        assert token not in json.dumps(token_events)
-
-
-# ── /session/token/verify ─────────────────────────────────────────────────────
-
-
-class TestSessionTokenVerify:
-    def test_verify_returns_true_for_issued_token(self):
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        resp = client.post("/session/token/verify", json={"token": token})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["exists"] is True
-
-    def test_verify_returns_false_for_unknown_tok_token(self):
-        client = get_client()
-        fake = "tok_" + "a" * 32
-        resp = client.post("/session/token/verify", json={"token": fake})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["exists"] is False
-
-    def test_verify_returns_true_for_uuid(self):
-        """UUID anonymous sessions are never in session_tokens but are always valid."""
-        client = get_client()
-        session_id = anonymous_session_id("a1b2c3d4-0000-4000-8000-000000000001")
-        resp = client.post("/session/token/verify", json={"token": session_id})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["exists"] is True
-
-    def test_verify_rejects_invalid_anonymous_session_id(self):
-        client = get_client()
-        resp = client.post("/session/token/verify", json={"token": "abc123"})
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "invalid anonymous session id"
-
-    def test_verify_requires_token_field(self):
-        client = get_client()
-        resp = client.post("/session/token/verify", json={})
-        assert resp.status_code == 400
-
-
-# ── /session/migrate ──────────────────────────────────────────────────────────
-
-
-class TestSessionMigrate:
-    def _seed_runs(self, session_id, count=2):
-        """Insert synthetic run rows for the given session_id."""
-        import uuid
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_PATH) as conn:
-            for _ in range(count):
-                conn.execute(
-                    "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, 'echo hi', ?)",
-                    (str(uuid.uuid4()), session_id, now),
-                )
-            conn.commit()
-
-    def _seed_snapshots(self, session_id, count=1):
-        import uuid
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_PATH) as conn:
-            for i in range(count):
-                conn.execute(
-                    "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
-                    (str(uuid.uuid4()), session_id, f"label-{i}", now, "{}"),
-                )
-            conn.commit()
-
-    def _count_rows(self, table, session_id):
-        with sqlite3.connect(DB_PATH) as conn:
-            return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE personal_workspace_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-
-    def _seed_preferences(self, session_id, preferences):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO session_preferences "
-                "(personal_workspace_id, preferences, updated) VALUES (?, ?, datetime('now'))",
-                (session_id, json.dumps(preferences, sort_keys=True)),
-            )
-            conn.commit()
-
-    def _seed_variable(self, session_id, name, value):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO session_variables (personal_workspace_id, name, value, updated) "
-                "VALUES (?, ?, ?, datetime('now'))",
-                (session_id, name, value),
-            )
-            conn.commit()
-
-    def _seed_workflow(self, session_id, workflow_id="usr_test_workflow"):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO user_workflows "
-                "(id, personal_workspace_id, title, description, inputs, steps, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-                (
-                    workflow_id,
-                    session_id,
-                    "Saved DNS",
-                    "custom workflow",
-                    json.dumps(
-                        [
-                            {
-                                "id": "domain",
-                                "label": "Domain",
-                                "type": "domain",
-                                "required": True,
-                                "placeholder": "example.com",
-                                "default": "",
-                                "help": "",
-                            },
-                        ]
-                    ),
-                    json.dumps([{"cmd": "dig {{domain}} A", "note": "resolve apex"}]),
-                ),
-            )
-            conn.commit()
-
-    def _seed_recent_values(self, session_id, rows):
-        with sqlite3.connect(DB_PATH) as conn:
-            for kind, value, last_used, use_count in rows:
-                conn.execute(
-                    "INSERT OR REPLACE INTO recent_values (personal_workspace_id, kind, value, last_used, use_count) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (session_id, kind, value, last_used, use_count),
-                )
-            conn.commit()
-
-    def _seed_project_workspace_records(self, session_id, *, project_id="prj_migrate_test", slug="case"):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO projects "
-                "(id, personal_workspace_id, name, slug, description, status, color, created, updated) "
-                "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
-                (project_id, session_id, slug),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO entities "
-                "(id, personal_workspace_id, type, canonical_value, signature_hash, "
-                "first_seen_at, last_seen_at, occurrence_count, created) "
-                "VALUES (?, ?, 'domain', 'darklab.sh', 'sig_migrate_test', "
-                "datetime('now'), datetime('now'), 1, datetime('now'))",
-                ("ent_migrate_test", session_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO project_links "
-                "(id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now'))",
-                ("pl_migrate_test", project_id, "ent_migrate_test"),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO run_file_artifacts "
-                "(id, personal_workspace_id, run_id, workspace_path, created) "
-                "VALUES (?, ?, ?, ?, datetime('now'))",
-                ("rfa_migrate_test", session_id, "run_migrate_test", "findings.txt"),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO findings "
-                "(id, personal_workspace_id, run_id, target_id, entity_id, scope, raw_line, created) "
-                "VALUES (?, ?, ?, ?, ?, 'finding', 'open port 443', datetime('now'))",
-                ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO finding_remediation_dispositions "
-                "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
-                "rule_identity, review_state, created_at, updated_at) "
-                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', 'RULE:observation:fnd_migrate_test', "
-                "'observation:fnd_migrate_test', 'reviewed', datetime('now'), datetime('now'))",
-                (session_id,),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO entity_labels "
-                "(id, personal_workspace_id, entity_type, entity_id, label, created) "
-                "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
-                ("lbl_migrate_test", session_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO entity_notes "
-                "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
-                "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
-                ("note_migrate_test", session_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO evidence_packages "
-                "(id, personal_workspace_id, project_id, name, manifest, created, updated) "
-                "VALUES (?, ?, ?, 'Package', '{}', datetime('now'), datetime('now'))",
-                ("pkg_migrate_test", session_id, project_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO project_assessments "
-                "(id, personal_workspace_id, project_id, title, profile_key, profile_version, "
-                "profile_snapshot, status, started_at, created_by_session_id, "
-                "updated_by_session_id, created_at, updated_at) VALUES "
-                "('asm_migrate_test', ?, ?, 'Assessment', 'network', '1.0', '{}', "
-                "'active', datetime('now'), ?, ?, datetime('now'), datetime('now'))",
-                (session_id, project_id, session_id, session_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO project_assessment_checks "
-                "(id, assessment_id, category, check_key, target_type, target_value, "
-                "target_value_hash, state, state_source, state_reason, "
-                "state_changed_by_session_id, state_changed_at, created_at, updated_at) "
-                "VALUES ('chk_migrate_test', 'asm_migrate_test', 'discovery', "
-                "'service_discovery', 'domain', 'darklab.sh', 'target-hash', 'blocked', "
-                "'manual', 'Waiting for access', ?, datetime('now'), datetime('now'), "
-                "datetime('now'))",
-                (session_id,),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO project_http_profiles "
-                "(id, personal_workspace_id, project_id, name, name_key, role_key, base_url, "
-                "created_by_session_id, updated_by_session_id, created_at, updated_at) "
-                "VALUES ('htp_migrate_test', ?, ?, 'Anonymous', 'anonymous', "
-                "'anonymous', 'https://darklab.sh', ?, ?, datetime('now'), datetime('now'))",
-                (session_id, project_id, session_id, session_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO zap_connector_jobs "
-                "(id, personal_workspace_id, project_id, assessment_id, check_id, "
-                "http_profile_id, http_profile_revision, policy_level, "
-                "target_count, created_at, updated_at, expires_at) VALUES "
-                "('zap_migrate_test', ?, ?, 'asm_migrate_test', "
-                "'chk_migrate_test', 'htp_migrate_test', 1, 'safe', 1, "
-                "datetime('now'), datetime('now'), datetime('now', '+1 hour'))",
-                (session_id, project_id),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO oast_correlations "
-                "(id, personal_workspace_id, project_id, assessment_id, check_id, "
-                "target_entity_id, action_key, callback_label, allowed_domain, "
-                "service_origin_sha256, created_at, updated_at, active_until, purge_at) "
-                "VALUES ('ocr_0123456789abcdef0123456789abcdef', ?, ?, "
-                "'asm_migrate_test', 'chk_migrate_test', 'ent_migrate_test', "
-                "'oast_dns_callback', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
-                "'oast.darklab.test', ?, datetime('now'), datetime('now'), "
-                "datetime('now', '+5 minutes'), datetime('now', '+1 hour'))",
-                (session_id, project_id, "a" * 64),
-            )
-            conn.commit()
-
-    def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
-        cfg = {
-            "workspace_enabled": True,
-            "workspace_backend": "tmpfs",
-            "workspace_root": str(tmp_path / "workspaces"),
-            "workspace_quota_mb": 1,
-            "workspace_max_file_mb": 1,
-            "workspace_max_files": 10,
-            "workspace_inactivity_ttl_hours": 1,
-        }
-        cfg.update(overrides)
-        for key, value in cfg.items():
-            monkeypatch.setitem(app_config.CFG, key, value)
-        return cfg
-
-    def test_returns_200_with_valid_request(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-from-valid-test")
-        to_id = str(__import__("uuid").uuid4())
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert resp.status_code == 200
-        data = json.loads(resp.data)
-        assert data["ok"] is True
-
-    def test_rejects_mismatched_from_session_id(self):
-        client = get_client()
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": "some-other-session", "to_session_id": "tok_abc"},
-            headers={"X-Session-ID": anonymous_session_id("actual-current-session")},
-        )
-        assert resp.status_code == 403
-
-    def test_rejects_missing_from_field(self):
-        client = get_client()
-        resp = client.post(
-            "/session/migrate",
-            json={"to_session_id": "tok_abc"},
-            headers={"X-Session-ID": anonymous_session_id("s")},
-        )
-        assert resp.status_code == 400
-
-    def test_rejects_missing_to_field(self):
-        client = get_client()
-        session_id = anonymous_session_id("s")
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": session_id},
-            headers={"X-Session-ID": session_id},
-        )
-        assert resp.status_code == 400
-
-    def test_rejects_equal_session_ids(self):
-        client = get_client()
-        session_id = anonymous_session_id("same-id")
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": session_id, "to_session_id": session_id},
-            headers={"X-Session-ID": session_id},
-        )
-        assert resp.status_code == 400
-
-    def test_rejects_unissued_tok_destination(self):
-        """Migrating to a tok_ token that is not in session_tokens must be rejected."""
-        client = get_client()
-        from_id = anonymous_session_id("migrate-tok-check-" + __import__("uuid").uuid4().hex[:8])
-        fake_tok = "tok_" + "f" * 32
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": fake_tok},
-            headers={"X-Session-ID": from_id},
-        )
-        assert resp.status_code == 400
-        assert "not a known issued token" in json.loads(resp.data).get("error", "")
-
-    def test_allows_uuid_destination(self):
-        """Migrating to a UUID (anonymous session) must still be accepted."""
-        client = get_client()
-        from_id = anonymous_session_id("migrate-uuid-dst-" + __import__("uuid").uuid4().hex[:8])
-        uuid_dst = str(__import__("uuid").uuid4())
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": uuid_dst},
-            headers={"X-Session-ID": from_id},
-        )
-        assert resp.status_code == 200
-
-    def test_migrates_runs(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-runs-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_runs(from_id, count=3)
-
-        assert self._count_rows("runs", from_id) == 3
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert self._count_rows("runs", from_id) == 0
-        assert self._count_rows("runs", to_id) == 3
-
-    def test_migrates_snapshots(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-snaps-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_snapshots(from_id, count=2)
-
-        assert self._count_rows("snapshots", from_id) == 2
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert self._count_rows("snapshots", from_id) == 0
-        assert self._count_rows("snapshots", to_id) == 2
-
-    def test_returns_correct_counts(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-counts-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_runs(from_id, count=2)
-        self._seed_snapshots(from_id, count=1)
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-        assert data["migrated_runs"] == 2
-        assert data["migrated_snapshots"] == 1
-
-    def test_records_audit_event_without_raw_tokens(self):
-        client = get_client()
-        from_id = str(uuid.uuid4())
-        to_id = json.loads(client.get("/session/token/generate", headers={"X-Session-ID": from_id}).data)["session_token"]
-        self._seed_runs(from_id, count=2)
-        self._seed_snapshots(from_id, count=1)
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert resp.status_code == 200
-        migration_events = [
-            row
-            for row in _audit_event_rows("session.migrate")
-            if row["details"].get("destination_session_hash") == token_hash(to_id)
-        ]
-        assert len(migration_events) == 1
-        details = migration_events[0]["details"]
-        assert migration_events[0]["target_type"] == "session_token"
-        assert details["source_session_hash"] == token_hash(from_id)
-        assert details["migration_counts"]["migrated_runs"] == 2
-        assert details["migration_counts"]["migrated_snapshots"] == 1
-        assert from_id not in json.dumps(migration_events)
-        assert to_id not in json.dumps(migration_events)
-
-    def test_does_not_migrate_other_sessions(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-own-" + __import__("uuid").uuid4().hex[:8])
-        bystander_id = anonymous_session_id("bystander-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_runs(from_id, count=2)
-        self._seed_runs(bystander_id, count=3)
-
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert self._count_rows("runs", bystander_id) == 3
-
-    def _seed_stars(self, session_id, commands):
-        with sqlite3.connect(DB_PATH) as conn:
-            for cmd in commands:
-                conn.execute(
-                    "INSERT OR IGNORE INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
-                    (session_id, cmd),
-                )
-            conn.commit()
-
-    def test_migrates_starred_commands(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-stars-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_stars(from_id, ["nmap target", "dig example.com"])
-
-        assert self._count_rows("starred_commands", from_id) == 2
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        assert self._count_rows("starred_commands", from_id) == 0
-        assert self._count_rows("starred_commands", to_id) == 2
-
-    def test_migrate_returns_migrated_stars_count(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-stars-count-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_stars(from_id, ["cmd1", "cmd2", "cmd3"])
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-        assert data["migrated_stars"] == 3
-
-    def test_migrate_stars_no_duplicates_in_destination(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-stars-dedup-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_stars(from_id, ["shared-cmd", "from-only"])
-        self._seed_stars(to_id, ["shared-cmd", "dest-only"])
-
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        # dest should have exactly 3 unique commands, not 4
-        assert self._count_rows("starred_commands", to_id) == 3
-
-    def test_migrate_returns_only_newly_inserted_star_count(self):
-        """migrated_stars must reflect INSERT rowcount, not DELETE rowcount.
-
-        When the destination already has some of the same starred commands, the
-        INSERT OR IGNORE skips them.  The returned count should be the number
-        actually written into the destination, not the (larger) number deleted
-        from the source.
-        """
-        client = get_client()
-        from_id = anonymous_session_id("migrate-stars-insert-ct-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        # source has 3, destination already has 1 overlap
-        self._seed_stars(from_id, ["shared", "from-only-1", "from-only-2"])
-        self._seed_stars(to_id, ["shared"])
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-        # Only 2 commands were actually inserted (the 1 already present was skipped)
-        assert data["migrated_stars"] == 2
-
-    def test_migrates_session_preferences_when_destination_has_none(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-prefs-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
-        self._seed_preferences(from_id, prefs)
-
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-
-        with sqlite3.connect(DB_PATH) as conn:
-            src = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
-                (from_id,),
-            ).fetchone()
-            dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
-                (to_id,),
-            ).fetchone()
-        assert src is None
-        assert json.loads(dst[0]) == prefs
-
-    def test_migrates_session_variables(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-vars-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_variable(from_id, "HOST", "ip.darklab.sh")
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_variables"] == 1
-        assert self._count_rows("session_variables", from_id) == 0
-        vars_resp = client.get("/session/variables", headers={"X-Session-ID": to_id})
-        vars_data = json.loads(vars_resp.data)
-        assert vars_data["variables"] == [{"name": "HOST", "value": "ip.darklab.sh"}]
-
-    def test_migrates_user_workflows(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-workflows-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_workflow(from_id, "usr_migrate_test")
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_workflows"] == 1
-        assert self._count_rows("user_workflows", from_id) == 0
-        assert self._count_rows("user_workflows", to_id) == 1
-
-    def test_migrates_project_workspace_records(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-projects-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_project_workspace_records(from_id)
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO projects "
-                "(id, personal_workspace_id, name, slug, description, status, color, created, updated) "
-                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', "
-                "datetime('now'), datetime('now'))",
-                (to_id,),
-            )
-            conn.execute(
-                "INSERT INTO finding_remediation_dispositions "
-                "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
-                "rule_identity, review_state, created_at, updated_at) "
-                "VALUES (?, '', 'entity:ent_migrate_test', 'rule', "
-                "'RULE:observation:fnd_migrate_test', 'observation:fnd_migrate_test', "
-                "'important', '2026-08-01T00:00:00+00:00', '2099-08-01T00:00:00+00:00')",
-                (to_id,),
-            )
-            conn.commit()
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        with sqlite3.connect(DB_PATH) as conn:
-            migrated_slug = conn.execute(
-                "SELECT slug FROM projects WHERE personal_workspace_id = ? AND id = 'prj_migrate_test'",
-                (to_id,),
-            ).fetchone()[0]
-            project_target = conn.execute(
-                "SELECT e.personal_workspace_id, e.canonical_value "
-                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
-                "WHERE l.id = 'pl_migrate_test'",
-            ).fetchone()
-            run_artifact = conn.execute(
-                "SELECT personal_workspace_id, workspace_path FROM run_file_artifacts WHERE id = 'rfa_migrate_test'",
-            ).fetchone()
-            finding_occurrence = conn.execute(
-                "SELECT f.personal_workspace_id, fo.finding_id, f.entity_id "
-                "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-                "WHERE fo.finding_id = 'fnd_migrate_test'",
-            ).fetchone()
-            finding_disposition = conn.execute(
-                "SELECT personal_workspace_id, review_state FROM finding_remediation_dispositions "
-                "WHERE affected_subject = 'entity:ent_migrate_test'",
-            ).fetchone()
-            evidence_package = conn.execute(
-                "SELECT personal_workspace_id, project_id FROM evidence_packages WHERE id = 'pkg_migrate_test'",
-            ).fetchone()
-            assessment = conn.execute(
-                "SELECT personal_workspace_id, created_by_session_id, updated_by_session_id "
-                "FROM project_assessments WHERE id = 'asm_migrate_test'",
-            ).fetchone()
-            assessment_check = conn.execute(
-                "SELECT state_changed_by_session_id FROM project_assessment_checks WHERE id = 'chk_migrate_test'",
-            ).fetchone()
-            http_profile = conn.execute(
-                "SELECT personal_workspace_id, created_by_session_id, updated_by_session_id "
-                "FROM project_http_profiles WHERE id = 'htp_migrate_test'",
-            ).fetchone()
-            zap_job = conn.execute(
-                "SELECT personal_workspace_id FROM zap_connector_jobs WHERE id = 'zap_migrate_test'",
-            ).fetchone()
-            oast_correlation = conn.execute(
-                "SELECT personal_workspace_id FROM oast_correlations WHERE id = 'ocr_0123456789abcdef0123456789abcdef'",
-            ).fetchone()
-        assert resp.status_code == 200
-        assert data["migrated_projects"] == 1
-        assert data["migrated_run_file_artifacts"] == 1
-        assert data["migrated_findings"] == 1
-        assert data["migrated_finding_remediation_dispositions"] == 1
-        assert data["migrated_finding_targets"] == 0
-        assert data["migrated_entity_labels"] == 1
-        assert data["migrated_entity_notes"] == 1
-        assert data["migrated_evidence_packages"] == 1
-        assert data["migrated_project_assessments"] == 1
-        assert data["migrated_schemathesis_run_evidence"] == 0
-        assert data["migrated_project_assessment_actors"] == 1
-        assert data["migrated_project_assessment_check_actors"] == 1
-        assert data["migrated_project_http_profiles"] == 1
-        assert data["migrated_zap_connector_jobs"] == 1
-        assert data["migrated_oast_correlations"] == 1
-        assert self._count_rows("projects", from_id) == 0
-        assert self._count_rows("projects", to_id) == 2
-        assert self._count_rows("run_file_artifacts", from_id) == 0
-        assert self._count_rows("findings", from_id) == 0
-        assert self._count_rows("entity_labels", from_id) == 0
-        assert self._count_rows("entity_notes", from_id) == 0
-        assert migrated_slug == "case-2"
-        assert tuple(project_target) == (to_id, "darklab.sh")
-        assert tuple(run_artifact) == (to_id, "findings.txt")
-        assert tuple(finding_occurrence) == (to_id, "fnd_migrate_test", "ent_migrate_test")
-        assert tuple(finding_disposition) == (to_id, "important")
-        assert tuple(evidence_package) == (to_id, "prj_migrate_test")
-        assert tuple(assessment) == (to_id, to_id, to_id)
-        assert tuple(assessment_check) == (to_id,)
-        assert tuple(http_profile) == (to_id, to_id, to_id)
-        assert tuple(zap_job) == (to_id,)
-        assert tuple(oast_correlation) == (to_id,)
-
-    def test_migrates_recent_values_and_merges_destination(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-recents-from-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        self._seed_recent_values(
-            from_id,
-            [
-                ("domain", "alpha.example.com", "2026-05-01 10:00:00.000001", 2),
-                ("domain", "shared.example.com", "2026-05-01 11:00:00.000001", 3),
-                ("ip", "192.0.2.10", "2026-05-01 12:00:00.000001", 1),
-            ],
-        )
-        self._seed_recent_values(
-            to_id,
-            [
-                ("domain", "shared.example.com", "2026-05-01 09:00:00.000001", 4),
-            ],
-        )
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        with sqlite3.connect(DB_PATH) as conn:
-            source_count = conn.execute(
-                "SELECT COUNT(*) FROM recent_values WHERE personal_workspace_id = ?",
-                (from_id,),
-            ).fetchone()[0]
-            rows = conn.execute(
-                "SELECT kind, value, last_used, use_count FROM recent_values WHERE personal_workspace_id = ?",
-                (to_id,),
-            ).fetchall()
-        by_value = {(row[0], row[1]): {"last_used": row[2], "use_count": row[3]} for row in rows}
-        assert resp.status_code == 200
-        assert data["migrated_recent_values"] == 3
-        assert source_count == 0
-        assert by_value[("domain", "alpha.example.com")]["use_count"] == 2
-        assert by_value[("domain", "shared.example.com")]["use_count"] == 7
-        assert by_value[("domain", "shared.example.com")]["last_used"] == "2026-05-01 11:00:00.000001"
-        assert by_value[("ip", "192.0.2.10")]["use_count"] == 1
-
-    def test_migrate_keeps_existing_destination_session_preferences(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        src_prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
-        dst_prefs = {"pref_theme_name": "darklab_obsidian.yaml", "pref_timestamps": "off"}
-        self._seed_preferences(from_id, src_prefs)
-        self._seed_preferences(to_id, dst_prefs)
-
-        client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-
-        with sqlite3.connect(DB_PATH) as conn:
-            dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
-                (to_id,),
-            ).fetchone()
-        assert json.loads(dst[0]) == dst_prefs
-
-    def test_migrate_merges_active_project_preference_into_existing_destination_preferences(self):
-        client = get_client()
-        from_id = anonymous_session_id("migrate-active-project-src-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        project_id = "prj_active_pref_migrate"
-        self._seed_project_workspace_records(from_id, project_id=project_id, slug="active-pref")
-        self._seed_preferences(
-            from_id,
-            {
-                "pref_active_project_id": project_id,
-                "pref_theme_name": "theme_light_blue",
-            },
-        )
-        self._seed_preferences(
-            to_id,
-            {
-                "pref_theme_name": "darklab_obsidian.yaml",
-                "pref_timestamps": "off",
-            },
-        )
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        with sqlite3.connect(DB_PATH) as conn:
-            dst = conn.execute(
-                "SELECT preferences FROM session_preferences WHERE personal_workspace_id = ?",
-                (to_id,),
-            ).fetchone()
-        preferences = json.loads(dst[0])
-        assert resp.status_code == 200
-        assert data["migrated_active_project_preference"] == 1
-        assert preferences["pref_active_project_id"] == project_id
-        assert preferences["pref_theme_name"] == "darklab_obsidian.yaml"
-        assert preferences["pref_timestamps"] == "off"
-
-    def test_migrate_workspace_returns_zero_without_source_workspace(self, tmp_path, monkeypatch):
-        client = get_client()
-        self._enable_workspace(monkeypatch, tmp_path)
-        from_id = anonymous_session_id("migrate-ws-none-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_workspace_files"] == 0
-        assert data["skipped_workspace_files"] == 0
-
-    def test_migrates_source_workspace_files_to_destination(self, tmp_path, monkeypatch):
-        client = get_client()
-        cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = anonymous_session_id("migrate-ws-src-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        workspace.write_workspace_text_file(from_id, "targets.txt", "darklab.sh\n", cfg)
-        workspace.create_workspace_directory(from_id, "reports/empty", cfg)
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_workspace_files"] == 1
-        assert data["skipped_workspace_files"] == 0
-        assert data["migrated_workspace_directories"] >= 2
-        assert workspace.read_workspace_text_file(to_id, "targets.txt", cfg) == "darklab.sh\n"
-        assert workspace.list_workspace_files(from_id, cfg) == []
-        assert any(item["path"] == "reports/empty" for item in workspace.list_workspace_directories(to_id, cfg))
-
-    def test_migrate_workspace_keeps_destination_only_files(self, tmp_path, monkeypatch):
-        client = get_client()
-        cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = anonymous_session_id("migrate-ws-dst-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        workspace.write_workspace_text_file(to_id, "existing.txt", "keep\n", cfg)
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_workspace_files"] == 0
-        assert data["skipped_workspace_files"] == 0
-        assert workspace.read_workspace_text_file(to_id, "existing.txt", cfg) == "keep\n"
-
-    def test_migrate_workspace_skips_conflicting_files_without_overwrite(self, tmp_path, monkeypatch):
-        client = get_client()
-        cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = anonymous_session_id("migrate-ws-conflict-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
-        workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
-        workspace.write_workspace_text_file(to_id, "shared.txt", "dest\n", cfg)
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        assert resp.status_code == 200
-        assert data["migrated_workspace_files"] == 1
-        assert data["skipped_workspace_files"] == 1
-        assert workspace.read_workspace_text_file(to_id, "shared.txt", cfg) == "dest\n"
-        assert workspace.read_workspace_text_file(to_id, "from-only.txt", cfg) == "move\n"
-        assert workspace.read_workspace_text_file(from_id, "shared.txt", cfg) == "source\n"
-
-    def test_migrate_workspace_file_metadata_only_for_moved_files(self, tmp_path, monkeypatch):
-        client = get_client()
-        cfg = self._enable_workspace(monkeypatch, tmp_path)
-        from_id = anonymous_session_id("migrate-ws-meta-src-" + __import__("uuid").uuid4().hex[:8])
-        to_id = str(__import__("uuid").uuid4())
-        workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
-        workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
-        workspace.write_workspace_text_file(to_id, "shared.txt", "dest\n", cfg)
-        with sqlite3.connect(DB_PATH) as conn:
-            for path, label in (("shared.txt", "source-shared"), ("from-only.txt", "source-only")):
-                conn.execute(
-                    "INSERT OR REPLACE INTO entity_labels "
-                    "(id, personal_workspace_id, entity_type, entity_id, label, created) "
-                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'))",
-                    ("lbl_" + __import__("uuid").uuid4().hex, from_id, path, label),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO entity_notes "
-                    "(id, personal_workspace_id, entity_type, entity_id, body, created, updated) "
-                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'), datetime('now'))",
-                    ("note_" + __import__("uuid").uuid4().hex, from_id, path, f"note {label}"),
-                )
-            conn.commit()
-
-        resp = client.post(
-            "/session/migrate",
-            json={"from_session_id": from_id, "to_session_id": to_id},
-            headers={"X-Session-ID": from_id},
-        )
-        data = json.loads(resp.data)
-
-        with sqlite3.connect(DB_PATH) as conn:
-            moved_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
-                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
-                (to_id,),
-            ).fetchone()
-            skipped_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
-                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
-                (from_id,),
-            ).fetchone()
-            drifted_label = conn.execute(
-                "SELECT label FROM entity_labels WHERE personal_workspace_id = ? "
-                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
-                (to_id,),
-            ).fetchone()
-            moved_note = conn.execute(
-                "SELECT body FROM entity_notes WHERE personal_workspace_id = ? "
-                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
-                (to_id,),
-            ).fetchone()
-
-        assert resp.status_code == 200
-        assert data["migrated_workspace_files"] == 1
-        assert data["skipped_workspace_files"] == 1
-        assert data["migrated_entity_labels"] == 1
-        assert data["migrated_entity_notes"] == 1
-        assert data["skipped_workspace_file_labels"] == 1
-        assert data["skipped_workspace_file_notes"] == 1
-        assert tuple(moved_label) == ("source-only",)
-        assert tuple(moved_note) == ("note source-only",)
-        assert tuple(skipped_label) == ("source-shared",)
-        assert drifted_label is None
-
-
-# ── /session/workflows ────────────────────────────────────────────────────────
 
 
 class TestSessionWorkflows:
@@ -1052,9 +78,9 @@ class TestSessionWorkflows:
         create_resp = client.post(
             "/session/workflows",
             json=self._payload(),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        list_resp = client.get("/session/workflows", headers={"X-Session-ID": session_id})
+        list_resp = client.get("/session/workflows", headers={**browser_identity_headers(session_id)})
         created = json.loads(create_resp.data)["workflow"]
         listed = json.loads(list_resp.data)["items"]
 
@@ -1092,7 +118,7 @@ class TestSessionWorkflows:
                     },
                 ],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         collection = collection_resp.get_json()["workflow"]
         assert collection_resp.status_code == 201
@@ -1107,7 +133,7 @@ class TestSessionWorkflows:
         launch_resp = client.post(
             "/workflow-executions",
             json={"workflow_id": collection["id"], "inputs": {}},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert launch_resp.status_code == 202
         launched_execution = launch_resp.get_json()["execution"]
@@ -1123,7 +149,7 @@ class TestSessionWorkflows:
         resp = client.post(
             "/session/workflows",
             json=payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 400
@@ -1142,7 +168,7 @@ class TestSessionWorkflows:
         create_error = client.post(
             "/session/workflows",
             json=invalid_create,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert create_error.status_code == 400
         assert create_error.get_json()["errors"] == [
@@ -1155,7 +181,7 @@ class TestSessionWorkflows:
         created = client.post(
             "/session/workflows",
             json=self._payload(),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["workflow"]
         invalid_update = {
             **self._payload("Invalid graph"),
@@ -1168,7 +194,7 @@ class TestSessionWorkflows:
         update_error = client.put(
             f"/session/workflows/{created['id']}",
             json=invalid_update,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert update_error.status_code == 400
         assert update_error.get_json()["errors"] == [
@@ -1199,7 +225,7 @@ class TestSessionWorkflows:
         capture_error = client.put(
             f"/session/workflows/{created['id']}",
             json=invalid_capture,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert capture_error.status_code == 400
         assert capture_error.get_json()["errors"] == [
@@ -1214,7 +240,7 @@ class TestSessionWorkflows:
         sensitive_error = client.put(
             f"/session/workflows/{created['id']}",
             json=invalid_sensitive,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert sensitive_error.status_code == 400
         assert sensitive_error.get_json()["errors"] == [
@@ -1229,7 +255,7 @@ class TestSessionWorkflows:
         version_error = client.put(
             f"/session/workflows/{created['id']}",
             json=unsupported_version,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert version_error.status_code == 400
         assert version_error.get_json()["errors"] == [
@@ -1247,23 +273,23 @@ class TestSessionWorkflows:
             client.post(
                 "/session/workflows",
                 json=self._payload(),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["workflow"]
 
         denied = client.put(
             f"/session/workflows/{created['id']}",
             json=self._payload("Other Edit"),
-            headers={"X-Session-ID": other_session_id},
+            headers={**browser_identity_headers(other_session_id)},
         )
         updated = client.put(
             f"/session/workflows/{created['id']}",
             json=self._payload("Updated DNS"),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         deleted = client.delete(
             f"/session/workflows/{created['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert denied.status_code == 404
@@ -1273,7 +299,7 @@ class TestSessionWorkflows:
             json.loads(
                 client.get(
                     "/session/workflows",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )["items"]
             == []
@@ -1295,7 +321,7 @@ class TestSessionRecentValues:
     def test_get_returns_empty_list_for_new_session(self):
         client = get_client()
         session_id = anonymous_session_id("recent-empty-" + __import__("uuid").uuid4().hex[:8])
-        resp = client.get("/session/recent-values", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/recent-values", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 200
         assert json.loads(resp.data)["values"] == {
@@ -1330,7 +356,7 @@ class TestSessionRecentValues:
                     *[{"kind": "domain", "value": value} for value in valid],
                 ]
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(resp.data)
 
@@ -1361,9 +387,9 @@ class TestSessionRecentValues:
         client.post(
             "/session/recent-values",
             json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
-            headers={"X-Session-ID": session_a},
+            headers={**browser_identity_headers(session_a)},
         )
-        resp = client.get("/session/recent-values", headers={"X-Session-ID": session_b})
+        resp = client.get("/session/recent-values", headers={**browser_identity_headers(session_b)})
 
         assert json.loads(resp.data)["values"]["domain"] == []
 
@@ -1374,17 +400,17 @@ class TestSessionRecentValues:
         client.post(
             "/session/recent-values",
             json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         client.post(
             "/session/recent-values",
             json={"values": [{"kind": "domain", "value": "beta.example.org"}]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         client.post(
             "/session/recent-values",
             json={"values": [{"kind": "domain", "value": "alpha.example.com"}]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         with sqlite3.connect(DB_PATH) as conn:
@@ -1392,7 +418,7 @@ class TestSessionRecentValues:
                 "SELECT use_count FROM recent_values WHERE personal_workspace_id = ? AND kind = ? AND value = ?",
                 (session_id, "domain", "alpha.example.com"),
             ).fetchone()[0]
-        resp = client.get("/session/recent-values?kind=domain", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/recent-values?kind=domain", headers={**browser_identity_headers(session_id)})
         assert json.loads(resp.data)["values"]["domain"][0] == "alpha.example.com"
         assert count == 2
 
@@ -1402,7 +428,7 @@ class TestSessionRecentValues:
         resp = client.post(
             "/session/recent-values",
             json={"values": "alpha.example.com"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 400
@@ -1411,95 +437,9 @@ class TestSessionRecentValues:
         client = get_client()
         session_id = anonymous_session_id("recent-invalid-kind-" + __import__("uuid").uuid4().hex[:8])
 
-        resp = client.get("/session/recent-values?kind=cve", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/recent-values?kind=cve", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 400
-
-
-# ── /session/run-count ────────────────────────────────────────────────────────
-
-
-class TestSessionRunCount:
-    def _seed_runs(self, session_id, count):
-        import uuid
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_PATH) as conn:
-            for _ in range(count):
-                conn.execute(
-                    "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, 'echo hi', ?)",
-                    (str(uuid.uuid4()), session_id, now),
-                )
-            conn.commit()
-
-    def test_returns_zero_for_empty_session(self):
-        client = get_client()
-        session_id = anonymous_session_id("run-count-empty-" + __import__("uuid").uuid4().hex[:8])
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["count"] == 0
-        assert json.loads(resp.data)["workflow_count"] == 0
-
-    def test_returns_true_count(self):
-        client = get_client()
-        session_id = anonymous_session_id("run-count-seeded-" + __import__("uuid").uuid4().hex[:8])
-        self._seed_runs(session_id, count=7)
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
-        assert json.loads(resp.data)["count"] == 7
-
-    def test_is_uncapped_beyond_history_panel_limit(self):
-        """The count must not be capped by history_panel_limit (default 50)."""
-        client = get_client()
-        session_id = anonymous_session_id("run-count-uncapped-" + __import__("uuid").uuid4().hex[:8])
-        self._seed_runs(session_id, count=75)
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
-        assert json.loads(resp.data)["count"] == 75
-
-    def test_is_scoped_to_session(self):
-        client = get_client()
-        session_a = anonymous_session_id("run-count-scope-a-" + __import__("uuid").uuid4().hex[:8])
-        session_b = anonymous_session_id("run-count-scope-b-" + __import__("uuid").uuid4().hex[:8])
-        self._seed_runs(session_a, count=3)
-        self._seed_runs(session_b, count=5)
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_a})
-        assert json.loads(resp.data)["count"] == 3
-
-    def test_returns_user_workflow_count(self):
-        client = get_client()
-        session_id = anonymous_session_id("run-count-workflows-" + __import__("uuid").uuid4().hex[:8])
-        client.post(
-            "/session/workflows",
-            headers={"X-Session-ID": session_id},
-            json=TestSessionWorkflows()._payload(),
-        )
-
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
-
-        assert json.loads(resp.data)["workflow_count"] == 1
-
-    def test_returns_recent_value_count(self):
-        client = get_client()
-        session_id = anonymous_session_id("run-count-recents-" + __import__("uuid").uuid4().hex[:8])
-        client.post(
-            "/session/recent-values",
-            headers={"X-Session-ID": session_id},
-            json={
-                "values": [
-                    {"kind": "domain", "value": "alpha.example.com"},
-                    {"kind": "ip", "value": "192.0.2.10"},
-                ]
-            },
-        )
-
-        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
-
-        assert json.loads(resp.data)["recent_value_count"] == 2
-
-
-# ── /session/starred ──────────────────────────────────────────────────────────
-
-
 class TestSessionStarred:
     def _count_stars(self, session_id):
         with sqlite3.connect(DB_PATH) as conn:
@@ -1521,7 +461,7 @@ class TestSessionStarred:
     def test_get_returns_empty_list_for_new_session(self):
         client = get_client()
         session_id = anonymous_session_id("get-stars-new-" + __import__("uuid").uuid4().hex[:8])
-        resp = client.get("/session/starred", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/starred", headers={**browser_identity_headers(session_id)})
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["commands"] == []
@@ -1535,7 +475,7 @@ class TestSessionStarred:
                 (session_id, "nmap target"),
             )
             conn.commit()
-        resp = client.get("/session/starred", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/starred", headers={**browser_identity_headers(session_id)})
         data = json.loads(resp.data)
         assert "nmap target" in data["commands"]
 
@@ -1549,7 +489,7 @@ class TestSessionStarred:
                 (session_a, "cmd-a"),
             )
             conn.commit()
-        resp = client.get("/session/starred", headers={"X-Session-ID": session_b})
+        resp = client.get("/session/starred", headers={**browser_identity_headers(session_b)})
         data = json.loads(resp.data)
         assert data["commands"] == []
 
@@ -1561,7 +501,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={"command": "dig example.com"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
@@ -1573,12 +513,12 @@ class TestSessionStarred:
         client.post(
             "/session/starred",
             json={"command": "ping target"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         client.post(
             "/session/starred",
             json={"command": "ping target"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert self._count_stars(session_id) == 1
 
@@ -1587,7 +527,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={},
-            headers={"X-Session-ID": anonymous_session_id("post-stars-no-cmd")},
+            headers={**browser_identity_headers(anonymous_session_id("post-stars-no-cmd"))},
         )
         assert resp.status_code == 400
 
@@ -1596,7 +536,7 @@ class TestSessionStarred:
         resp = client.post(
             "/session/starred",
             json={"command": ""},
-            headers={"X-Session-ID": anonymous_session_id("post-stars-empty-cmd")},
+            headers={**browser_identity_headers(anonymous_session_id("post-stars-empty-cmd"))},
         )
         assert resp.status_code == 400
 
@@ -1615,7 +555,7 @@ class TestSessionStarred:
         client.delete(
             "/session/starred",
             json={"command": "remove"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         stars = self._get_stars(session_id)
         assert "keep" in stars
@@ -1627,7 +567,7 @@ class TestSessionStarred:
         resp = client.delete(
             "/session/starred",
             json={"command": "nonexistent"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
@@ -1646,7 +586,7 @@ class TestSessionStarred:
         client.delete(
             "/session/starred",
             json={"command": "shared-cmd"},
-            headers={"X-Session-ID": session_a},
+            headers={**browser_identity_headers(session_a)},
         )
         assert self._count_stars(session_a) == 0
         assert self._count_stars(session_b) == 1
@@ -1666,7 +606,7 @@ class TestSessionStarred:
         resp = client.delete(
             "/session/starred",
             json={},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 200
         assert self._count_stars(session_id) == 0
@@ -1685,67 +625,14 @@ class TestSessionStarred:
         client.delete(
             "/session/starred",
             json={},
-            headers={"X-Session-ID": session_a},
+            headers={**browser_identity_headers(session_a)},
         )
         assert self._count_stars(session_b) == 1
-
-
-# ── /session/token/info ───────────────────────────────────────────────────────
-
-
-class TestSessionTokenInfo:
-    def test_returns_null_for_uuid_session(self):
-        client = get_client()
-        resp = client.get(
-            "/session/token/info",
-            headers={"X-Session-ID": anonymous_session_id("session-token-info-anonymous")},
-        )
-        assert resp.status_code == 200
-        data = json.loads(resp.data)
-        assert data["token"] is None
-        assert data["created"] is None
-
-    def test_returns_token_for_tok_session(self, durable_identity_factory):
-        client = get_client()
-        token = durable_identity_factory("session-token-info").value
-        resp = client.get("/session/token/info", headers={"X-Session-ID": token})
-        assert resp.status_code == 200
-        data = json.loads(resp.data)
-        assert data["token"] == token
-
-    def test_returns_created_date_for_tok_session(self):
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": token}).data)
-        assert data["created"] is not None
-        assert len(data["created"]) > 0
-
-    def test_unknown_tok_fails_closed(self):
-        """An unknown legacy token cannot fall back to anonymous state."""
-        client = get_client()
-        phantom = "tok_" + "f" * 32
-        response = client.get("/session/token/info", headers={"X-Session-ID": phantom})
-        assert response.status_code == 401
-        assert response.get_json()["error"] == "revoked_token"
-
-    def test_revoked_tok_fails_closed(self):
-        """A revoked legacy token cannot fall back to anonymous state."""
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        client.post("/session/token/revoke", json={"token": token})
-        response = client.get("/session/token/info", headers={"X-Session-ID": token})
-        assert response.status_code == 401
-        assert response.get_json()["error"] == "revoked_token"
-
-
-# ── /session/preferences ──────────────────────────────────────────────────────
-
-
 class TestSessionPreferences:
     def test_returns_empty_preferences_when_none_saved(self):
         client = get_client()
         session_id = anonymous_session_id("prefs-empty-" + __import__("uuid").uuid4().hex[:8])
-        resp = client.get("/session/preferences", headers={"X-Session-ID": session_id})
+        resp = client.get("/session/preferences", headers={**browser_identity_headers(session_id)})
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["preferences"] == {}
@@ -1768,10 +655,10 @@ class TestSessionPreferences:
                 "pref_options_modal_last_tab": "secrets",
             }
         }
-        save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
+        save_resp = client.post("/session/preferences", json=payload, headers={**browser_identity_headers(session_id)})
         assert save_resp.status_code == 200
 
-        get_resp = client.get("/session/preferences", headers={"X-Session-ID": session_id})
+        get_resp = client.get("/session/preferences", headers={**browser_identity_headers(session_id)})
         data = json.loads(get_resp.data)
         assert data["preferences"] == payload["preferences"]
         assert data["updated"]
@@ -1791,83 +678,8 @@ class TestSessionPreferences:
                     "pref_unknown": "x",
                 }
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["preferences"] == {"pref_theme_name": "theme_light_blue"}
-
-
-# ── /session/token/revoke ─────────────────────────────────────────────────────
-
-
-class TestSessionTokenRevoke:
-    def test_returns_200_for_existing_token(self):
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        resp = client.post("/session/token/revoke", json={"token": token})
-        assert resp.status_code == 200
-        assert json.loads(resp.data)["ok"] is True
-
-    def test_deletes_token_from_db(self):
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        client.post("/session/token/revoke", json={"token": token})
-        with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT 1 FROM session_tokens WHERE token = ?", (token,)).fetchone()
-        assert row is None
-
-    def test_returns_404_for_unknown_token(self):
-        client = get_client()
-        fake = "tok_" + "b" * 32
-        resp = client.post("/session/token/revoke", json={"token": fake})
-        assert resp.status_code == 404
-
-    def test_rejects_uuid_format(self):
-        client = get_client()
-        resp = client.post(
-            "/session/token/revoke",
-            json={"token": "a1b2c3d4-0000-0000-0000-000000000002"},
-        )
-        assert resp.status_code == 400
-
-    def test_rejects_missing_token_field(self):
-        client = get_client()
-        resp = client.post("/session/token/revoke", json={})
-        assert resp.status_code == 400
-
-    def test_can_revoke_own_current_token(self):
-        """Revoking the caller's own active token is permitted."""
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        resp = client.post(
-            "/session/token/revoke",
-            json={"token": token},
-            headers={"X-Session-ID": token},
-        )
-        assert resp.status_code == 200
-
-    def test_records_audit_event_without_raw_token(self):
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        resp = client.post(
-            "/session/token/revoke",
-            json={"token": token},
-            headers={"X-Session-ID": token},
-        )
-        assert resp.status_code == 200
-        revoke_events = [
-            row for row in _audit_event_rows("session_token.revoke") if row["details"].get("session_hash") == token_hash(token)
-        ]
-        assert len(revoke_events) == 1
-        assert revoke_events[0]["target_type"] == "session_token"
-        assert revoke_events[0]["details"]["revoked_current"] is True
-        assert token not in json.dumps(revoke_events)
-
-    def test_second_revoke_returns_404(self):
-        """Once revoked, the same token cannot be revoked again."""
-        client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
-        client.post("/session/token/revoke", json={"token": token})
-        resp = client.post("/session/token/revoke", json={"token": token})
-        assert resp.status_code == 404

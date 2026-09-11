@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Literal
 
 from services.auth.contracts import InvalidIdentityValue, validate_anonymous_uuid, validate_identifier
@@ -42,12 +41,7 @@ class OwnerContext:
         return self.scope == "team"
 
 
-_LEGACY_TOKEN_RE = re.compile(r"\Atok_[A-Za-z0-9_-]{1,124}\Z")
-
-
 def _validate_personal_owner_id(owner_id: str) -> None:
-    if _LEGACY_TOKEN_RE.fullmatch(owner_id):
-        return
     if owner_id.startswith("wsp_"):
         try:
             validate_identifier(owner_id, "workspace")
@@ -121,7 +115,6 @@ def owner_context_from_authentication(result) -> OwnerContext:
         AnonymousContext,
         AuthenticatedContext,
         AuthenticationState,
-        LegacySessionContext,
     )
 
     if result.state not in {AuthenticationState.NO_CREDENTIAL, AuthenticationState.VALID}:
@@ -136,8 +129,6 @@ def owner_context_from_authentication(result) -> OwnerContext:
             actor_principal_id=result.context.principal_id,
             actor_credential_id=result.context.credential_id,
         )
-    if isinstance(result.context, LegacySessionContext):
-        return personal_owner_context(result.context.session_id)
     raise TeamError("Missing authentication cannot construct an owner context")
 
 

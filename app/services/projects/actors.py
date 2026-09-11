@@ -1,33 +1,32 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Team actor shaping helpers for project read models."""
+"""Team principal shaping helpers for project read models."""
 
 from __future__ import annotations
 
-from services.teams.storage import token_hash as _team_token_hash
-
-
-def team_actor_map(conn, team_id, session_ids):
-    values = [str(value or "").strip() for value in session_ids if str(value or "").strip()]
+def team_actor_map(conn, team_id, workspace_ids):
+    values = [str(value or "").strip() for value in workspace_ids if str(value or "").strip()]
     if not team_id or not values:
         return {}
-    hash_to_session = {_team_token_hash(value): value for value in values}
-    placeholders = ",".join("?" for _ in hash_to_session)
+    placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_token_hash, display_name, role, status, removed_at "
-        "FROM team_members WHERE team_id = ? "
-        f"AND session_token_hash IN ({placeholders})",  # nosec
-        (team_id, *hash_to_session.keys()),
+        "SELECT team_members.id, personal_workspaces.id AS personal_workspace_id, "
+        "team_members.display_name, team_members.role, team_members.status, team_members.removed_at "
+        "FROM team_members JOIN personal_workspaces "
+        "ON personal_workspaces.principal_id = team_members.principal_id "
+        "WHERE team_members.team_id = ? "
+        f"AND personal_workspaces.id IN ({placeholders})",  # nosec
+        (team_id, *values),
     ).fetchall()
     actors = {}
     for row in rows:
-        session_value = hash_to_session.get(str(row["session_token_hash"] or ""))
-        if not session_value:
+        workspace_id = str(row["personal_workspace_id"] or "")
+        if not workspace_id:
             continue
         status = str(row["status"] or "")
         display_name = str(row["display_name"] or "").strip()
-        actors[session_value] = {
+        actors[workspace_id] = {
             "member_id": row["id"],
             "display_name": display_name or ("Former member" if status == "removed" else "Team member"),
             "role": row["role"],

@@ -200,7 +200,7 @@ def assessment_oast_paths() -> dict[str, Any]:
     ]
     errors = {
         "400": _response("Invalid private OAST request", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot prepare private OAST", _ref("ApiError")),
         "404": _response(
             "Project assessment check or OAST correlation not found",

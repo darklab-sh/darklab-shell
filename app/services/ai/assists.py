@@ -300,7 +300,7 @@ def _owned_run_row(session_id: str, run_id: str, *, team_id: str = "") -> dict[s
     with get_db_connect()() as conn:
         row = conn.execute(
             "SELECT id, personal_workspace_id, team_id, command, finished, exit_code FROM runs "
-            f"WHERE {owner.sql}",  # nosec B608
+            f"WHERE {owner.sql}",  # nosec
             owner.params,
         ).fetchone()
     return dict(row) if row else None
