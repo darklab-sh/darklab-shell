@@ -396,7 +396,7 @@ class TestSyntheticPostFilterParsing:
             side_effect=InvalidWorkspacePath("parent directory does not exist"),
         ), mock.patch("services.runs.output_sink_files.write_owner_workspace_text_file") as write_file:
             processor.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 cfg={"workspace_enabled": True},
             )
             filtered = redactor.process_output_line(raw_line)
@@ -439,7 +439,7 @@ class TestSyntheticPostFilterParsing:
             "services.runs.output_sink_files.append_owner_workspace_text_file",
         ) as append_file:
             append_processor.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 cfg={"workspace_enabled": True},
             )
             assert append_processor.process_output_line("appended\n") == ["appended\n"]
@@ -465,7 +465,7 @@ class TestSyntheticPostFilterParsing:
             side_effect=OSError("/data/workspaces/sess_private/ping.txt: disk unavailable"),
         ), mock.patch("services.runs.output_sink_files.log.warning") as warning:
             processor.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 cfg={"workspace_enabled": True},
             )
             assert processor.process_output_line("visible\n") == ["visible\n"]
@@ -507,7 +507,7 @@ class TestSyntheticPostFilterParsing:
             side_effect=InvalidWorkspacePath("parent directory does not exist"),
         ):
             processor.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 workspace_cwd="reports/daily",
                 cfg={"workspace_enabled": True},
             )
@@ -524,7 +524,7 @@ class TestSyntheticPostFilterParsing:
             return_value=existing_directory,
         ), pytest.raises(ValueError, match="must be a file"):
             directory.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 cfg={"workspace_enabled": True},
             )
 
@@ -534,7 +534,7 @@ class TestSyntheticPostFilterParsing:
             side_effect=WorkspaceDisabled("disabled"),
         ), pytest.raises(ValueError, match="disabled"):
             disabled.configure_output_sink(
-                owner_context=personal_owner_context("tok_" + "8" * 32),
+                owner_context=personal_owner_context("wsp_" + "8" * 32),
                 cfg={"workspace_enabled": False},
             )
 

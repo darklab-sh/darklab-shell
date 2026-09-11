@@ -576,7 +576,7 @@ def acknowledge_escalation(
         owner_column_first=False,
     )
     row = conn.execute(
-        _ACKNOWLEDGE_ESCALATION_SQL.format(owner_clause=owner.sql),  # nosec B608
+        _ACKNOWLEDGE_ESCALATION_SQL.format(owner_clause=owner.sql),  # nosec
         (escalation_id, project_id, *owner.params),
     ).fetchone()
     if row is None:

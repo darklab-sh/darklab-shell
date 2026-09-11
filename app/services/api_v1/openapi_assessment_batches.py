@@ -280,7 +280,7 @@ def assessment_batch_preview_paths() -> dict[str, Any]:
     }
     errors = {
         "400": _error("Invalid preview selection or page"),
-        "401": _error("Missing, invalid, or revoked token"),
+        "401": _error("Missing, invalid, expired, or revoked PAT"),
         "404": _error("Project, assessment, or preview not found"),
         "409": _error("Assessment state, scope, or preview conflict"),
         "429": _error("Rate limit exceeded"),

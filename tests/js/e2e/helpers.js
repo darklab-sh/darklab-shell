@@ -208,7 +208,16 @@ export async function browserSessionId(page) {
   return page.evaluate(() => {
     if (typeof window.getSessionId === 'function') return window.getSessionId()
     if (typeof window.SESSION_ID === 'string' && window.SESSION_ID) return window.SESSION_ID
-    return localStorage.getItem('session_id')
+    return localStorage.getItem('anonymous_id')
+  })
+}
+
+export async function browserRequestIdentityHeaders(page) {
+  await waitForE2ETestHooks(page)
+  return page.evaluate(() => {
+    const credential = localStorage.getItem('access_credential') || ''
+    if (credential) return { 'X-Darklab-Credential': credential }
+    return { 'X-Darklab-Anonymous-ID': localStorage.getItem('anonymous_id') || '' }
   })
 }
 
@@ -978,7 +987,7 @@ export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
       const sawNewLine = rawLines.length > previousLineCount
       const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
       const sensitivePrefix = expectedCmd.match(
-        /^((?:session-token\s+(?:set|revoke)|credential\s+(?:create|use|expiry|rotate|revoke|recover)))\b/i,
+        /^(credential\s+(?:create|use|expiry|rotate|revoke|recover))\b/i,
       )?.[1] || ''
       const sawMaskedEcho = sensitivePrefix && (
         text.includes(`$${sensitivePrefix}`) || text.includes(`$ ${sensitivePrefix}`)

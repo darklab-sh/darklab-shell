@@ -23,6 +23,7 @@ from services.projects.crud import create_project
 from services.projects.utils import now
 from services.runs.finalization import save_completed_run
 from services.runs.finalization_takeover import materialize_takeover_confirmation_for_finalize
+from identity_helpers import anonymous_session_id
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -36,7 +37,7 @@ def _seed_takeover_evidence(
     nuclei_timestamp: str = "2026-08-07T22:02:00Z",
 ):
     suffix = uuid.uuid4().hex[:12]
-    session_id = f"tok_takeover_{suffix}"
+    session_id = anonymous_session_id(f"takeover-{suffix}")
     project = create_project(session_id, {"name": f"Takeover {suffix}"})
     assert project is not None
     project_id = str(project["id"])

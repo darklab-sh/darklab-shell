@@ -34,7 +34,7 @@ from services.teams.ownership_queries import (
     OwnerKeyShape,
     PersonalTeamRows,
     composite_owner_predicate,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
 from services.teams.scope import owner_context_for_scope, team_owner_context
 
@@ -170,9 +170,9 @@ def _max_schedules_per_session() -> int:
 
 def _owner_schedule_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
-        token_column=f"{prefix}personal_workspace_id",
+        workspace_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -647,13 +647,13 @@ def pause_team_schedules(conn, team_id: str, *, reason: str = "team_archived") -
         return 0
     owner = composite_owner_predicate(
         team_owner_context(normalized_team_id),
-        owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_key_shape=OwnerKeyShape.PERSONAL_WORKSPACE,
         team_column="team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
         key_values=(("enabled", _bool_param(True)),),
     )
     result = conn.execute(
-        "UPDATE schedules SET enabled = ?, paused_reason = ?, updated = ? WHERE "  # nosec B608
+        "UPDATE schedules SET enabled = ?, paused_reason = ?, updated = ? WHERE "  # nosec
         + owner.sql,
         (_bool_param(False), reason, _utc_now(), *owner.params),
     )

@@ -1521,7 +1521,7 @@
           </div>
           <div class="faq-a form-fieldset">
             <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-            <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
+            <div class="options-access-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
             <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
           </div>
         </div>
@@ -1537,7 +1537,7 @@
               <input type="checkbox" id="options-project-auto-link-run-entities-toggle">
               <span>Also add Atlas entities from auto-linked runs</span>
             </label>
-            <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
+            <div class="options-access-desc">Built-in administrative commands are never added as project runs.</div>
           </div>
         </div>
         <div class="faq-item options-desktop-only">
@@ -1645,12 +1645,12 @@
             <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Store API keys for the active personal or team scope. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
-            <div class="options-session-token-actions">
+            <div class="options-access-desc">Store API keys for the active personal or team scope. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
+            <div class="options-access-actions">
               <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
               <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
             </div>
-            <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-secrets-msg" class="options-access-msg" role="status" aria-live="polite" style="display:none"></div>
             <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
           </div>
         </div>
@@ -1662,13 +1662,13 @@
             <button id="options-teams-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh teams" title="Refresh teams">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Use teams to share team-scoped runs, projects, schedules, watchers, and Atlas data with other principals.</div>
-            <div class="options-session-token-actions">
+            <div class="options-access-desc">Use teams to share team-scoped runs, projects, schedules, watchers, and Atlas data with other principals.</div>
+            <div class="options-access-actions">
               <button id="options-team-create-btn" class="btn btn-secondary btn-compact" type="button">Create team</button>
               <button id="options-team-join-btn" class="btn btn-secondary btn-compact" type="button">Join team</button>
               <button id="options-team-recover-btn" class="btn btn-secondary btn-compact" type="button">Use recovery code</button>
             </div>
-            <div id="options-teams-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-teams-msg" class="options-access-msg" role="status" aria-live="polite" style="display:none"></div>
             <div id="options-team-form" class="options-team-form"></div>
             <div id="options-teams-list" class="options-team-list" aria-live="polite"></div>
             <div id="options-team-detail" class="options-team-detail" aria-live="polite"></div>
@@ -1682,11 +1682,11 @@
             <button id="options-notification-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh notification channels" title="Refresh notification channels">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Send run, schedule, and watcher updates to destinations owned by the active personal workspace or team. Secret values are stored in the vault and never shown again.</div>
-            <div class="options-session-token-actions">
+            <div class="options-access-desc">Send run, schedule, and watcher updates to destinations owned by the active personal workspace or team. Secret values are stored in the vault and never shown again.</div>
+            <div class="options-access-actions">
               <button id="options-notification-new-btn" class="btn btn-secondary btn-compact" type="button">Add channel</button>
             </div>
-            <div id="options-notification-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-notification-msg" class="options-access-msg" role="status" aria-live="polite" style="display:none"></div>
             <div id="options-notification-list" class="options-secrets-list" aria-live="polite"></div>
           </div>
         </div>
@@ -1701,7 +1701,7 @@
     <div class="faq-header team-scope-header">
       <div>
         <span class="faq-title" id="team-scope-title">ACTIVE SCOPE</span>
-        <div id="team-scope-current" class="options-session-token-desc">Personal</div>
+        <div id="team-scope-current" class="options-access-desc">Personal</div>
       </div>
       <button type="button" class="close-btn team-scope-close" aria-label="Close scope selector">✕</button>
     </div>

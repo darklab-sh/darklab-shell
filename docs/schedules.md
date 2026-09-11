@@ -1,8 +1,8 @@
 # Scheduled Runs
 
-Scheduled runs let a durable session token keep running one saved command on a cadence, even when no browser tab is open. Use them for routine checks such as a daily `nmap`, an hourly health probe, or a recurring passive recon command that should land in normal History.
+Scheduled runs let a kept personal workspace or team keep running one saved command on a cadence, even when no browser tab is open. Use them for routine checks such as a daily `nmap`, an hourly health probe, or a recurring passive recon command that should land in normal History.
 
-Schedules are owned by the active personal or team scope. Anonymous browser sessions cannot create them because the worker needs a durable `tok_` token it can check after the browser closes, and token revocation must stop later personal fires. Team-owned schedules stay with the team and are visible to other members when that team scope is active. Team viewers can read schedules and fire audit rows, while schedule creation, edits, deletes, and manual fires require automation-management permission.
+Schedules are owned by the active personal workspace or team. Anonymous browser workspaces can't create them because the worker needs an owner that survives after the browser closes. Team-owned schedules stay with the team and are visible to other members when that team scope is active. Team viewers can read schedules and fire audit rows, while schedule creation, edits, deletes, and manual fires require automation-management permission.
 
 ## Creating Schedules
 
@@ -83,7 +83,7 @@ The overlap policy is stored on the schedule row for forward compatibility, but 
 
 ## Revoked Tokens And Archived Teams
 
-Personal schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and keeps the row in storage instead of deleting it. Clients using the revoked token lose access to session-scoped schedule routes, so they will not be able to list or edit those rows after revocation.
+Personal schedules belong to the principal's personal workspace. Revoking one credential leaves them running by default because another credential for the same principal still owns the same data. The revoke flow can also pause definitions created or last changed through that credential. Disabling the principal is the global stop; it prevents later fires and leaves the rows available for incident review.
 
 Team-owned schedules pause when the team is archived. They do not move into any member's personal scope, which keeps the ownership trail clear if the team is later reactivated or inspected. Reactivating the team does not resume them automatically; resume the schedule when it should fire again.
 

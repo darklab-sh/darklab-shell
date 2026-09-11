@@ -478,7 +478,7 @@ def _load_findings(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
         )
         rows = conn.execute(
             "SELECT id, severity, kind, title, raw_line, line_number, status "
-            f"FROM findings WHERE {owner.sql} AND COALESCE(suppressed, FALSE) = FALSE "  # nosec B608
+            f"FROM findings WHERE {owner.sql} AND COALESCE(suppressed, FALSE) = FALSE "  # nosec
             "ORDER BY line_number, created LIMIT 200",
             owner.params,
         ).fetchall()
@@ -522,7 +522,7 @@ def _load_entities(conn, session_id: str, run_id: str, *, team_id: str = "") -> 
         rows = conn.execute(
             "SELECT e.type, e.canonical_value FROM entities e "
             "JOIN entity_run_links erl ON erl.entity_id = e.id "
-            f"WHERE {owner.sql} AND COALESCE(e.suppressed, FALSE) = FALSE "  # nosec B608
+            f"WHERE {owner.sql} AND COALESCE(e.suppressed, FALSE) = FALSE "  # nosec
             "ORDER BY e.type, e.canonical_value",
             owner.params,
         ).fetchall()

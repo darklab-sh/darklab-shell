@@ -221,9 +221,9 @@ def current_request_scope(
                 )
             )
         return RequestScope(personal_owner_context(session_id))
-    if authenticated is None and not session_id.startswith("tok_"):
+    if authenticated is None:
         _raise_scope_error(
-            "team_token_required",
+            "team_credential_required",
             "Team scope requires a kept workspace.",
             request=request,
             session_id=session_id,

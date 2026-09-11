@@ -84,7 +84,7 @@ def cached_completed_assist(
                 personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
             )
             row = active_conn.execute(
-                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec
                 "AND status = 'completed' ORDER BY created_at DESC LIMIT 1",
                 owner.params,
             ).fetchone()
@@ -115,7 +115,7 @@ def active_assist(
                 personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
             )
             row = active_conn.execute(
-                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec
                 "AND status IN ('queued', 'in_progress') ORDER BY created_at DESC LIMIT 1",
                 owner.params,
             ).fetchone()
@@ -390,7 +390,7 @@ def list_recent_assists_for_run(
                 personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
             )
             rows = conn.execute(
-                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec B608
+                f"SELECT * FROM ai_run_assists WHERE {owner.sql} "  # nosec
                 "ORDER BY created_at DESC LIMIT ?",
                 (*owner.params, normalized_limit),
             ).fetchall()

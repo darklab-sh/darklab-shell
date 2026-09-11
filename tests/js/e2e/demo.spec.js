@@ -31,7 +31,7 @@ import {
   openCaptureRunComparison,
   waitForWorkflowsReady,
 } from './ui_capture_shared.js'
-import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
+import { CAPTURE_ANONYMOUS_ID } from '../../../.tooling/playwright.visual.contracts.js'
 
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62
@@ -623,13 +623,13 @@ test('demo', async ({ page }) => {
   test.setTimeout(300_000)
   const captureFrames = process.env.DEMO_DISABLE_FRAME_CAPTURE !== '1'
 
-  await page.addInitScript((token) => {
+  await page.addInitScript((anonymousId) => {
     try {
-      localStorage.setItem('session_token', token)
+      localStorage.setItem('anonymous_id', anonymousId)
     } catch (_) {
       // Ignore storage failures in non-standard contexts.
     }
-  }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+  }, process.env.DEMO_ANONYMOUS_ID || CAPTURE_ANONYMOUS_ID)
   await installCommonCaptureMocks(page)
 
   // ── Optional screenshot-frame fallback ────────────────────────────────────
@@ -668,7 +668,7 @@ test('demo', async ({ page }) => {
   await assertVisualFlowGuardrails(page, {
     mode: 'desktop',
     requireSeededHistory: true,
-    expectedSessionToken: process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN,
+    expectedAnonymousId: process.env.DEMO_ANONYMOUS_ID || CAPTURE_ANONYMOUS_ID,
   })
 
   // Start the capture loop only after the terminal is visible so the first

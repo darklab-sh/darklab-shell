@@ -18,7 +18,7 @@ from services.projects.contracts import ProjectWorkspaceError, ProjectWorkspaceN
 from services.auth.background_authorization import principal_id_for_workspace
 from services.projects.monitoring import get_project_monitoring_summary
 from services.projects.scope import shared_owner_where
-from services.teams.ownership_queries import PersonalTeamRows, token_keyed_owner_predicate
+from services.teams.ownership_queries import PersonalTeamRows, workspace_keyed_owner_predicate
 from services.teams.scope import owner_context_for_scope
 from services.notifications.dispatcher import enqueue as enqueue_notification
 from services.notifications.models import TRIGGER_PROJECT_DIGEST
@@ -223,13 +223,13 @@ def _validate_channel_ids(conn: Any, session_id: str, team_id: str, channel_ids:
     if not channel_ids:
         return
     placeholders = ",".join("?" for _ in channel_ids)
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         owner_context_for_scope(session_id, team_id=team_id),
         team_column="team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
     rows = conn.execute(
-        "SELECT id FROM notification_channels WHERE "  # nosec B608
+        "SELECT id FROM notification_channels WHERE "  # nosec
         + owner.sql
         + f" AND id IN ({placeholders})",
         (*owner.params, *channel_ids),

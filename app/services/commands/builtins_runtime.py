@@ -76,7 +76,7 @@ def _recent_runs(session_id: str, limit: int | None = None):
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         return conn.execute(
-            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec B608
+            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec
             "ORDER BY started DESC LIMIT ?",
             (*owner.params, effective_limit),
         ).fetchall()
@@ -88,7 +88,7 @@ def _session_history_runs(session_id: str):
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         return conn.execute(
-            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec B608
+            f"SELECT id, command, started, finished, exit_code FROM runs WHERE {owner.sql} "  # nosec
             "ORDER BY started ASC, id ASC",
             owner.params,
         ).fetchall()
@@ -98,7 +98,7 @@ def _session_row_count(table: str, session_id: str) -> int:
     owner = personal_only_owner_predicate(personal_owner_context(session_id))
     with get_db_connect()() as conn:
         row = conn.execute(
-            f"SELECT COUNT(*) AS count FROM {table} WHERE {owner.sql}",  # nosec B608
+            f"SELECT COUNT(*) AS count FROM {table} WHERE {owner.sql}",  # nosec
             owner.params,
         ).fetchone()
     return int(row["count"]) if row else 0
@@ -668,7 +668,7 @@ def run_builtin_stats(
               FROM runs
              WHERE {owner.sql}
              ORDER BY started ASC, id ASC
-            """,  # nosec B608
+            """,  # nosec
             owner.params,
         ).fetchall()
 

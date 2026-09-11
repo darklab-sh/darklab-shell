@@ -776,7 +776,7 @@ test.describe('history drawer', () => {
         && response.status() === 200
     })
 
-    // Reload without clearing localStorage — session_id is preserved, so starred
+    // Reload without clearing localStorage — the anonymous id is preserved, so starred
     // commands are still in the server DB for this session.
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('#cmd').waitFor()

@@ -57,7 +57,7 @@ let exportedRefreshOptionsTeams = null;
 
   function _durableAccessActive() {
     const identityId = String(typeof importedGetSessionId === 'function' ? importedGetSessionId() : '');
-    return identityId.startsWith('crd_') || identityId.startsWith('pat_') || identityId.startsWith('tok_');
+    return identityId.startsWith('crd_') || identityId.startsWith('pat_');
   }
 
   function _msg(text, { error = false } = {}) {
@@ -409,7 +409,7 @@ let exportedRefreshOptionsTeams = null;
         _field('Your display name', _input('display_name', 'nona', existingValues.display_name || ''))
       );
     }
-    const actions = _node('div', 'options-session-token-actions options-team-field-full');
+    const actions = _node('div', 'options-access-actions options-team-field-full');
     const submit = document.createElement('button');
     submit.type = 'submit';
     submit.className = 'btn btn-secondary btn-compact';
@@ -573,7 +573,7 @@ let exportedRefreshOptionsTeams = null;
         _field('Label', _input('label', 'Alice laptop')),
         _field('Max uses', _numberInput('max_uses', '1'))
       );
-      const actions = _node('div', 'options-session-token-actions options-team-field-full');
+      const actions = _node('div', 'options-access-actions options-team-field-full');
       const submit = document.createElement('button');
       submit.type = 'submit';
       submit.className = 'btn btn-secondary btn-compact';
@@ -612,7 +612,7 @@ let exportedRefreshOptionsTeams = null;
     const canRecovery = _actorCan('manage_recovery');
     const header = _node('div', 'options-team-section-title', 'Recovery');
     section.appendChild(header);
-    const actions = _node('div', 'options-session-token-actions');
+    const actions = _node('div', 'options-access-actions');
     const rotate = _button('Rotate recovery code', 'rotate-recovery');
     rotate.disabled = !canRecovery;
     actions.appendChild(rotate);
@@ -759,7 +759,7 @@ let exportedRefreshOptionsTeams = null;
       _field('From', from),
       _field('To', to),
     );
-    const actions = _node('div', 'options-session-token-actions options-team-field-full');
+    const actions = _node('div', 'options-access-actions options-team-field-full');
     const apply = _button('Apply', 'activity-apply');
     apply.dataset.teamId = teamId;
     const clear = _button('Clear', 'activity-clear', { role: 'ghost' });
@@ -938,7 +938,7 @@ let exportedRefreshOptionsTeams = null;
       section.appendChild(list);
     }
     if (st.hasMore || st.events.length) {
-      const actions = _node('div', 'options-session-token-actions');
+      const actions = _node('div', 'options-access-actions');
       const viewAll = _button('View activity', 'detail-tab', { role: 'ghost' });
       viewAll.dataset.teamDetailTab = 'activity';
       viewAll.dataset.teamId = teamId;

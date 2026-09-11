@@ -127,7 +127,7 @@ def finding_evidence_paths() -> dict[str, Any]:
     evidence_link_id = _param("evidence_link_id", "Finding evidence link id")
     errors = {
         "400": _response("Invalid finding evidence request", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot triage findings", _ref("ApiError")),
         "404": _response("Project finding or evidence not found", _ref("ApiError")),
         "409": _response("Finding evidence quota exceeded", _ref("ApiError")),

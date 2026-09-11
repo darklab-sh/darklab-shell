@@ -36,7 +36,7 @@ import app as shell_app_module
 import config as app_config
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
-from identity_helpers import anonymous_session_id
+from identity_helpers import anonymous_session_id, browser_identity_headers, principal_identity
 import core.database as db_module
 from core.database import DB_PATH, db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields, configure_logging
@@ -44,6 +44,7 @@ from services.assessments import profiles as assessment_profiles
 from services.assessments.batch import active_monitor as assessment_active_monitor
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _emit(formatter, level, msg, extra=None):
     """Emit one log record through a formatter and return the formatted string."""
@@ -91,11 +92,13 @@ def _run_config_startup(
             "WORKSPACE_ROOT",
         }:
             env.pop(name, None)
-    env.update({
-        "APP_CONF_DIR": str(shipped_dir),
-        "APP_LOCAL_CONF_DIR": str(local_dir),
-        "PYTHONPATH": str(repo_root / "app"),
-    })
+    env.update(
+        {
+            "APP_CONF_DIR": str(shipped_dir),
+            "APP_LOCAL_CONF_DIR": str(local_dir),
+            "PYTHONPATH": str(repo_root / "app"),
+        }
+    )
 
     if fatal:
         program = "import config"
@@ -104,10 +107,7 @@ def _run_config_startup(
         if configure_twice:
             calls.append("configure_runtime_logging()")
         calls.append("log_loaded_config()")
-        program = (
-            "from runtime_bootstrap import configure_runtime_logging, log_loaded_config; "
-            + "; ".join(calls)
-        )
+        program = "from runtime_bootstrap import configure_runtime_logging, log_loaded_config; " + "; ".join(calls)
     return subprocess.run(
         [sys.executable, "-c", program],
         cwd=repo_root,
@@ -131,7 +131,11 @@ def get_client(*, use_forwarded_for=True):
 
 def _post_brokered_run(client, command, *, headers=None):
     request_headers = dict(headers or {})
-    request_headers.setdefault("X-Session-ID", anonymous_session_id("log-test-session"))
+    if not {
+        "X-Darklab-Anonymous-ID",
+        "X-Darklab-Credential",
+    }.intersection(request_headers):
+        request_headers["X-Darklab-Anonymous-ID"] = anonymous_session_id("log-test-session")
     with mock.patch("blueprints.run.broker_available", return_value=True):
         start_resp = client.post("/runs", json={"command": command}, headers=request_headers)
     if start_resp.status_code != 202:
@@ -174,11 +178,17 @@ class _FakeProc:
 
 # ── _extra_fields ─────────────────────────────────────────────────────────────
 
+
 class TestExtraFields:
     def _make_record(self, **kwargs):
         record = logging.LogRecord(
-            name="shell", level=logging.INFO, pathname="",
-            lineno=0, msg="TEST", args=(), exc_info=None,
+            name="shell",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="TEST",
+            args=(),
+            exc_info=None,
         )
         for k, v in kwargs.items():
             setattr(record, k, v)
@@ -213,9 +223,11 @@ class TestExtraFields:
 
 # ── _TextFormatter ────────────────────────────────────────────────────────────
 
+
 class TestTextFormatter:
     def test_output_starts_with_iso_timestamp(self):
         import re
+
         out = _emit(_TextFormatter(), logging.INFO, "TEST")
         assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", out)
 
@@ -300,6 +312,7 @@ class TestTextFormatter:
 
 # ── GELFFormatter ─────────────────────────────────────────────────────────────
 
+
 class TestGELFFormatter:
     def test_output_is_valid_json(self):
         out = _emit(GELFFormatter(), logging.INFO, "TEST")
@@ -343,42 +356,66 @@ class TestGELFFormatter:
         assert "ip" not in data
 
     def test_multiple_extras_all_prefixed(self):
-        data = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "RUN_START",
-            extra={
-                "assist_status": "completed",
-                "fire_status": "fired",
-                "http_status": 202,
-                "ip": "1.2.3.4",
-                "project_status": "active",
-                "provider_status": "ok",
-                "run_id": "abc",
-                "exit_code": 0,
-                "version": "2.6.0",
-                "source": "config.local.yaml",
-                "workflow_status": "completed",
-            },
-        ))
-        numeric_status = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "LEGACY_HTTP_EVENT",
-            extra={"status": 200},
-        ))
-        text_status = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "LEGACY_STATE_EVENT",
-            extra={"status": "error"},
-        ))
-        explicit_status = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "MIXED_COMPAT_EVENT",
-            extra={"http_status": 202, "status": 500},
-        ))
-        invalid_http_status = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "INVALID_HTTP_STATUS_EVENT",
-            extra={"http_status": "upstream_error"},
-        ))
-        normalized_feature_status = json.loads(_emit(
-            GELFFormatter(), logging.INFO, "INVALID_FEATURE_STATUS_EVENT",
-            extra={"provider_status": 503},
-        ))
+        data = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "RUN_START",
+                extra={
+                    "assist_status": "completed",
+                    "fire_status": "fired",
+                    "http_status": 202,
+                    "ip": "1.2.3.4",
+                    "project_status": "active",
+                    "provider_status": "ok",
+                    "run_id": "abc",
+                    "exit_code": 0,
+                    "version": "2.6.0",
+                    "source": "config.local.yaml",
+                    "workflow_status": "completed",
+                },
+            )
+        )
+        numeric_status = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "LEGACY_HTTP_EVENT",
+                extra={"status": 200},
+            )
+        )
+        text_status = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "LEGACY_STATE_EVENT",
+                extra={"status": "error"},
+            )
+        )
+        explicit_status = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "MIXED_COMPAT_EVENT",
+                extra={"http_status": 202, "status": 500},
+            )
+        )
+        invalid_http_status = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "INVALID_HTTP_STATUS_EVENT",
+                extra={"http_status": "upstream_error"},
+            )
+        )
+        normalized_feature_status = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.INFO,
+                "INVALID_FEATURE_STATUS_EVENT",
+                extra={"provider_status": 503},
+            )
+        )
         assert data["_assist_status"] == "completed"
         assert data["_fire_status"] == "fired"
         assert data["_http_status"] == 202
@@ -456,6 +493,7 @@ class TestGELFFormatter:
 
 
 # ── configure_logging ─────────────────────────────────────────────────────────
+
 
 class TestConfigureLogging:
     def teardown_method(self, method):  # noqa: ARG002
@@ -558,10 +596,7 @@ class TestConfigStartupLogging:
         result = _run_config_startup(
             tmp_path,
             base_config=(
-                "app_name: startup-test\n"
-                "log_level: DEBUG\n"
-                f"log_format: {log_format}\n"
-                "raw_packet_scanning_enabled: banana\n"
+                f"app_name: startup-test\nlog_level: DEBUG\nlog_format: {log_format}\nraw_packet_scanning_enabled: banana\n"
             ),
             configure_twice=True,
         )
@@ -580,14 +615,8 @@ class TestConfigStartupLogging:
             assert warning["_fallback"] is False
             assert loaded["_warning_count"] == 1
         else:
-            warning = next(
-                line for line in result.stderr.splitlines()
-                if "CONFIG_VALUE_DEFAULTED" in line
-            )
-            loaded = next(
-                line for line in result.stderr.splitlines()
-                if "CONFIG_LOADED" in line
-            )
+            warning = next(line for line in result.stderr.splitlines() if "CONFIG_VALUE_DEFAULTED" in line)
+            loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
             assert "key=raw_packet_scanning_enabled" in warning
             assert "reason=invalid_bool" in warning
             assert "fallback=False" in warning
@@ -597,10 +626,7 @@ class TestConfigStartupLogging:
         result = _run_config_startup(
             tmp_path,
             base_config=(
-                "log_level: ERROR\n"
-                "log_format: text\n"
-                "raw_packet_scanning_enabled: banana\n"
-                "unknown_startup_key: ignored\n"
+                "log_level: ERROR\nlog_format: text\nraw_packet_scanning_enabled: banana\nunknown_startup_key: ignored\n"
             ),
         )
 
@@ -617,14 +643,8 @@ class TestConfigStartupLogging:
 
         assert result.returncode == 0, result.stderr
         assert result.stderr.count("CONFIG_UNKNOWN_KEY_IGNORED") == 1
-        warning = next(
-            line for line in result.stderr.splitlines()
-            if "CONFIG_UNKNOWN_KEY_IGNORED" in line
-        )
-        loaded = next(
-            line for line in result.stderr.splitlines()
-            if "CONFIG_LOADED" in line
-        )
+        warning = next(line for line in result.stderr.splitlines() if "CONFIG_UNKNOWN_KEY_IGNORED" in line)
+        loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
         assert "key=unknown_password" in warning
         assert str(tmp_path / "local" / "config.local.yaml") in warning
         assert "warning_count=1" in loaded
@@ -635,16 +655,8 @@ class TestConfigStartupLogging:
         secret_value = "release-secret-must-not-appear"
         result = _run_config_startup(
             tmp_path,
-            base_config=(
-                "app_name: startup-test\n"
-                "log_level: DEBUG\n"
-                f"log_format: {log_format}\n"
-            ),
-            local_config=(
-                "notifications:\n"
-                "  smtp:\n"
-                f"    password_secret_id: [{secret_value}\n"
-            ),
+            base_config=(f"app_name: startup-test\nlog_level: DEBUG\nlog_format: {log_format}\n"),
+            local_config=(f"notifications:\n  smtp:\n    password_secret_id: [{secret_value}\n"),
             fatal=True,
         )
 
@@ -663,10 +675,7 @@ class TestConfigStartupLogging:
             assert failure["_error"] == "ParserError"
             assert "full_message" not in failure
         else:
-            failure = next(
-                line for line in result.stderr.splitlines()
-                if "CONFIG_LOAD_FAILED" in line
-            )
+            failure = next(line for line in result.stderr.splitlines() if "CONFIG_LOAD_FAILED" in line)
             assert "[ERROR]" in failure
             assert "phase=yaml_parse" in failure
             assert f"source={tmp_path / 'local' / 'config.local.yaml'}" in failure
@@ -675,16 +684,17 @@ class TestConfigStartupLogging:
 
 # ── Log event emission ────────────────────────────────────────────────────────
 
+
 class TestCmdDeniedEvent:
-    """CMD_DENIED is emitted at WARNING when is_command_allowed() returns False.
-    """
+    """CMD_DENIED is emitted at WARNING when is_command_allowed() returns False."""
 
     # RFC 5737 TEST-NET-1 — never routed, guaranteed unique from real traffic
     _IP = "192.0.2.10"
 
     def _post_run(self, client, command):
         return _post_brokered_run(
-            client, command,
+            client,
+            command,
             headers={"X-Forwarded-For": self._IP},
         )
 
@@ -724,6 +734,7 @@ class TestCmdDeniedEvent:
         assert "rule_id" in call.kwargs["extra"]
 
         from blueprints import run as run_routes
+
         readiness = run_routes._cmd_denied_log_extra(
             self._IP,
             anonymous_session_id("log-test-session"),
@@ -748,6 +759,7 @@ class TestRateLimitEvent:
 
     def test_rate_limit_emits_warning(self):
         from werkzeug.exceptions import TooManyRequests
+
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
@@ -758,6 +770,7 @@ class TestRateLimitEvent:
 
     def test_rate_limit_extra_has_ip(self):
         from werkzeug.exceptions import TooManyRequests
+
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
@@ -770,6 +783,7 @@ class TestRateLimitEvent:
 
     def test_rate_limit_extra_has_limit_description(self):
         from werkzeug.exceptions import TooManyRequests
+
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
@@ -778,17 +792,20 @@ class TestRateLimitEvent:
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert call.kwargs["extra"]["limit_policy"] == "5 per 1 second"
         assert call.kwargs["extra"]["scope"] == "global"
-        data = json.loads(_emit(
-            GELFFormatter(),
-            logging.WARNING,
-            "RATE_LIMIT",
-            extra=call.kwargs["extra"],
-        ))
+        data = json.loads(
+            _emit(
+                GELFFormatter(),
+                logging.WARNING,
+                "RATE_LIMIT",
+                extra=call.kwargs["extra"],
+            )
+        )
         assert data["_limit_policy"] == "5 per 1 second"
         assert "_limit" not in data
 
     def test_rate_limit_returns_json_429(self):
         from werkzeug.exceptions import TooManyRequests
+
         e = TooManyRequests()
         e.description = "30 per 1 minute"
         with _test_app().test_request_context("/runs", method="POST"):
@@ -836,7 +853,7 @@ class TestShareCreatedEvent:
             client.post(
                 "/share",
                 json={"label": "test label", "content": ["line1"]},
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
         share_calls = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED"]
         assert len(share_calls) == 1
@@ -847,7 +864,7 @@ class TestShareCreatedEvent:
             client.post(
                 "/share",
                 json={"label": "my-label", "content": []},
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED")
         assert call.kwargs["extra"]["label"] == "my-label"
@@ -858,7 +875,7 @@ class TestShareCreatedEvent:
             resp = client.post(
                 "/share",
                 json={"label": "lbl", "content": []},
-                headers={"X-Session-ID": anonymous_session_id('test-session')},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
         share_id = json.loads(resp.data)["id"]
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED")
@@ -873,7 +890,8 @@ class TestCmdRewriteEvent:
 
     def _post_run(self, client, command):
         return _post_brokered_run(
-            client, command,
+            client,
+            command,
             headers={"X-Forwarded-For": self._IP},
         )
 
@@ -929,16 +947,21 @@ class TestSecretEnvironmentLogging:
         from blueprints import run as run_routes
         from services.secrets.vault import MasterKeyError
 
-        with mock.patch("blueprints.run.get_secret_value_for_env", side_effect=MasterKeyError("locked")), \
-                mock.patch.object(run_routes.log, "error") as error_log:
+        with (
+            mock.patch("blueprints.run.get_secret_value_for_env", side_effect=MasterKeyError("locked")),
+            mock.patch.object(run_routes.log, "error") as error_log,
+        ):
             with pytest.raises(run_routes._RunPreparationError, match="Secrets vault unavailable"):
-                run_routes._resolve_secret_environment("shodan host 8.8.8.8", "tok_secret_failure")
+                run_routes._resolve_secret_environment(
+                    "shodan host 8.8.8.8",
+                    anonymous_session_id("secret-resolution-failure"),
+                )
 
         error_log.assert_called_once()
         assert error_log.call_args.args == ("SECRET_ENV_RESOLVE_FAILED",)
         assert error_log.call_args.kwargs["exc_info"] is True
         extra = error_log.call_args.kwargs["extra"]
-        assert extra["session"] == "tok_secr********"
+        assert extra["session"] == anonymous_session_id("secret-resolution-failure")
         assert extra["command_root"] == "shodan"
         assert extra["secret_name"] == "SHODAN_API_KEY"
         assert extra["lookup_env_names"] == ["SHODAN_API_KEY"]
@@ -950,12 +973,14 @@ class TestRunLifecycleEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", ""])
 
-        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+        with (
+            mock.patch.object(shell_app_module.log, "info") as mock_info,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]),
+        ):
             resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
@@ -963,36 +988,44 @@ class TestRunLifecycleEvents:
         assert len(calls) == 1
         assert "scan_transport" not in calls[0].kwargs["extra"]
 
-    def test_run_start_masks_token_session_id(self):
+    def test_run_start_logs_credential_id_without_portable_secret(self):
         client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        identity = principal_identity("run-start-logging")
         fake_proc = _FakeProc(lines=["hello\n", ""])
 
-        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = _post_brokered_run(client, "echo hello", headers={"X-Session-ID": token})
+        with (
+            mock.patch.object(shell_app_module.log, "info") as mock_info,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]),
+        ):
+            resp = _post_brokered_run(
+                client,
+                "echo hello",
+                headers=identity.browser_headers(),
+            )
             _ = resp.get_data(as_text=True)
 
+        assert resp.status_code == 200, resp.get_data(as_text=True)
         call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_START")
         extra = call.kwargs["extra"]
-        assert extra["session"] != token
-        assert extra["session"].startswith(token[:8])
-        assert token not in extra.values()
+        assert extra["session"].startswith("crd_")
+        assert identity.portable_secret not in extra.values()
 
     def test_run_end_emits_info_with_exit_code(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", ""], returncode=7)
 
-        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+        with (
+            mock.patch.object(shell_app_module.log, "info") as mock_info,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]),
+        ):
             resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
@@ -1002,11 +1035,15 @@ class TestRunLifecycleEvents:
     def test_run_kill_emits_info(self):
         client = get_client()
 
-        with mock.patch.object(shell_app_module.log, "info") as mock_info, \
-             mock.patch("blueprints.run.pid_for_session", return_value=1234), \
-             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
-             mock.patch("blueprints.run.os.killpg"):
-            resp = client.post("/kill", headers={"X-Session-ID": anonymous_session_id('session-1')}, json={"run_id": "run-123"})
+        with (
+            mock.patch.object(shell_app_module.log, "info") as mock_info,
+            mock.patch("blueprints.run.pid_for_session", return_value=1234),
+            mock.patch("blueprints.run.os.getpgid", return_value=4321),
+            mock.patch("blueprints.run.os.killpg"),
+        ):
+            resp = client.post(
+                "/kill", headers={**browser_identity_headers(anonymous_session_id("session-1"))}, json={"run_id": "run-123"}
+            )
 
         assert resp.status_code == 200
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_KILL"]
@@ -1015,11 +1052,13 @@ class TestRunLifecycleEvents:
     def test_kill_miss_emits_debug(self):
         client = get_client()
 
-        with mock.patch.object(shell_app_module.log, "debug") as mock_debug, \
-             mock.patch("blueprints.run.pid_for_session", return_value=None):
+        with (
+            mock.patch.object(shell_app_module.log, "debug") as mock_debug,
+            mock.patch("blueprints.run.pid_for_session", return_value=None),
+        ):
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
                 json={"run_id": "missing-run"},
             )
 
@@ -1033,14 +1072,16 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["still running\n"], returncode=-15)
 
-        with mock.patch.object(shell_app_module.log, "warning") as mock_warn, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
-             mock.patch("blueprints.run.os.killpg"), \
-             mock.patch.dict("config.CFG", {"command_timeout_seconds": -1}):
+        with (
+            mock.patch.object(shell_app_module.log, "warning") as mock_warn,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run.os.getpgid", return_value=4321),
+            mock.patch("blueprints.run.os.killpg"),
+            mock.patch.dict("config.CFG", {"command_timeout_seconds": -1}),
+        ):
             resp = _post_brokered_run(client, "sleep forever")
             _ = resp.get_data(as_text=True)
 
@@ -1051,13 +1092,15 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch.object(shell_app_module.log, "error") as mock_error, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
-             mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")):
+        with (
+            mock.patch.object(shell_app_module.log, "error") as mock_error,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]),
+            mock.patch("blueprints.run.run_persistence_transaction", side_effect=Exception("db write failed")),
+        ):
             resp = _post_brokered_run(client, "echo saved")
             _ = resp.get_data(as_text=True)
 
@@ -1068,12 +1111,14 @@ class TestRunFailureEvents:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n"])
 
-        with mock.patch.object(shell_app_module.log, "error") as mock_error, \
-             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("stream exploded")):
+        with (
+            mock.patch.object(shell_app_module.log, "error") as mock_error,
+            mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")),
+            mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc),
+            mock.patch("blueprints.run.pid_register"),
+            mock.patch("blueprints.run.pid_pop"),
+            mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("stream exploded")),
+        ):
             resp = _post_brokered_run(client, "echo boom")
             _ = resp.get_data(as_text=True)
 
@@ -1300,6 +1345,7 @@ class TestRequestResponseDebugEvents:
 
 # ── worker entrypoint logging setup ──────────────────────────────────────────
 
+
 class TestWorkerEntrypointLoggingSetup:
     """Dedicated worker processes configure structured logging before they run."""
 
@@ -1319,11 +1365,13 @@ class TestWorkerEntrypointLoggingSetup:
 
         fake_app.run.side_effect = lambda **_kwargs: order.append("run")
 
-        with mock.patch.object(shell_app_module, "bootstrap_runtime", side_effect=fake_bootstrap) as bootstrap_runtime, \
-             mock.patch.object(shell_app_module, "create_app", side_effect=fake_create_app) as create_app, \
-             mock.patch.object(shell_app_module, "_log_app_initialized", side_effect=fake_log_initialized) as log_initialized, \
-             mock.patch.object(shell_app_module.time, "monotonic", side_effect=[10.0, 10.25]), \
-             mock.patch("builtins.print"):
+        with (
+            mock.patch.object(shell_app_module, "bootstrap_runtime", side_effect=fake_bootstrap) as bootstrap_runtime,
+            mock.patch.object(shell_app_module, "create_app", side_effect=fake_create_app) as create_app,
+            mock.patch.object(shell_app_module, "_log_app_initialized", side_effect=fake_log_initialized) as log_initialized,
+            mock.patch.object(shell_app_module.time, "monotonic", side_effect=[10.0, 10.25]),
+            mock.patch("builtins.print"),
+        ):
             shell_app_module.main()
 
         assert order == ["bootstrap", "create_app", "log_initialized", "run"]
@@ -1339,19 +1387,15 @@ class TestWorkerEntrypointLoggingSetup:
         replacement_cfg = build_test_config({"app_name": "late-ai-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
-        with mock.patch.object(
-            worker,
-            "bootstrap_runtime",
-            side_effect=lambda *_args, **_kwargs: order.append("bootstrap")
-        ) as bootstrap_runtime, \
-             mock.patch.object(
-                 worker, "_load_runtime_dependencies",
-                 side_effect=lambda: order.append("load_dependencies")
-            ) as load_runtime_dependencies, \
-             mock.patch.object(
-                 worker,
-                 "run_forever", side_effect=lambda: order.append("run_forever")
-            ) as run_forever:
+        with (
+            mock.patch.object(
+                worker, "bootstrap_runtime", side_effect=lambda *_args, **_kwargs: order.append("bootstrap")
+            ) as bootstrap_runtime,
+            mock.patch.object(
+                worker, "_load_runtime_dependencies", side_effect=lambda: order.append("load_dependencies")
+            ) as load_runtime_dependencies,
+            mock.patch.object(worker, "run_forever", side_effect=lambda: order.append("run_forever")) as run_forever,
+        ):
             worker.main()
 
         assert order == ["bootstrap", "load_dependencies", "run_forever"]
@@ -1370,8 +1414,10 @@ class TestWorkerEntrypointLoggingSetup:
         replacement_cfg = build_test_config({"app_name": "late-notification-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
-        with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
-             mock.patch.object(worker, "run_forever") as run_forever:
+        with (
+            mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime,
+            mock.patch.object(worker, "run_forever") as run_forever,
+        ):
             worker.main()
 
         bootstrap_runtime.assert_called_once_with(
@@ -1389,8 +1435,10 @@ class TestWorkerEntrypointLoggingSetup:
         replacement_cfg = build_test_config({"app_name": "late-scheduler-worker-config"})
         monkeypatch.setattr(app_config, "CFG", replacement_cfg)
 
-        with mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime, \
-             mock.patch.object(worker, "run_forever") as run_forever:
+        with (
+            mock.patch.object(worker, "bootstrap_runtime") as bootstrap_runtime,
+            mock.patch.object(worker, "run_forever") as run_forever,
+        ):
             worker.main()
 
         bootstrap_runtime.assert_called_once_with(
@@ -1422,6 +1470,7 @@ class TestWorkerEntrypointLoggingSetup:
 
 # ── DB_PRUNED log event ───────────────────────────────────────────────────────
 
+
 class TestDbPrunedEvent:
     """DB_PRUNED is emitted at INFO when retention pruning deletes records."""
 
@@ -1431,7 +1480,7 @@ class TestDbPrunedEvent:
         conn.execute(
             "INSERT INTO runs (id, personal_workspace_id, command, started) "
             "VALUES (?, 'test', 'ping prune-test', datetime('now', '-10 days'))",
-            (old_run_id,)
+            (old_run_id,),
         )
         conn.commit()
         conn.close()
@@ -1458,7 +1507,7 @@ class TestDbPrunedEvent:
         conn.execute(
             "INSERT INTO runs (id, personal_workspace_id, command, started) "
             "VALUES (?, 'test', 'ping prune-test', datetime('now', '-10 days'))",
-            (old_run_id,)
+            (old_run_id,),
         )
         conn.execute(
             "INSERT OR REPLACE INTO projects "
@@ -1478,8 +1527,10 @@ class TestDbPrunedEvent:
         try:
             patched_cfg = build_test_config({"permalink_retention_days": 5})
             with mock.patch("core.database.CFG", patched_cfg):
-                with mock.patch.object(db_module.log, "info") as mock_info, \
-                     mock.patch.object(db_module.log, "warning") as mock_warning:
+                with (
+                    mock.patch.object(db_module.log, "info") as mock_info,
+                    mock.patch.object(db_module.log, "warning") as mock_warning,
+                ):
                     db_init()
 
             call = next(c for c in mock_info.call_args_list if c[0][0] == "DB_PRUNED")
@@ -1519,6 +1570,7 @@ class TestDbPrunedEvent:
 
 # ── LOGGING_CONFIGURED startup event ─────────────────────────────────────────
 
+
 class TestLoggingConfiguredEvent:
     """LOGGING_CONFIGURED is emitted at INFO when configure_logging() completes."""
 
@@ -1545,6 +1597,7 @@ class TestLoggingConfiguredEvent:
 
 
 # ── HEALTH_OK / HEALTH_DEGRADED ───────────────────────────────────────────────
+
 
 class TestHealthStatusEvents:
     """HEALTH_OK is emitted at DEBUG on a clean health check; HEALTH_DEGRADED at WARNING."""
@@ -1583,6 +1636,7 @@ class TestHealthStatusEvents:
 
 # ── KILL_FAILED ───────────────────────────────────────────────────────────────
 
+
 class TestKillFailedEvent:
     """KILL_FAILED is emitted at WARNING when the kill signal cannot be delivered."""
 
@@ -1593,7 +1647,7 @@ class TestKillFailedEvent:
                 with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                     client.post(
                         "/kill",
-                        headers={"X-Session-ID": anonymous_session_id("session-1")},
+                        headers={**browser_identity_headers(anonymous_session_id("session-1"))},
                         json={"run_id": "fake-run-id"},
                     )
         kill_failed = [c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED"]
@@ -1602,14 +1656,16 @@ class TestKillFailedEvent:
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
         team_scope = mock.Mock(team_id="team-1", is_team=True, member={"id": "tmem-killer", "role": "operator"})
-        with mock.patch("blueprints.run.current_request_scope", return_value=team_scope), \
-             mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "test-run-xyz"}]), \
-             mock.patch("blueprints.run.pid_for_team", return_value=99999), \
-             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")), \
-             mock.patch.object(shell_app_module.log, "warning") as mock_warn:
+        with (
+            mock.patch("blueprints.run.current_request_scope", return_value=team_scope),
+            mock.patch("blueprints.run.active_runs_for_team", return_value=[{"run_id": "test-run-xyz"}]),
+            mock.patch("blueprints.run.pid_for_team", return_value=99999),
+            mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")),
+            mock.patch.object(shell_app_module.log, "warning") as mock_warn,
+        ):
             client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id('member-session'), "X-Team-ID": "team-1"},
+                headers={**browser_identity_headers(anonymous_session_id("member-session")), "X-Team-ID": "team-1"},
                 json={"run_id": "test-run-xyz"},
             )
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED")
@@ -1624,6 +1680,7 @@ class TestKillFailedEvent:
 
 # ── SHARE_VIEWED ──────────────────────────────────────────────────────────────
 
+
 class TestShareViewedEvent:
     """SHARE_VIEWED is emitted at INFO when a snapshot permalink is retrieved."""
 
@@ -1631,7 +1688,7 @@ class TestShareViewedEvent:
         resp = client.post(
             "/share",
             json={"label": "test-snap", "content": []},
-            headers={"X-Session-ID": anonymous_session_id('sv-session')},
+            headers={**browser_identity_headers(anonymous_session_id("sv-session"))},
         )
         return json.loads(resp.data)["id"]
 
@@ -1669,6 +1726,7 @@ class TestShareViewedEvent:
 
 # ── RUN_VIEWED ────────────────────────────────────────────────────────────────
 
+
 class TestRunViewedEvent:
     """RUN_VIEWED is emitted at INFO when a run permalink is retrieved."""
 
@@ -1691,7 +1749,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app_module.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('rv-session')})
+                get_client().get(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("rv-session"))})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
             assert len(viewed) == 1
         finally:
@@ -1702,7 +1760,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app_module.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('rv-session')})
+                get_client().get(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("rv-session"))})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["run_id"] == run_id
         finally:
@@ -1713,7 +1771,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "nmap 8.8.8.8")
         try:
             with mock.patch.object(shell_app_module.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('rv-session')})
+                get_client().get(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("rv-session"))})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["cmd"] == "nmap 8.8.8.8"
         finally:
@@ -1727,6 +1785,7 @@ class TestRunViewedEvent:
 
 
 # ── HISTORY_DELETED ───────────────────────────────────────────────────────────
+
 
 class TestHistoryDeletedEvent:
     """HISTORY_DELETED is emitted at INFO when a run is deleted from history."""
@@ -1745,7 +1804,7 @@ class TestHistoryDeletedEvent:
         run_id = "hd-test-run-1"
         self._insert_run(run_id)
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('hd-session')})
+            get_client().delete(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("hd-session"))})
         deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
         assert len(deleted) == 1
 
@@ -1753,7 +1812,7 @@ class TestHistoryDeletedEvent:
         run_id = "hd-test-run-2"
         self._insert_run(run_id)
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('hd-session')})
+            get_client().delete(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("hd-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED")
         assert call.kwargs["extra"]["run_id"] == run_id
 
@@ -1761,7 +1820,7 @@ class TestHistoryDeletedEvent:
         run_id = "hd-test-run-3"
         self._insert_run(run_id, session_id=anonymous_session_id("owner-session"))
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('other-session')})
+            get_client().delete(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("other-session"))})
         deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
         assert len(deleted) == 0
         # clean up
@@ -1772,12 +1831,13 @@ class TestHistoryDeletedEvent:
 
 # ── HISTORY_CLEARED ───────────────────────────────────────────────────────────
 
+
 class TestHistoryClearedEvent:
     """HISTORY_CLEARED is emitted at INFO when all history for a session is deleted."""
 
     def test_history_cleared_emits_info(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete("/history", headers={"X-Session-ID": anonymous_session_id('hc-session')})
+            get_client().delete("/history", headers={**browser_identity_headers(anonymous_session_id("hc-session"))})
         cleared = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED"]
         assert len(cleared) == 1
 
@@ -1789,24 +1849,24 @@ class TestHistoryClearedEvent:
                 conn.execute(
                     "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (f"hc-run-{i}", session, "ping test", "2026-01-01T00:00:00",
-                     "2026-01-01T00:00:01", 0, "[]"),
+                    (f"hc-run-{i}", session, "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
                 )
             conn.commit()
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete("/history", headers={"X-Session-ID": session})
+            get_client().delete("/history", headers={**browser_identity_headers(session)})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
         assert call.kwargs["extra"]["count"] == 2
 
     def test_history_cleared_count_is_zero_for_empty_session(self):
         # Clearing a session with no history still emits HISTORY_CLEARED with count=0
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().delete("/history", headers={"X-Session-ID": anonymous_session_id('hc-empty-session')})
+            get_client().delete("/history", headers={**browser_identity_headers(anonymous_session_id("hc-empty-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
         assert call.kwargs["extra"]["count"] == 0
 
 
 # ── HISTORY_VIEWED ───────────────────────────────────────────────────────────
+
 
 class TestHistoryViewedEvent:
     """HISTORY_VIEWED is emitted at INFO when the history list is requested."""
@@ -1826,7 +1886,7 @@ class TestHistoryViewedEvent:
         self._insert_run(run_id)
         try:
             with mock.patch.object(shell_app_module.log, "info") as mock_info:
-                get_client().get("/history", headers={"X-Session-ID": anonymous_session_id('hv-session')})
+                get_client().get("/history", headers={**browser_identity_headers(anonymous_session_id("hv-session"))})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED"]
             assert len(viewed) == 1
         finally:
@@ -1839,7 +1899,7 @@ class TestHistoryViewedEvent:
         self._insert_run(run_id)
         try:
             with mock.patch.object(shell_app_module.log, "info") as mock_info:
-                get_client().get("/history?q=ping", headers={"X-Session-ID": anonymous_session_id('hv-session')})
+                get_client().get("/history?q=ping", headers={**browser_identity_headers(anonymous_session_id("hv-session"))})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED")
             assert call.kwargs["extra"]["count"] == 1
             assert call.kwargs["extra"]["session"] == anonymous_session_id("hv-session")
@@ -1855,30 +1915,37 @@ class TestHistoryViewedEvent:
 
 # ── HISTORY_COMMANDS_VIEWED ───────────────────────────────────────────────────
 
+
 class TestHistoryCommandsViewedEvent:
     """HISTORY_COMMANDS_VIEWED is emitted at DEBUG when command recall hydrates."""
 
-    def test_history_commands_masks_token_session_id(self):
+    def test_history_commands_logs_credential_id_without_portable_secret(self):
         client = get_client()
-        generate_resp = client.get("/session/token/generate")
-        token = json.loads(generate_resp.data)["session_token"]
+        identity = principal_identity("history-command-logging")
         run_id = "hcv-test-run-" + uuid.uuid4().hex[:8]
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_id, token, "dig darklab.sh", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
+                (
+                    run_id,
+                    identity.personal_workspace_id,
+                    "dig darklab.sh",
+                    "2026-01-01T00:00:00",
+                    "2026-01-01T00:00:01",
+                    0,
+                    "[]",
+                ),
             )
             conn.commit()
         try:
             with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
-                resp = client.get("/history/commands", headers={"X-Session-ID": token})
+                resp = client.get("/history/commands", headers=identity.browser_headers())
             assert resp.status_code == 200
             call = next(c for c in mock_debug.call_args_list if c[0][0] == "HISTORY_COMMANDS_VIEWED")
             extra = call.kwargs["extra"]
-            assert extra["session"] != token
-            assert extra["session"].startswith(token[:8])
-            assert token not in extra.values()
+            assert extra["session"].startswith("crd_")
+            assert identity.portable_secret not in extra.values()
         finally:
             with db_connect() as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
@@ -1886,6 +1953,7 @@ class TestHistoryCommandsViewedEvent:
 
 
 # ── PAGE_LOAD ─────────────────────────────────────────────────────────────────
+
 
 class TestPageLoadEvent:
     """PAGE_LOAD is emitted at INFO on every GET /."""
@@ -1904,20 +1972,19 @@ class TestPageLoadEvent:
 
     def test_page_load_extra_has_session_when_present(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().get("/", headers={"X-Session-ID": anonymous_session_id('page-session')})
+            get_client().get("/", headers={**browser_identity_headers(anonymous_session_id("page-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["session"] == anonymous_session_id("page-session")
 
-    def test_page_load_masks_token_session_id(self):
+    def test_page_load_logs_credential_id_without_portable_secret(self):
         client = get_client()
-        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        identity = principal_identity("page-load-logging")
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            client.get("/", headers={"X-Session-ID": token})
+            client.get("/", headers=identity.browser_headers())
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         extra = call.kwargs["extra"]
-        assert extra["session"] != token
-        assert extra["session"].startswith(token[:8])
-        assert token not in extra.values()
+        assert extra["session"].startswith("crd_")
+        assert identity.portable_secret not in extra.values()
 
     def test_page_load_extra_has_theme(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
@@ -1937,7 +2004,7 @@ class TestThemeSelectedDebugEvent:
 
     def test_theme_selected_extra_has_theme_and_source(self):
         with mock.patch.object(shell_app_module.log, "debug") as mock_debug:
-            get_client().get("/themes", headers={"X-Session-ID": anonymous_session_id('theme-session')})
+            get_client().get("/themes", headers={**browser_identity_headers(anonymous_session_id("theme-session"))})
         call = next(c for c in mock_debug.call_args_list if c[0][0] == "THEME_SELECTED")
         assert call.kwargs["extra"]["theme"]
         assert call.kwargs["extra"]["source"] in {"pref_theme_name", "pref_theme", "default_theme", "fallback"}
@@ -1964,7 +2031,7 @@ class TestContentViewedEvents:
     )
     def test_content_viewed_emits_info(self, route):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().get(route, headers={"X-Session-ID": anonymous_session_id('content-session')})
+            get_client().get(route, headers={**browser_identity_headers(anonymous_session_id("content-session"))})
         calls = [c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED"]
         assert len(calls) == 1
         call = calls[0]
@@ -1973,7 +2040,7 @@ class TestContentViewedEvents:
 
     def test_config_viewed_extra_has_key_count(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().get("/config", headers={"X-Session-ID": anonymous_session_id('cfg-session')})
+            get_client().get("/config", headers={**browser_identity_headers(anonymous_session_id("cfg-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/config"
         assert call.kwargs["extra"]["session"] == anonymous_session_id("cfg-session")
@@ -1981,7 +2048,7 @@ class TestContentViewedEvents:
 
     def test_themes_viewed_extra_has_current_and_count(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            get_client().get("/themes", headers={"X-Session-ID": anonymous_session_id('themes-session')})
+            get_client().get("/themes", headers={**browser_identity_headers(anonymous_session_id("themes-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/themes"
         assert call.kwargs["extra"]["session"] == anonymous_session_id("themes-session")
@@ -1990,14 +2057,17 @@ class TestContentViewedEvents:
 
     def test_allowed_commands_viewed_extra_reflects_restricted_list(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            with mock.patch("blueprints.content.load_commands_registry", return_value={
-                "commands": [
-                    {"root": "ping", "category": "Network", "policy": {"allow": ["ping"], "deny": []}},
-                    {"root": "curl", "category": "Web", "policy": {"allow": ["curl"], "deny": []}},
-                ],
-                "pipe_helpers": [],
-            }):
-                get_client().get("/allowed-commands", headers={"X-Session-ID": anonymous_session_id('ac-session')})
+            with mock.patch(
+                "blueprints.content.load_commands_registry",
+                return_value={
+                    "commands": [
+                        {"root": "ping", "category": "Network", "policy": {"allow": ["ping"], "deny": []}},
+                        {"root": "curl", "category": "Web", "policy": {"allow": ["curl"], "deny": []}},
+                    ],
+                    "pipe_helpers": [],
+                },
+            ):
+                get_client().get("/allowed-commands", headers={**browser_identity_headers(anonymous_session_id("ac-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/allowed-commands"
         assert call.kwargs["extra"]["session"] == anonymous_session_id("ac-session")
@@ -2007,7 +2077,7 @@ class TestContentViewedEvents:
     def test_allowed_commands_viewed_extra_reflects_unrestricted_mode(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
             with mock.patch("blueprints.content.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
-                get_client().get("/allowed-commands", headers={"X-Session-ID": anonymous_session_id('ac-session')})
+                get_client().get("/allowed-commands", headers={**browser_identity_headers(anonymous_session_id("ac-session"))})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/allowed-commands"
         assert call.kwargs["extra"]["session"] == anonymous_session_id("ac-session")
@@ -2016,6 +2086,7 @@ class TestContentViewedEvents:
 
 
 # ── RUN_NOT_FOUND / SHARE_NOT_FOUND ──────────────────────────────────────────
+
 
 class TestNotFoundEvents:
     """RUN_NOT_FOUND and SHARE_NOT_FOUND are emitted at WARN for missing permalinks."""
@@ -2038,13 +2109,12 @@ class TestNotFoundEvents:
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_id, anonymous_session_id("pnf-session"), "ping test", "2026-01-01T00:00:00",
-                 "2026-01-01T00:00:01", 0, "[]"),
+                (run_id, anonymous_session_id("pnf-session"), "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
             )
             conn.commit()
         try:
             with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
-                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id('pnf-session')})
+                get_client().get(f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("pnf-session"))})
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
             assert len(calls) == 0
         finally:
@@ -2069,7 +2139,7 @@ class TestNotFoundEvents:
         resp = client.post(
             "/share",
             json={"label": "exists", "content": []},
-            headers={"X-Session-ID": anonymous_session_id('pnf-share-session')},
+            headers={**browser_identity_headers(anonymous_session_id("pnf-share-session"))},
         )
         share_id = json.loads(resp.data)["id"]
         with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
@@ -2078,69 +2148,18 @@ class TestNotFoundEvents:
         assert len(calls) == 0
 
 
-# ── Session state events ─────────────────────────────────────────────────────
+# ── Workspace state events ───────────────────────────────────────────────────
+
 
 class TestSessionStateEvents:
-    """Session-token, preference, and starred-command state changes emit logs."""
-
-    def test_session_token_generate_emits_info_without_token_field(self):
-        with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            resp = get_client().get("/session/token/generate")
-        assert resp.status_code == 200
-        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_TOKEN_GENERATED")
-        assert "session_kind" in call.kwargs["extra"]
-        assert "token" not in call.kwargs["extra"]
-
-    def test_session_token_revoke_not_found_emits_warning_without_token_field(self):
-        with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
-            resp = get_client().post("/session/token/revoke", json={"token": "tok_" + "a" * 32})
-        assert resp.status_code == 404
-        call = next(c for c in mock_warn.call_args_list if c[0][0] == "SESSION_TOKEN_REVOKE_DENIED")
-        assert call.kwargs["extra"]["reason"] == "not_found"
-        assert "token" not in call.kwargs["extra"]
-
-    def test_session_token_revoke_masks_token_session_id(self):
-        client = get_client()
-        generate_resp = client.get("/session/token/generate")
-        token = json.loads(generate_resp.data)["session_token"]
-        with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            resp = client.post(
-                "/session/token/revoke",
-                json={"token": token},
-                headers={"X-Session-ID": token},
-            )
-        assert resp.status_code == 200
-        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_TOKEN_REVOKED")
-        extra = call.kwargs["extra"]
-        assert extra["session"] != token
-        assert extra["session"].startswith(token[:8])
-        assert token not in extra.values()
-
-    def test_session_migrate_emits_counts_and_session_kinds(self):
-        client = get_client()
-        from_id = anonymous_session_id("log-migrate-from-" + uuid.uuid4().hex[:8])
-        to_id = str(uuid.uuid4())
-        with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            resp = client.post(
-                "/session/migrate",
-                json={"from_session_id": from_id, "to_session_id": to_id},
-                headers={"X-Session-ID": from_id},
-            )
-        assert resp.status_code == 200
-        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_MIGRATED")
-        extra = call.kwargs["extra"]
-        assert extra["from_session_kind"] == "anonymous"
-        assert extra["to_session_kind"] == "anonymous"
-        assert "migrated_preferences" in extra
-        assert "from_session_id" not in extra
-        assert "to_session_id" not in extra
+    """Preference and starred-command state changes emit safe logs."""
 
     def test_session_preferences_save_emits_key_count(self):
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
             resp = get_client().post(
                 "/session/preferences",
                 json={"preferences": {"pref_theme_name": "darklab_obsidian.yaml", "ignored": "x"}},
-                headers={"X-Session-ID": anonymous_session_id('prefs-log-session')},
+                headers={**browser_identity_headers(anonymous_session_id("prefs-log-session"))},
             )
         assert resp.status_code == 200
         call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_PREFERENCES_SAVED")
@@ -2159,19 +2178,18 @@ class TestSessionStateEvents:
             conn.commit()
         try:
             with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
-                resp = get_client().get("/session/preferences", headers={"X-Session-ID": session_id})
-                token_id = "tok_" + uuid.uuid4().hex
-                decode_preferences("{not-json", session_id=token_id)
+                resp = get_client().get("/session/preferences", headers={**browser_identity_headers(session_id)})
+                workspace_id = "wsp_" + uuid.uuid4().hex
+                decode_preferences("{not-json", session_id=workspace_id)
             assert resp.status_code == 200
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "SESSION_PREFERENCES_INVALID"]
             assert len(calls) == 2
             extra = calls[0].kwargs["extra"]
             assert extra["error_type"] == "JSONDecodeError"
             assert "not-json" not in str(extra)
-            token_extra = calls[-1].kwargs["extra"]
-            assert token_extra["session_kind"] == "token"
-            assert token_extra["session"] != token_id
-            assert token_id not in str(token_extra)
+            workspace_extra = calls[-1].kwargs["extra"]
+            assert workspace_extra["session_kind"] == "workspace"
+            assert workspace_extra["session"] == workspace_id
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session_id,))
@@ -2182,7 +2200,7 @@ class TestSessionStateEvents:
             resp = get_client().post(
                 "/session/starred",
                 json={"command": "curl -H Authorization:secret https://darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id('star-log-session')},
+                headers={**browser_identity_headers(anonymous_session_id("star-log-session"))},
             )
         assert resp.status_code == 200
         call = next(c for c in mock_info.call_args_list if c[0][0] == "STARRED_COMMAND_ADDED")
@@ -2200,13 +2218,14 @@ class TestSessionStateEvents:
             )
             conn.commit()
         with mock.patch.object(shell_app_module.log, "info") as mock_info:
-            resp = client.delete("/session/starred", headers={"X-Session-ID": session_id})
+            resp = client.delete("/session/starred", headers={**browser_identity_headers(session_id)})
         assert resp.status_code == 200
         call = next(c for c in mock_info.call_args_list if c[0][0] == "STARRED_COMMANDS_CLEARED")
         assert call.kwargs["extra"]["count"] >= 1
 
 
 # ── RUN_SPAWN_ERROR ────────────────────────────────────────────────────────────
+
 
 class TestRunSpawnErrorEvent:
     """RUN_SPAWN_ERROR is emitted at ERROR when subprocess.Popen raises."""
@@ -2218,7 +2237,7 @@ class TestRunSpawnErrorEvent:
         return _post_brokered_run(
             client,
             cmd,
-            headers={"X-Forwarded-For": ip, "X-Session-ID": anonymous_session_id('rse-session')},
+            headers={"X-Forwarded-For": ip, **browser_identity_headers(anonymous_session_id("rse-session"))},
         )
 
     def test_spawn_error_returns_500(self):

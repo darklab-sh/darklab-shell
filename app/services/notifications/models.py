@@ -76,8 +76,6 @@ def notification_app_name() -> str:
 def is_durable_personal_owner(owner_id: str) -> bool:
     """Return whether an owner survives beyond an anonymous browser session."""
     normalized = str(owner_id or "").strip()
-    if normalized.startswith("tok_"):
-        return True
     if not normalized.startswith("wsp_"):
         return False
     try:
@@ -92,12 +90,6 @@ def require_durable_personal_owner(owner_id: str) -> str:
     if not is_durable_personal_owner(normalized):
         raise ValueError("this feature requires a durable personal workspace")
     return normalized
-
-
-# Temporary names retained for the legacy session interface. Product code uses
-# the owner-named helpers; remove these aliases with the item 11 cutover cleanup.
-is_durable_session_token = is_durable_personal_owner
-require_durable_session_token = require_durable_personal_owner
 
 
 def _decode_json_dict(value: Any) -> dict[str, Any]:

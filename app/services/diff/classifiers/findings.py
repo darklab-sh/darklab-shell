@@ -28,7 +28,7 @@ def applies_to(_command_text: str, run: dict[str, Any], conn=None) -> bool:
     )
     row = conn.execute(
         "SELECT 1 FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        f"WHERE {owner.sql} LIMIT 1",  # nosec B608
+        f"WHERE {owner.sql} LIMIT 1",  # nosec
         owner.params,
     ).fetchone()
     return row is not None
@@ -47,7 +47,7 @@ def _items(conn, run: dict[str, Any]) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT f.id, f.signature_hash, f.fingerprint, f.title, f.raw_line, f.severity, fo.line_number "
         "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
-        f"WHERE {owner.sql} "  # nosec B608
+        f"WHERE {owner.sql} "  # nosec
         "ORDER BY fo.line_number ASC, f.id ASC",
         owner.params,
     ).fetchall()

@@ -749,18 +749,18 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   consumersInput.setAttribute('data-lpignore', 'true');
 
   const choiceDesc = document.createElement('div');
-  choiceDesc.className = 'options-session-token-desc';
+  choiceDesc.className = 'options-access-desc';
 
   const customWarning = document.createElement('div');
-  customWarning.className = 'options-session-token-msg';
+  customWarning.className = 'options-access-msg';
   customWarning.textContent = 'HTTP profiles can reference this stored name. External commands use it only when their registry entry declares a matching consumer env.';
 
   const err = document.createElement('div');
-  err.className = 'options-session-token-msg is-error';
+  err.className = 'options-access-msg is-error';
   err.style.display = 'none';
 
   const note = document.createElement('div');
-  note.className = 'options-session-token-desc';
+  note.className = 'options-access-desc';
   note.textContent = 'Stored values are replace-only and cannot be revealed from this panel.';
 
   const nameInputField = _optionsSecretInput('Custom secret name', nameInput);

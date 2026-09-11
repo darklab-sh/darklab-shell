@@ -6,7 +6,7 @@ set -euo pipefail
 
 PORT="${1:?port required}"
 SLOT="${2:?slot required}"
-CAPTURE_SESSION_TOKEN="tok_cafebabecafebabecafebabecafebabe"
+CAPTURE_ANONYMOUS_ID="cafebabe-cafe-4abe-8afe-cafebabecafe"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
@@ -61,7 +61,7 @@ if [[ "$SLOT" == capture-* ]]; then
   APP_DATA_DIR="$DATA_DIR" APP_CONF_DIR="$SHIPPED_CONF_DIR" APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR" \
     "$PYTHON_BIN" "$REPO_ROOT/scripts/development/seed_history.py" \
     --fixture visual-flows \
-    --token "$CAPTURE_SESSION_TOKEN" \
+    --anonymous-id "$CAPTURE_ANONYMOUS_ID" \
     >/dev/null
 fi
 

@@ -202,7 +202,7 @@ async function loadTeamsPanel({
     apiFetch,
     showConfirm,
     showToast,
-    sessionId: `tok_team_panel_${role}`,
+    sessionId: `crd_team_panel_${role}`,
   })
   harness.activateOptionsTab('teams')
   await vi.waitFor(() => {
@@ -395,7 +395,7 @@ describe('Options Teams permissions UI', () => {
     const apiFetch = buildApiFetch({ role: 'owner' })
     const harness = await loadAppFns({
       apiFetch,
-      sessionId: 'tok_team_panel_create_refresh',
+      sessionId: 'crd_team_panel_create_refresh',
     })
     harness.activateOptionsTab('teams')
     await vi.waitFor(() => {

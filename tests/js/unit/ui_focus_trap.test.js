@@ -120,7 +120,7 @@ describe('bindFocusTrap', () => {
     expect(document.activeElement).toBe(first)
   })
 
-  it('skips focusables with inline display:none (options-modal session-token buttons pattern)', () => {
+  it('skips focusables with inline display:none in modal action groups', () => {
     // Matches the real options-modal scenario: a button later in DOM order
     // is toggled to style="display:none" by app code, and the trap must
     // treat the *visible* last button as the boundary. Without this filter,

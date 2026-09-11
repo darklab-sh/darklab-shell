@@ -207,11 +207,11 @@ The private execution record holds the collection. Durable child rows hold only 
 
 Starting a v2 or v3 playbook saves an immutable normalized definition snapshot plus the resolved inputs and current execution variables. Editing or deleting the source workflow doesn't change an execution already in progress or its historical detail.
 
-Completed personal execution history moves with session-token migration and rotation. Migration is blocked while the current identity has an active workflow execution; wait for it to finish or cancel it before trying again. Team-owned execution history stays with the team.
+Completed personal execution history belongs to the principal's personal workspace. Adding, rotating, or revoking a credential doesn't move that history. Team-owned execution history stays with the team.
 
 The server claims one scalar step or one bounded collection batch at a time and starts each command through the normal run broker. Every launched command remains a standard History run with its own output, findings, Atlas entities, artifacts, Project links, and exit code. Finalization saves the run before it advances the playbook, and transaction guards prevent a duplicate callback from launching the next step or child twice. Cancellation also stops runs that become active during a transition.
 
-At startup, recovery reconciles all active executions in bounded pages. It retries a scalar step interrupted before run binding, advances a completed linked run from saved output, leaves a live run alone, and fails an execution whose active run disappeared. For collection work, it initializes a claimed parent that stopped before child creation, returns only unbound launching children to pending, reconciles completed linked children, leaves active children alone, applies the saved policy to vanished runs, and fills only the available parallel slots. The initiating team's state, member permission, and personal or team session token are checked again before each new step or child.
+At startup, recovery reconciles all active executions in bounded pages. It retries a scalar step interrupted before run binding, advances a completed linked run from saved output, leaves a live run alone, and fails an execution whose active run disappeared. For collection work, it initializes a claimed parent that stopped before child creation, returns only unbound launching children to pending, reconciles completed linked children, leaves active children alone, applies the saved policy to vanished runs, and fills only the available parallel slots. The principal state, initiating team's state, current membership, and required capability are checked again before each new step or child.
 
 Interactive PTY modes aren't workflow steps. A command containing a registry-declared PTY trigger, such as an interactive monitor flag, is rejected before broker launch with a clear execution failure. Run interactive commands directly from the terminal instead.
 
@@ -235,7 +235,7 @@ Create, list, detail, and cancel responses contain only the status fields the Wo
 
 The event feed includes `started`, `step_started`, `step_completed`, `capture_saved`, `completed`, `failed`, and `canceled` events. Its payloads contain bounded ids, status, exit code, transition, timestamp, run links, and capture names, but not commands or input/capture values.
 
-These browser routes follow the active personal/team session scope. They aren't part of the token-authenticated `/api/v1` surface.
+These browser routes follow the active personal-workspace or team scope. They aren't part of the PAT-authenticated `/api/v1` surface.
 
 ## Limits And Troubleshooting
 
@@ -265,7 +265,7 @@ Saved personal and team definitions also have fixed validation bounds:
 
 These are application validation limits, not operator settings. Deployment-file playbooks use the same strict identifier, graph, input, transition, and capture validation, while the title, description, step-count, command, and note limits above apply when saving personal or team definitions through the app.
 
-When a playbook stops, open its row in the **Executions** tab for the failed step and linked run. Common causes are a normal command-policy denial, missing secret or tool, unavailable Files path, required capture miss, command exit failure, changed team permission, revoked initiating token, runtime limit, or an interactive PTY trigger. The saved run remains the source of truth for command output; the execution row explains the orchestration outcome and selected transition. If session-token migration or rotation reports an active workflow execution, let that execution finish or cancel it from this tab before retrying.
+When a playbook stops, open its row in the **Executions** tab for the failed step and linked run. Common causes are a normal command-policy denial, missing secret or tool, unavailable Files path, required capture miss, command exit failure, changed team permission, a disabled principal, runtime limit, or an interactive PTY trigger. The saved run remains the source of truth for command output; the execution row explains the orchestration outcome and selected transition.
 
 ## Related Docs
 

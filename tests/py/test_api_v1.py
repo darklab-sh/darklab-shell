@@ -109,6 +109,11 @@ class _LiveCliServer:
 
 
 class _ApiIdentity(str):
+    portable_secret: str
+    pat_secret: str
+    principal_id: str
+    pat_id: str
+
     def __new__(
         cls,
         workspace_id: str,
@@ -117,7 +122,7 @@ class _ApiIdentity(str):
         pat_secret: str,
         principal_id: str,
         pat_id: str,
-    ):
+    ) -> "_ApiIdentity":
         value = str.__new__(cls, workspace_id)
         value.portable_secret = portable_secret
         value.pat_secret = pat_secret
@@ -610,7 +615,10 @@ def test_api_v1_pat_authentication_states_fail_closed():
     assert (expired.status_code, expired.get_json()["error"]["code"]) == (401, "expired_credential")
     assert (disabled.status_code, disabled.get_json()["error"]["code"]) == (401, "disabled_principal")
     assert (under_scoped.status_code, under_scoped.get_json()["error"]["code"]) == (403, "insufficient_scope")
-    assert (legacy_header.status_code, legacy_header.get_json()["error"]["code"]) == (401, "pat_required")
+    assert (legacy_header.status_code, legacy_header.get_json()["error"]["code"]) == (
+        401,
+        "legacy_identity_removed",
+    )
     assert (portable_header.status_code, portable_header.get_json()["error"]["code"]) == (401, "pat_required")
 
 

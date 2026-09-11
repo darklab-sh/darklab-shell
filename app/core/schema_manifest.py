@@ -10,14 +10,9 @@ import re
 import sqlite3
 from typing import Any, Iterable, Mapping
 
-from core.database_backend import (
-    DatabaseBackend,
-    sqlite_fts_virtual_table_names,
-    sqlite_schema_objects,
-    sqlite_table_names,
-)
+from core.database_backend import DatabaseBackend, sqlite_fts_virtual_table_names, sqlite_schema_objects, sqlite_table_names
+from core.schema_manifest_postgres import apply_destructive_schema_statement
 from services.shared_schema import SHARED_TABLES
-
 UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "ai_run_assists",
     "ai_suggestion_validations",
@@ -53,7 +48,6 @@ UNIFIED_BASELINE_APP_TABLES: tuple[str, ...] = (
     "scan_target_observations",
     "secrets",
     "session_preferences",
-    "session_tokens",
     "session_variables",
     "snapshots",
     "starred_commands",
@@ -102,7 +96,6 @@ POSTGRES_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "schema_migrations",
     "pg_trgm",
 )
-
 
 @dataclass(frozen=True)
 class SchemaTableInventory:
@@ -505,6 +498,8 @@ def postgres_migration_schema_inventory(statements: list[str] | tuple[str, ...])
         statement = str(raw_statement or "")
         normalized = normalize_schema_sql(statement)
         if not normalized:
+            continue
+        if apply_destructive_schema_statement(normalized, tables, indexes, triggers):
             continue
         drop_constraint_match = _ALTER_DROP_CONSTRAINT_RE.search(normalized)
         if drop_constraint_match:

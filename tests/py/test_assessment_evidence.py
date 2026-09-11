@@ -1130,7 +1130,7 @@ def test_browser_routes_validate_link_and_unlink_saved_run_evidence(
     other_run = _seed_linked_run(cleanup, other_session, other_project, "nmap other.example")
     check_id = _check_id(assessment_id)
     client = make_test_app().test_client()
-    headers = {"X-Session-ID": session_id}
+    headers = {"X-Darklab-Anonymous-ID": session_id}
     path = f"/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}"
 
     missing_reason = client.patch(path, headers=headers, json={"state": "skipped"})
@@ -1217,7 +1217,7 @@ def test_fail_closed_check_audit_rolls_back_manual_state(
     with pytest.raises(RuntimeError, match="audit unavailable"):
         client.patch(
             f"/projects/{project_id}/assessments/{assessment_id}/checks/{check_id}",
-            headers={"X-Session-ID": session_id},
+            headers={"X-Darklab-Anonymous-ID": session_id},
             json={"state": "blocked", "reason": "Should roll back"},
         )
     check = _check_row(assessment_id)

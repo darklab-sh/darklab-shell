@@ -77,23 +77,3 @@ def project_is_active_for_session(conn, session_id, project_id):
         owner.params,
     ).fetchone()
     return row is not None
-
-
-def migrate_active_project_preference(conn, from_session_id, to_session_id):
-    source_preferences = load_session_preferences(conn, from_session_id)
-    source_project_id = str(source_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-    if not source_project_id:
-        return 0
-    if not project_is_active_for_session(conn, to_session_id, source_project_id):
-        return 0
-
-    destination_preferences = load_session_preferences(conn, to_session_id)
-    current_project_id = str(destination_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-    if current_project_id == source_project_id:
-        return 1
-    if project_is_active_for_session(conn, to_session_id, current_project_id):
-        return 0
-
-    destination_preferences[ACTIVE_PROJECT_PREF_KEY] = source_project_id
-    save_session_preferences(conn, to_session_id, destination_preferences)
-    return 1

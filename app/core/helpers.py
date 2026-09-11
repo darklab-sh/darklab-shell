@@ -26,7 +26,6 @@ _UNTRUSTED_PROXY_LOGGED_FLAG = "_untrusted_proxy_logged"
 GRACEFUL_TERMINATION_EXIT_CODE = -15
 GRACEFUL_TERMINATION_EXIT_CODES = frozenset({GRACEFUL_TERMINATION_EXIT_CODE})
 _AUTH_RESULT_KEY = "darklab_authentication_result"
-LEGACY_SESSION_ADAPTER_REMOVAL_ITEM = 11
 
 
 class AuthenticationRejected(RuntimeError):
@@ -36,10 +35,6 @@ class AuthenticationRejected(RuntimeError):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-class LegacyIdentityAdapterUnavailable(RuntimeError):
-    """Raised until principal ownership replaces the v2 session owner seam."""
 
 
 def _coerce_exit_code(exit_code):
@@ -178,19 +173,16 @@ def get_authentication_result():
 
 
 def get_session_id():
-    """Return the request's personal owner id through the transition adapter."""
+    """Return the request's validated workspace or anonymous owner id."""
     from services.auth.resolver import (  # noqa: PLC0415
         AnonymousContext,
         AuthenticatedContext,
-        LegacySessionContext,
     )
 
     result = get_authentication_result()
     if result.failed:
         raise AuthenticationRejected(result.error_code, result.message)
     context = result.context
-    if isinstance(context, LegacySessionContext):
-        return context.session_id
     if isinstance(context, AnonymousContext):
         return context.anonymous_id
     if isinstance(context, AuthenticatedContext):
@@ -211,24 +203,16 @@ def require_authenticated_context():
 
 
 def get_log_session_id(session_id=None):
-    """Return a log-safe session identifier.
-
-    Anonymous UUID-style sessions are correlation IDs and can be logged as-is.
-    ``tok_`` sessions are bearer credentials, so logs keep only the visible
-    prefix needed for correlation and mask the secret suffix.
-    """
+    """Return a log-safe anonymous, workspace, principal, or credential id."""
     if session_id is None:
         try:
             from services.auth.resolver import (  # noqa: PLC0415
                 AnonymousContext,
                 AuthenticatedContext,
-                LegacySessionContext,
             )
 
             context = get_authentication_result().context
-            if isinstance(context, LegacySessionContext):
-                value = context.session_id
-            elif isinstance(context, AnonymousContext):
+            if isinstance(context, AnonymousContext):
                 value = context.anonymous_id
             elif isinstance(context, AuthenticatedContext):
                 value = context.credential_id
@@ -255,8 +239,6 @@ def get_log_session_id(session_id=None):
                     value = context.credential_id
             except (AuthenticationRejected, RuntimeError):
                 pass
-    if value.startswith("tok_"):
-        return f"{value[:8]}********"
     if value.startswith(("crd_", "pat_")):
         return f"{value[:12]}********"
     return value

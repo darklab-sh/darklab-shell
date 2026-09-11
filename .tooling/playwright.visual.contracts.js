@@ -19,7 +19,7 @@ export const MOBILE_VISUAL_CONTRACT = {
   mobileTerminalMode: true,
 }
 
-export const CAPTURE_SESSION_TOKEN = 'tok_cafebabecafebabecafebabecafebabe'
+export const CAPTURE_ANONYMOUS_ID = 'cafebabe-cafe-4abe-8afe-cafebabecafe'
 export const VISUAL_HISTORY_FIXTURE_NAME = 'visual-flows'
 export const VISUAL_HISTORY_MIN_RUNS = 240
 export const VISUAL_HISTORY_MIN_ROOTS = 12

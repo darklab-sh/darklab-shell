@@ -52,7 +52,7 @@ from .contracts import (
     validate_identifier,
 )
 from .verifier_keys import credential_verifier_digest, ensure_active_verifier_root
-from .ownership_cutover import attach_anonymous_ownership
+from .ownership_cutover import attach_personal_ownership
 from .workspace_storage import (
     anonymous_workspace_storage_key,
     new_workspace_storage_key,
@@ -311,16 +311,16 @@ def _usable_portable_credential_count(
 
 
 def _savepoint(conn: Any, name: str) -> None:
-    conn.execute(f"SAVEPOINT {name}")  # nosec - static internal names only
+    conn.execute(f"SAVEPOINT {name}")  # nosec
 
 
 def _rollback_savepoint(conn: Any, name: str) -> None:
-    conn.execute(f"ROLLBACK TO SAVEPOINT {name}")  # nosec - static internal names only
-    conn.execute(f"RELEASE SAVEPOINT {name}")  # nosec - static internal names only
+    conn.execute(f"ROLLBACK TO SAVEPOINT {name}")  # nosec
+    conn.execute(f"RELEASE SAVEPOINT {name}")  # nosec
 
 
 def _release_savepoint(conn: Any, name: str) -> None:
-    conn.execute(f"RELEASE SAVEPOINT {name}")  # nosec - static internal names only
+    conn.execute(f"RELEASE SAVEPOINT {name}")  # nosec
 
 
 def _insert_credential(
@@ -389,6 +389,8 @@ def _insert_credential(
 def create_principal_with_credential(
     *,
     anonymous_id: str | None = None,
+    cutover_owner_id: str | None = None,
+    cutover_storage_key: str | None = None,
     credential_label: str = "",
     settings: WorkspaceSettings | None = None,
     conn: Any | None = None,
@@ -401,7 +403,21 @@ def create_principal_with_credential(
         maximum=MAX_CREDENTIAL_LABEL_LENGTH,
     )
     active_settings = settings or workspace_settings()
-    preserved_key = anonymous_workspace_storage_key(anonymous_id) if anonymous_id is not None else None
+    if anonymous_id is not None and cutover_owner_id is not None:
+        raise IdentityStorageError("principal creation accepts only one source owner")
+    if cutover_owner_id is not None:
+        source_owner_id = str(cutover_owner_id or "").strip()
+        if not source_owner_id or not cutover_storage_key:
+            raise IdentityStorageError("selected cutover requires an owner and storage key")
+        preserved_key = str(cutover_storage_key)
+        validate_workspace_storage_key(
+            preserved_key,
+            active_settings,
+            allow_existing_directory=True,
+        )
+    else:
+        source_owner_id = anonymous_id
+        preserved_key = anonymous_workspace_storage_key(anonymous_id) if anonymous_id is not None else None
 
     def operation(active_conn: Any) -> PrincipalBundle:
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
@@ -450,11 +466,11 @@ def create_principal_with_credential(
                     verifier_root_version=verifier_version,
                     verifier_root=verifier_root,
                 )
-                if anonymous_id is not None:
-                    attach_anonymous_ownership(
+                if source_owner_id is not None:
+                    attach_personal_ownership(
                         active_conn,
                         backend=_database_backend(active_conn),
-                        anonymous_id=anonymous_id,
+                        source_owner_id=source_owner_id,
                         workspace_id=workspace_id,
                         principal_id=principal_id,
                         credential_id=issued.metadata.id,

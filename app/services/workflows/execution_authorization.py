@@ -81,8 +81,6 @@ def current_execution_role(
             originating_credential_id=str(execution.get("originating_credential_id") or ""),
             required_capability=Capability.RUN_COMMANDS,
         )
-    if authorization.state is BackgroundAuthorizationState.LEGACY_SESSION_REVOKED:
-        return "token_revoked", "The execution initiator's token is no longer active.", ""
     if authorization.state is BackgroundAuthorizationState.PRINCIPAL_DISABLED:
         return "principal_disabled", authorization.message, ""
     if authorization.state is BackgroundAuthorizationState.TEAM_UNAVAILABLE:

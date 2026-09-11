@@ -15,6 +15,7 @@ import pytest
 
 from core.database import db_init
 from core.database_access import get_db_connect
+from identity_helpers import anonymous_session_id
 from services.assessments.dalfox_parameter_evidence import ReviewedDalfoxParameterEvidence
 from services.assessments.dalfox_parameter_observations import (
     DALFOX_DISCOVERY_PARSER_VERSION,
@@ -40,7 +41,7 @@ def _initialize_dalfox_xss_finding_schema():
 
 def _seed_reviewed_xss(*, seed_active_run: bool = True) -> dict[str, Any]:
     suffix = uuid.uuid4().hex[:12]
-    session_id = f"tok_dalfox_xss_{suffix}"
+    session_id = anonymous_session_id(f"dalfox-xss-{suffix}")
     project = create_project(session_id, {"name": f"Dalfox XSS {suffix}"})
     assert project is not None
     project_id = str(project["id"])

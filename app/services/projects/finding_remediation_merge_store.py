@@ -198,7 +198,7 @@ def migrate_remediation_merge_members(
     """Move personal merge memberships and union any colliding destination groups."""
     source_owner_sql, source_owner_params = shared_owner_where(from_session_id)
     rows = conn.execute(
-        "SELECT merge_id, affected_subject, identity_kind, identity_value, vulnerability_id, "  # nosec B608
+        "SELECT merge_id, affected_subject, identity_kind, identity_value, vulnerability_id, "  # nosec
         "rule_identity, created_by_session_id, created_at "
         "FROM finding_remediation_merge_members WHERE "
         + source_owner_sql
@@ -224,7 +224,7 @@ def migrate_remediation_merge_members(
         for stale_merge_id in destination_merge_ids[1:]:
             destination_owner_sql, destination_owner_params = shared_owner_where(to_session_id)
             conn.execute(
-                "UPDATE finding_remediation_merge_members SET merge_id = ? "  # nosec B608
+                "UPDATE finding_remediation_merge_members SET merge_id = ? "  # nosec
                 "WHERE " + destination_owner_sql + " AND merge_id = ?",
                 (merge_id, *destination_owner_params, stale_merge_id),
             )
@@ -248,7 +248,7 @@ def migrate_remediation_merge_members(
             for row in members
         ])
     conn.execute(
-        "DELETE FROM finding_remediation_merge_members WHERE " + source_owner_sql,  # nosec B608
+        "DELETE FROM finding_remediation_merge_members WHERE " + source_owner_sql,  # nosec
         source_owner_params,
     )
     return len(rows)

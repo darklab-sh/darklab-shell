@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Dormant post-cutover schema checks for removal of token-owned state."""
+"""Post-cutover schema checks for removal of token-owned state."""
 
 from __future__ import annotations
 
@@ -11,29 +11,18 @@ from core.database_backend import DatabaseBackend
 
 
 class PostCutoverSchemaMismatch(RuntimeError):
-    """Raised when post-cutover code is paired with legacy token ownership."""
+    """Raised when principal-only code is paired with retired identity ownership."""
 
 
 _LEGACY_TABLES = ("session_tokens",)
 _LEGACY_OWNER_COLUMN_NAMES = frozenset({
-    "actor_session_id",
-    "created_by_session_id",
     "created_by_session_token_hash",
-    "manual_created_by_session_id",
-    "manual_updated_by_session_id",
-    "owner_session_id",
     "session_id",
     "session_token",
     "session_token_hash",
-    "state_changed_by_session_id",
-    "updated_by_session_id",
-    "verification_updated_by_session_id",
 })
 
-# This switches only in the coordinated legacy-removal phase. Keeping the call
-# wired into startup now prevents that phase from having to invent a second
-# initialization path.
-POST_CUTOVER_SCHEMA_GUARD_ENABLED = False
+POST_CUTOVER_SCHEMA_GUARD_ENABLED = True
 
 
 def _table_exists(conn: Any, backend: DatabaseBackend, table_name: str) -> bool:
@@ -73,7 +62,7 @@ def _legacy_owner_columns(conn: Any, backend: DatabaseBackend) -> tuple[tuple[st
         except (KeyError, TypeError, IndexError):
             table_name = str(table_row[0])
         quoted = '"' + table_name.replace('"', '""') + '"'
-        for column_row in conn.execute(f"PRAGMA table_info({quoted})"):  # nosec - quoted catalog name
+        for column_row in conn.execute(f"PRAGMA table_info({quoted})"):  # nosec
             try:
                 column_name = str(column_row["name"])
             except (KeyError, TypeError, IndexError):
@@ -102,7 +91,7 @@ def assert_post_cutover_schema(
     *,
     enabled: bool = False,
 ) -> None:
-    """Reject mixed schemas only after a later cutover explicitly enables this guard."""
+    """Reject mixed schemas when the caller enables the principal-only guard."""
     if not enabled:
         return
     violations = post_cutover_schema_violations(conn, backend)

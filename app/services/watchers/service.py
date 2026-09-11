@@ -56,7 +56,7 @@ from services.storage.transactions import run_read, run_transaction
 from services.teams.ownership_queries import (
     PersonalTeamRows,
     team_capable_owner_predicate,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
 from services.teams.scope import owner_context_for_scope, team_owner_context
 
@@ -347,9 +347,9 @@ def _max_watchers_per_session() -> int:
 
 def _owner_watcher_clause(session_token: str, team_id: str = "", *, table_alias: str = "") -> tuple[str, tuple[str, ...]]:
     prefix = f"{table_alias}." if table_alias else ""
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
-        token_column=f"{prefix}personal_workspace_id",
+        workspace_column=f"{prefix}personal_workspace_id",
         team_column=f"{prefix}team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
@@ -1104,13 +1104,13 @@ def pause_team_watchers_and_schedules(conn, team_id: str, *, reason: str = "team
     normalized_team_id = str(team_id or "").strip()
     if not normalized_team_id:
         return {"watchers": 0, "schedules": 0}
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         team_owner_context(normalized_team_id),
         team_column="team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
     )
     rows = conn.execute(
-        "SELECT id FROM watchers WHERE "  # nosec B608
+        "SELECT id FROM watchers WHERE "  # nosec
         + owner.sql
         + " AND state != ?",
         (*owner.params, WATCHER_STATE_PAUSED),

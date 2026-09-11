@@ -32,7 +32,7 @@ def _path_param(name: str, description: str) -> dict[str, Any]:
 def _errors() -> dict[str, Any]:
     return {
         "400": _response("Invalid HTTP profile", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot manage protected references", _ref("ApiError")),
         "404": _response("Project or HTTP profile not found", _ref("ApiError")),
         "409": _response("HTTP profile conflict or quota exceeded", _ref("ApiError")),
