@@ -318,6 +318,9 @@ function _persistCurrentSessionPreferences() {
 
 async function loadSessionPreferences() {
   const loadStartedAtRevision = _sessionPreferenceLocalRevision;
+  const openOptionsTab = document.getElementById('options-overlay')?.classList.contains('open')
+    ? document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab || ''
+    : '';
   if (typeof window !== 'undefined') {
   }
   try {
@@ -362,7 +365,8 @@ async function loadSessionPreferences() {
     applyCommandOutcomeSummariesPreference(prefs.pref_command_outcome_summaries, false);
     applyConstellationFullDayPreference(prefs.pref_constellation_full_day, false);
     await applyRunNotifyPreference(prefs.pref_run_notify, false);
-    syncOptionsControls();
+    syncOptionsControls({ preserveActiveTab: true });
+    if (openOptionsTab) activateOptionsTab(openOptionsTab, { persist: false, focus: false });
     return prefs;
   } finally {
     if (typeof window !== 'undefined') {
@@ -457,6 +461,9 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   const refreshTeams = _preferenceGlobalFunction('refreshOptionsTeams');
   if (nextTab === 'teams' && refreshTeams) {
     void refreshTeams();
+  }
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('app:options-tab-changed', { detail: { tab: nextTab } }));
   }
   return nextTab;
 }
@@ -560,8 +567,9 @@ function applyHudClockPreference(mode, persist = true) {
   if (typeof importedRenderHudClock === 'function') importedRenderHudClock();
 }
 
-function syncOptionsControls() {
-  syncOptionsTabFromPreference();
+function syncOptionsControls({ preserveActiveTab = false } = {}) {
+  const optionsOpen = document.getElementById('options-overlay')?.classList.contains('open');
+  if (!preserveActiveTab || !optionsOpen) syncOptionsTabFromPreference();
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = _preferenceTimestampMode();
   const lnToggle = optionsLnToggle;

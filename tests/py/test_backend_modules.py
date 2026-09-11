@@ -34827,7 +34827,7 @@ class TestBuiltinConfigAccess:
 
 
 class TestBuiltinStatus:
-    def test_includes_session_summary_counts(self):
+    def test_includes_workspace_and_access_summary_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
             with mock.patch("core.database.DB_PATH", db_path):
@@ -34864,12 +34864,12 @@ class TestBuiltinStatus:
                         lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
-        assert re.search(r"session\s+tok_stat••••", text)
+        assert re.search(r"workspace\s+anonymous", text)
+        assert re.search(r"access\s+anonymous", text)
         assert "tok_statusdemo" not in text
-        assert re.search(r"session type\s+session token", text)
         assert re.search(r"database\s+online", text)
         assert re.search(r"redis\s+n/a", text)
-        assert re.search(r"runs in session\s+2", text)
+        assert re.search(r"runs in workspace\s+2", text)
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
         assert re.search(r"saved options\s+yes", text)
@@ -34972,7 +34972,8 @@ class TestBuiltinStats:
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         class_by_text = {str(line["text"]): str(line.get("cls") or "") for line in lines}
-        assert re.search(r"session\s+tok_stat••••", text)
+        assert re.search(r"workspace\s+anonymous", text)
+        assert re.search(r"access\s+anonymous", text)
         assert "tok_statsdemo" not in text
         assert re.search(r"runs\s+7", text)
         assert re.search(r"snapshots\s+1", text)
@@ -35020,7 +35021,7 @@ class TestBuiltinStats:
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"runs\s+1", text)
         assert re.search(r"success rate\s+100% \(1 ok / 0 failed\)", text)
-        assert "No external tool runs for this session yet." in text
+        assert "No external tool runs for this workspace yet." in text
         assert not re.search(r"status\s+1 run", text)
 
 

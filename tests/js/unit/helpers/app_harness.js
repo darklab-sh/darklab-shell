@@ -332,6 +332,7 @@ export async function loadAppFns({
       <div id="options-modal">
         <div id="options-tabs" role="tablist">
           <button id="options-tab-preferences" data-options-tab="preferences" class="is-active" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+          <button id="options-tab-access" data-options-tab="access" role="tab" aria-selected="false" aria-controls="options-panel-access">Access</button>
           <button id="options-tab-secrets" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
           <button id="options-tab-teams" data-options-tab="teams" role="tab" aria-selected="false" aria-controls="options-panel-teams">Teams</button>
           <button id="options-tab-notifications" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
@@ -379,14 +380,8 @@ export async function loadAppFns({
           </select>
           <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
           <div id="options-prompt-username-error" class="u-hidden"></div>
-          <span id="options-session-token-status"></span>
-          <button id="options-session-token-generate-btn"></button>
-          <button id="options-session-token-set-btn"></button>
-          <button id="options-session-token-rotate-btn"></button>
-          <button id="options-session-token-clear-btn"></button>
-          <button id="options-session-token-copy-btn"></button>
-          <div id="options-session-token-msg"></div>
         </div>
+        <div id="options-panel-access" data-options-panel="access" role="tabpanel" aria-labelledby="options-tab-access" hidden></div>
         <div id="options-panel-secrets" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
           <button id="options-provider-status-btn"></button>
           <button id="options-secret-new-btn"></button>
@@ -703,6 +698,7 @@ export async function loadAppFns({
   const fns = fromDomScripts(
     [
       'app/static/js/core/output_core.js',
+      'app/static/js/core/session_core.js',
       'app/static/js/runtime_bridge.js',
       'app/static/js/output_bridge.js',
       'app/static/js/output.js',
@@ -711,7 +707,6 @@ export async function loadAppFns({
       'app/static/js/features/theme/theme.js',
       'app/static/js/features/terminal/composer_prompt_bridge.js',
       'app/static/js/features/preferences/preferences.js',
-      'app/static/js/features/preferences/session_token_bridge.js',
       'app/static/js/features/preferences/secrets_bridge.js',
       'app/static/js/features/tabs/share_redaction_bridge.js',
       'app/static/js/ui/overlay_actions_bridge.js',
@@ -722,7 +717,6 @@ export async function loadAppFns({
       'app/static/js/features/tabs/tab_session_state.js',
       'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/teams_panel.js',
-      'app/static/js/features/preferences/session_token_controls.js',
       'app/static/js/ui/ui_helpers.js',
       'app/static/js/features/command-registry/command_registry_bridge.js',
       'app/static/js/features/command-registry/faq_helpers.js',

@@ -28,7 +28,7 @@ Tap summarize to append a command findings recap for the current tab.
 Timestamps and line numbers make copied mobile output easier to reference later.
 If output is scrolled away from the tail, use jump to live to snap back down.
 Theme changes apply to the full mobile shell, not just the picker preview.
-Run 'session-token generate' to carry history, stars, snapshots, and user options to another device.
+Use Access in the mobile menu to keep your workspace or open it on another device.
 Run 'theme list' or 'config list' when you want to inspect app settings from the mobile prompt.
 Run 'commands --external' to list allowed runtime tools from the mobile prompt.
 

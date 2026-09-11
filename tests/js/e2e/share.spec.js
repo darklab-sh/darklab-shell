@@ -42,7 +42,9 @@ test.describe('permalink / share', () => {
     // Intercept the POST /share response so we can capture the share URL
     const shareResp = await createShareSnapshot(page)
     expect(shareResp.status()).toBe(200)
-    expect(shareResp.request().headers()['x-session-id']).toBe(sessionId)
+    const requestHeaders = shareResp.request().headers()
+    expect(requestHeaders['x-darklab-anonymous-id']).toBe(sessionId)
+    expect(requestHeaders['x-session-id']).toBeUndefined()
     const data = await shareResp.json()
     expect(data.url).toMatch(/^\/share\//)
 

@@ -587,7 +587,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await page.locator('#options-tab-preferences').click()
     await expect(page.locator('#options-tab-preferences')).toHaveAttribute('aria-selected', 'true')
     await dispatchMacOptionKey(page, '#options-modal', { key: 'Tab', code: 'Tab', altKey: true })
-    await expect(page.locator('#options-tab-secrets')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#options-tab-access')).toHaveAttribute('aria-selected', 'true')
   })
 
   test('Alt+Shift+T opens the theme selector from the composer', async ({ page }) => {

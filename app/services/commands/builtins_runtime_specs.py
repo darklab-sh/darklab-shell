@@ -68,12 +68,12 @@ _BUILTIN_AUTOCOMPLETE = {
     },
     "stats": {
         "root": "stats",
-        "description": "built-in: show session activity totals and command breakdowns",
+        "description": "built-in: show workspace activity totals and command breakdowns",
         "autocomplete": {"arguments": []},
     },
     "status": {
         "root": "status",
-        "description": "built-in: show the current session summary, limits, and backend health",
+        "description": "built-in: show the current workspace and access summary, limits, and backend health",
         "autocomplete": {"arguments": []},
     },
 }
@@ -152,7 +152,7 @@ def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
                 builtins_runtime.active_runs_for_session,
             ),
             name="stats",
-            description=("Show session activity totals and command-root breakdowns."),
+            description=("Show workspace activity totals and command-root breakdowns."),
         ),
         build_builtin_command_spec(
             _BUILTIN_AUTOCOMPLETE["status"],
@@ -163,6 +163,6 @@ def builtin_command_specs() -> tuple[BuiltinCommandSpec, ...]:
                 builtins_runtime.redis_client,
             ),
             name="status",
-            description=("Show the current session summary, limits, and backend health."),
+            description=("Show the current workspace and access summary, limits, and backend health."),
         ),
     )

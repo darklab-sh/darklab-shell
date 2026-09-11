@@ -49,7 +49,9 @@ def _usage() -> list[dict[str, object]]:
 def _require_token(session_id: str) -> str:
     session_id = str(session_id or "").strip()
     if not is_durable_personal_owner(session_id):
-        raise BuiltinTeamError("team: persistent session token required. Run `session-token generate` first.")
+        raise BuiltinTeamError(
+            "team: a kept workspace is required. Open Options > Access and choose Keep this workspace."
+        )
     return session_id
 
 

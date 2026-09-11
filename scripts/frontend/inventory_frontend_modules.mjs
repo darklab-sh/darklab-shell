@@ -96,7 +96,6 @@ const RESOLVER_HELPER_REGISTRY = Object.freeze({
   _runnerValue: { class: 'import_first', name_arg: 0, fallback_arg: 1 },
   _searchGlobalFunction: { class: 'global_only', name_arg: 0 },
   _searchGlobalValue: { class: 'global_only', name_arg: 0 },
-  _sessionTokenGlobalFunction: { class: 'global_only', name_arg: 0 },
   _shellFn: { class: 'import_first', name_arg: 0, fallback_arg: 1 },
   _shellValue: { class: 'import_first', name_arg: 0, fallback_arg: 1 },
   _statusMonitorGlobalFunction: { class: 'global_only', name_arg: 0 },

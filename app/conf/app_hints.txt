@@ -40,8 +40,8 @@ Copy, save txt, and save html all work from the active tab without leaving the s
 Theme changes apply to the shell, history overlays, and shared snapshot pages.
 Run 'theme list' to inspect installed themes or 'theme set <name>' to apply one from the prompt.
 Run 'config list' to inspect user options or 'config set <option> <value>' to change them.
-Run 'session-token generate' to carry history, starred commands, snapshots, and user options across devices.
-Run 'status' for a compact summary of session type, runs, snapshots, stars, saved options, and active jobs.
+Use Options > Access to keep your workspace and open it on another device.
+Run 'status' for a compact summary of workspace access, runs, snapshots, stars, saved options, and active jobs.
 Use Projects to group related runs, targets, findings, artifacts, notes, and evidence packages.
 Press Alt+P to open Projects without leaving the prompt.
 Run 'project help' to create, select, link, archive, and annotate projects from the shell.

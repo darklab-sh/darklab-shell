@@ -46,7 +46,7 @@ let exportedRenderTourIllustration = null;
     'atlas_entities',
     'files_panel',
     'pty_terminal',
-    'session_token',
+    'access_credential',
     'next_steps',
   ];
 
@@ -113,7 +113,7 @@ let exportedRenderTourIllustration = null;
     },
     atlas: { label: 'Open Atlas', opener: () => importedOpenAtlas?.({ source: 'tour' }) },
     session_files: { label: 'Open Files', opener: () => importedOpenWorkspace?.() },
-    session_tokens: { label: 'Open Options', opener: () => importedOpenOptions?.() },
+    workspace_access: { label: 'Open Access', opener: () => importedOpenOptions?.({ tab: 'access' }) },
     closer: { label: 'Open FAQ', opener: () => importedOpenFaq?.() },
   };
 
@@ -427,9 +427,9 @@ let exportedRenderTourIllustration = null;
       return card;
     }
 
-    if (normalized === 'session_token') {
+    if (normalized === 'access_credential') {
       card.append(
-        _createMiniLine('tok_a0b2********', 'is-command'),
+        _createMiniLine('crd_a0b2••••', 'is-command'),
         _createMiniLine('history · projects · files · options', 'is-output'),
         _createMiniLine('moves with you', 'is-muted'),
       );

@@ -430,7 +430,7 @@ test.describe('tab command recall', () => {
 
     await page.locator('.tab').first().click()
     await expect(page.locator('.tab-panel.active .output')).toContainText(idleCmd)
-    await expect(page.locator('.tab-panel.active .output')).toContainText('runs in session')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('runs in workspace')
   })
 
   test('pressing Enter on a blank prompt appends a fresh prompt line', async ({ page }) => {
