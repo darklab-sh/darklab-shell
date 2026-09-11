@@ -792,7 +792,7 @@ def _normalize_line(command: str, line: str) -> str:
         return line
     if root == "status":
         line = UUID_RE.sub("<SESSION>", line)
-        line = re.sub(r"(runs in session\s+)(\d+)", r"\1<RUNS>", line)
+        line = re.sub(r"(runs in workspace\s+)(\d+)", r"\1<RUNS>", line)
         return line
     if root == "who":
         return UUID_RE.sub("<SESSION>", line)

@@ -23,7 +23,6 @@ import {
   tsBtn as importedTsBtn,
 } from './core/dom.js';
 import { getAppConfig as importedGetAppConfig } from './core/config.js';
-import { maskSessionToken as importedMaskSessionToken } from './core/session_core.js';
 import { showToast as importedShowToast } from './core/utils.js';
 import {
   getActiveTab as importedGetActiveTab,
@@ -95,10 +94,10 @@ import {
 } from './features/theme/theme.js';
 import {
   applyShareRedactionDefaultPreference as importedApplyShareRedactionDefaultPreference,
+  activateOptionsTab as importedActivateOptionsTab,
   getShareRedactionDefaultPreference as importedGetShareRedactionDefaultPreference,
   syncOptionsControls as importedSyncOptionsControls,
 } from './features/preferences/preferences.js';
-import { updateOptionsSessionTokenStatus as importedUpdateOptionsSessionTokenStatus } from './features/preferences/session_token_bridge.js';
 import {
   closeWorkspace as importedCloseWorkspace,
 } from './workspace_bridge.js';
@@ -242,11 +241,8 @@ var _appIsOptionsOverlayOpenAdapter = (...args) => _appFn('isOptionsOverlayOpen'
 var _appHideOptionsOverlayAdapter = (...args) => _appFn('hideOptionsOverlay', importedHideOptionsOverlay)?.(...args);
 var _appIsShortcutsOverlayOpenAdapter = (...args) => _appFn('isShortcutsOverlayOpen', importedIsShortcutsOverlayOpen)?.(...args);
 var _appHideShortcutsOverlayAdapter = (...args) => _appFn('hideShortcutsOverlay', importedHideShortcutsOverlay)?.(...args);
-var _appMaskSessionTokenAdapter = (...args) => (
-  typeof importedMaskSessionToken === 'function' ? importedMaskSessionToken(...args) : undefined
-);
 var _appSyncOptionsControlsAdapter = (...args) => _appFn('syncOptionsControls', importedSyncOptionsControls)?.(...args);
-var _appUpdateOptionsSessionTokenStatusAdapter = (...args) => _appFn('_updateOptionsSessionTokenStatus', importedUpdateOptionsSessionTokenStatus)?.(...args);
+var _appActivateOptionsTabAdapter = (...args) => _appFn('activateOptionsTab', importedActivateOptionsTab)?.(...args);
 var _appShowOptionsOverlayAdapter = (...args) => _appFn('showOptionsOverlay', importedShowOptionsOverlay)?.(...args);
 var _appMarkInteractionSurfaceReadyAdapter = (...args) => _appFn('markInteractionSurfaceReady', importedMarkInteractionSurfaceReady)?.(...args);
 var _appLoadOptionsPanelsAdapter = (...args) => _appFn('loadOptionsPanels')?.(...args);
@@ -527,41 +523,23 @@ function _closeMajorOverlays(options = {}) {
     _appHideFaqOverlayAdapter();
   }
   if (_appIsThemeOverlayOpenAdapter()) _appHideThemeOverlayAdapter();
-  if (_appIsOptionsOverlayOpenAdapter()) _appHideOptionsOverlayAdapter();
+  if (_appIsOptionsOverlayOpenAdapter()) {
+    _notifyOptionsClosing();
+    _appHideOptionsOverlayAdapter();
+  }
   if (typeof _appIsShortcutsOverlayOpenAdapter === 'function' && _appIsShortcutsOverlayOpenAdapter()) {
     if (typeof _appHideShortcutsOverlayAdapter === 'function') _appHideShortcutsOverlayAdapter();
   }
 }
 
 
-function _syncOptionsSessionTokenStatusFallback() {
-  const el = document.getElementById('options-session-token-status');
-  const token = localStorage.getItem('session_token');
-  const hasToken = Boolean(token);
-  if (el) {
-    el.textContent = hasToken && typeof _appMaskSessionTokenAdapter === 'function'
-      ? _appMaskSessionTokenAdapter(token)
-      : (hasToken ? token : 'No session token — anonymous session');
-    el.classList.toggle('is-active', hasToken);
-  }
-  const generateBtn = document.getElementById('options-session-token-generate-btn');
-  const rotateBtn = document.getElementById('options-session-token-rotate-btn');
-  const clearBtn = document.getElementById('options-session-token-clear-btn');
-  const copyBtn = document.getElementById('options-session-token-copy-btn');
-  if (generateBtn) generateBtn.style.display = hasToken ? 'none' : '';
-  if (rotateBtn) rotateBtn.style.display = hasToken ? '' : 'none';
-  if (clearBtn) clearBtn.style.display = hasToken ? '' : 'none';
-  if (copyBtn) copyBtn.style.display = hasToken ? '' : 'none';
-}
-
-function openOptions() {
+function openOptions({ tab = '', action = '' } = {}) {
   // Opening one major overlay should implicitly close the others so mobile and
   // desktop never stack multiple drawers/modals on top of each other.
   _closeMajorOverlays();
   if (typeof _appBlurVisibleComposerMobileAdapter === 'function') _appBlurVisibleComposerMobileAdapter();
   _appSyncOptionsControlsAdapter();
-  if (typeof _appUpdateOptionsSessionTokenStatusAdapter === 'function') _appUpdateOptionsSessionTokenStatusAdapter();
-  else _syncOptionsSessionTokenStatusFallback();
+  if (tab) _appActivateOptionsTabAdapter(tab, { persist: true, focus: false });
   _appShowOptionsOverlayAdapter();
   if (typeof _appMarkInteractionSurfaceReadyAdapter === 'function') {
     _appMarkInteractionSurfaceReadyAdapter('options', optionsOverlay, document.getElementById('options-modal'));
@@ -570,19 +548,24 @@ function openOptions() {
     ? Promise.resolve(_appLoadOptionsPanelsAdapter())
     : Promise.resolve();
   panelsReady.then((panels) => {
-    const updateSessionTokenStatus = panels?._updateOptionsSessionTokenStatus
-      || (typeof _appUpdateOptionsSessionTokenStatusAdapter === 'function' ? _appUpdateOptionsSessionTokenStatusAdapter : null);
+    const refreshAccess = panels?.refreshAccessPanel || null;
     const refreshSecrets = panels?.refreshOptionsSecrets
       || (typeof _appRefreshOptionsSecretsAdapter === 'function' ? _appRefreshOptionsSecretsAdapter : null);
     const refreshTeams = panels?.refreshOptionsTeams
       || (typeof _appRefreshOptionsTeamsAdapter === 'function' ? _appRefreshOptionsTeamsAdapter : null);
     const refreshNotifications = panels?.refreshNotificationChannels
       || (typeof _appRefreshNotificationChannelsAdapter === 'function' ? _appRefreshNotificationChannelsAdapter : null);
-    if (typeof updateSessionTokenStatus === 'function') updateSessionTokenStatus();
     if (typeof refreshSecrets === 'function') {
       refreshSecrets().catch((err) => _appLogClientErrorAdapter('failed to load options secrets', err));
     }
     const activeTab = document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab;
+    if (activeTab === 'access' && typeof refreshAccess === 'function') {
+      const openAccessAction = panels?.openAccessAction;
+      const operation = action && typeof openAccessAction === 'function'
+        ? openAccessAction(action)
+        : refreshAccess();
+      Promise.resolve(operation).catch((err) => _appLogClientErrorAdapter('failed to load access', err));
+    }
     if (activeTab === 'teams' && typeof refreshTeams === 'function') {
       refreshTeams().catch((err) => _appLogClientErrorAdapter('failed to load options teams', err));
     }
@@ -592,7 +575,14 @@ function openOptions() {
   }).catch((err) => _appLogClientErrorAdapter('failed to load options panels', err));
 }
 
+function _notifyOptionsClosing() {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('app:options-closing'));
+  }
+}
+
 function closeOptions() {
+  _notifyOptionsClosing();
   _appHideOptionsOverlayAdapter();
   _appRefocusComposerAdapter({ defer: true });
 }
@@ -868,7 +858,10 @@ function _setTsMode(mode) {
 
 if (typeof window !== 'undefined') {
   if (typeof importedOnUiEvent === 'function') {
-    importedOnUiEvent('app:open-access', () => openOptions());
+    importedOnUiEvent('app:open-access', (event) => openOptions({
+      tab: 'access',
+      action: event?.detail?.action || '',
+    }));
   }
   if (typeof importedSetComposerPromptHandlers === 'function') {
     importedSetComposerPromptHandlers({

@@ -34,7 +34,6 @@ from services.commands.builtins_format import (
     format_stats_duration as _format_stats_duration,
     output_line as _output_line,
 )
-from services.commands.builtins_session import mask_session_token as _mask_session_token
 from services.session.variables import list_session_variables
 from services.teams.ownership_queries import personal_only_owner_predicate
 from services.teams.scope import personal_owner_context
@@ -110,7 +109,7 @@ def _session_variable_count(session_id: str) -> int:
 
 
 def _session_type_label(session_id: str) -> str:
-    return "session token" if str(session_id or "").startswith("tok_") else "anonymous"
+    return "kept" if str(session_id or "").startswith("wsp_") else "anonymous"
 
 
 def _status_db_label() -> str:
@@ -142,7 +141,7 @@ def _format_clock(value: str | None) -> str:
 def run_builtin_history(session_id: str) -> list[dict[str, object]]:
     rows = _session_history_runs(session_id)
     if not rows:
-        return [{"type": "output", "text": "No history for this session yet."}]
+        return [{"type": "output", "text": "No history for this workspace yet."}]
 
     width = len(str(len(rows)))
     lines = [_output_line("Command history:", "builtin-section")]
@@ -403,7 +402,7 @@ def run_builtin_runs(
 def run_builtin_last(session_id: str) -> list[dict[str, object]]:
     rows = _recent_runs(session_id)
     if not rows:
-        return [{"type": "output", "text": "No completed runs for this session yet."}]
+        return [{"type": "output", "text": "No completed runs for this workspace yet."}]
 
     lines = [_output_line("Recent runs:", "builtin-section")]
     for row in rows:
@@ -572,7 +571,7 @@ def run_builtin_status(
 ) -> list[dict[str, object]]:
     width = 18
     cfg = resolve_effective_cfg()
-    session_label = _mask_session_token(session_id) if session_id else "anonymous"
+    workspace_label = "kept" if _session_type_label(session_id) == "kept" else "anonymous"
     run_count = _session_row_count("runs", session_id)
     snapshot_count = _session_row_count("snapshots", session_id)
     starred_count = _session_row_count("starred_commands", session_id)
@@ -580,9 +579,9 @@ def run_builtin_status(
     lines = [
         _output_line("Shell status:", "builtin-section"),
         _output_line(_format_native_record("app", cfg["app_name"], width), "builtin-kv"),
-        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
+        _output_line(_format_native_record("workspace", _ansi_dim(workspace_label), width), "builtin-kv"),
         _output_line(
-            _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
+            _format_native_record("access", _ansi_status_label(_session_type_label(session_id)), width),
             "builtin-kv",
         ),
         _output_line(_format_native_record("database", _ansi_status_label(_status_db_label()), width), "builtin-kv"),
@@ -590,7 +589,7 @@ def run_builtin_status(
             _format_native_record("redis", _ansi_status_label(_status_redis_label(redis_client_value)), width),
             "builtin-kv",
         ),
-        _output_line(_format_native_record("runs in session", str(run_count), width), "builtin-kv"),
+        _output_line(_format_native_record("runs in workspace", str(run_count), width), "builtin-kv"),
         _output_line(_format_native_record("snapshots", str(snapshot_count), width), "builtin-kv"),
         _output_line(
             _format_native_record(
@@ -725,7 +724,7 @@ def run_builtin_stats(
     avg_duration = sum(total_durations) / len(total_durations) if total_durations else None
     completed = success_total + failed_total
     width = 18
-    session_label = _mask_session_token(session_id) if session_id else "anonymous"
+    workspace_label = "kept" if _session_type_label(session_id) == "kept" else "anonymous"
     snapshot_count = _session_row_count("snapshots", session_id)
     starred_count = _session_row_count("starred_commands", session_id)
     success_rate = (
@@ -733,10 +732,10 @@ def run_builtin_stats(
         f"({_ansi_green(f'{success_total} ok')} / {_ansi_red(f'{failed_total} failed')})"
     )
     lines = [
-        _output_line("Session stats:", "builtin-section"),
-        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
+        _output_line("Workspace stats:", "builtin-section"),
+        _output_line(_format_native_record("workspace", _ansi_dim(workspace_label), width), "builtin-kv"),
         _output_line(
-            _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
+            _format_native_record("access", _ansi_status_label(_session_type_label(session_id)), width),
             "builtin-kv",
         ),
         _output_line(_format_native_record("runs", str(run_total), width), "builtin-kv"),
@@ -761,7 +760,7 @@ def run_builtin_stats(
     if not by_root:
         lines.append(_output_line("", "builtin-spacer"))
         lines.append(_output_line("Top commands:", "builtin-section"))
-        lines.append(_output_line("  No external tool runs for this session yet.", "builtin-note"))
+        lines.append(_output_line("  No external tool runs for this workspace yet.", "builtin-note"))
         return lines
 
     lines.append(_output_line("", "builtin-spacer"))

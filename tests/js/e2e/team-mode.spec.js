@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test'
 import {
   ensurePromptReady,
+  keepBrowserWorkspace,
   openRailAction,
   runCommand,
 } from './helpers.js'
@@ -11,24 +12,6 @@ import {
 const PERSONAL_COMMAND = 'hostname'
 const TEAM_COMMAND = 'date'
 const INVITED_MEMBER_COMMAND = 'whoami'
-
-async function issueSessionToken(page) {
-  return page.evaluate(async () => {
-    const resp = await apiFetch('/session/token/generate')
-    if (!resp.ok) throw new Error(`token generate failed: ${resp.status}`)
-    const data = await resp.json()
-    return data.session_token
-  })
-}
-
-async function activateSessionToken(page, token) {
-  await page.evaluate((sessionToken) => {
-    localStorage.setItem('session_token', sessionToken)
-  }, token)
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await ensurePromptReady(page, { timeout: 30_000 })
-  await expect.poll(() => page.evaluate(() => SESSION_ID), { timeout: 15_000 }).toBe(token)
-}
 
 async function openTeamsOptions(page) {
   await openRailAction(page, 'options')
@@ -175,8 +158,7 @@ test.describe('team mode browser flow', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page, { timeout: 30_000 })
 
-    const ownerToken = await issueSessionToken(page)
-    await activateSessionToken(page, ownerToken)
+    await keepBrowserWorkspace(page, { label: 'Team owner browser' })
 
     await runCommand(page, PERSONAL_COMMAND)
     await expect.poll(async () => historyCommands(page), { timeout: 20_000 })
@@ -226,15 +208,12 @@ test.describe('team mode browser flow', () => {
     await switchScopeFromSelector(page, teamId)
     await expect(page.locator('#team-scope-label')).toHaveText(teamName)
 
-    const invitedToken = await issueSessionToken(page)
     const context = await browser.newContext()
     const invitedPage = await context.newPage()
     try {
-      await invitedPage.addInitScript((sessionToken) => {
-        localStorage.setItem('session_token', sessionToken)
-      }, invitedToken)
       await invitedPage.goto('/', { waitUntil: 'domcontentloaded' })
       await ensurePromptReady(invitedPage, { timeout: 30_000 })
+      await keepBrowserWorkspace(invitedPage, { label: 'Invited operator browser' })
       await joinTeamFromOptions(invitedPage, {
         code: inviteCode,
         displayName: 'Invited operator',

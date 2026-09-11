@@ -127,6 +127,7 @@ function dispatchMobileMenuAction(action, btn = null) {
     _mobileMenuRefocusComposer({ defer: true });
   }
   if (action === 'options') _mobileMenuImportedCall(importedOpenOptions, 'openOptions');
+  if (action === 'access') _mobileMenuImportedCall(importedOpenOptions, 'openOptions', { tab: 'access' });
   if (action === 'scope' && typeof openTeamScopeSelector === 'function') openTeamScopeSelector();
   if (action === 'projects') void _mobileMenuImportedCall(importedOpenProjectWorkspace, 'openProjectWorkspace');
   if (action === 'atlas') void _mobileMenuImportedCall(importedOpenAtlas, 'openAtlas', { source: 'mobile-menu' });

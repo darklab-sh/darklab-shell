@@ -291,7 +291,7 @@ class TestIndexRoute:
             "history_compare_renderer": "/static/js/features/run-comparison/history_compare_renderer.js",
             "history_compare_launcher": "/static/js/features/run-comparison/history_compare_launcher.js",
             "history_run_details": "/static/js/features/history/history_run_details.js",
-            "options_session_token_controls": "/static/js/features/preferences/session_token_controls.js",
+            "options_access_panel": "/static/js/features/preferences/access_panel.js",
             "options_secrets_panel": "/static/js/features/preferences/secrets_panel.js",
             "options_teams_panel": "/static/js/features/preferences/teams_panel.js",
             "options_notification_channels": "/static/js/features/preferences/notification_channels.js",

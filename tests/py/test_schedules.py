@@ -1087,13 +1087,16 @@ class TestWatchBuiltin:
         assert audit_rows[1]["details"]["run_id"].startswith("run_fire_")
         assert audit_rows[2]["details"]["baseline_run_id"].startswith("run_fire_")
 
-    def test_watch_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
+    def test_watch_builtin_requires_kept_workspace(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
 
         lines, exit_code = execute_builtin_command("watch list", "anonymous-session")
 
         assert exit_code == 0
-        assert _line_text(lines[0]) == "watch: persistent session token required. Run `session-token generate` first."
+        assert _line_text(lines[0]) == (
+            "watch: a kept workspace is required. "
+            "Open Options > Access and choose Keep this workspace."
+        )
 
 
 class TestScheduleBuiltin:
@@ -1205,10 +1208,13 @@ class TestScheduleBuiltin:
         assert audit_rows[1]["details"]["status"] == "fired"
         assert audit_rows[1]["details"]["run_id"] == "run_builtin_schedule"
 
-    def test_schedule_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
+    def test_schedule_builtin_requires_kept_workspace(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
 
         lines, exit_code = execute_builtin_command("schedule list", "anonymous-session")
 
         assert exit_code == 0
-        assert _line_text(lines[0]) == "schedule: persistent session token required. Run `session-token generate` first."
+        assert _line_text(lines[0]) == (
+            "schedule: a kept workspace is required. "
+            "Open Options > Access and choose Keep this workspace."
+        )

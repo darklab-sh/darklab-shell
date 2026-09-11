@@ -87,7 +87,7 @@ describe('notification channel preferences panel', () => {
     const { list, msg, refreshNotificationChannels } = loadNotificationChannels({ apiFetch })
 
     await refreshNotificationChannels({ force: true })
-    expect(msg.textContent).toContain('Generate or set a session token')
+    expect(msg.textContent).toContain('Keep this workspace from Access')
     expect(msg.classList.contains('is-error')).toBe(true)
     expect(list.textContent).toContain('No notification channels yet.')
 

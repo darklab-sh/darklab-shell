@@ -3112,9 +3112,10 @@ class TestRunStreaming:
         assert "files cleanup" in limits_body
         assert "90h (0 = disabled)\\n" in limits_body
         assert status_resp.status_code == 200
-        assert "session" in status_body
+        assert "workspace" in status_body
+        assert "access" in status_body
         session_id = anonymous_session_id("sess-limits")
-        assert session_id[:8] in status_body
+        assert session_id[:8] not in status_body
         assert f"{session_id}\\n" not in status_body
         assert "tab limit" in status_body
         assert "4\\n" in status_body
@@ -3126,7 +3127,7 @@ class TestRunStreaming:
         assert "files" in status_body
         assert "0/100 files, 0 B / 50.0 MB\\n" in status_body
         assert stats_resp.status_code == 200
-        assert "Session stats:\\n" in stats_body
+        assert "Workspace stats:\\n" in stats_body
         assert "active runs" in stats_body
         assert "active jobs" not in stats_body
         assert "success rate" in stats_body

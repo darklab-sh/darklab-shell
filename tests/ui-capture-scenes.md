@@ -82,7 +82,7 @@ scene where one of these appears to have drifted.
   otherwise lays them out horizontally. Cancel-role action is the default
   focus. See `kill-confirmation-modal`,
   `confirm-modal-three-actions-stacked` (desktop only),
-  `history-drawer-delete-*-confirmation`, `session-token-clear-confirmation`,
+  `history-drawer-delete-*-confirmation`, `options-access-*-confirmation`,
   and the mobile `history-panel-delete-*-confirmation` scenes.
 - **Disclosure affordance rules** — `▸ / ▾` for accordions, `▾` for dropdown
   menus, `✕` for dismissal. Glyph follows behavior, not visual hierarchy.
@@ -134,18 +134,21 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 34 | `history-drawer-search-chip` | `/` | History drawer with `host` search applied and filter chip visible. | Active filter chip shows the current query; chip dismissal glyph (`✕`) visible; filtered row count reflects the query. |
 | 35 | `history-drawer-delete-all-confirmation` | `/` | Filtered History drawer with its matching-run deletion confirmation open. | Copy explicitly limits deletion to current filters; favorite/non-favorite counts are clear; the three role-typed actions use the stacked confirmation layout. |
 | 36 | `history-drawer-delete-confirmation` | `/` | History drawer + single-row delete confirm. | Confirm modal with 2-action horizontal layout; row being deleted still visible behind backdrop. |
-| 37 | `options-modal` | `/` | Options modal open from the rail. | Themed native form controls (`<select>`, `<input type="checkbox">`); `.form-*` class group rendering; modal close button in the top-right corner. |
-| 38 | `session-token-clear-confirmation` | `/` | Options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; `Copy token` keeps the dialog open; `Clear token` reads as destructive; `Cancel` is default focus. |
-| 39 | `theme-modal` | `/` | Theme picker open from the rail. | Theme cards each render a mini terminal preview (with traffic-light dots); selected card has a visible selection ring; grid alignment. |
-| 40 | `faq-modal` | `/` | FAQ modal open from the rail. | Accordion `▸ / ▾` glyphs on each FAQ item; first item expanded by default; clickable command chips render as primitives. |
-| 41 | `shortcuts-overlay` | `/` | Keyboard shortcuts overlay (the `?` surface). | Transparent overlay with grouped sections (`Terminal:`, `Tabs:`, `UI:`); section titles styled in blue; key chords left-aligned, descriptions right-aligned; grid alignment holds across themes. |
-| 42 | `line-numbers-enabled` | `/` | Transcript with line-number prefix on. | Prefix width stable; content left-edge aligned to prefix right edge; `body.ln-on` rule visible. |
-| 43 | `timestamps-enabled` | `/` | Transcript with elapsed-timestamp prefix on. | Timestamp prefix rendering; four ping lines with their timings; prefix visually distinct from content. |
-| 44 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
-| 45 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
-| 46 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
-| 47 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
-| 48 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
+| 37 | `options-access-anonymous` | `/` | Access open for an anonymous workspace. | The outcome-first explanation, primary Keep action, existing-credential action, and tab order remain clear without crowding the Options card. |
+| 38 | `options-access-first-credential` | `/` | The masked one-time credential reveal after keeping a workspace. | The credential stays masked by default; Reveal, Copy, saved acknowledgement, and Close are easy to distinguish; password-manager guidance remains readable. |
+| 39 | `options-access-credential-list` | `/` | Access credential list with the active browser row. | Label, safe prefix, dates, type, active state, passive Current badge, and action group form a scannable `.panel-row` without exposing a secret. |
+| 40 | `options-access-rotate-confirmation` | `/` | First step of credential rotation. | Copy makes the replacement-first ordering explicit; the old credential remains active; Cancel has default focus and the primary action isn't styled as destructive. |
+| 41 | `options-access-revoke-warning` | `/` | Current and last-credential revoke warning. | Current/last warnings, related-work option, irreversible-action copy, and destructive Revoke action are visually unambiguous. |
+| 42 | `theme-modal` | `/` | Theme picker open from the rail. | Theme cards each render a mini terminal preview (with traffic-light dots); selected card has a visible selection ring; grid alignment. |
+| 43 | `faq-modal` | `/` | FAQ modal open from the rail. | Accordion `▸ / ▾` glyphs on each FAQ item; first item expanded by default; clickable command chips render as primitives. |
+| 44 | `shortcuts-overlay` | `/` | Keyboard shortcuts overlay (the `?` surface). | Transparent overlay with grouped sections (`Terminal:`, `Tabs:`, `UI:`); section titles styled in blue; key chords left-aligned, descriptions right-aligned; grid alignment holds across themes. |
+| 45 | `line-numbers-enabled` | `/` | Transcript with line-number prefix on. | Prefix width stable; content left-edge aligned to prefix right edge; `body.ln-on` rule visible. |
+| 46 | `timestamps-enabled` | `/` | Transcript with elapsed-timestamp prefix on. | Timestamp prefix rendering; four ping lines with their timings; prefix visually distinct from content. |
+| 47 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
+| 48 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
+| 49 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
+| 50 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
+| 51 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
 
 ## Mobile pack
 
@@ -189,13 +192,16 @@ Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 �
 | 32 | `menu-modal` | `/` | Mobile hamburger bottom-sheet. | Session group (search / line numbers / timestamps submenu); overlay entries (history, workflows, options, theme, FAQ, diag); grab handle at the top; close glyph in the header; `.sheet-close` styling matches desktop modal-close treatment. |
 | 33 | `workflows-modal` | `/` | Mobile workflows modal. | Step-row layout reflows for narrow viewport; per-step ▶ run button reachable; modal body scrollable. |
 | 34 | `workflow-parameterized-playbook` | `/` | Mobile Subdomain HTTP Triage playbook with `darklab.sh` entered. | Input, substituted commands, expanded steps, per-step actions, and enabled `Run all` remain usable in the scrollable sheet. |
-| 35 | `options-modal` | `/` | Mobile options modal. | Form controls render natively in the mobile sheet; modal close reachable with thumb; session-token button visibility follows token state. |
-| 36 | `session-token-clear-confirmation` | `/` | Mobile options modal with the session-token clear confirm open. | Confirm copy warns that the token is not recoverable from the app; actions stack cleanly; `Copy token`, `Cancel`, and destructive `Clear token` remain readable. |
-| 37 | `theme-modal` | `/` | Mobile theme picker. | Theme cards stack or grid in the narrow viewport; selected card ring visible; traffic-light dots in each preview. |
-| 38 | `faq-modal` | `/` | Mobile FAQ modal. | Accordion glyphs; modal body scrollable; close button reachable. |
-| 39 | `snapshot-page` | `/share/:id` | Mobile snapshot landing page. | Header metadata stacks vertically; save menu reachable; prompt prefix matches the shell's. |
-| 40 | `permalink-page` | `/history/:id` | Mobile permalink landing page. | Same as snapshot page plus the run permalink semantics. |
-| 41 | `diag-page` | `/diag` | Mobile diag page. | `.diag-topbar` sibling wrapper keeps the sticky header legible on iOS Safari (the unscoped `mobile.css:84` rule that used to collapse the header is avoided by this structure); back-button visible at mobile/touch breakpoints. |
+| 35 | `options-access-anonymous` | `/` | Mobile Access for an anonymous workspace. | Access follows Preferences, primary and secondary actions stack cleanly, touch targets remain comfortable, and no content clips horizontally. |
+| 36 | `options-access-first-credential` | `/` | Mobile masked one-time credential reveal. | The masked value wraps safely, save guidance is readable, and Reveal, Copy, saved acknowledgement, and Close stay reachable without another nested modal. |
+| 37 | `options-access-credential-list` | `/` | Mobile Access credential list with its current row. | Safe metadata and Current badge remain readable; lifecycle actions wrap into reachable touch-sized rows. |
+| 38 | `options-access-credential-detail` | `/` | Mobile in-panel rename editor for the current credential. | The list-to-detail transition stays inside Options, the input isn't hidden by the keyboard, and Save/Cancel remain reachable with clear focus. |
+| 39 | `options-access-revoke-warning` | `/` | Mobile current and last-credential revoke warning. | Warning copy and durable-work option fit above the stacked Cancel/Revoke actions; destructive intent remains clear without clipping. |
+| 40 | `theme-modal` | `/` | Mobile theme picker. | Theme cards stack or grid in the narrow viewport; selected card ring visible; traffic-light dots in each preview. |
+| 41 | `faq-modal` | `/` | Mobile FAQ modal. | Accordion glyphs; modal body scrollable; close button reachable. |
+| 42 | `snapshot-page` | `/share/:id` | Mobile snapshot landing page. | Header metadata stacks vertically; save menu reachable; prompt prefix matches the shell's. |
+| 43 | `permalink-page` | `/history/:id` | Mobile permalink landing page. | Same as snapshot page plus the run permalink semantics. |
+| 44 | `diag-page` | `/diag` | Mobile diag page. | `.diag-topbar` sibling wrapper keeps the sticky header legible on iOS Safari (the unscoped `mobile.css:84` rule that used to collapse the header is avoided by this structure); back-button visible at mobile/touch breakpoints. |
 
 ## Reporting regressions
 

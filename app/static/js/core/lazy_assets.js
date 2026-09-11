@@ -169,7 +169,7 @@ let exportedLoadWatchersModal = null;
     if (name === 'history_compare_renderer') return { url: '/static/js/features/run-comparison/history_compare_renderer.js', type: 'module' };
     if (name === 'history_compare_launcher') return { url: '/static/js/features/run-comparison/history_compare_launcher.js', type: 'module' };
     if (name === 'history_run_details') return { url: '/static/js/features/history/history_run_details.js', type: 'module' };
-    if (name === 'options_session_token_controls') return { url: '/static/js/features/preferences/session_token_controls.js', type: 'module' };
+    if (name === 'options_access_panel') return { url: '/static/js/features/preferences/access_panel.js', type: 'module' };
     if (name === 'options_secrets_panel') return { url: '/static/js/features/preferences/secrets_panel.js', type: 'module' };
     if (name === 'options_teams_panel') return { url: '/static/js/features/preferences/teams_panel.js', type: 'module' };
     if (name === 'options_notification_channels') return { url: '/static/js/features/preferences/notification_channels.js', type: 'module' };
@@ -1175,16 +1175,13 @@ let exportedLoadWatchersModal = null;
   }
 
   async function loadOptionsPanels() {
-    const sessionTokenControls = await loadLazyAsset('options_session_token_controls');
+    const accessPanel = await loadLazyAsset('options_access_panel');
     const secretsPanel = await loadLazyAsset('options_secrets_panel');
     const teamsPanel = await loadLazyAsset('options_teams_panel');
     const notificationChannels = await loadLazyAsset('options_notification_channels');
     return {
-      _updateOptionsSessionTokenStatus: _requireLazyModuleExport(
-        sessionTokenControls,
-        '_updateOptionsSessionTokenStatus',
-        value => typeof value === 'function',
-      ),
+      refreshAccessPanel: _requireLazyModuleExport(accessPanel, 'refreshAccessPanel', value => typeof value === 'function'),
+      openAccessAction: _requireLazyModuleExport(accessPanel, 'openAccessAction', value => typeof value === 'function'),
       refreshOptionsSecrets: _requireLazyModuleExport(secretsPanel, 'refreshOptionsSecrets', value => (
         typeof value === 'function' && value !== lazyRefreshOptionsSecrets
       )),

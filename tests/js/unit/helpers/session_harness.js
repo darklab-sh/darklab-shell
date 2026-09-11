@@ -24,7 +24,6 @@ export function loadSession({
   const fns = fromDomScripts(
     [
       'app/static/js/core/session_core.js',
-      'app/static/js/features/preferences/session_token_bridge.js',
       'app/static/js/session.js',
     ],
     {
@@ -33,11 +32,13 @@ export function loadSession({
       fetch: fetchFn,
     },
     `{
+    activateAccessCredential,
     apiFetch,
+    clearAccessCredential,
     describeFetchError,
+    getBrowserIdentitySnapshot,
     logClientError,
     maskSessionToken,
-    setSessionTokenHandlers,
     updateSessionId,
     _getSessionId: () => SESSION_ID,
     _getClientId: () => CLIENT_ID,

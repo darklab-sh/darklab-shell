@@ -8,17 +8,14 @@ import { loadSessionVariables as importedLoadSessionVariables } from './features
 import { getActiveTeamId as importedGetActiveTeamId } from './features/team_scope.js';
 import { refreshWorkspaceFileCache as importedRefreshWorkspaceFileCache } from './features/workspace/workspace_autocomplete_cache.js';
 import { setRuntimeHandlers as importedSetRuntimeHandlers } from './runtime_bridge.js';
-import { updateOptionsSessionTokenStatus as importedUpdateOptionsSessionTokenStatus } from './features/preferences/session_token_bridge.js';
 import {
   hasSecretsHandler as importedHasSecretsHandler,
   invalidateOptionsSecrets as importedInvalidateOptionsSecrets,
   refreshOptionsSecrets as importedRefreshOptionsSecrets,
 } from './features/preferences/secrets_bridge.js';
 
-// Session identity: check for a persistent session token first (set by
-// 'session-token generate' / 'session-token set'), then fall back to the
-// auto-generated UUID.  The UUID is always preserved so clearing a session
-// token reverts to the original anonymous session rather than losing identity.
+// Browser identity uses either one portable access credential or one anonymous
+// UUID. Reusable credential secrets stay out of UI state and cache keys.
 var SessionCore = typeof importedSessionCore !== 'undefined' && importedSessionCore
   ? importedSessionCore
   : null;
@@ -63,6 +60,7 @@ function _generateUUID() {
 
 var _sessionStorageApi = null;
 var _sessionUuid = '';
+var _browserIdentity = null;
 var CLIENT_ID = '';
 var SESSION_ID = '';
 const SESSION_REFRESH_TASKS = [
@@ -82,9 +80,14 @@ function _ensureSessionIdentity() {
   if (_sessionStorageApi && CLIENT_ID && SESSION_ID) return;
   const core = _sessionCore();
   _sessionStorageApi = _sessionStorage();
-  _sessionUuid = core.getOrCreateStorageValue(_sessionStorageApi, 'session_id', _generateUUID);
+  const legacyAnonymousId = _sessionStorageApi.getItem('session_id');
+  if (!_sessionStorageApi.getItem('anonymous_id') && legacyAnonymousId) {
+    _sessionStorageApi.setItem('anonymous_id', legacyAnonymousId);
+  }
+  _sessionUuid = core.getOrCreateStorageValue(_sessionStorageApi, 'anonymous_id', _generateUUID);
   CLIENT_ID = core.getOrCreateStorageValue(_sessionStorageApi, 'client_id', _generateUUID);
-  SESSION_ID = core.resolveSessionId(_sessionStorageApi, _sessionUuid);
+  _browserIdentity = core.resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
+  SESSION_ID = _browserIdentity.publicId;
 }
 
 function _refreshWorkspaceFileCache() {
@@ -106,7 +109,7 @@ function _sessionLogRefreshTaskFailed(task, err, reason) {
   _sessionLogEvent('session refresh task failed', 'SESSION_REFRESH_TASK_FAILED', 'warning', {
     task,
     reason,
-    has_token: String(SESSION_ID || '').startsWith('tok_'),
+    authenticated: _browserIdentity?.kind === 'credential',
   });
   if (typeof console !== 'undefined' && typeof console.warn === 'function') {
     console.warn(`[client] session refresh task failed: ${task}`, err);
@@ -116,7 +119,7 @@ function _sessionLogRefreshTaskFailed(task, err, reason) {
 function _sessionLogIdentityUpdated(reason) {
   _sessionLogEvent('session identity updated', 'SESSION_ID_UPDATED', 'info', {
     reason,
-    has_token: String(SESSION_ID || '').startsWith('tok_'),
+    authenticated: _browserIdentity?.kind === 'credential',
     refresh_tasks: SESSION_REFRESH_TASKS,
   });
 }
@@ -166,34 +169,77 @@ function _sessionInvalidateOptionsSecrets() {
   if (invalidate) invalidate();
 }
 
-function _sessionUpdateOptionsSessionTokenStatus() {
-  if (typeof importedUpdateOptionsSessionTokenStatus === 'function') {
-    importedUpdateOptionsSessionTokenStatus();
-  }
+function _emitIdentityChanged(reason) {
+  if (!SESSION_GLOBAL || typeof SESSION_GLOBAL.dispatchEvent !== 'function') return;
+  const EventCtor = SESSION_GLOBAL.CustomEvent || globalThis.CustomEvent;
+  if (typeof EventCtor !== 'function') return;
+  SESSION_GLOBAL.dispatchEvent(new EventCtor('app:identity-changed', {
+    detail: { reason, identity: getBrowserIdentitySnapshot() },
+  }));
 }
 
-if (typeof window !== 'undefined') {
-}
-
-// Update SESSION_ID at runtime after a session token is set, changed, or
-// cleared.  Called by the session-token terminal commands after they update
-// localStorage — avoids a page reload to apply the new identity.
-function updateSessionId(newId) {
+function _applyIdentityChange(reason) {
   _ensureSessionIdentity();
-  SESSION_ID = newId || _sessionCore().resolveSessionId(_sessionStorageApi, _sessionUuid);
-  _sessionLogIdentityUpdated('local-update');
-  _sessionCallAsync('loadSessionPreferences', 'local-update');
-  _sessionCallAsync('loadSessionVariables', 'local-update');
-  _sessionCallAsync('loadRecentValues', 'local-update');
-  _sessionCallAsync('loadScheduleAutocompleteHints', 'local-update');
-  _sessionCallAsync('loadWatcherAutocompleteHints', 'local-update');
+  _browserIdentity = _sessionCore().resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
+  SESSION_ID = _browserIdentity.publicId;
+  _sessionLogIdentityUpdated(reason);
+  _sessionCallAsync('reloadSessionHistory', reason);
+  _sessionCallAsync('loadSessionPreferences', reason);
+  _sessionCallAsync('loadSessionVariables', reason);
+  _sessionCallAsync('loadRecentValues', reason);
+  _sessionCallAsync('loadScheduleAutocompleteHints', reason);
+  _sessionCallAsync('loadWatcherAutocompleteHints', reason);
   _refreshWorkspaceFileCache()?.catch?.((err) => {
-    _sessionLogRefreshTaskFailed('refreshWorkspaceFileCache', err, 'local-update');
+    _sessionLogRefreshTaskFailed('refreshWorkspaceFileCache', err, reason);
   });
-  _sessionCallAsync('refreshTeamScopes', 'local-update');
-  _sessionCallAsync('refreshActiveProjectContext', 'local-update');
+  _sessionCallAsync('refreshTeamScopes', reason);
+  _sessionCallAsync('refreshActiveProjectContext', reason);
   _sessionInvalidateOptionsSecrets();
-  _sessionRefreshOptionsSecretsIfOpen('local-update');
+  _sessionRefreshOptionsSecretsIfOpen(reason);
+  _emitIdentityChanged(reason);
+}
+
+function activateAccessCredential(secret) {
+  _ensureSessionIdentity();
+  const normalized = String(secret || '').trim();
+  if (!_sessionCore().credentialPublicId(normalized).startsWith('crd_')) {
+    throw new Error('Invalid access credential format');
+  }
+  _sessionStorageApi.setItem('access_credential', normalized);
+  _sessionStorageApi.removeItem('session_token');
+  _applyIdentityChange('credential-activated');
+}
+
+function clearAccessCredential({ freshAnonymous = true } = {}) {
+  _ensureSessionIdentity();
+  const hadCredential = _browserIdentity?.kind === 'credential';
+  _sessionStorageApi.removeItem('access_credential');
+  _sessionStorageApi.removeItem('session_token');
+  if (freshAnonymous && hadCredential) {
+    _sessionUuid = _generateUUID();
+    _sessionStorageApi.setItem('anonymous_id', _sessionUuid);
+  }
+  _applyIdentityChange('credential-removed');
+}
+
+// Compatibility boundary for the few staged-cutover callers that still use a
+// session-named update. Only modern credentials and validated UUIDs are valid.
+function updateSessionId(newId) {
+  const value = String(newId || '').trim();
+  if (_sessionCore().credentialPublicId(value)) {
+    activateAccessCredential(value);
+    return;
+  }
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    _ensureSessionIdentity();
+    _sessionStorageApi.removeItem('access_credential');
+    _sessionStorageApi.removeItem('session_token');
+    _sessionStorageApi.setItem('anonymous_id', value);
+    _sessionUuid = value;
+    _applyIdentityChange('anonymous-identity-activated');
+    return;
+  }
+  throw new Error('Invalid browser identity');
 }
 
 function getSessionId() {
@@ -206,47 +252,37 @@ function getClientId() {
   return CLIENT_ID;
 }
 
-// Keep SESSION_ID current in other open tabs when session_token changes in
-// localStorage (the storage event only fires in tabs that did not make the
-// change, so this does not double-apply in the tab that called updateSessionId).
-// Also reload starred commands, recent chips, and the options-panel token
-// display so passive tabs reflect the new session identity immediately.
-if (SESSION_GLOBAL && typeof SESSION_GLOBAL.addEventListener === 'function') {
-  SESSION_GLOBAL.addEventListener('storage', (e) => {
-    if (e.key === 'session_token') {
-      _ensureSessionIdentity();
-      SESSION_ID = e.newValue || _sessionUuid;
-      _sessionLogIdentityUpdated('storage-event');
-      _sessionCallAsync('reloadSessionHistory', 'storage-event');
-      _sessionCallAsync('loadSessionPreferences', 'storage-event');
-      _sessionCallAsync('loadSessionVariables', 'storage-event');
-      _sessionCallAsync('loadRecentValues', 'storage-event');
-      _sessionCallAsync('loadScheduleAutocompleteHints', 'storage-event');
-      _sessionCallAsync('loadWatcherAutocompleteHints', 'storage-event');
-      _refreshWorkspaceFileCache()?.catch?.((err) => {
-        _sessionLogRefreshTaskFailed('refreshWorkspaceFileCache', err, 'storage-event');
-      });
-      _sessionCallAsync('refreshTeamScopes', 'storage-event');
-      _sessionCallAsync('refreshActiveProjectContext', 'storage-event');
-      _sessionUpdateOptionsSessionTokenStatus();
-      _sessionInvalidateOptionsSecrets();
-      _sessionRefreshOptionsSecretsIfOpen('storage-event');
-    }
+function getBrowserIdentitySnapshot() {
+  _ensureSessionIdentity();
+  return Object.freeze({
+    kind: _browserIdentity.kind,
+    anonymousId: _browserIdentity.kind === 'anonymous' ? _browserIdentity.anonymousId : '',
+    credentialId: _browserIdentity.kind === 'credential' && _browserIdentity.publicId !== 'credential-invalid'
+      ? _browserIdentity.publicId
+      : '',
+    validFormat: _browserIdentity.publicId !== 'credential-invalid',
   });
 }
 
-// Return a display-safe masked version of a session token or UUID.
+// Keep browser identity current in other tabs. The initiating tab refreshes
+// directly because the storage event only fires in the other tabs.
+if (SESSION_GLOBAL && typeof SESSION_GLOBAL.addEventListener === 'function') {
+  SESSION_GLOBAL.addEventListener('storage', (e) => {
+    if (e.key === 'access_credential' || e.key === 'anonymous_id') _applyIdentityChange('storage-event');
+  });
+}
+
+// Return a display-safe masked version of a credential id or anonymous UUID.
 // tok_a1b2c3d4... → tok_a1b2••••
 // uuid...         → 8-char-prefix••••••••
 function maskSessionToken(token) {
   return _sessionCore().maskSessionToken(token);
 }
 
-// Wrapper around fetch that always includes the session ID header so every API
-// request stays scoped to the same anonymous browser session.
+// Wrapper around fetch that sends exactly one browser identity header.
 function apiFetch(url, options = {}) {
   _ensureSessionIdentity();
-  const requestOptions = _sessionCore().withSessionHeaders(options, SESSION_ID, CLIENT_ID);
+  const requestOptions = _sessionCore().withIdentityHeaders(options, _browserIdentity, CLIENT_ID);
   const teamId = typeof importedGetActiveTeamId === 'function'
     ? importedGetActiveTeamId()
     : '';
@@ -334,8 +370,11 @@ if (typeof window !== 'undefined') {
 }
 
 export {
+  activateAccessCredential,
   apiFetch,
+  clearAccessCredential,
   describeFetchError,
+  getBrowserIdentitySnapshot,
   getClientId,
   getSessionId,
   logClientError,

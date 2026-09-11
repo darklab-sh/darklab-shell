@@ -469,7 +469,7 @@ let exportedOpenNotificationChannelEditor = null;
         _renderChannels([]);
       }
       const message = error.message === 'session_token_required'
-        ? 'Generate or set a session token before adding notification channels.'
+        ? 'Keep this workspace from Access before adding notification channels.'
         : `Could not load notification channels: ${error.message || 'network error'}`;
       _msg(message, { error: true });
       return [];

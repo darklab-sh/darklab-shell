@@ -41,12 +41,39 @@ const DarklabSessionCore = (function (global) {
     return value;
   }
 
+  function credentialPublicId(secret) {
+    const match = /^(?:dlc_v1_(crd_[0-9a-f]{32})|dlp_v1_(pat_[0-9a-f]{32}))_[A-Za-z0-9_-]{43}$/.exec(
+      String(secret || '').trim(),
+    );
+    return match ? String(match[1] || match[2] || '').toLowerCase() : '';
+  }
+
+  function resolveBrowserIdentity(storage, anonymousId) {
+    const secret = String(storage.getItem('access_credential') || '');
+    if (secret) {
+      const publicId = credentialPublicId(secret);
+      return Object.freeze({
+        kind: 'credential',
+        secret,
+        publicId: publicId.startsWith('crd_') ? publicId : 'credential-invalid',
+      });
+    }
+    return Object.freeze({
+      kind: 'anonymous',
+      anonymousId: String(anonymousId || ''),
+      publicId: String(anonymousId || ''),
+    });
+  }
+
+  // Compatibility alias for cache-key callers during the staged cutover.
   function resolveSessionId(storage, sessionUuid) {
-    return storage.getItem('session_token') || sessionUuid;
+    return resolveBrowserIdentity(storage, sessionUuid).publicId;
   }
 
   function maskSessionToken(token) {
     if (typeof token !== 'string' || !token) return '(none)';
+    const credentialId = credentialPublicId(token);
+    if (credentialId) return `${credentialId.slice(0, 12)}••••`;
     if (token.startsWith('tok_')) return 'tok_' + token.slice(4, 8) + '••••';
     return token.slice(0, 8) + '••••••••';
   }
@@ -67,26 +94,52 @@ const DarklabSessionCore = (function (global) {
     return `Request to the ${context} failed: ${message}`;
   }
 
-  function withSessionHeaders(options = {}, sessionId, clientId) {
+  function withIdentityHeaders(options = {}, identity, clientId) {
+    const headers = Object.assign({}, options.headers || {});
+    Object.keys(headers).forEach((name) => {
+      if (['x-session-id', 'x-darklab-credential', 'x-darklab-anonymous-id'].includes(name.toLowerCase())) {
+        delete headers[name];
+      }
+    });
+    if (identity && identity.kind === 'credential') {
+      headers['X-Darklab-Credential'] = String(identity.secret || '');
+    } else {
+      headers['X-Darklab-Anonymous-ID'] = String(identity?.anonymousId || '');
+    }
+    headers['X-Client-ID'] = clientId;
     return {
       ...options,
-      headers: Object.assign({}, options.headers || {}, {
-        'X-Session-ID': sessionId,
-        'X-Client-ID': clientId,
-      }),
+      headers,
     };
   }
 
+  function withSessionHeaders(options = {}, sessionId, clientId) {
+    return withIdentityHeaders(options, { kind: 'anonymous', anonymousId: sessionId }, clientId);
+  }
+
   const api = Object.freeze({
+    credentialPublicId,
     generateUUID,
     getOrCreateStorageValue,
     resolveSessionId,
     maskSessionToken,
+    resolveBrowserIdentity,
     describeFetchError,
+    withIdentityHeaders,
     withSessionHeaders,
   });
   return api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
-export const { describeFetchError, generateUUID, getOrCreateStorageValue, maskSessionToken, resolveSessionId, withSessionHeaders } = DarklabSessionCore;
+export const {
+  credentialPublicId,
+  describeFetchError,
+  generateUUID,
+  getOrCreateStorageValue,
+  maskSessionToken,
+  resolveBrowserIdentity,
+  resolveSessionId,
+  withIdentityHeaders,
+  withSessionHeaders,
+} = DarklabSessionCore;
 export { DarklabSessionCore };

@@ -629,6 +629,7 @@ test.beforeEach(async ({ page }) => {
         .map(node => node.getAttribute('data-menu-action')))
     expect(toolOrder).toEqual([
       'options',
+      'access',
       'workflows',
       'scope',
       'atlas',
@@ -647,6 +648,7 @@ test.beforeEach(async ({ page }) => {
     ])
     await expect(menu.locator('[data-menu-action="status-monitor"] .menu-item-label')).toHaveText('status')
     await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
+    await expect(menu.locator('#mobile-menu-access-state')).toHaveText('Anonymous')
     await expect(menu.locator('#mobile-menu-history-count')).toHaveText('3 saved')
     await expect(menu.locator('#mobile-menu-atlas-hint')).toHaveText('4 entities')
     await expect(menu.locator('#mobile-menu-files-hint')).toHaveText('2 files')

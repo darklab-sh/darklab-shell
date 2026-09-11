@@ -55,8 +55,9 @@ let exportedRefreshOptionsTeams = null;
     return typeof importedApiFetch === 'function' ? importedApiFetch : global.fetch.bind(global);
   }
 
-  function _tokenSessionActive() {
-    return String(typeof importedGetSessionId === 'function' ? importedGetSessionId() : '').startsWith('tok_');
+  function _durableAccessActive() {
+    const identityId = String(typeof importedGetSessionId === 'function' ? importedGetSessionId() : '');
+    return identityId.startsWith('crd_') || identityId.startsWith('pat_') || identityId.startsWith('tok_');
   }
 
   function _msg(text, { error = false } = {}) {
@@ -468,10 +469,10 @@ let exportedRefreshOptionsTeams = null;
     const list = _el('options-teams-list');
     _clear(list);
     if (!list) return;
-    if (!_tokenSessionActive()) {
+    if (!_durableAccessActive()) {
       const empty = _node('div', 'options-team-empty-state');
       empty.append(
-        _node('div', 'options-team-empty', 'Teams require a session token. Generate or set one on the Preferences tab first.')
+        _node('div', 'options-team-empty', 'Teams require a kept workspace. Open Access and keep this workspace first.')
       );
       list.appendChild(empty);
       return;
@@ -1073,7 +1074,7 @@ let exportedRefreshOptionsTeams = null;
   async function refreshOptionsTeams() {
     const list = _el('options-teams-list');
     if (!list) return [];
-    if (!_tokenSessionActive()) {
+    if (!_durableAccessActive()) {
       _teams = [];
       _detail = null;
       _selectedTeamId = '';

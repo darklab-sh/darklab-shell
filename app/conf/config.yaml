@@ -695,7 +695,7 @@
 
 # Team management read routes are used by the Options Teams tab, the desktop
 # HUD scope selector, the mobile menu scope selector, and `/api/v1/teams`.
-# These routes are keyed by durable session token when one is available.
+# These routes are keyed by a kept personal workspace when one is available.
 # Server defaults if unset:
 #   team_read_rate_limit_per_minute: 180
 #   team_read_rate_limit_per_second: 20

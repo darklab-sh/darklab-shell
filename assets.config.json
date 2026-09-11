@@ -135,7 +135,7 @@
     "/static/js/features/run-comparison/history_compare_launcher.js",
     "/static/js/features/history/history_run_details.js",
     "/static/js/features/nmap_service_evidence.js",
-    "/static/js/features/preferences/session_token_controls.js",
+    "/static/js/features/preferences/access_panel.js",
     "/static/js/features/preferences/secrets_panel.js",
     "/static/js/features/preferences/teams_panel.js",
     "/static/js/features/preferences/notification_channels.js",
@@ -168,6 +168,8 @@
     "/static/css/styles.css",
     "/static/js/features/atlas/atlas_quick_lookup_mode.js",
     "/static/js/features/findings/finding_record_context.js",
+    "/static/js/features/preferences/credential_reveal.js",
+    "/static/js/features/preferences/credential_rows.js",
     "/static/js/features/workspace/workspace_viewer_formats.js",
     "/vendor/ansi_up.js"
   ]

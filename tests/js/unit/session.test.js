@@ -11,7 +11,7 @@ describe('session.js', () => {
     })
 
     expect(_getSessionId()).toBe('existing-session')
-    expect(storage.getItem('session_id')).toBe('existing-session')
+    expect(storage.getItem('anonymous_id')).toBe('existing-session')
   })
 
   it('generates and persists a session id when one does not exist', () => {
@@ -20,7 +20,7 @@ describe('session.js', () => {
     })
 
     expect(_getSessionId()).toBe('generated-session')
-    expect(storage.getItem('session_id')).toBe('generated-session')
+    expect(storage.getItem('anonymous_id')).toBe('generated-session')
   })
 
   it('treats a blank stored session id as missing and generates a new one', () => {
@@ -30,7 +30,7 @@ describe('session.js', () => {
     })
 
     expect(_getSessionId()).toBe('generated-from-blank')
-    expect(storage.getItem('session_id')).toBe('generated-from-blank')
+    expect(storage.getItem('anonymous_id')).toBe('generated-from-blank')
   })
 
   it('falls back to getRandomValues UUID generation when randomUUID throws (insecure HTTP context)', () => {
@@ -43,10 +43,10 @@ describe('session.js', () => {
     const sessionId = _getSessionId()
     // Must be a valid UUID v4
     expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(storage.getItem('session_id')).toBe(sessionId)
+    expect(storage.getItem('anonymous_id')).toBe(sessionId)
   })
 
-  it('apiFetch injects the X-Session-ID and X-Client-ID headers', async () => {
+  it('apiFetch injects anonymous identity and client headers', async () => {
     const { apiFetch, fetchCalls } = loadSession({
       storageData: { session_id: 'session-123', client_id: 'client-123' },
     })
@@ -55,11 +55,12 @@ describe('session.js', () => {
 
     expect(fetchCalls).toHaveLength(1)
     expect(fetchCalls[0][0]).toBe('/config')
-    expect(fetchCalls[0][1].headers['X-Session-ID']).toBe('session-123')
+    expect(fetchCalls[0][1].headers['X-Darklab-Anonymous-ID']).toBe('session-123')
+    expect(fetchCalls[0][1].headers['X-Darklab-Credential']).toBeUndefined()
     expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('client-123')
   })
 
-  it('apiFetch preserves existing headers while adding the session header', async () => {
+  it('apiFetch preserves existing headers while adding the anonymous identity header', async () => {
     const { apiFetch, fetchCalls } = loadSession({
       storageData: { session_id: 'session-abc', client_id: 'client-abc' },
     })
@@ -71,7 +72,7 @@ describe('session.js', () => {
 
     expect(fetchCalls[0][1].headers).toEqual({
       'Content-Type': 'application/json',
-      'X-Session-ID': 'session-abc',
+      'X-Darklab-Anonymous-ID': 'session-abc',
       'X-Client-ID': 'client-abc',
     })
   })
@@ -122,54 +123,78 @@ describe('session.js', () => {
     )
   })
 
-  it('prefers session_token over session_id when both are in localStorage', () => {
-    const { _getSessionId } = loadSession({
+  it('uses a credential public id for local scope while keeping the secret out of UI state', () => {
+    const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
+    const { _getSessionId, getBrowserIdentitySnapshot } = loadSession({
       storageData: {
         session_id: 'uuid-session',
-        session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456',
+        access_credential: secret,
       },
     })
 
-    expect(_getSessionId()).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(_getSessionId()).toBe(`crd_${'a'.repeat(32)}`)
+    expect(getBrowserIdentitySnapshot()).toEqual({
+      kind: 'credential',
+      anonymousId: '',
+      credentialId: `crd_${'a'.repeat(32)}`,
+      validFormat: true,
+    })
   })
 
   it('falls back to session_id UUID when session_token is absent', () => {
-    const { _getSessionId } = loadSession({
+    const { _getSessionId, storage } = loadSession({
       storageData: { session_id: 'uuid-fallback' },
     })
 
     expect(_getSessionId()).toBe('uuid-fallback')
   })
 
-  it('updateSessionId switches SESSION_ID at runtime', () => {
-    const { _getSessionId, updateSessionId } = loadSession({
+  it('activateAccessCredential switches the local identity at runtime', () => {
+    const secret = `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`
+    const { _getSessionId, activateAccessCredential } = loadSession({
       storageData: { session_id: 'original-uuid' },
     })
 
     expect(_getSessionId()).toBe('original-uuid')
-    updateSessionId('tok_newtoken1234567890abcdef12345678')
-    expect(_getSessionId()).toBe('tok_newtoken1234567890abcdef12345678')
+    activateAccessCredential(secret)
+    expect(_getSessionId()).toBe(`crd_${'c'.repeat(32)}`)
   })
 
-  it('apiFetch sends updated session token after updateSessionId', async () => {
-    const { apiFetch, fetchCalls, updateSessionId } = loadSession({
+  it('rejects browser credentials that do not match the portable server format', () => {
+    const { activateAccessCredential } = loadSession({
       storageData: { session_id: 'original-uuid' },
     })
 
-    updateSessionId('tok_newtoken1234567890abcdef12345678')
-    await apiFetch('/history')
-
-    expect(fetchCalls[0][1].headers['X-Session-ID']).toBe('tok_newtoken1234567890abcdef12345678')
+    for (const value of [
+      `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(42)}`,
+      `dlp_v1_pat_${'c'.repeat(32)}_${'d'.repeat(43)}`,
+      `DLC_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`,
+    ]) {
+      expect(() => activateAccessCredential(value)).toThrow('Invalid access credential format')
+    }
   })
 
-  it('updateSessionId reloads session preferences when the helper is available', () => {
+  it('apiFetch sends the stored credential after activation', async () => {
+    const secret = `dlc_v1_crd_${'e'.repeat(32)}_${'f'.repeat(43)}`
+    const { apiFetch, fetchCalls, activateAccessCredential } = loadSession({
+      storageData: { session_id: 'original-uuid' },
+    })
+
+    activateAccessCredential(secret)
+    await apiFetch('/history')
+
+    expect(fetchCalls[0][1].headers['X-Darklab-Credential']).toBe(secret)
+    expect(fetchCalls[0][1].headers['X-Darklab-Anonymous-ID']).toBeUndefined()
+  })
+
+  it('credential activation reloads identity-bound preferences', () => {
     const loadSessionPreferences = vi.fn(() => Promise.resolve())
-    const { updateSessionId } = loadSession({
+    const { activateAccessCredential } = loadSession({
       storageData: { session_id: 'original-uuid' },
     })
     window.loadSessionPreferences = loadSessionPreferences
 
-    updateSessionId('tok_newtoken1234567890abcdef12345678')
+    activateAccessCredential(`dlc_v1_crd_${'1'.repeat(32)}_${'2'.repeat(43)}`)
 
     expect(loadSessionPreferences).toHaveBeenCalled()
     delete window.loadSessionPreferences
@@ -194,34 +219,34 @@ describe('session.js', () => {
     expect(maskSessionToken(null)).toBe('(none)')
   })
 
-  it('storage event from another tab updates SESSION_ID to the new token', () => {
-    const { _getSessionId } = loadSession({
+  it('storage event from another tab updates the active credential identity', () => {
+    const { _getSessionId, storage } = loadSession({
       storageData: { session_id: 'uuid-original' },
     })
 
     expect(_getSessionId()).toBe('uuid-original')
 
-    window.dispatchEvent(
-      new StorageEvent('storage', {
-        key: 'session_token',
-        newValue: 'tok_newtoken1234567890abcdef12345678',
-      }),
-    )
-
-    expect(_getSessionId()).toBe('tok_newtoken1234567890abcdef12345678')
+    storage.setItem('access_credential', `dlc_v1_crd_${'3'.repeat(32)}_${'4'.repeat(43)}`)
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'access_credential',
+      newValue: `dlc_v1_crd_${'3'.repeat(32)}_${'4'.repeat(43)}`,
+    }))
+    expect(_getSessionId()).toBe(`crd_${'3'.repeat(32)}`)
   })
 
-  it('storage event from another tab reverts SESSION_ID to UUID when token is cleared', () => {
-    const { _getSessionId } = loadSession({
+  it('storage event from another tab reverts to the anonymous UUID when access is removed', () => {
+    const secret = `dlc_v1_crd_${'5'.repeat(32)}_${'6'.repeat(43)}`
+    const { _getSessionId, storage } = loadSession({
       storageData: {
         session_id: 'uuid-base',
-        session_token: 'tok_existingtoken234567890abcdef12',
+        access_credential: secret,
       },
     })
 
-    expect(_getSessionId()).toBe('tok_existingtoken234567890abcdef12')
+    expect(_getSessionId()).toBe(`crd_${'5'.repeat(32)}`)
 
-    window.dispatchEvent(new StorageEvent('storage', { key: 'session_token', newValue: null }))
+    storage.removeItem('access_credential')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'access_credential', newValue: null }))
 
     expect(_getSessionId()).toBe('uuid-base')
   })
@@ -246,8 +271,8 @@ describe('session.js', () => {
 
     window.dispatchEvent(
       new StorageEvent('storage', {
-        key: 'session_token',
-        newValue: 'tok_newtoken1234567890abcdef12345678',
+        key: 'access_credential',
+        newValue: `dlc_v1_crd_${'7'.repeat(32)}_${'8'.repeat(43)}`,
       }),
     )
 
@@ -262,8 +287,8 @@ describe('session.js', () => {
 
     window.dispatchEvent(
       new StorageEvent('storage', {
-        key: 'session_token',
-        newValue: 'tok_newtoken1234567890abcdef12345678',
+        key: 'access_credential',
+        newValue: `dlc_v1_crd_${'9'.repeat(32)}_${'a'.repeat(43)}`,
       }),
     )
 
@@ -271,28 +296,21 @@ describe('session.js', () => {
     delete window.loadSessionPreferences
   })
 
-  it('storage event calls the registered session-token status updater when available', () => {
-    const updateOptionsSessionTokenStatus = vi.fn()
-    const { setSessionTokenHandlers } = loadSession({ storageData: { session_id: 'uuid-b' } })
-    setSessionTokenHandlers({ updateOptionsSessionTokenStatus })
-
-    window.dispatchEvent(
-      new StorageEvent('storage', {
-        key: 'session_token',
-        newValue: 'tok_newtoken1234567890abcdef12345678',
-      }),
-    )
-
-    expect(updateOptionsSessionTokenStatus).toHaveBeenCalled()
+  it('storage event announces the changed browser identity', () => {
+    loadSession({ storageData: { session_id: 'uuid-b' } })
+    const listener = vi.fn()
+    window.addEventListener('app:identity-changed', listener)
+    window.dispatchEvent(new StorageEvent('storage', { key: 'access_credential' }))
+    expect(listener).toHaveBeenCalled()
   })
 
-  it('storage event does not throw when reloadSessionHistory and session-token status updater are absent', () => {
+  it('storage event does not throw when optional refresh handlers are absent', () => {
     loadSession({ storageData: { session_id: 'uuid-c' } })
     delete window.reloadSessionHistory
 
     expect(() => {
       window.dispatchEvent(
-        new StorageEvent('storage', { key: 'session_token', newValue: 'tok_abc' }),
+        new StorageEvent('storage', { key: 'access_credential', newValue: null }),
       )
     }).not.toThrow()
   })

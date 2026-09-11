@@ -327,7 +327,7 @@ function _scheduleStatusLabel(schedule) {
   if (!schedule) return '';
   const reason = String(schedule.paused_reason || '').trim();
   if (schedule.enabled === false) {
-    return /revok/i.test(reason) ? 'token revoked' : 'paused';
+    return /revok/i.test(reason) ? 'credential revoked' : 'paused';
   }
   if (schedule.last_error) return 'needs attention';
   return 'active';
@@ -336,7 +336,7 @@ function _scheduleStatusLabel(schedule) {
 function _scheduleStatusTone(schedule) {
   const label = _scheduleStatusLabel(schedule);
   if (label === 'active') return 'badge-tone-green';
-  if (label === 'token revoked' || label === 'needs attention') return 'badge-tone-red';
+  if (label === 'credential revoked' || label === 'needs attention') return 'badge-tone-red';
   return 'badge-tone-muted';
 }
 
@@ -916,7 +916,7 @@ function _renderSchedulesDetail() {
   if (schedule?.paused_reason && /revok/i.test(schedule.paused_reason)) {
     const revoked = document.createElement('div');
     revoked.className = 'schedules-alert';
-    revoked.textContent = 'Paused because the session token was revoked.';
+    revoked.textContent = 'Paused because its originating access credential was revoked.';
     root.appendChild(revoked);
   } else if (schedule?.last_error) {
     const err = document.createElement('div');

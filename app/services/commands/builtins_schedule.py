@@ -58,9 +58,7 @@ def _schedule_usage() -> list[dict[str, object]]:
 
 
 def _durable_session_error(session_id: str) -> str:
-    if str(session_id or "").startswith("tok_"):
-        return "schedule: this token is not registered; run `session-token generate` or reload with a saved token."
-    return "schedule: persistent session token required. Run `session-token generate` first."
+    return "schedule: a kept workspace is required. Open Options > Access and choose Keep this workspace."
 
 
 def _is_durable_session(session_id: str) -> bool:
@@ -264,7 +262,7 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
                 "subcommand": subcommand,
-                "error": "session token required",
+                "error": "kept workspace required",
             },
         )
         return [output_line(_durable_session_error(session_id))]
@@ -364,7 +362,7 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object
         ValueError,
     ) as exc:
         message = str(exc)
-        if message == "notification channels require a durable session token":
+        if message == "this feature requires a durable personal workspace":
             message = _durable_session_error(session_id)
         log.warning(
             "BUILTIN_SCHEDULE_REJECTED",

@@ -175,8 +175,9 @@ describe('team scope selector', () => {
     }
   })
 
-  it('restores token-scoped team selection before runtime session handlers are ready', async () => {
-    const sessionToken = 'tok_scope_reload'
+  it('restores credential-scoped team selection before runtime identity handlers are ready', async () => {
+    const credentialId = `crd_${'a'.repeat(32)}`
+    const credential = `dlc_v1_${credentialId}_${'b'.repeat(43)}`
     const apiFetch = defaultApiFetch({
       teams: [{
         id: 'team_live_1',
@@ -189,8 +190,8 @@ describe('team scope selector', () => {
       apiFetch,
       sessionId: '',
       localStorageEntries: {
-        session_token: sessionToken,
-        [`active_team_id:${sessionToken}`]: 'team_live_1',
+        access_credential: credential,
+        [`active_team_id:${credentialId}`]: 'team_live_1',
       },
     })
 
