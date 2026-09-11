@@ -11,10 +11,10 @@ import sqlite3
 import unittest.mock as mock
 from typing import Any
 
-from conftest import build_test_config
+from conftest import build_test_config, copy_pristine_sqlite_database
 from conftest import make_test_app as _test_app
 from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
-from core.database import db_init, db_connect
+from core.database import db_connect
 from services.commands.builtins import execute_builtin_command
 from services.teams import storage as team_storage
 
@@ -45,7 +45,7 @@ def _schedule_client(monkeypatch, tmp_path):
     monkeypatch.setattr("core.database.DB_INIT_LOCK_PATH", lock_path)
     monkeypatch.setattr("core.database.CFG", cfg)
     monkeypatch.setattr("config.CFG", cfg)
-    db_init()
+    copy_pristine_sqlite_database(db_path)
     return get_client(), db_path
 
 

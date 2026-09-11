@@ -36,7 +36,7 @@ from urllib.parse import quote, urlencode
 import unittest.mock as mock
 
 import app as shell_app_module
-from conftest import build_test_config
+from conftest import build_test_config, copy_pristine_sqlite_database
 from conftest import make_test_app as _test_app
 from conftest import reusable_test_app
 from identity_helpers import (
@@ -60,7 +60,7 @@ import services.projects.package_presets as package_presets
 import services.atlas.import_workflow as atlas_import_workflow
 from services.commands.builtins import execute_builtin_command
 from core.output_signals import OutputSignalClassifier
-from core.database import DB_PATH, db_connect, db_init
+from core.database import DB_PATH, db_connect
 from core.database_backend import DatabaseBackend, quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
 from services.projects.contracts import ProjectWorkspaceError
@@ -634,7 +634,7 @@ class TestSecretsRoutes:
         ]
         for patcher in patchers:
             patcher.start()
-        db_init()
+        copy_pristine_sqlite_database(db_path)
         client = get_client()
         return client, patchers
 
@@ -799,7 +799,7 @@ class TestAtlasImportRoutes:
         ]
         for patcher in patchers:
             patcher.start()
-        db_init()
+        copy_pristine_sqlite_database(db_path)
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
@@ -2523,7 +2523,7 @@ class TestTeamRoutes:
         ]
         for patcher in patchers:
             patcher.start()
-        db_init()
+        copy_pristine_sqlite_database(db_path)
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
@@ -5995,7 +5995,7 @@ class TestNotificationChannelRoutes:
         ]
         for patcher in patchers:
             patcher.start()
-        db_init()
+        copy_pristine_sqlite_database(db_path)
         client = get_client()
         return client, patchers
 
@@ -7695,7 +7695,7 @@ class TestProjectRoutes:
         ]
         for patcher in patchers:
             patcher.start()
-        db_init()
+        copy_pristine_sqlite_database(db_path)
         client = get_client()
         owner_token = principal_owner(str("tok_project_digest_owner_" + uuid.uuid4().hex[:8]))
         viewer_token = principal_owner(str("tok_project_digest_viewer_" + uuid.uuid4().hex[:8]))

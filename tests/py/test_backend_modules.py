@@ -65,7 +65,7 @@ import services.reports.storage as report_storage
 import services.reports.templates as report_templates
 import runtime_bootstrap
 import app as shell_app_module
-from conftest import build_test_config
+from conftest import build_test_config, copy_pristine_sqlite_database
 from conftest import make_test_app as _test_app
 from conftest import reset_reusable_test_apps, reusable_test_app
 import config as app_config
@@ -530,7 +530,7 @@ class TestAIAssistContextAndStorage:
         db_path = os.path.join(tmp_path, "ai-assist.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         conn = database.db_connect()
         created = "2026-05-23T10:00:00+00:00"
         conn.execute(
@@ -5188,7 +5188,7 @@ class TestProjectOverviewContract:
         db_path = str(tmp_path / "project-overview.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         return db_path
 
     def test_payload_contract_and_overview_helpers_pin_phase_one_decisions(self):
@@ -7765,7 +7765,7 @@ class TestReportTemplateCatalog:
     def test_report_draft_storage_handles_scope_and_conflicts(self, tmp_path):
         db_path = str(tmp_path / "reports.db")
         with mock.patch("core.database.DB_PATH", db_path):
-            database.db_init()
+            copy_pristine_sqlite_database(db_path)
             saved = report_storage.save_report_draft(
                 "facbddf1-a4e3-44ca-98f1-2501b26a3ff3",
                 "project-1",
@@ -11244,7 +11244,7 @@ class TestSchedulerFoundation:
                 }
             ),
         )
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         conn = database.db_connect()
         identity = persisted_principal(conn, "scheduler")
         assert identity.personal_workspace_id == _SCHEDULER_WORKSPACE_ID
@@ -12016,7 +12016,7 @@ class TestWatchersFoundation:
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "CFG", cfg)
         monkeypatch.setattr(app_config, "CFG", cfg)
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         conn = database.db_connect()
         identity = persisted_principal(conn, "watchers")
         assert identity.personal_workspace_id == _WATCHER_WORKSPACE_ID
@@ -14624,7 +14624,7 @@ class TestNotificationsPhase0:
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         monkeypatch.setattr(database, "CFG", cfg)
         monkeypatch.setattr(app_config, "CFG", cfg)
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         persisted_principal(conn, "notifications")
@@ -17606,7 +17606,7 @@ class TestDataAccessLayerServiceCoverage:
         db_path = os.path.join(tmp_path, name)
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
-        database.db_init()
+        copy_pristine_sqlite_database(db_path)
         return db_path
 
     def test_history_list_items_preserve_enriched_run_and_snapshot_shape(self, monkeypatch, tmp_path):
@@ -28439,13 +28439,74 @@ class TestPermalinkErrorPage:
 # ── database init and pruning ─────────────────────────────────────────────────
 
 
+class TestPristineSQLiteTestDatabase:
+    def test_copy_is_current_clean_and_self_contained(self, tmp_path):
+        from core.migrations import MIGRATIONS
+        from services.auth.schema_guard import post_cutover_schema_violations
+
+        db_path = copy_pristine_sqlite_database(tmp_path / "current.db")
+
+        assert not any(
+            Path(str(db_path) + suffix).exists()
+            for suffix in ("-journal", "-shm", "-wal")
+        )
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+            assert {
+                str(row[0])
+                for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            } == {migration.version for migration in MIGRATIONS}
+            assert not post_cutover_schema_violations(
+                conn,
+                database_backend.DatabaseBackend.SQLITE,
+            )
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs_fts'"
+            ).fetchone() is not None
+
+    def test_copies_do_not_share_rows(self, tmp_path):
+        first_path = copy_pristine_sqlite_database(tmp_path / "first.db")
+        second_path = copy_pristine_sqlite_database(tmp_path / "second.db")
+        created = "2026-09-11T12:00:00+00:00"
+        principal_id = "prn_" + "a" * 32
+
+        with sqlite3.connect(first_path) as conn:
+            conn.execute(
+                "INSERT INTO principals (id, created_at, updated_at) VALUES (?, ?, ?)",
+                (principal_id, created, created),
+            )
+            conn.commit()
+        with sqlite3.connect(second_path) as conn:
+            count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM principals WHERE id = ?",
+                    (principal_id,),
+                ).fetchone()[0]
+            )
+
+        assert count == 0
+
+    def test_copy_refuses_existing_database_state(self, tmp_path):
+        existing_path = tmp_path / "existing.db"
+        existing_path.touch()
+        with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+            copy_pristine_sqlite_database(existing_path)
+
+        sidecar_path = tmp_path / "sidecar.db-wal"
+        sidecar_path.touch()
+        with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+            copy_pristine_sqlite_database(tmp_path / "sidecar.db")
+
+
 class TestAuditEvents:
     def _audit_conn(self):
         tmp = tempfile.TemporaryDirectory()
         db_path = os.path.join(tmp.name, "audit.db")
         with mock.patch("core.database.DB_PATH", db_path):
             with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0, "audit_retention_days": 0})):
-                database.db_init()
+                copy_pristine_sqlite_database(db_path)
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return tmp, conn
@@ -29325,7 +29386,10 @@ class TestDatabaseInit:
         """Return a path to a new empty DB file in tmp."""
         return os.path.join(tmp, "test.db")
 
-    def _create_tables(self, db_path):
+    def _copy_current_database(self, db_path):
+        copy_pristine_sqlite_database(db_path)
+
+    def _initialize_database(self, db_path):
         with mock.patch("core.database.DB_PATH", db_path):
             with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                 database.db_init()
@@ -29417,7 +29481,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
@@ -29551,7 +29615,7 @@ class TestDatabaseInit:
         canonical_value = "shared.example.com"
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
@@ -29654,7 +29718,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             try:
@@ -30139,7 +30203,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             schema_conn = sqlite3.connect(db_path)
             schema_conn.row_factory = sqlite3.Row
             try:
@@ -30252,7 +30316,7 @@ class TestDatabaseInit:
     def test_creates_runs_and_snapshots_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             conn = sqlite3.connect(db_path)
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             conn.close()
@@ -30264,7 +30328,7 @@ class TestDatabaseInit:
     def test_run_output_summary_backfill_marks_empty_runs_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
                 with database.db_connect() as conn:
                     conn.execute(
@@ -30292,7 +30356,7 @@ class TestDatabaseInit:
     def test_run_output_summary_backfill_marks_failures_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
                 with database.db_connect() as conn:
                     conn.execute(
@@ -30346,7 +30410,7 @@ class TestDatabaseInit:
     def test_creates_project_workspace_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             conn = sqlite3.connect(db_path)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             artifact_columns = {row[1] for row in conn.execute("PRAGMA table_info('run_file_artifacts')").fetchall()}
@@ -30476,7 +30540,7 @@ class TestDatabaseInit:
         } == finding_disposition_columns
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -30729,7 +30793,7 @@ class TestDatabaseInit:
     def test_json_bearing_schema_columns_use_sqlite_json_type(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             conn = sqlite3.connect(db_path)
             column_types = {
                 table_name: {row[1]: row[2] for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()}
@@ -30772,7 +30836,7 @@ class TestDatabaseInit:
     def test_atlas_import_source_helpers_are_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             now = "2026-06-01T00:00:00+00:00"
@@ -30886,7 +30950,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             now = "2026-06-01T00:00:00+00:00"
@@ -30981,7 +31045,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             now = "2026-06-01T00:00:00+00:00"
@@ -31080,7 +31144,7 @@ class TestDatabaseInit:
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             now = "2026-06-01T00:00:00+00:00"
@@ -31785,7 +31849,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -31870,7 +31934,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -31943,7 +32007,7 @@ SQL syntax error near q</response>
     def test_materialized_url_host_from_extracted_entities_is_not_double_counted(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32050,7 +32114,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             url_id = atlas_entity_id("4d4659e9-5837-4282-92d4-98c55ac2fa5b", "url", "https://legacy.example.com/path")
@@ -32195,7 +32259,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32240,7 +32304,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32403,7 +32467,7 @@ SQL syntax error near q</response>
             import services.atlas.intel_bridge as intel_bridge
 
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32469,7 +32533,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32544,7 +32608,7 @@ SQL syntax error near q</response>
     ):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32582,7 +32646,7 @@ SQL syntax error near q</response>
     def test_materializes_no_scan_target_observation_when_command_target_is_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32618,7 +32682,7 @@ SQL syntax error near q</response>
     def test_materializes_curl_port_entities_without_scan_target_observation(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32664,7 +32728,7 @@ SQL syntax error near q</response>
     def test_materializer_ignores_unclassified_raw_output_text(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32737,7 +32801,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             for run_id, command, line in rows:
@@ -32778,7 +32842,7 @@ SQL syntax error near q</response>
     def test_materializer_deduplicates_team_entities_across_members(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             for run_id, session_id in (
@@ -32819,7 +32883,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             entries = [
@@ -32887,7 +32951,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -32969,7 +33033,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -33032,7 +33096,7 @@ SQL syntax error near q</response>
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -33105,7 +33169,7 @@ SQL syntax error near q</response>
     def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             conn.execute(
@@ -33217,7 +33281,7 @@ SQL syntax error near q</response>
             conn.close()
 
             with pytest.raises(SchemaReconciliationError, match="Back up this database"):
-                self._create_tables(db_path)
+                self._initialize_database(db_path)
 
             conn = sqlite3.connect(db_path)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
@@ -33258,7 +33322,7 @@ SQL syntax error near q</response>
 
     def _auto_promote_test_conn(self, tmp):
         db_path = self._fresh_db(tmp)
-        self._create_tables(db_path)
+        self._copy_current_database(db_path)
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return conn
@@ -34187,7 +34251,7 @@ SQL syntax error near q</response>
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()
@@ -34207,7 +34271,7 @@ SQL syntax error near q</response>
     def test_creates_project_workspace_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             conn = sqlite3.connect(db_path)
             project_indexes = {row[1] for row in conn.execute("PRAGMA index_list('projects')").fetchall()}
             link_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_links')").fetchall()}
@@ -34299,7 +34363,7 @@ SQL syntax error near q</response>
         # Calling db_init() twice on the same DB must not raise
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._initialize_database(db_path)
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
                     database.db_init()  # second call
@@ -34307,7 +34371,7 @@ SQL syntax error near q</response>
     def test_current_schema_accepts_project_digest_schedule_and_notifications(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             schedules_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'").fetchone()[
                 0
@@ -34347,7 +34411,7 @@ SQL syntax error near q</response>
     def test_retention_prunes_old_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             # Insert a run timestamped 100 days ago
             conn = sqlite3.connect(db_path)
             conn.execute(
@@ -34368,7 +34432,7 @@ SQL syntax error near q</response>
     def test_retention_prunes_old_snapshots(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) "
@@ -34387,7 +34451,7 @@ SQL syntax error near q</response>
     def test_retention_prunes_old_snapshot_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) "
@@ -34422,7 +34486,7 @@ SQL syntax error near q</response>
     def test_retention_prunes_project_run_and_artifact_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started) "
@@ -34486,7 +34550,7 @@ SQL syntax error near q</response>
     def test_zero_retention_does_not_prune(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started) "
@@ -34506,7 +34570,7 @@ SQL syntax error near q</response>
     def test_recent_runs_not_pruned(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
-            self._create_tables(db_path)
+            self._copy_current_database(db_path)
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started) "
@@ -34562,7 +34626,7 @@ class TestSessionVariables:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                    database.db_init()
+                    copy_pristine_sqlite_database(db_path)
                 session_variables.set_session_variable(session_id, "HOST", "ip.darklab.sh")
                 session_variables.set_session_variable(session_id, "PORT", "443")
                 expansion = session_variables.expand_session_variables(
@@ -34589,7 +34653,7 @@ class TestSessionVariables:
             db_path = os.path.join(tmp, "vars.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                    database.db_init()
+                    copy_pristine_sqlite_database(db_path)
                 with pytest.raises(session_variables.InvalidSessionVariableName):
                     session_variables.set_session_variable(session_id, "host", "ip.darklab.sh")
                 with pytest.raises(session_variables.UndefinedSessionVariable):
@@ -34715,7 +34779,7 @@ class TestBuiltinStatus:
             db_path = os.path.join(tmp, "status.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                    database.db_init()
+                    copy_pristine_sqlite_database(db_path)
 
             conn = sqlite3.connect(db_path)
             conn.execute(
@@ -34765,7 +34829,7 @@ class TestBuiltinStats:
             db_path = os.path.join(tmp, "stats.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                    database.db_init()
+                    copy_pristine_sqlite_database(db_path)
 
             conn = sqlite3.connect(db_path)
             runs = [
@@ -34881,7 +34945,7 @@ class TestBuiltinStats:
             db_path = os.path.join(tmp, "stats-builtin-only.db")
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                    database.db_init()
+                    copy_pristine_sqlite_database(db_path)
 
             conn = sqlite3.connect(db_path)
             conn.execute(
@@ -35003,7 +35067,7 @@ class TestSecretsVault:
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
             with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                database.db_init()
+                copy_pristine_sqlite_database(db_path)
             older_ciphertext, older_nonce = secrets_vault.encrypt_secret("older-secret")
             newer_ciphertext, newer_nonce = secrets_vault.encrypt_secret("newer-secret")
             with database.db_connect() as conn:
@@ -35044,7 +35108,7 @@ class TestSecretsVault:
         db_path = os.path.join(tmp_path, "secrets.db")
         with mock.patch("core.database.DB_PATH", db_path):
             with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                database.db_init()
+                copy_pristine_sqlite_database(db_path)
             secrets_storage.upsert_secret(
                 "secret-session",
                 "shodan_primary",
