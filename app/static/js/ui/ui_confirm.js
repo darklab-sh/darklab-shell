@@ -4,7 +4,7 @@
 // Single imperative primitive for modal confirmations in the shell.
 //
 // Every destructive or mode-switching confirmation (kill, history-delete,
-// history-clear, share-redaction, session-token set/migrate, team management)
+// history-clear, share-redaction, credential lifecycle, team management)
 // resolves through
 // this helper. Previously each one hand-rolled its own markup, show/hide
 // helpers, bindDismissible registration, bindMobileSheet registration,

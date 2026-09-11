@@ -61,6 +61,27 @@ async function runFastCaptureCommand(page) {
   )
 }
 
+async function openAccessCapture(page) {
+  await openRailAction(page, 'options')
+  await expect(page.locator('#options-modal')).toBeVisible()
+  await page.locator('#options-tab-access').click()
+  await expect(page.locator('#options-panel-access')).toBeVisible()
+}
+
+async function keepCaptureWorkspace(page, label = 'Primary browser') {
+  await openAccessCapture(page)
+  await page.locator('#options-access-keep-btn').click()
+  await page.locator('#options-access-editor input[type="text"]').fill(label)
+  await page.locator('#options-access-editor').getByRole('button', { name: 'Keep workspace' }).click()
+  await expect(page.locator('#options-access-reveal')).toBeVisible()
+}
+
+async function showCaptureCredentialList(page) {
+  await keepCaptureWorkspace(page)
+  await page.locator('#options-access-reveal').getByRole('button', { name: 'Close' }).click()
+  await expect(page.locator('.options-access-row', { hasText: 'Primary browser' })).toContainText('Current')
+}
+
 async function runCaptureCommandAndGetRunId(page, command) {
   await runCommand(page, command)
   await waitForHistoryRuns(page, 1)
@@ -739,29 +760,56 @@ const scenes = [
     },
   },
   {
-    slug: 'options-modal',
-    title: 'Main UI - options modal',
+    slug: 'options-access-anonymous',
+    title: 'Main UI - anonymous workspace Access',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await openRailAction(page, 'options')
-      await expect(page.locator('#options-modal')).toBeVisible()
+      await openAccessCapture(page)
+      await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
     },
   },
   {
-    slug: 'session-token-clear-confirmation',
-    title: 'Main UI - session-token clear confirmation modal',
+    slug: 'options-access-first-credential',
+    title: 'Main UI - first credential one-time reveal',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await openRailAction(page, 'options')
-      await expect(page.locator('#options-modal')).toBeVisible()
-      await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
-      await page.locator('#options-session-token-clear-btn').click()
+      await keepCaptureWorkspace(page)
+      await expect(page.locator('.options-access-reveal-value')).toHaveAttribute('aria-label', 'Credential hidden')
+    },
+  },
+  {
+    slug: 'options-access-credential-list',
+    title: 'Main UI - Access credential list with current row',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialList(page)
+    },
+  },
+  {
+    slug: 'options-access-rotate-confirmation',
+    title: 'Main UI - Access credential rotation confirmation',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialList(page)
+      await page.locator('.options-access-row', { hasText: 'Primary browser' }).getByRole('button', { name: 'Rotate' }).click()
       await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
-      await expect(page.locator('#confirm-host')).toContainText('Clear the current session token')
-      await expect(page.locator('#confirm-host [data-confirm-action-id="copy"]')).toBeVisible()
-      await expect(page.locator('#confirm-host [data-confirm-action-id="clear"]')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toContainText('old credential stays active')
+    },
+  },
+  {
+    slug: 'options-access-revoke-warning',
+    title: 'Main UI - current credential revocation warning',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialList(page)
+      await page.locator('.options-access-row', { hasText: 'Primary browser' }).getByRole('button', { name: 'Revoke' }).click()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toContainText('last active access credential')
     },
   },
   {

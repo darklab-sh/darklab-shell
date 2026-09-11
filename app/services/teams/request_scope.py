@@ -224,7 +224,7 @@ def current_request_scope(
     if authenticated is None and not session_id.startswith("tok_"):
         _raise_scope_error(
             "team_token_required",
-            "Team scope requires a session token.",
+            "Team scope requires a kept workspace.",
             request=request,
             session_id=session_id,
             team_id=team_id,
@@ -236,7 +236,7 @@ def current_request_scope(
     if not member:
         _raise_scope_error(
             "team_forbidden",
-            "Your session token is not a member of this team.",
+            "Your principal is not a member of this team.",
             request=request,
             session_id=session_id,
             team_id=team_id,

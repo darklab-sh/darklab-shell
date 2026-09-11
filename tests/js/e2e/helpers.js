@@ -212,6 +212,33 @@ export async function browserSessionId(page) {
   })
 }
 
+export async function keepBrowserWorkspace(page, { label = 'Playwright browser', timeout = 30_000 } = {}) {
+  await waitForE2ETestHooks(page, { timeout })
+  const credentialId = await page.evaluate(async (credentialLabel) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await apiFetch('/auth/principals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: credentialLabel }),
+      })
+      if (response.ok) {
+        const payload = await response.json()
+        localStorage.setItem('access_credential', payload.secret)
+        return payload.credential.id
+      }
+      if (response.status !== 500 || attempt === 2) {
+        throw new Error(`workspace keep failed: ${response.status}`)
+      }
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)))
+    }
+    throw new Error('workspace keep failed after retry')
+  }, label)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await ensurePromptReady(page, { timeout })
+  await expect.poll(() => page.evaluate(() => SESSION_ID), { timeout: 15_000 }).toBe(credentialId)
+  return credentialId
+}
+
 export function seedExternalHistoryRuns(testInfo, { sessionId, commands }) {
   if (!sessionId) {
     throw new Error('Cannot seed external history runs without a browser session id')

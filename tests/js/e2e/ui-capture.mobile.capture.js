@@ -78,6 +78,26 @@ async function openMenu(page) {
   await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
 }
 
+async function openAccessCaptureMobile(page) {
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
+  await expect(page.locator('#options-panel-access')).toBeVisible()
+}
+
+async function keepCaptureWorkspaceMobile(page, label = 'Primary phone') {
+  await openAccessCaptureMobile(page)
+  await page.locator('#options-access-keep-btn').click()
+  await page.locator('#options-access-editor input[type="text"]').fill(label)
+  await page.locator('#options-access-editor').getByRole('button', { name: 'Keep workspace' }).click()
+  await expect(page.locator('#options-access-reveal')).toBeVisible()
+}
+
+async function showCaptureCredentialListMobile(page) {
+  await keepCaptureWorkspaceMobile(page)
+  await page.locator('#options-access-reveal').getByRole('button', { name: 'Close' }).click()
+  await expect(page.locator('.options-access-row', { hasText: 'Primary phone' })).toContainText('Current')
+}
+
 async function openRecentsSheet(page) {
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
@@ -750,31 +770,55 @@ const scenes = [
     },
   },
   {
-    slug: 'options-modal',
-    title: 'Options modal',
+    slug: 'options-access-anonymous',
+    title: 'Anonymous workspace Access',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await openMenu(page)
-      await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
-      await expect(page.locator('#options-modal')).toBeVisible()
+      await openAccessCaptureMobile(page)
+      await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
     },
   },
   {
-    slug: 'session-token-clear-confirmation',
-    title: 'Session-token clear confirmation modal',
+    slug: 'options-access-first-credential',
+    title: 'First credential one-time reveal',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await openMenu(page)
-      await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
-      await expect(page.locator('#options-modal')).toBeVisible()
-      await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
-      await page.locator('#options-session-token-clear-btn').click()
+      await keepCaptureWorkspaceMobile(page)
+      await expect(page.locator('.options-access-reveal-value')).toHaveAttribute('aria-label', 'Credential hidden')
+    },
+  },
+  {
+    slug: 'options-access-credential-list',
+    title: 'Access credential list with current row',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialListMobile(page)
+    },
+  },
+  {
+    slug: 'options-access-credential-detail',
+    title: 'Access credential detail editor',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialListMobile(page)
+      await page.locator('.options-access-row', { hasText: 'Primary phone' }).getByRole('button', { name: 'Rename' }).click()
+      await expect(page.locator('#options-access-editor')).toContainText('Rename credential')
+    },
+  },
+  {
+    slug: 'options-access-revoke-warning',
+    title: 'Current credential revocation warning',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await showCaptureCredentialListMobile(page)
+      await page.locator('.options-access-row', { hasText: 'Primary phone' }).getByRole('button', { name: 'Revoke' }).click()
       await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
-      await expect(page.locator('#confirm-host')).toContainText('Clear the current session token')
-      await expect(page.locator('#confirm-host [data-confirm-action-id="copy"]')).toBeVisible()
-      await expect(page.locator('#confirm-host [data-confirm-action-id="clear"]')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toContainText('last active access credential')
     },
   },
   {

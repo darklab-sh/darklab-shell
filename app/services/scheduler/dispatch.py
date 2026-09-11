@@ -456,7 +456,7 @@ def _disable_revoked_schedule(conn, schedule: Schedule, *, fired_at: str) -> Non
         SET enabled = ?, last_run_at = ?, last_error = ?, paused_reason = ?, updated = ?
         WHERE id = ?
         """,
-        (_bool_param(False), fired_at, "session token revoked", "session token revoked", fired_at, schedule.id),
+        (_bool_param(False), fired_at, "access credential revoked", "access credential revoked", fired_at, schedule.id),
     )
 
 

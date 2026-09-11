@@ -306,7 +306,10 @@ import {
   openSecretEditor,
   refreshOptionsSecrets,
 } from '../../../app/static/js/features/preferences/secrets_panel.js'
-import { _updateOptionsSessionTokenStatus } from '../../../app/static/js/features/preferences/session_token_controls.js'
+import {
+  openAccessAction,
+  refreshAccessPanel,
+} from '../../../app/static/js/features/preferences/access_panel.js'
 import { refreshOptionsTeams } from '../../../app/static/js/features/preferences/teams_panel.js'
 import {
   openNotificationChannelEditor,
@@ -1024,7 +1027,7 @@ describe('core ESM exports', () => {
       expect(fetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
         cache: 'no-store',
         headers: expect.objectContaining({
-          'X-Session-ID': expect.any(String),
+          'X-Darklab-Anonymous-ID': expect.any(String),
         }),
       }))
       expect(document.getElementById('options-secrets-list').textContent).toContain('SHODAN_API_KEY')

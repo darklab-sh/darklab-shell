@@ -149,7 +149,7 @@ describe('tour modal renderer', () => {
           illustration: 'atlas_entities',
         },
         { id: 'session_files', title: 'Files', sample: 'file list', illustration: 'files_panel' },
-        { id: 'session_tokens', title: 'Tokens', sample: 'session-token', illustration: 'session_token' },
+        { id: 'workspace_access', title: 'Access', sample: 'credential status', illustration: 'access_credential' },
         { id: 'closer', title: 'Next', sample: 'help', illustration: 'next_steps' },
       ],
     }
@@ -181,7 +181,7 @@ describe('tour modal renderer', () => {
       ['team_mode', openOptions, []],
       ['atlas', openAtlas, [{ source: 'tour' }]],
       ['session_files', openFiles, []],
-      ['session_tokens', openOptions, []],
+      ['workspace_access', openOptions, [{ tab: 'access' }]],
       ['closer', openFaq, []],
     ].forEach(([chapterId, spy, args]) => {
       openSecondTour({ chapterId })
@@ -235,7 +235,7 @@ describe('tour modal renderer', () => {
       'atlas_entities',
       'files_panel',
       'pty_terminal',
-      'session_token',
+      'access_credential',
       'next_steps',
     ].forEach((key) => {
       const node = _renderTourIllustration(key)

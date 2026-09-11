@@ -312,8 +312,8 @@
     'url': static_asset('/static/js/features/nmap_service_evidence.js'),
     'type': 'module'
   },
-  'options_session_token_controls': {
-    'url': static_asset('/static/js/features/preferences/session_token_controls.js'),
+  'options_access_panel': {
+    'url': static_asset('/static/js/features/preferences/access_panel.js'),
     'type': 'module'
   },
   'options_secrets_panel': {
@@ -591,6 +591,12 @@
             <span class="menu-item-label">options</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="access">
+            <span class="menu-item-icon" aria-hidden="true">◈</span>
+            <span class="menu-item-label">access</span>
+            <span id="mobile-menu-access-state" class="menu-item-hint">Anonymous</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="workflows">
             <span class="menu-item-icon" aria-hidden="true">⚙</span>
             <span class="menu-item-label">workflows</span>
@@ -846,8 +852,8 @@
           <span id="hud-latency" class="hud-value hud-muted">— ms</span>
         </div>
         <div class="hud-cell">
-          <span class="hud-label">session</span>
-          <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
+          <span class="hud-label">access</span>
+          <span id="hud-session" class="hud-value hud-muted" title="Active workspace access">ANON</span>
         </div>
         <div class="hud-cell hud-scope-cell">
           <span class="hud-label">scope</span>
@@ -1461,6 +1467,7 @@
     <div class="options-tabs-wrap">
       <div id="options-tabs" class="options-tabs tab-strip" role="tablist" aria-label="Options sections">
         <button type="button" id="options-tab-preferences" class="tab-strip-item is-active" data-options-tab="preferences" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+        <button type="button" id="options-tab-access" class="tab-strip-item" data-options-tab="access" role="tab" aria-selected="false" aria-controls="options-panel-access">Access</button>
         <button type="button" id="options-tab-secrets" class="tab-strip-item" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
         <button type="button" id="options-tab-teams" class="tab-strip-item" data-options-tab="teams" role="tab" aria-selected="false" aria-controls="options-panel-teams">Teams</button>
         <button type="button" id="options-tab-notifications" class="tab-strip-item" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
@@ -1516,23 +1523,6 @@
             <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
             <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
             <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
-          </div>
-        </div>
-        <div class="faq-item">
-          <div class="faq-q">Session Token</div>
-          <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
-            <div class="options-session-token-status-row">
-              <div id="options-session-token-status" class="options-session-token-status"></div>
-              <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
-            </div>
-            <div class="options-session-token-actions">
-              <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
-              <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
-              <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
-              <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
-            </div>
-            <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
           </div>
         </div>
         <div class="options-section-heading">Runs</div>
@@ -1602,6 +1592,52 @@
           </div>
         </div>
       </div>
+      <div id="options-panel-access" class="options-tab-panel" data-options-panel="access" role="tabpanel" aria-labelledby="options-tab-access" aria-busy="true" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Workspace access</span>
+            <button id="options-access-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh access" title="Refresh access" disabled>⟳</button>
+          </div>
+          <div class="faq-a form-fieldset options-access-panel">
+            <div class="options-access-summary-card">
+              <strong id="options-access-summary">Anonymous workspace</strong>
+              <div id="options-access-summary-detail" class="options-access-description">This workspace is tied to this browser. Keep it to use the same workspace on other devices.</div>
+            </div>
+            <div id="options-access-anonymous-actions" class="options-access-actions">
+              <button id="options-access-keep-btn" class="btn btn-primary btn-compact" type="button" disabled>Keep this workspace</button>
+              <button id="options-access-use-btn" class="btn btn-secondary btn-compact" type="button" disabled>Use an existing credential</button>
+              <button id="options-access-discard-invalid-btn" class="btn btn-secondary btn-warning btn-compact" type="button" disabled hidden>Remove invalid credential</button>
+            </div>
+            <div id="options-access-authenticated-actions" class="options-access-actions" hidden>
+              <button id="options-access-add-btn" class="btn btn-secondary btn-compact" type="button" disabled>Add credential</button>
+              <button id="options-access-remove-btn" class="btn btn-secondary btn-warning btn-compact" type="button" disabled>Remove from browser</button>
+            </div>
+            <div id="options-access-redemption" class="options-access-inline-card" hidden>
+              <strong>Use an existing credential</strong>
+              <p class="options-access-description">Paste a portable credential to open its workspace on this browser. It won't be added to shell history.</p>
+              <label class="form-fieldset">
+                <span class="form-label">Access credential</span>
+                <input id="options-access-redemption-input" class="form-control" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+              </label>
+              <div class="options-access-actions">
+                <button id="options-access-redemption-apply" class="btn btn-primary btn-compact" type="button">Use credential</button>
+                <button id="options-access-redemption-cancel" class="btn btn-ghost btn-compact" type="button">Cancel</button>
+              </div>
+            </div>
+            <div id="options-access-editor" class="options-access-inline-card" hidden></div>
+            <div id="options-access-reveal" hidden></div>
+            <div id="options-access-msg" class="options-access-message" role="status" aria-live="polite" hidden></div>
+            <div id="options-access-affected-work" class="options-access-inline-card" hidden></div>
+          </div>
+        </div>
+        <div id="options-access-credentials-section" class="faq-item" hidden>
+          <div class="faq-q">Credentials</div>
+          <div class="faq-a form-fieldset">
+            <div class="options-access-description">Credentials open this workspace without revealing your principal ID. Full credential values are shown only once.</div>
+            <div id="options-access-credentials" class="options-access-credentials" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
       <div id="options-panel-secrets" class="options-tab-panel" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
         <div class="faq-item">
           <div class="faq-q options-field-heading">
@@ -1626,7 +1662,7 @@
             <button id="options-teams-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh teams" title="Refresh teams">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Use teams to share team-scoped runs, projects, schedules, watchers, and Atlas data with other session-token holders.</div>
+            <div class="options-session-token-desc">Use teams to share team-scoped runs, projects, schedules, watchers, and Atlas data with other principals.</div>
             <div class="options-session-token-actions">
               <button id="options-team-create-btn" class="btn btn-secondary btn-compact" type="button">Create team</button>
               <button id="options-team-join-btn" class="btn btn-secondary btn-compact" type="button">Join team</button>
@@ -1646,7 +1682,7 @@
             <button id="options-notification-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh notification channels" title="Refresh notification channels">⟳</button>
           </div>
           <div class="faq-a form-fieldset">
-            <div class="options-session-token-desc">Send run, schedule, and watcher updates to destinations owned by this session token. Secret values are stored in the vault and never shown again.</div>
+            <div class="options-session-token-desc">Send run, schedule, and watcher updates to destinations owned by the active personal workspace or team. Secret values are stored in the vault and never shown again.</div>
             <div class="options-session-token-actions">
               <button id="options-notification-new-btn" class="btn btn-secondary btn-compact" type="button">Add channel</button>
             </div>

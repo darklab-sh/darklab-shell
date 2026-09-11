@@ -966,8 +966,8 @@ describe('frontend config bootstrap', () => {
   it('lazy-loads the Options panel controller cluster in order', async () => {
     const appended = []
     const optionsPanelScripts = [
-      ['options_session_token_controls', {
-        url: '/static/js/features/preferences/session_token_controls.js?v=session-token-hash',
+      ['options_access_panel', {
+        url: '/static/js/features/preferences/access_panel.js?v=access-panel-hash',
         type: 'module',
       }],
       ['options_secrets_panel', {
@@ -1001,10 +1001,10 @@ describe('frontend config bootstrap', () => {
     const window = {
       __darklabImportModule: vi.fn(async (url) => {
         imported.push(url)
-        if (url.includes('/session_token_controls.js')) {
-          const _updateOptionsSessionTokenStatus = vi.fn()
-          window._updateOptionsSessionTokenStatus = _updateOptionsSessionTokenStatus
-          return { _updateOptionsSessionTokenStatus }
+        if (url.includes('/access_panel.js')) {
+          const refreshAccessPanel = vi.fn(async () => true)
+          const openAccessAction = vi.fn(async () => true)
+          return { refreshAccessPanel, openAccessAction }
         }
         if (url.includes('/secrets_panel.js')) {
           const refreshOptionsSecrets = vi.fn(async () => true)
@@ -1044,7 +1044,7 @@ describe('frontend config bootstrap', () => {
     const loadPromise = window.loadOptionsPanels()
 
     await vi.waitFor(() => expect(imported).toEqual([
-      '/static/js/features/preferences/session_token_controls.js?v=session-token-hash',
+      '/static/js/features/preferences/access_panel.js?v=access-panel-hash',
       '/static/js/features/preferences/secrets_panel.js?v=secrets-hash',
       '/static/js/features/preferences/teams_panel.js?v=teams-hash',
       '/static/js/features/preferences/notification_channels.js?v=notifications-hash',
@@ -1053,7 +1053,8 @@ describe('frontend config bootstrap', () => {
 
     const panels = await loadPromise
     expect(panels).toEqual(expect.objectContaining({
-      _updateOptionsSessionTokenStatus: expect.any(Function),
+      refreshAccessPanel: expect.any(Function),
+      openAccessAction: expect.any(Function),
       refreshOptionsSecrets: expect.any(Function),
       invalidateOptionsSecrets: expect.any(Function),
       openSecretEditor: expect.any(Function),

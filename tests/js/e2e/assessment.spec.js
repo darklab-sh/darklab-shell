@@ -5,21 +5,10 @@ import { test, expect } from '@playwright/test'
 import {
   browserSessionId,
   ensurePromptReady,
+  keepBrowserWorkspace,
   openRailAction,
   seedProjectMonitoringFixture,
 } from './helpers.js'
-
-async function issueAndActivateSessionToken(page) {
-  const token = await page.evaluate(async () => {
-    const response = await apiFetch('/session/token/generate')
-    if (!response.ok) throw new Error(`session token create failed: ${response.status}`)
-    return (await response.json()).session_token
-  })
-  await page.evaluate((sessionToken) => localStorage.setItem('session_token', sessionToken), token)
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await ensurePromptReady(page, { timeout: 30_000 })
-  await expect.poll(() => page.evaluate(() => SESSION_ID), { timeout: 15_000 }).toBe(token)
-}
 
 async function createAndSelectTeam(page, suffix) {
   await page.evaluate(() => window.DarklabTeamScope.refreshTeamScopes())
@@ -1043,7 +1032,7 @@ test.describe('project assessment qualification', () => {
 
   test('switches personal and team scope while archived team assessments stay read-only', async ({ page }) => {
     test.setTimeout(120_000)
-    await issueAndActivateSessionToken(page)
+    await keepBrowserWorkspace(page, { label: 'Assessment browser' })
     const suffix = Date.now().toString(36)
     const team = await createAndSelectTeam(page, suffix)
     const projectName = `Archived Team Assessment ${suffix}`

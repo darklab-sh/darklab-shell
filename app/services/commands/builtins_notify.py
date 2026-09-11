@@ -53,9 +53,7 @@ def _notify_usage() -> list[dict[str, object]]:
 
 
 def _durable_session_error(session_id: str) -> str:
-    if str(session_id or "").startswith("tok_"):
-        return "notify: this token is not registered; run `session-token generate` or reload with a saved token."
-    return "notify: persistent session token required. Run `session-token generate` first."
+    return "notify: a kept workspace is required. Open Options > Access and choose Keep this workspace."
 
 
 def _is_durable_session(session_id: str) -> bool:
@@ -345,7 +343,7 @@ def run_builtin_notify(command: str, session_id: str, *, team_id: str = "", team
                 "session": get_log_session_id(session_id),
                 "source": "builtin",
                 "subcommand": subcommand,
-                "error": "session token required",
+                "error": "kept workspace required",
             },
         )
         return [output_line(_durable_session_error(session_id))]

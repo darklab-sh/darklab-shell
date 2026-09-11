@@ -101,18 +101,18 @@ def _builtin_faq(app_name="darklab_shell", project_source=None, cfg=None):
             "category": "Core features",
             "feature": "workspace",
             "answer": (
-                "Files are app-managed, session-scoped text files for commands that need small inputs or outputs. "
+                "Files are app-managed, workspace-scoped text files for commands that need small inputs or outputs. "
                 "Use the Files panel or run file help to create, view, edit, "
                 "download, copy, move, touch, or delete files."
             ),
             "answer_html": (
-                "Files are app-managed, session-scoped text files for commands that need small "
+                "Files are app-managed, workspace-scoped text files for commands that need small "
                 "inputs or outputs. Use the <strong>Files</strong> panel or run "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"file help\">file help</span> "
                 "to create, view, edit, download, copy, move, touch, or delete files.<br><br>"
                 "Commands can use explicitly enabled file flags, <code>command &gt; file</code>, "
                 "<code>command &gt;&gt; file</code>, or a final <code>| tee file</code> sink. Other redirection remains blocked. "
-                "Files stay scoped to the current browser session or named session token."
+                "Files stay with the current anonymous or kept workspace."
             ),
         },
         {

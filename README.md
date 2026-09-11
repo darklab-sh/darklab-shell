@@ -80,6 +80,7 @@ After changing one of these settings, run `docker compose up -d --force-recreate
 | [Workflows and automation](FEATURES.md#guided-workflows) | Guided playbooks, schedules, watchers, and outbound notifications. |
 | [Intel lookups](FEATURES.md#external-intel) | Normalized IP, domain, URL, hash, and CVE context, including dated offline EPSS and CISA KEV signals. |
 | [Files, variables, and secrets](FEATURES.md#session-files) | A searchable personal or team file browser, terminal capture/copy helpers, reusable values, and encrypted tool credentials. |
+| [Workspace access](FEATURES.md#workspace-access) | Start anonymously, keep a workspace for later, and manage separate credentials for each device. |
 | [Teams](FEATURES.md#team-mode) | Shared runs, projects, files, automation, and secrets with role controls. |
 | [Interactive tools](FEATURES.md#interactive-pty-mode) | Guarded PTY sessions for approved tools that need a real terminal. |
 | [AI assists](FEATURES.md#ai-assists) | Optional summaries and next-command drafts with privacy controls. |

@@ -60,8 +60,8 @@ chapters:
       Every saved run can be found again from History. Use history to search
       commands and stored output, star commands you use often, restore a
       previous transcript into a tab, copy a run permalink, or remove old
-      rows when a session gets noisy. Session tokens carry history across
-      browsers and devices.
+      rows when a workspace gets noisy. Keep the workspace from Options >
+      Access when you want the same history on another browser or device.
     sample: "history"
     illustration: history_rows
 
@@ -146,15 +146,15 @@ chapters:
     requires: interactive_pty_enabled
     illustration: pty_terminal
 
-  - id: session_tokens
+  - id: workspace_access
     title: "Keep Your Workspace Across Sessions"
     summary: |
-      A session token lets your history, starred commands, variables,
+      An access credential lets your history, starred commands, variables,
       workflows, project context, Files, and saved options follow you to
-      another browser or device. Generate a token when you want continuity;
-      clear it when you want to return to a browser-local anonymous session.
-    sample: "session-token"
-    illustration: session_token
+      another browser or device. Keep the workspace when you want continuity;
+      remove local access when you want to return to an anonymous workspace.
+    sample: "credential status"
+    illustration: access_credential
 
   - id: closer
     title: "Where to go from here"

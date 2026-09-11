@@ -69,8 +69,8 @@ import {
 } from './core/utils.js';
 import {
   apiFetch as importedApiFetch,
+  getBrowserIdentitySnapshot as importedGetBrowserIdentitySnapshot,
   logClientError as importedLogClientError,
-  maskSessionToken as importedMaskSessionToken,
 } from './session.js';
 import { openStatusMonitor as importedRuntimeOpenStatusMonitor } from './runtime_bridge.js';
 import { confirmKill as importedConfirmKill } from './runner_bridge.js';
@@ -167,7 +167,6 @@ let importedProjectWorkspaceShell;
   const _shellSetComposerValue = (...args) => _shellFn('setComposerValue', importedSetComposerValue)?.(...args);
   const _shellDownloadBlobAsAttachment = (...args) => _shellFn('downloadBlobAsAttachment', importedDownloadBlobAsAttachment)?.(...args);
   const _shellDownloadUrlAsAttachment = (...args) => _shellFn('downloadUrlAsAttachment', importedDownloadUrlAsAttachment)?.(...args);
-  const _shellMaskSessionToken = (token) => _shellFn('maskSessionToken', importedMaskSessionToken)?.(token) || token;
   const _shellShowConfirm = (...args) => _shellFn('showConfirm', importedShowConfirm)?.(...args);
   const _shellUseMobileTerminalViewportMode = () => !!_shellFn('useMobileTerminalViewportMode', importedUseMobileTerminalViewportMode)?.();
   const _shellResetCmdHistoryNav = (...args) => _shellFn('resetCmdHistoryNav', importedResetCmdHistoryNav)?.(...args);
@@ -287,6 +286,7 @@ let importedProjectWorkspaceShell;
   const hudTabsEl         = document.getElementById('hud-tabs');
   const hudLatencyEl      = document.getElementById('hud-latency');
   const hudSessionEl      = document.getElementById('hud-session');
+  const mobileAccessStateEl = document.getElementById('mobile-menu-access-state');
   const hudProjectCell    = document.getElementById('hud-project-cell');
   const hudProjectEl      = document.getElementById('hud-project');
   const hudUptimeEl       = document.getElementById('hud-uptime');
@@ -1714,22 +1714,24 @@ let importedProjectWorkspaceShell;
   }
 
   function _renderSession() {
-    if (!hudSessionEl) return;
-    // Read directly from window storage: SESSION_ID in session.js is declared
-    // with `let` so it is not attached to window; localStorage is the
-    // underlying source of truth and updates synchronously across all paths
-    // that change the active session token.
-    let token = '';
-    try { token = global.localStorage?.getItem('session_token') || ''; } catch (_) {}
-    if (token && token.startsWith('tok_')) {
-      const masked = _shellMaskSessionToken(token);
-      hudSessionEl.textContent = masked;
-      hudSessionEl.title = `Active session token (${masked})`;
-      _setValueColor(hudSessionEl, 'hud-value-green');
+    const identity = typeof importedGetBrowserIdentitySnapshot === 'function'
+      ? importedGetBrowserIdentitySnapshot()
+      : { kind: 'anonymous', credentialId: '' };
+    if (identity.kind === 'credential') {
+      const label = identity.credentialId ? `${identity.credentialId.slice(0, 12)}••••` : 'INVALID';
+      if (hudSessionEl) {
+        hudSessionEl.textContent = label;
+        hudSessionEl.title = identity.credentialId ? 'Access credential active' : 'Saved access credential needs attention';
+        _setValueColor(hudSessionEl, identity.credentialId ? 'hud-value-green' : 'hud-value-red');
+      }
+      if (mobileAccessStateEl) mobileAccessStateEl.textContent = identity.credentialId ? 'Kept' : 'Check';
     } else {
-      hudSessionEl.textContent = 'ANON';
-      hudSessionEl.title = 'Anonymous UUID session — generate a token in Options to carry history across devices';
-      _setValueColor(hudSessionEl, 'hud-muted');
+      if (hudSessionEl) {
+        hudSessionEl.textContent = 'ANON';
+        hudSessionEl.title = 'Anonymous workspace — open Access to keep it across devices';
+        _setValueColor(hudSessionEl, 'hud-muted');
+      }
+      if (mobileAccessStateEl) mobileAccessStateEl.textContent = 'Anonymous';
     }
   }
 
@@ -5240,10 +5242,10 @@ let importedProjectWorkspaceShell;
     if (pollNow) pollHudStatus();
   }
 
-  // Cross-tab SESSION_ID changes fire the 'storage' event, so refresh there
-  // as well as on every poll (cheap) so token rotations reflect immediately.
+  // Cross-tab access changes fire storage events; refresh immediately as well
+  // as on each inexpensive status poll.
   window.addEventListener('storage', e => {
-    if (e.key === 'session_token') {
+    if (e.key === 'access_credential' || e.key === 'anonymous_id') {
       _renderSession();
       loadActiveProjectContext().catch(() => {});
       return;
@@ -5251,6 +5253,10 @@ let importedProjectWorkspaceShell;
     if (e.key === PROJECT_WORKSPACE_CONSTANTS.workspaceBroadcastKey && e.newValue) {
       _scheduleProjectWorkspaceExternalRefresh();
     }
+  });
+  window.addEventListener('app:identity-changed', () => {
+    _renderSession();
+    loadActiveProjectContext().catch(() => {});
   });
   document.addEventListener('visibilitychange', () => {
     _startHudStatusPoll({ pollNow: document.visibilityState === 'visible' });
