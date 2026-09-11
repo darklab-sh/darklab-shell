@@ -513,6 +513,8 @@ Practical note:
 ## Testing Conventions
 
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
+- Use `copy_pristine_sqlite_database()` for an ordinary isolated test that only needs an empty current SQLite schema. It copies a production-built, integrity-checked template to a unique path, so test data remains isolated without replaying the migration ladder.
+- Keep migration, schema reconciliation, startup, cutover, failure, and rollback coverage on a genuinely empty or purpose-built database through the real `db_init()` path.
 - Use the shared helpers in `tests/py/identity_helpers.py` for server-side requests that need an identity. `anonymous_session_id()` creates a valid anonymous UUID, `durable_identity()` creates a real principal and personal workspace, and `identity_client()` keeps the same identity across related client requests. `principal_identity()` creates one personal workspace with a portable browser credential and a scoped PAT; use `browser_identity_headers()` for browser routes and `api_identity_headers()` for API v1 routes.
 - Keep malformed, empty, unknown, and revoked identity values as readable literals only in tests that intentionally verify rejection. JavaScript tests that only check header construction don't need database-backed identities, while Playwright should continue reading its identity from the running application.
 - Keep principal-authentication coverage backend-complete. The SQLite and Postgres cases should exercise every typed resolver state, portable credentials and scoped PATs, one-time secret responses, rate limits, redacted audit details, and concurrent last-credential protection through the same production services.

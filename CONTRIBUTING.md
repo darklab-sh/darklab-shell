@@ -286,6 +286,12 @@ check. For one area, pass the file directly to the approved helper:
 bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
 ```
 
+Ordinary isolated SQLite tests that only need an empty current schema should use
+`copy_pristine_sqlite_database()` from `tests/py/conftest.py`. Tests for
+migrations, schema reconciliation, startup, cutover, failure, or rollback must
+keep using a genuinely empty or purpose-built database and the real `db_init()`
+path.
+
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
 integration tests against isolated test schemas. The helper uses

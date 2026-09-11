@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,10 @@ _OWNED_TEST_DATA_DIR = None
 if not os.environ.get("APP_DATA_DIR"):
     _OWNED_TEST_DATA_DIR = tempfile.mkdtemp(prefix="darklab-test-data-")
     os.environ["APP_DATA_DIR"] = _OWNED_TEST_DATA_DIR
+
+_OWNED_SQLITE_TEMPLATE_DIR = Path(tempfile.mkdtemp(prefix="darklab-test-sqlite-template-"))
+_PRISTINE_SQLITE_TEMPLATE_PATH = _OWNED_SQLITE_TEMPLATE_DIR / "pristine.db"
+_PRISTINE_SQLITE_TEMPLATE_LOCK = threading.Lock()
 
 # Change to the app/ directory so module-level file reads in app.py work correctly
 # (templates/, conf/, etc.), and add it to sys.path so app modules are importable.
@@ -77,6 +82,101 @@ def _sqlite_test_db_needs_init(db_path: str) -> bool:
     except sqlite3.DatabaseError:
         return True
     return {row[0] for row in rows} != {"runs", "schema_migrations"}
+
+
+def _sqlite_sidecar_paths(db_path: Path) -> tuple[Path, ...]:
+    return tuple(Path(str(db_path) + suffix) for suffix in ("-journal", "-shm", "-wal"))
+
+
+def _validate_pristine_sqlite_database(db_path: Path) -> None:
+    from core.migrations import MIGRATIONS  # noqa: PLC0415
+    from core.database_backend import DatabaseBackend  # noqa: PLC0415
+    from services.auth.schema_guard import post_cutover_schema_violations  # noqa: PLC0415
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+        if integrity != "ok":
+            raise RuntimeError(f"Pristine SQLite test database failed integrity_check: {integrity}")
+        if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise RuntimeError("Pristine SQLite test database failed foreign_key_check")
+        applied = {
+            str(row[0])
+            for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+        }
+        expected = {migration.version for migration in MIGRATIONS}
+        if applied != expected:
+            raise RuntimeError("Pristine SQLite test database is not at the current migration head")
+        if post_cutover_schema_violations(conn, DatabaseBackend.SQLITE):
+            raise RuntimeError("Pristine SQLite test database failed the post-cutover schema guard")
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs_fts'"
+        ).fetchone() is None:
+            raise RuntimeError("Pristine SQLite test database is missing runs_fts")
+        journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+        if journal_mode.lower() != "delete":
+            raise RuntimeError("Pristine SQLite test database is not self-contained")
+    finally:
+        conn.close()
+
+
+def _ensure_pristine_sqlite_template() -> Path:
+    if _PRISTINE_SQLITE_TEMPLATE_PATH.exists():
+        return _PRISTINE_SQLITE_TEMPLATE_PATH
+    with _PRISTINE_SQLITE_TEMPLATE_LOCK:
+        if _PRISTINE_SQLITE_TEMPLATE_PATH.exists():
+            return _PRISTINE_SQLITE_TEMPLATE_PATH
+
+        from core import database as shell_db  # noqa: PLC0415
+
+        if shell_db.DB_BACKEND.value != "sqlite":
+            raise RuntimeError("The pristine test database is available only for SQLite tests")
+        runtime_path = _OWNED_SQLITE_TEMPLATE_DIR / "pristine.runtime.db"
+        building_path = _OWNED_SQLITE_TEMPLATE_DIR / "pristine.building.db"
+        original_db_path = shell_db.DB_PATH
+        original_lock_path = shell_db.DB_INIT_LOCK_PATH
+        shell_db.DB_PATH = str(runtime_path)
+        shell_db.DB_INIT_LOCK_PATH = str(_OWNED_SQLITE_TEMPLATE_DIR / "pristine.db.init.lock")
+        try:
+            shell_db.db_init()
+        finally:
+            shell_db.DB_PATH = original_db_path
+            shell_db.DB_INIT_LOCK_PATH = original_lock_path
+
+        source = sqlite3.connect(runtime_path)
+        packaged = sqlite3.connect(building_path)
+        try:
+            source.backup(packaged)
+        finally:
+            packaged.close()
+            source.close()
+        packaged = sqlite3.connect(building_path)
+        try:
+            journal_mode = str(packaged.execute("PRAGMA journal_mode=DELETE").fetchone()[0])
+            if journal_mode.lower() != "delete":
+                raise RuntimeError("Pristine SQLite test database could not leave WAL mode")
+        finally:
+            packaged.close()
+        _validate_pristine_sqlite_database(building_path)
+
+        sidecars = tuple(path for path in _sqlite_sidecar_paths(building_path) if path.exists())
+        if sidecars:
+            names = ", ".join(path.name for path in sidecars)
+            raise RuntimeError(f"Pristine SQLite test database retained sidecar files: {names}")
+        building_path.chmod(0o400)
+        os.replace(building_path, _PRISTINE_SQLITE_TEMPLATE_PATH)
+    return _PRISTINE_SQLITE_TEMPLATE_PATH
+
+
+def copy_pristine_sqlite_database(db_path: str | Path) -> Path:
+    """Copy the production-built empty schema to one test-owned database path."""
+    target = Path(db_path)
+    if target.exists() or any(path.exists() for path in _sqlite_sidecar_paths(target)):
+        raise FileExistsError(f"Refusing to overwrite SQLite test database state at {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_ensure_pristine_sqlite_template(), target)
+    return target
 
 
 def make_test_app(*, init_db: bool = True):
@@ -154,6 +254,7 @@ def pytest_sessionfinish(session, exitstatus):
     # and nothing lingers in the system temp directory.
     if _OWNED_TEST_DATA_DIR:
         shutil.rmtree(_OWNED_TEST_DATA_DIR, ignore_errors=True)
+    shutil.rmtree(_OWNED_SQLITE_TEMPLATE_DIR, ignore_errors=True)
 
 
 def pytest_addoption(parser):

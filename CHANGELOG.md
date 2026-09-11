@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The local pytest fast lane is back below three minutes without weakening database qualification.**
+  - **Before:** Ordinary isolated route and backend tests rebuilt the complete current SQLite schema for each case, so a clean fast-lane run grew to roughly six and a half minutes even though most of those tests weren't exercising initialization.
+  - **After:** Each pytest process now builds one pristine database through the production initialization path, packages and validates a sidecar-free source, and copies it to a unique path for ordinary empty-schema tests. Migration, schema reconciliation, startup, cutover, failure, rollback, retention, and backend-parity coverage still uses the real initialization path.
+  - **Tests:** New guards cover migration head, integrity, foreign keys, FTS, principal-only schema, sidecars, overwrite refusal, and cross-copy isolation. Three idle-host fast-lane runs completed in 174.86-174.99 seconds of pytest time with a 176.04-second median wall time; each collected the same 3,089 cases, selected 3,052, passed 2,776, skipped 276, and deselected the same 37 release-integration cases. The complete SQLite suite passed 2,813 tests with 276 skips in 203.70 seconds, down from 414.35 seconds, and the PostgreSQL qualification passed all 138 tests.
 - **Security lint output is clean for reviewed dynamic SQL.** Bandit suppressions now use its unqualified marker, avoiding misleading warnings about comment text and stale test identifiers while keeping the existing reviewed queries unchanged.
 - **Assessment worklist scrolling now survives background refreshes.** A late scroll event from a replaced list can no longer erase the saved position while the Project workspace rerenders, so lifecycle confirmations keep both the expanded target and the reader's place.
 - **The v3 principal cutover now removes the legacy session identity completely.**
