@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_test_app as _test_app
+from conftest import copy_pristine_sqlite_database, make_test_app as _test_app
 from identity_helpers import anonymous_session_id
 import core.database as shell_db
 import services.runs.output_store as run_output_store
@@ -30,8 +30,9 @@ def get_client(session_id=SESSION_A, *, init_db: bool = True):
 
 @pytest.fixture(autouse=True)
 def isolated_db(monkeypatch, tmp_path):
-    monkeypatch.setattr(shell_db, "DB_PATH", str(tmp_path / "history.db"))
-    shell_db.db_init()
+    db_path = tmp_path / "history.db"
+    monkeypatch.setattr(shell_db, "DB_PATH", str(db_path))
+    copy_pristine_sqlite_database(db_path)
 
 
 def _insert_run(session_id, command, output_lines, exit_code=0):

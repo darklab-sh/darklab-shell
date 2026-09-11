@@ -26,8 +26,7 @@ import pytest
 
 import app as shell_app_module
 import config as app_config
-from conftest import build_test_config
-from conftest import reusable_test_app
+from conftest import build_test_config, copy_pristine_sqlite_database, reusable_test_app
 from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 import blueprints.run as run_routes
 import core.database as shell_db
@@ -59,8 +58,9 @@ def get_client(*, use_forwarded_for=True):
 
 @pytest.fixture(autouse=True)
 def isolated_history_db(monkeypatch, tmp_path):
-    monkeypatch.setattr(shell_db, "DB_PATH", str(tmp_path / "history.db"))
-    shell_db.db_init()
+    db_path = tmp_path / "history.db"
+    monkeypatch.setattr(shell_db, "DB_PATH", str(db_path))
+    copy_pristine_sqlite_database(db_path)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
