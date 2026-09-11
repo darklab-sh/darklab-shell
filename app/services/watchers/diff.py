@@ -21,7 +21,7 @@ def run_row(conn, session_token: str, run_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT runs.*, art.rel_path "
         "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-        "WHERE " + owner.sql,  # nosec B608
+        "WHERE " + owner.sql,  # nosec
         owner.params,
     ).fetchone()
     return dict(row) if row else None

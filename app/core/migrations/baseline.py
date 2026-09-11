@@ -1580,7 +1580,7 @@ def _sqlite_baseline_inventory():
 def _sqlite_shared_table_order() -> tuple[str, ...]:
     from core.schema_manifest import SHARED_APP_TABLES
 
-    shared = set(SHARED_APP_TABLES)
+    shared = set(SHARED_APP_TABLES) | {"session_tokens"}
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     try:

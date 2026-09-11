@@ -38,8 +38,6 @@ export function loadSession({
     describeFetchError,
     getBrowserIdentitySnapshot,
     logClientError,
-    maskSessionToken,
-    updateSessionId,
     _getSessionId: () => SESSION_ID,
     _getClientId: () => CLIENT_ID,
   }`,

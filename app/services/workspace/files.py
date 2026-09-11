@@ -41,7 +41,6 @@ from services.workspace.models import (
     WorkspaceDisabled as WorkspaceDisabled,
     WorkspaceError as WorkspaceError,
     WorkspaceFileNotFound,
-    WorkspaceMigrationResult,
     WorkspaceMoveResult,
     WorkspacePathMatch,
     WorkspacePathNotFound,
@@ -1060,16 +1059,6 @@ def _chmod_workspace_dir(path: Path) -> None:
         os.chmod(path, WORKSPACE_DIR_MODE)
     except OSError as exc:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_DIR_MODE, exc)
-
-
-def migrate_session_workspace(
-    from_session_id: str,
-    to_session_id: str,
-    cfg: Mapping[str, Any] | None = None,
-) -> WorkspaceMigrationResult:
-    from services.workspace.maintenance import migrate_session_workspace as _migrate_session_workspace
-
-    return _migrate_session_workspace(from_session_id, to_session_id, cfg)
 
 
 def cleanup_inactive_workspaces(

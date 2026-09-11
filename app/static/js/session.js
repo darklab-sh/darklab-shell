@@ -80,10 +80,6 @@ function _ensureSessionIdentity() {
   if (_sessionStorageApi && CLIENT_ID && SESSION_ID) return;
   const core = _sessionCore();
   _sessionStorageApi = _sessionStorage();
-  const legacyAnonymousId = _sessionStorageApi.getItem('session_id');
-  if (!_sessionStorageApi.getItem('anonymous_id') && legacyAnonymousId) {
-    _sessionStorageApi.setItem('anonymous_id', legacyAnonymousId);
-  }
   _sessionUuid = core.getOrCreateStorageValue(_sessionStorageApi, 'anonymous_id', _generateUUID);
   CLIENT_ID = core.getOrCreateStorageValue(_sessionStorageApi, 'client_id', _generateUUID);
   _browserIdentity = core.resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
@@ -206,7 +202,6 @@ function activateAccessCredential(secret) {
     throw new Error('Invalid access credential format');
   }
   _sessionStorageApi.setItem('access_credential', normalized);
-  _sessionStorageApi.removeItem('session_token');
   _applyIdentityChange('credential-activated');
 }
 
@@ -214,32 +209,11 @@ function clearAccessCredential({ freshAnonymous = true } = {}) {
   _ensureSessionIdentity();
   const hadCredential = _browserIdentity?.kind === 'credential';
   _sessionStorageApi.removeItem('access_credential');
-  _sessionStorageApi.removeItem('session_token');
   if (freshAnonymous && hadCredential) {
     _sessionUuid = _generateUUID();
     _sessionStorageApi.setItem('anonymous_id', _sessionUuid);
   }
   _applyIdentityChange('credential-removed');
-}
-
-// Compatibility boundary for the few staged-cutover callers that still use a
-// session-named update. Only modern credentials and validated UUIDs are valid.
-function updateSessionId(newId) {
-  const value = String(newId || '').trim();
-  if (_sessionCore().credentialPublicId(value)) {
-    activateAccessCredential(value);
-    return;
-  }
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-    _ensureSessionIdentity();
-    _sessionStorageApi.removeItem('access_credential');
-    _sessionStorageApi.removeItem('session_token');
-    _sessionStorageApi.setItem('anonymous_id', value);
-    _sessionUuid = value;
-    _applyIdentityChange('anonymous-identity-activated');
-    return;
-  }
-  throw new Error('Invalid browser identity');
 }
 
 function getSessionId() {
@@ -270,13 +244,6 @@ if (SESSION_GLOBAL && typeof SESSION_GLOBAL.addEventListener === 'function') {
   SESSION_GLOBAL.addEventListener('storage', (e) => {
     if (e.key === 'access_credential' || e.key === 'anonymous_id') _applyIdentityChange('storage-event');
   });
-}
-
-// Return a display-safe masked version of a credential id or anonymous UUID.
-// tok_a1b2c3d4... → tok_a1b2••••
-// uuid...         → 8-char-prefix••••••••
-function maskSessionToken(token) {
-  return _sessionCore().maskSessionToken(token);
 }
 
 // Wrapper around fetch that sends exactly one browser identity header.
@@ -378,8 +345,6 @@ export {
   getClientId,
   getSessionId,
   logClientError,
-  maskSessionToken,
-  updateSessionId,
 };
 
 _ensureSessionIdentity();

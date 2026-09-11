@@ -31,8 +31,6 @@ import {
   getClientId as importedGetClientId,
   getSessionId as importedGetSessionId,
   logClientError as importedLogClientError,
-  maskSessionToken as importedMaskSessionToken,
-  updateSessionId as importedUpdateSessionId,
 } from './session.js';
 import {
   appendHighVolumeOutputFinalSummary as importedAppendHighVolumeOutputFinalSummary,
@@ -277,15 +275,6 @@ var hideTabKillBtn = (...args) => _runnerFn('hideTabKillBtn', importedHideTabKil
 var showTabKillBtn = (...args) => _runnerFn('showTabKillBtn', importedShowTabKillBtn)?.(...args);
 var emitUiEvent = (...args) => _runnerFn('emitUiEvent', importedEmitUiEvent)?.(...args);
 var logClientError = (...args) => _runnerFn('logClientError', importedLogClientError)?.(...args);
-var maskSessionToken = (...args) => _runnerFn('maskSessionToken', importedMaskSessionToken)?.(...args);
-var updateSessionId = (...args) => {
-  cancelAllPendingTerminalConfirms({ refocus: false });
-  const fn = _runnerFn('updateSessionId', importedUpdateSessionId);
-  const result = typeof fn === 'function' ? fn(...args) : undefined;
-  if (typeof importedGetSessionId === 'function') SESSION_ID = importedGetSessionId();
-  else if (args.length) SESSION_ID = args[0] || SESSION_ID;
-  return result;
-};
 var describeFetchError = (...args) => _runnerFn('describeFetchError', importedDescribeFetchError)?.(...args);
 var isHistoryPanelOpen = (...args) => _runnerFn('isHistoryPanelOpen', importedIsHistoryPanelOpen)?.(...args);
 var refreshHistoryPanel = (...args) => {
@@ -565,7 +554,6 @@ function _runnerPersistenceHelpers() {
     }
     _runnerPersistence = createPersistence({
       apiFetch,
-      maskSessionToken,
       isHistoryPanelOpen: typeof isHistoryPanelOpen === 'function' ? isHistoryPanelOpen : null,
       refreshHistoryPanel: typeof refreshHistoryPanel === 'function' ? refreshHistoryPanel : null,
       logClientError: typeof logClientError === 'function' ? logClientError : null,
@@ -2286,7 +2274,7 @@ function _isExactSpecialBuiltInCommand(cmd) {
   return /^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$/.test(String(cmd || '').trim());
 }
 
-// ── Session token client-side command handlers ─────────────────────────────
+// ── Credential client-side command handlers ────────────────────────────────
 
 function _isCredentialCommand(cmd) {
   return String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'credential';
@@ -2325,7 +2313,7 @@ function _broadcastProjectWorkspaceChanged(cmd) {
   if (typeof localStorage === 'undefined' || !localStorage || typeof localStorage.setItem !== 'function') return;
   try {
     localStorage.setItem(_runnerProjectWorkspaceSyncStorageKey(), JSON.stringify({
-      session_id: typeof SESSION_ID !== 'undefined' ? SESSION_ID : '',
+      identity_id: typeof SESSION_ID !== 'undefined' ? SESSION_ID : '',
       command: String(cmd || ''),
       changed_at: Date.now(),
     }));
@@ -2459,83 +2447,6 @@ function _runnerCommandCompletionCoordinator() {
 
 function _completeTerminalCommand(result, defaults = {}) {
   return _runnerCommandCompletionCoordinator().complete(result, defaults);
-}
-
-function _sessionAppendLine(execution, text, cls = '', tabId = _runnerActiveTabId()) {
-  execution.appendLine(text, cls, tabId);
-}
-
-function _sessionSetStatus(execution, status) {
-  execution.setStatus(status);
-}
-
-function _sessionRecordSuccess(execution) {
-  execution.setPersistence('client');
-  execution.setRecordRecent(true);
-}
-
-function _sessionCancelPersistence(execution) {
-  execution.setPersistence('none');
-  execution.setRecordRecent(false);
-}
-
-function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
-  const parts = [];
-  if (runCount > 0) parts.push(`${runCount} run(s)`);
-  if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
-  if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
-  if (recentValueCount > 0) parts.push(`${recentValueCount} recent value(s)`);
-  if (!parts.length) return 'no runs, workspace files, workflows, or recent values';
-  if (parts.length === 1) return parts[0];
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-}
-
-function _sessionMigrationResultText(data = {}) {
-  const workspaceFiles = Number(data.migrated_workspace_files || 0);
-  const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
-  const workspaceDirs = Number(data.migrated_workspace_directories || 0);
-  const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
-  const recentValues = Number(data.migrated_recent_values || 0);
-  const workspaceParts = [
-    `${workspaceFiles} workspace file(s)`,
-  ];
-  if (workspaceDirs > 0) workspaceParts.push(`${workspaceDirs} folder(s)`);
-  if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
-  if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
-  return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
-    + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
-    + `${recentValues} recent value(s), `
-    + `${workspaceParts.join(', ')}, `
-    + 'and saved user options when the destination had none';
-}
-
-async function _doSessionMigration(fromId, toId, tabId, execution) {
-  // Use an explicit fetch (not apiFetch) so X-Session-ID is the OLD session ID
-  // regardless of what SESSION_ID has been updated to.
-  // Returns true on success so the caller switches identity only after a
-  // successful migration — leaving the old session active on failure.
-  let succeeded = false;
-  try {
-    const resp = await fetch('/session/migrate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-ID': fromId,
-      },
-      body: JSON.stringify({ from_session_id: fromId, to_session_id: toId }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok && data.ok) {
-      _sessionAppendLine(execution, _sessionMigrationResultText(data), '', tabId);
-      succeeded = true;
-    } else {
-      _sessionAppendLine(execution, `[migration failed] ${data.error || resp.status}`, 'exit-fail', tabId);
-    }
-  } catch (err) {
-    _sessionAppendLine(execution, `[migration failed] ${err.message || 'network error'}`, 'exit-fail', tabId);
-    logClientError('session-token migrate', err);
-  }
-  return succeeded;
 }
 
 async function _seedLocalStorageStarsToServer() {
@@ -2706,445 +2617,6 @@ function _cancelPendingTerminalConfirmsByKind(kind) {
     .map(([tabId]) => tabId);
   tabIds.forEach(tabId => cancelPendingTerminalConfirm(tabId, { refocus: false }));
   return tabIds.length;
-}
-
-function _appendSessionTokenSetLines(token, tabId, execution) {
-  _sessionAppendLine(execution, `session token set: ${maskSessionToken(token)}`, '', tabId);
-  _sessionAppendLine(execution, 'reload other tabs to apply the new session token', '', tabId);
-}
-
-function _clearVisibleSessionHistoryState() {
-  if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
-}
-
-async function _activateSessionTokenIdentity(token) {
-  localStorage.setItem('session_token', token);
-  updateSessionId(token);
-  if (typeof loadRecentValues === 'function') await _runnerIgnoreFailure(loadRecentValues());
-  await _seedLocalStorageStarsToServer();
-  if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
-  if (typeof refreshWorkspaceFiles === 'function') void _runnerIgnoreFailure(refreshWorkspaceFiles());
-  else _runnerWorkspaceCacheApi().refresh?.()?.catch?.(() => {});
-  if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-}
-
-async function _sessionTokenGenerate(tabId, execution) {
-  const oldSessionId = _runnerCurrentSessionId();
-  try {
-    const resp = await apiFetch('/session/token/generate');
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      _sessionAppendLine(execution, `[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-    const data = await resp.json();
-    const newToken = data.session_token;
-
-    if (typeof flushRecentValues === 'function') {
-      await _runnerIgnoreFailure(flushRecentValues());
-    }
-
-    // Check run/workspace counts on old session before switching identity.
-    let runCount = 0;
-    let workspaceFileCount = 0;
-    let workflowCount = 0;
-    let recentValueCount = 0;
-    try {
-      const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) {
-        const countData = await countResp.json();
-        runCount = countData.count || 0;
-        workspaceFileCount = countData.workspace_files || 0;
-        workflowCount = countData.workflow_count || 0;
-        recentValueCount = countData.recent_value_count || 0;
-      }
-    } catch (_) {}
-
-    _sessionAppendLine(execution, `session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
-    _sessionAppendLine(execution, 'stored in localStorage as session_token', '', tabId);
-    _sessionAppendLine(execution, 'use session-token set <value> on another device to continue your session', '', tabId);
-    _sessionAppendLine(execution, 'warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
-
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
-      // Defer identity switch until the user answers the migration prompt so a
-      // failed /session/migrate does not strand runs on the old session while
-      // the active identity is already the new token.
-      _sessionAppendLine(
-        execution,
-        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your previous session. migrate history, files, workflows, and recent values to your new session token?`,
-        '',
-        tabId
-      );
-      _sessionCancelPersistence(execution);
-      _setPendingTerminalConfirm({
-        tabId,
-        execution,
-        onYes: async () => {
-          const migrated = await _doSessionMigration(oldSessionId, newToken, tabId, execution);
-          if (migrated) {
-            localStorage.setItem('session_token', newToken);
-            updateSessionId(newToken);
-            await _seedLocalStorageStarsToServer();
-            if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
-            if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-            _sessionRecordSuccess(execution);
-          }
-          _sessionSetStatus(execution, 'idle');
-        },
-        onNo: async () => {
-          localStorage.setItem('session_token', newToken);
-          updateSessionId(newToken);
-          await _seedLocalStorageStarsToServer();
-          if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
-          if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-          _sessionRecordSuccess(execution);
-          _sessionAppendLine(execution, 'History, file, workflow, and recent-value migration skipped.', '', tabId);
-          _sessionSetStatus(execution, 'idle');
-        },
-        onCancel: async () => {
-          _sessionAppendLine(execution, 'Session token generation canceled.', '', tabId);
-          _sessionCancelPersistence(execution);
-          _sessionSetStatus(execution, 'idle');
-        },
-      });
-      _sessionSetStatus(execution, 'idle');
-    } else {
-      localStorage.setItem('session_token', newToken);
-      updateSessionId(newToken);
-      await _seedLocalStorageStarsToServer();
-      if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-      _sessionRecordSuccess(execution);
-      _sessionSetStatus(execution, 'ok');
-    }
-  } catch (err) {
-    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
-    logClientError('session-token generate', err);
-    _sessionSetStatus(execution, 'fail');
-  }
-}
-
-async function _sessionTokenSet(value, tabId, execution) {
-  if (!value) {
-    _sessionAppendLine(execution, 'usage: session-token set <token>', '', tabId);
-    _sessionSetStatus(execution, 'fail');
-    return;
-  }
-  const isTok = value.startsWith('tok_');
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-  if (!isTok && !isUuid) {
-    _sessionAppendLine(execution, '[error] invalid session token format — expected tok_... or a UUID', 'exit-fail', tabId);
-    _sessionSetStatus(execution, 'fail');
-    return;
-  }
-
-  // For tok_ tokens, verify server-side existence before switching.
-  // A typo would otherwise silently create a brand-new empty session.
-  // Fail closed: any failure (network error, non-OK response, missing exists flag)
-  // blocks the switch rather than allowing an unverified token through.
-  if (isTok) {
-    let verifyErr = null;
-    try {
-      const vResp = await apiFetch('/session/token/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: value }),
-      });
-      const vData = await vResp.json().catch(() => ({}));
-      if (!vResp.ok) {
-        verifyErr = 'token verification failed — server returned an error';
-      } else if (vData.exists === false) {
-        verifyErr = 'session token not found — this token was not issued by this server';
-      }
-    } catch (_) {
-      verifyErr = 'token verification failed — server is unreachable';
-    }
-    if (verifyErr !== null) {
-      _sessionAppendLine(execution, `[error] ${verifyErr}`, 'exit-fail', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-  }
-
-  const oldSessionId = _runnerCurrentSessionId();
-
-  if (typeof flushRecentValues === 'function') {
-    await _runnerIgnoreFailure(flushRecentValues());
-  }
-
-  // Check current session's run/workspace counts before switching identity.
-  let runCount = 0;
-  let workspaceFileCount = 0;
-  let workflowCount = 0;
-  let recentValueCount = 0;
-  try {
-    const countResp = await apiFetch('/session/run-count');
-    if (countResp.ok) {
-      const countData = await countResp.json();
-      runCount = countData.count || 0;
-      workspaceFileCount = countData.workspace_files || 0;
-      workflowCount = countData.workflow_count || 0;
-      recentValueCount = countData.recent_value_count || 0;
-    }
-  } catch (_) {}
-
-  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
-    // Defer identity switch until the user answers the migration prompt so a
-    // failed /session/migrate does not strand runs on the old session while
-    // the active identity is already the new token.
-    _sessionAppendLine(
-      execution,
-      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your current session. migrate history, files, workflows, and recent values to this session token?`,
-      '',
-      tabId
-    );
-    _sessionCancelPersistence(execution);
-    _setPendingTerminalConfirm({
-      tabId,
-      execution,
-      onYes: async () => {
-        const migrated = await _doSessionMigration(oldSessionId, value, tabId, execution);
-        if (migrated) {
-          await _activateSessionTokenIdentity(value);
-          _appendSessionTokenSetLines(value, tabId, execution);
-          _sessionRecordSuccess(execution);
-        }
-        _sessionSetStatus(execution, 'idle');
-      },
-      onNo: async () => {
-        await _activateSessionTokenIdentity(value);
-        _appendSessionTokenSetLines(value, tabId, execution);
-        _sessionRecordSuccess(execution);
-        _sessionAppendLine(execution, 'History, file, workflow, and recent-value migration skipped.', '', tabId);
-        _sessionSetStatus(execution, 'idle');
-      },
-      onCancel: async () => {
-        _sessionAppendLine(execution, 'Session token set canceled.', '', tabId);
-        _sessionCancelPersistence(execution);
-        _sessionSetStatus(execution, 'idle');
-      },
-    });
-    _sessionSetStatus(execution, 'idle');
-  } else {
-    await _activateSessionTokenIdentity(value);
-    _appendSessionTokenSetLines(value, tabId, execution);
-    _sessionRecordSuccess(execution);
-    _sessionSetStatus(execution, 'ok');
-  }
-}
-
-async function _sessionTokenCopy(tabId, execution) {
-  if (typeof flushRecentValues === 'function') {
-    await _runnerIgnoreFailure(flushRecentValues());
-  }
-  const token = localStorage.getItem('session_token');
-  if (!token) {
-    _sessionAppendLine(execution, 'no session token is set — already using an anonymous session', '', tabId);
-    _sessionSetStatus(execution, 'idle');
-    return;
-  }
-  try {
-    await _runnerCopyTextToClipboardAdapter(token);
-    _sessionAppendLine(execution, `session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
-    _sessionRecordSuccess(execution);
-    _sessionSetStatus(execution, 'ok');
-  } catch (err) {
-    _sessionAppendLine(execution, '[error] failed to copy the session token to clipboard', 'exit-fail', tabId);
-    logClientError('session-token copy', err);
-    _sessionSetStatus(execution, 'fail');
-  }
-}
-
-async function _sessionTokenClear(tabId, execution) {
-  if (!localStorage.getItem('session_token')) {
-    _sessionAppendLine(execution, 'no session token is set — already using an anonymous session', '', tabId);
-    _sessionSetStatus(execution, 'idle');
-    return;
-  }
-  _sessionAppendLine(execution, 'warning: clearing the active session token removes it from this browser', 'notice', tabId);
-  _sessionAppendLine(execution, "run 'session-token copy' first if you want to save the current token before clearing it", 'notice', tabId);
-  _sessionAppendLine(execution, 'clear the active session token and revert to an anonymous session?', '', tabId);
-  _setPendingTerminalConfirm({
-    tabId,
-    execution,
-    onYes: async () => {
-      localStorage.removeItem('session_token');
-      const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
-      updateSessionId(uuid);
-      _clearVisibleSessionHistoryState();
-      if (typeof reloadSessionHistory === 'function') await _runnerIgnoreFailure(reloadSessionHistory());
-      if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-      _sessionAppendLine(execution, `session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
-      _sessionAppendLine(execution, 'your session token data remains in the server database', '', tabId);
-      _sessionRecordSuccess(execution);
-      _sessionSetStatus(execution, 'ok');
-    },
-    onNo: async () => {
-      _sessionAppendLine(execution, 'Session token clear canceled.', '', tabId);
-      _sessionCancelPersistence(execution);
-      _sessionSetStatus(execution, 'idle');
-    },
-    onCancel: async () => {
-      _sessionAppendLine(execution, 'Session token clear canceled.', '', tabId);
-      _sessionCancelPersistence(execution);
-      _sessionSetStatus(execution, 'idle');
-    },
-  });
-  _sessionCancelPersistence(execution);
-  _sessionSetStatus(execution, 'idle');
-}
-
-async function _sessionTokenRotate(tabId, execution) {
-  const oldSessionId = _runnerCurrentSessionId();
-  try {
-    const resp = await apiFetch('/session/token/generate');
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      _sessionAppendLine(execution, `[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-    const data = await resp.json();
-    const newToken = data.session_token;
-
-    // Migrate BEFORE updating SESSION_ID so the old ID is sent as X-Session-ID
-    const migrateResp = await fetch('/session/migrate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-ID': oldSessionId,
-      },
-      body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
-    });
-    const migrateData = await migrateResp.json().catch(() => ({}));
-
-    if (!migrateResp.ok || !migrateData.ok) {
-      _sessionAppendLine(execution, `[error] migration failed — session token NOT rotated: ${migrateData.error || migrateResp.status}`, 'exit-fail', tabId);
-      _sessionAppendLine(execution, 'your previous session token is still active', '', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-
-    localStorage.setItem('session_token', newToken);
-    updateSessionId(newToken);
-    if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-    if (typeof refreshWorkspaceFiles === 'function') void _runnerIgnoreFailure(refreshWorkspaceFiles());
-    else _runnerWorkspaceCacheApi().refresh?.()?.catch?.(() => {});
-    if (typeof reloadWorkflowCatalog === 'function') void _runnerIgnoreFailure(reloadWorkflowCatalog());
-
-    _sessionAppendLine(execution, `session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
-    _sessionAppendLine(execution, _sessionMigrationResultText(migrateData), '', tabId);
-    _sessionAppendLine(execution, 'old session token is now inactive — reload other tabs to use the new token', '', tabId);
-    _sessionRecordSuccess(execution);
-    _sessionSetStatus(execution, 'ok');
-  } catch (err) {
-    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
-    logClientError('session-token rotate', err);
-    _sessionSetStatus(execution, 'fail');
-  }
-}
-
-async function _sessionTokenList(tabId, execution) {
-  try {
-    const resp = await apiFetch('/session/token/info');
-    if (!resp.ok) {
-      _sessionAppendLine(execution, '[error] failed to load session token info', 'exit-fail', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-    const data = await resp.json();
-    const w = 14;
-    const kv = (k, v) => k.padEnd(w) + '  ' + v;
-    if (data.token) {
-      _sessionAppendLine(execution, kv('session token', maskSessionToken(data.token)), 'builtin-kv', tabId);
-      _sessionAppendLine(execution, kv('status', 'active'), 'builtin-kv', tabId);
-      if (data.created) _sessionAppendLine(execution, kv('created', data.created + ' UTC'), 'builtin-kv', tabId);
-      _sessionAppendLine(execution, kv('storage', 'localStorage (session_token)'), 'builtin-kv', tabId);
-    } else {
-      _sessionAppendLine(execution, kv('session', maskSessionToken(_runnerCurrentSessionId())), 'builtin-kv', tabId);
-      _sessionAppendLine(execution, kv('status', 'anonymous (no session token set)'), 'builtin-kv', tabId);
-      _sessionAppendLine(execution, kv('tip', "run 'session-token generate' to create a persistent token"), 'builtin-kv', tabId);
-    }
-    _sessionRecordSuccess(execution);
-    _sessionSetStatus(execution, 'ok');
-  } catch (err) {
-    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
-    logClientError('session-token list', err);
-    _sessionSetStatus(execution, 'fail');
-  }
-}
-
-async function _sessionTokenRevoke(token, tabId, execution) {
-  if (!token) {
-    _sessionAppendLine(execution, 'usage: session-token revoke <token>', '', tabId);
-    _sessionSetStatus(execution, 'fail');
-    return;
-  }
-  if (!token.startsWith('tok_')) {
-    _sessionAppendLine(execution, '[error] only tok_ tokens can be revoked', 'exit-fail', tabId);
-    _sessionSetStatus(execution, 'fail');
-    return;
-  }
-  _sessionAppendLine(execution, `revoke session token ${maskSessionToken(token)}?`, '', tabId);
-  _sessionAppendLine(
-    execution,
-    "warning: this token's history and workspace files will not be recoverable from the app after revocation.",
-    'warning',
-    tabId
-  );
-  _setPendingTerminalConfirm({
-    tabId,
-    execution,
-    onYes: async () => {
-      await _sessionTokenRevokeConfirmed(token, tabId, execution);
-    },
-    onNo: async () => {
-      _sessionAppendLine(execution, 'Session token revoke canceled.', '', tabId);
-      _sessionCancelPersistence(execution);
-      _sessionSetStatus(execution, 'idle');
-    },
-    onCancel: async () => {
-      _sessionAppendLine(execution, 'Session token revoke canceled.', '', tabId);
-      _sessionCancelPersistence(execution);
-      _sessionSetStatus(execution, 'idle');
-    },
-  });
-  _sessionCancelPersistence(execution);
-  _sessionSetStatus(execution, 'idle');
-}
-
-async function _sessionTokenRevokeConfirmed(token, tabId, execution) {
-  try {
-    const resp = await apiFetch('/session/token/revoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      _sessionAppendLine(execution, `[error] ${data.error || resp.status}`, 'exit-fail', tabId);
-      _sessionSetStatus(execution, 'fail');
-      return;
-    }
-    const isCurrentToken = token === _runnerCurrentSessionId();
-    _sessionAppendLine(execution, `session token revoked: ${maskSessionToken(token)}`, '', tabId);
-    if (isCurrentToken) {
-      localStorage.removeItem('session_token');
-      const uuid = localStorage.getItem('session_id') || _runnerCurrentSessionId();
-      updateSessionId(uuid);
-      _clearVisibleSessionHistoryState();
-      if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-      _sessionAppendLine(execution, `reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
-    } else {
-      _sessionAppendLine(execution, 'token removed from server — any device using it is now on an empty anonymous session', '', tabId);
-    }
-    _sessionRecordSuccess(execution);
-    _sessionSetStatus(execution, 'ok');
-  } catch (err) {
-    _sessionAppendLine(execution, `[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
-    logClientError('session-token revoke', err);
-    _sessionSetStatus(execution, 'fail');
-  }
 }
 
 function _workspacePlainLine(text = '') {
@@ -3554,32 +3026,6 @@ async function _handleWorkspaceTerminalCommand(cmd, tabId, execution) {
     execution.setRecordRecent(false);
     execution.setStatus('fail');
     logClientError('workspace terminal command', err);
-  }
-}
-
-async function _handleSessionTokenCommand(cmd, tabId, execution) {
-  const parts = cmd.trim().split(/\s+/);
-  const sub = (parts[1] || '').toLowerCase();
-  if (sub === 'generate') {
-    await _sessionTokenGenerate(tabId, execution);
-  } else if (sub === 'copy') {
-    await _sessionTokenCopy(tabId, execution);
-  } else if (sub === 'set') {
-    const value = parts.slice(2).join(' ').trim();
-    await _sessionTokenSet(value, tabId, execution);
-  } else if (sub === 'clear') {
-    await _sessionTokenClear(tabId, execution);
-  } else if (sub === 'rotate') {
-    await _sessionTokenRotate(tabId, execution);
-  } else if (sub === 'list') {
-    await _sessionTokenList(tabId, execution);
-  } else if (sub === 'revoke') {
-    const value = parts.slice(2).join(' ').trim();
-    await _sessionTokenRevoke(value, tabId, execution);
-  } else {
-    _sessionAppendLine(execution, `session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
-    _sessionAppendLine(execution, 'usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
-    _sessionSetStatus(execution, 'fail');
   }
 }
 
@@ -4445,6 +3891,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
     _cancelPendingTerminalConfirmsByKind('probe');
   });
   for (const eventName of [
+    'app:identity-changed',
     'app:scope-capabilities-changed',
     'app:scope-changed',
   ]) {

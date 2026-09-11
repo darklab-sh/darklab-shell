@@ -4,9 +4,9 @@
 import { loadSession } from './helpers/session_harness.js'
 
 describe('session.js', () => {
-  it('reuses an existing session id from localStorage', () => {
+  it('reuses an existing anonymous id from localStorage', () => {
     const { _getSessionId, storage } = loadSession({
-      storageData: { session_id: 'existing-session' },
+      storageData: { anonymous_id: 'existing-session' },
       randomUUID: () => 'new-session',
     })
 
@@ -14,7 +14,7 @@ describe('session.js', () => {
     expect(storage.getItem('anonymous_id')).toBe('existing-session')
   })
 
-  it('generates and persists a session id when one does not exist', () => {
+  it('generates and persists an anonymous id when one does not exist', () => {
     const { _getSessionId, storage } = loadSession({
       randomUUID: () => 'generated-session',
     })
@@ -23,9 +23,9 @@ describe('session.js', () => {
     expect(storage.getItem('anonymous_id')).toBe('generated-session')
   })
 
-  it('treats a blank stored session id as missing and generates a new one', () => {
+  it('treats a blank stored anonymous id as missing and generates a new one', () => {
     const { _getSessionId, storage } = loadSession({
-      storageData: { session_id: '' },
+      storageData: { anonymous_id: '' },
       randomUUID: () => 'generated-from-blank',
     })
 
@@ -48,7 +48,7 @@ describe('session.js', () => {
 
   it('apiFetch injects anonymous identity and client headers', async () => {
     const { apiFetch, fetchCalls } = loadSession({
-      storageData: { session_id: 'session-123', client_id: 'client-123' },
+      storageData: { anonymous_id: 'session-123', client_id: 'client-123' },
     })
 
     await apiFetch('/config')
@@ -62,7 +62,7 @@ describe('session.js', () => {
 
   it('apiFetch preserves existing headers while adding the anonymous identity header', async () => {
     const { apiFetch, fetchCalls } = loadSession({
-      storageData: { session_id: 'session-abc', client_id: 'client-abc' },
+      storageData: { anonymous_id: 'session-abc', client_id: 'client-abc' },
     })
 
     await apiFetch('/runs', {
@@ -79,7 +79,7 @@ describe('session.js', () => {
 
   it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
     const { logClientError, fetchCalls } = loadSession({
-      storageData: { session_id: 'session-log', client_id: 'client-log' },
+      storageData: { anonymous_id: 'session-log', client_id: 'client-log' },
     })
     const err = new Error('lazy module failed /static/build/project-report.123456789abc.js?v=abc123&token=secret')
 
@@ -127,7 +127,7 @@ describe('session.js', () => {
     const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
     const { _getSessionId, getBrowserIdentitySnapshot } = loadSession({
       storageData: {
-        session_id: 'uuid-session',
+        anonymous_id: 'uuid-session',
         access_credential: secret,
       },
     })
@@ -141,9 +141,9 @@ describe('session.js', () => {
     })
   })
 
-  it('falls back to session_id UUID when session_token is absent', () => {
+  it('uses the anonymous UUID when no access credential is present', () => {
     const { _getSessionId, storage } = loadSession({
-      storageData: { session_id: 'uuid-fallback' },
+      storageData: { anonymous_id: 'uuid-fallback' },
     })
 
     expect(_getSessionId()).toBe('uuid-fallback')
@@ -152,7 +152,7 @@ describe('session.js', () => {
   it('activateAccessCredential switches the local identity at runtime', () => {
     const secret = `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`
     const { _getSessionId, activateAccessCredential } = loadSession({
-      storageData: { session_id: 'original-uuid' },
+      storageData: { anonymous_id: 'original-uuid' },
     })
 
     expect(_getSessionId()).toBe('original-uuid')
@@ -162,7 +162,7 @@ describe('session.js', () => {
 
   it('rejects browser credentials that do not match the portable server format', () => {
     const { activateAccessCredential } = loadSession({
-      storageData: { session_id: 'original-uuid' },
+      storageData: { anonymous_id: 'original-uuid' },
     })
 
     for (const value of [
@@ -177,7 +177,7 @@ describe('session.js', () => {
   it('apiFetch sends the stored credential after activation', async () => {
     const secret = `dlc_v1_crd_${'e'.repeat(32)}_${'f'.repeat(43)}`
     const { apiFetch, fetchCalls, activateAccessCredential } = loadSession({
-      storageData: { session_id: 'original-uuid' },
+      storageData: { anonymous_id: 'original-uuid' },
     })
 
     activateAccessCredential(secret)
@@ -190,7 +190,7 @@ describe('session.js', () => {
   it('credential activation reloads identity-bound preferences', () => {
     const loadSessionPreferences = vi.fn(() => Promise.resolve())
     const { activateAccessCredential } = loadSession({
-      storageData: { session_id: 'original-uuid' },
+      storageData: { anonymous_id: 'original-uuid' },
     })
     window.loadSessionPreferences = loadSessionPreferences
 
@@ -200,28 +200,9 @@ describe('session.js', () => {
     delete window.loadSessionPreferences
   })
 
-  it('maskSessionToken masks a tok_ token showing only the first 4 hex chars', () => {
-    const { maskSessionToken } = loadSession()
-
-    expect(maskSessionToken('tok_abcd1234efgh5678ijkl9012mnop3456')).toBe('tok_abcd••••')
-  })
-
-  it('maskSessionToken masks a UUID session showing the first 8 chars', () => {
-    const { maskSessionToken } = loadSession()
-
-    expect(maskSessionToken('abcdef12-1234-1234-1234-abcdef123456')).toBe('abcdef12••••••••')
-  })
-
-  it('maskSessionToken returns (none) for empty input', () => {
-    const { maskSessionToken } = loadSession()
-
-    expect(maskSessionToken('')).toBe('(none)')
-    expect(maskSessionToken(null)).toBe('(none)')
-  })
-
   it('storage event from another tab updates the active credential identity', () => {
     const { _getSessionId, storage } = loadSession({
-      storageData: { session_id: 'uuid-original' },
+      storageData: { anonymous_id: 'uuid-original' },
     })
 
     expect(_getSessionId()).toBe('uuid-original')
@@ -238,7 +219,7 @@ describe('session.js', () => {
     const secret = `dlc_v1_crd_${'5'.repeat(32)}_${'6'.repeat(43)}`
     const { _getSessionId, storage } = loadSession({
       storageData: {
-        session_id: 'uuid-base',
+        anonymous_id: 'uuid-base',
         access_credential: secret,
       },
     })
@@ -253,7 +234,7 @@ describe('session.js', () => {
 
   it('storage event for an unrelated key does not change SESSION_ID', () => {
     const { _getSessionId } = loadSession({
-      storageData: { session_id: 'uuid-stable' },
+      storageData: { anonymous_id: 'uuid-stable' },
     })
 
     window.dispatchEvent(
@@ -265,7 +246,7 @@ describe('session.js', () => {
 
   it('storage event calls reloadSessionHistory when available to refresh passive tab UI', () => {
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
-    loadSession({ storageData: { session_id: 'uuid-a' } })
+    loadSession({ storageData: { anonymous_id: 'uuid-a' } })
     // Inject the global that session.js checks with typeof
     window.reloadSessionHistory = reloadSessionHistory
 
@@ -282,7 +263,7 @@ describe('session.js', () => {
 
   it('storage event calls loadSessionPreferences when available', () => {
     const loadSessionPreferences = vi.fn(() => Promise.resolve())
-    loadSession({ storageData: { session_id: 'uuid-a' } })
+    loadSession({ storageData: { anonymous_id: 'uuid-a' } })
     window.loadSessionPreferences = loadSessionPreferences
 
     window.dispatchEvent(
@@ -297,7 +278,7 @@ describe('session.js', () => {
   })
 
   it('storage event announces the changed browser identity', () => {
-    loadSession({ storageData: { session_id: 'uuid-b' } })
+    loadSession({ storageData: { anonymous_id: 'uuid-b' } })
     const listener = vi.fn()
     window.addEventListener('app:identity-changed', listener)
     window.dispatchEvent(new StorageEvent('storage', { key: 'access_credential' }))
@@ -305,7 +286,7 @@ describe('session.js', () => {
   })
 
   it('storage event does not throw when optional refresh handlers are absent', () => {
-    loadSession({ storageData: { session_id: 'uuid-c' } })
+    loadSession({ storageData: { anonymous_id: 'uuid-c' } })
     delete window.reloadSessionHistory
 
     expect(() => {

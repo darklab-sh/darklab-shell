@@ -129,44 +129,43 @@ def get_team(conn: Any, team_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
-def _principal_identity(value: str) -> bool:
-    return str(value or "").strip().startswith("prn_")
+def _require_principal_id(value: str) -> str:
+    principal_id = str(value or "").strip()
+    if not principal_id.startswith("prn_"):
+        raise TeamError("Team membership requires an authenticated principal")
+    return principal_id
 
 
-def list_teams_for_token(conn: Any, session_token: str) -> list[dict[str, Any]]:
-    """List memberships for a principal or the temporary legacy token adapter."""
-    identity = session_token.strip()
-    identity_column = "team_members.principal_id" if _principal_identity(identity) else "team_members.session_token_hash"
-    identity_value = identity if _principal_identity(identity) else token_hash(identity)
+def list_teams_for_principal(conn: Any, principal_id: str) -> list[dict[str, Any]]:
+    """List active memberships for an authenticated principal."""
+    identity = _require_principal_id(principal_id)
     rows = conn.execute(
         "SELECT teams.*, team_members.id AS member_id, team_members.role AS member_role, "
         "team_members.display_name AS member_display_name, team_members.joined_at AS member_joined_at "
         "FROM team_members "
         "JOIN teams ON teams.id = team_members.team_id "
-        f"WHERE {identity_column} = ? "  # nosec B608 - fixed internal column choice
+        "WHERE team_members.principal_id = ? "
         "AND team_members.status = 'active' "
         "AND team_members.removed_at = '' "
         "AND teams.deleted_at = '' "
         "ORDER BY teams.updated_at DESC, LOWER(teams.name)",
-        (identity_value,),
+        (identity,),
     ).fetchall()
     return [_public_team(row) for row in rows]
 
 
-def get_team_membership(conn: Any, team_id: str, session_token: str) -> dict[str, Any] | None:
-    identity = session_token.strip()
-    identity_column = "team_members.principal_id" if _principal_identity(identity) else "team_members.session_token_hash"
-    identity_value = identity if _principal_identity(identity) else token_hash(identity)
+def get_team_membership(conn: Any, team_id: str, principal_id: str) -> dict[str, Any] | None:
+    identity = _require_principal_id(principal_id)
     row = conn.execute(
         "SELECT team_members.*, teams.name AS team_name, teams.slug AS team_slug, teams.status AS team_status "
         "FROM team_members "
         "JOIN teams ON teams.id = team_members.team_id "
         "WHERE team_members.team_id = ? "
-        f"AND {identity_column} = ? "  # nosec B608 - fixed internal column choice
+        "AND team_members.principal_id = ? "
         "AND team_members.status = 'active' "
         "AND team_members.removed_at = '' "
         "AND teams.deleted_at = ''",
-        (team_id, identity_value),
+        (team_id, identity),
     ).fetchone()
     return _row_to_dict(row)
 
@@ -251,35 +250,33 @@ def public_recovery_code(row: Any) -> dict[str, Any]:
     return _public_recovery_code(row)
 
 
-def team_detail(conn: Any, team_id: str, *, current_session_token: str = "") -> dict[str, Any] | None:
+def team_detail(conn: Any, team_id: str, *, current_principal_id: str = "") -> dict[str, Any] | None:
     team = get_team(conn, team_id)
     if team is None:
         return None
     owner = team_only_owner_predicate(team_owner_context(team_id))
     rows = conn.execute(
-        f"SELECT * FROM team_members WHERE {owner.sql} ORDER BY status, role, joined_at",  # nosec B608
+        f"SELECT * FROM team_members WHERE {owner.sql} ORDER BY status, role, joined_at",  # nosec
         owner.params,
     ).fetchall()
-    current_identity = current_session_token.strip()
-    current_hash = token_hash(current_identity) if current_identity and not _principal_identity(current_identity) else ""
+    current_identity = _require_principal_id(current_principal_id)
     members = []
     for row in rows:
         data = _row_to_dict(row) or {}
         data["is_current"] = bool(
-            (current_identity and data.get("principal_id") == current_identity)
-            or (current_hash and data.get("session_token_hash") == current_hash)
+            current_identity and data.get("principal_id") == current_identity
         )
         members.append(_public_member(data))
     invite_rows = conn.execute(
-        f"SELECT * FROM team_invites WHERE {owner.sql} ORDER BY created_at DESC",  # nosec B608
+        f"SELECT * FROM team_invites WHERE {owner.sql} ORDER BY created_at DESC",  # nosec
         owner.params,
     ).fetchall()
     recovery_rows = conn.execute(
-        f"SELECT * FROM team_recovery_codes WHERE {owner.sql} ORDER BY created_at DESC",  # nosec B608
+        f"SELECT * FROM team_recovery_codes WHERE {owner.sql} ORDER BY created_at DESC",  # nosec
         owner.params,
     ).fetchall()
     public = _public_team(team)
-    public["member"] = _public_member(get_team_membership(conn, team_id, current_session_token) or {})
+    public["member"] = _public_member(get_team_membership(conn, team_id, current_identity) or {})
     return {
         "team": public,
         "members": members,
@@ -292,7 +289,7 @@ def active_owner_count(conn: Any, team_id: str) -> int:
     owner = team_only_owner_predicate(team_owner_context(team_id))
     row = conn.execute(
         "SELECT COUNT(*) AS count FROM team_members "
-        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''",  # nosec B608
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''",  # nosec
         owner.params,
     ).fetchone()
     return int(row["count"] if row else 0)
@@ -304,7 +301,7 @@ def _lock_active_owner_rows(conn: Any, team_id: str) -> None:
     owner = team_only_owner_predicate(team_owner_context(team_id))
     conn.execute(
         "SELECT id FROM team_members "
-        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = '' "  # nosec B608
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = '' "  # nosec
         "ORDER BY id FOR UPDATE",
         owner.params,
     ).fetchall()
@@ -319,15 +316,13 @@ def create_team(
     conn: Any,
     *,
     name: str,
-    creator_session_token: str,
+    creator_principal_id: str,
     creator_credential_id: str = "",
     slug: str = "",
     display_name: str = "",
 ) -> dict[str, Any]:
     name = _validate_team_name(name)
-    session_token = creator_session_token.strip()
-    if not session_token:
-        raise TeamError("Team creator requires an authenticated identity")
+    principal_id = _require_principal_id(creator_principal_id)
     slug = normalize_team_slug(slug or name)
     display_name = _validate_short_label(
         display_name,
@@ -337,24 +332,17 @@ def create_team(
     created = now()
     team_id = new_team_id()
     member_id = new_team_member_id()
-    principal_id = session_token if _principal_identity(session_token) else None
-    legacy_token = None if principal_id else session_token
-    # Keep the legacy NOT NULL/unique column populated until item 11 removes
-    # it. Principal membership is authorized only through ``principal_id``;
-    # this digest is a compatibility value, not a credential verifier.
-    session_token_hash = token_hash(principal_id or session_token)
     try:
         conn.execute(
             "INSERT INTO teams "
-            "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_by_principal_id, "
+            "(id, name, slug, status, created_by_member_id, created_by_principal_id, "
             "created_by_credential_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)",
             (
                 team_id,
                 name,
                 slug,
                 member_id,
-                session_token_hash,
                 principal_id,
                 creator_credential_id.strip() or None,
                 created,
@@ -367,14 +355,12 @@ def create_team(
         raise
     conn.execute(
         "INSERT INTO team_members "
-        "(id, team_id, session_token, session_token_hash, principal_id, joined_by_credential_id, "
+        "(id, team_id, principal_id, joined_by_credential_id, "
         "role, display_name, status, joined_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'owner', ?, 'active', ?)",
+        "VALUES (?, ?, ?, ?, 'owner', ?, 'active', ?)",
         (
             member_id,
             team_id,
-            legacy_token,
-            session_token_hash,
             principal_id,
             creator_credential_id.strip() or None,
             display_name,
@@ -392,7 +378,7 @@ def create_team_with_recovery_code(
     conn: Any,
     *,
     name: str,
-    creator_session_token: str,
+    creator_principal_id: str,
     creator_credential_id: str = "",
     slug: str = "",
     display_name: str = "",
@@ -402,7 +388,7 @@ def create_team_with_recovery_code(
         conn,
         name=name,
         slug=slug,
-        creator_session_token=creator_session_token,
+        creator_principal_id=creator_principal_id,
         creator_credential_id=creator_credential_id,
         display_name=display_name,
     )
@@ -418,7 +404,7 @@ def add_team_member(
     conn: Any,
     *,
     team_id: str,
-    session_token: str,
+    principal_id: str,
     role: str = "operator",
     display_name: str = "",
     invited_by_member_id: str = "",
@@ -426,9 +412,7 @@ def add_team_member(
 ) -> dict[str, Any]:
     require_active_team(conn, team_id)
     role = _validate_role(role)
-    session_token = session_token.strip()
-    if not session_token:
-        raise TeamError("Team member requires an authenticated identity")
+    principal_id = _require_principal_id(principal_id)
     display_name = _validate_short_label(
         display_name,
         field="Team member display name",
@@ -436,21 +420,14 @@ def add_team_member(
     )
     joined = now()
     member_id = new_team_member_id()
-    principal_id = session_token if _principal_identity(session_token) else None
-    legacy_token = None if principal_id else session_token
-    # See ``create_team``: principal membership is keyed by ``principal_id``.
-    # The digest only satisfies the temporary legacy schema constraint.
-    session_token_hash = token_hash(principal_id or session_token)
     conn.execute(
         "INSERT INTO team_members "
-        "(id, team_id, session_token, session_token_hash, principal_id, joined_by_credential_id, role, display_name, status, "
+        "(id, team_id, principal_id, joined_by_credential_id, role, display_name, status, "
         "invited_by_member_id, joined_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
         (
             member_id,
             team_id,
-            legacy_token,
-            session_token_hash,
             principal_id,
             joined_by_credential_id.strip() or None,
             role,
@@ -466,8 +443,8 @@ def add_team_member(
     return result
 
 
-def find_member_for_token(conn: Any, team_id: str, session_token: str) -> dict[str, Any] | None:
-    return get_team_membership(conn, team_id, session_token)
+def find_member_for_principal(conn: Any, team_id: str, principal_id: str) -> dict[str, Any] | None:
+    return get_team_membership(conn, team_id, principal_id)
 
 
 def update_team_member(
@@ -510,7 +487,7 @@ def update_team_member(
             where_sql += (
                 " AND (role != 'owner' OR ("
                 "SELECT COUNT(*) FROM team_members "
-                f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec B608
+                f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec
                 ") > 1)"
             )
             params.extend(owner.params)
@@ -538,7 +515,7 @@ def soft_remove_team_member(conn: Any, member_id: str, *, removed_at: str = "") 
         "WHERE id = ? AND status = 'active' "
         "AND (role != 'owner' OR ("
         "SELECT COUNT(*) FROM team_members "
-        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec B608
+        f"WHERE {owner.sql} AND role = 'owner' AND status = 'active' AND removed_at = ''"  # nosec
         ") > 1)",
         (removed_at or now(), member_id, *owner.params),
     )
@@ -677,7 +654,7 @@ def redeem_team_invite(
     conn: Any,
     *,
     code: str,
-    session_token: str,
+    principal_id: str,
     display_name: str = "",
     joined_by_credential_id: str = "",
 ) -> dict[str, Any]:
@@ -694,7 +671,7 @@ def redeem_team_invite(
     _require_active_team_for_redemption(conn, invite["team_id"])
     if int(invite["use_count"] or 0) >= int(invite["max_uses"] or 1):
         raise TeamError("Invite code has already been used")
-    existing = get_team_membership(conn, invite["team_id"], session_token)
+    existing = get_team_membership(conn, invite["team_id"], principal_id)
     if existing:
         return existing
     claimed = conn.execute(
@@ -707,7 +684,7 @@ def redeem_team_invite(
     member = add_team_member(
         conn,
         team_id=invite["team_id"],
-        session_token=session_token,
+        principal_id=principal_id,
         role=invite["role"],
         display_name=display_name,
         invited_by_member_id=invite["created_by_member_id"],
@@ -747,7 +724,7 @@ def rotate_team_recovery_code(conn: Any, *, team_id: str, created_by_member_id: 
     owner = team_only_owner_predicate(team_owner_context(team_id))
     conn.execute(
         "UPDATE team_recovery_codes SET rotated_at = ? "
-        f"WHERE {owner.sql} AND rotated_at = '' AND revoked_at = '' AND used_at = ''",  # nosec B608
+        f"WHERE {owner.sql} AND rotated_at = '' AND revoked_at = '' AND used_at = ''",  # nosec
         (created, *owner.params),
     )
     code = new_recovery_code()
@@ -766,7 +743,7 @@ def redeem_team_recovery_code(
     conn: Any,
     *,
     code: str,
-    session_token: str,
+    principal_id: str,
     display_name: str = "",
     joined_by_credential_id: str = "",
 ) -> dict[str, Any]:
@@ -791,14 +768,14 @@ def redeem_team_recovery_code(
     )
     if not claimed.rowcount:
         raise TeamError("Recovery code is not active")
-    existing = get_team_membership(conn, recovery["team_id"], session_token)
+    existing = get_team_membership(conn, recovery["team_id"], principal_id)
     if existing:
         member = update_team_member(conn, existing["id"], role="owner", display_name=display_name)
     else:
         member = add_team_member(
             conn,
             team_id=recovery["team_id"],
-            session_token=session_token,
+            principal_id=principal_id,
             role="owner",
             display_name=display_name,
             invited_by_member_id=recovery["created_by_member_id"],

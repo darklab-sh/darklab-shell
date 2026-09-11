@@ -113,14 +113,14 @@ def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
             )
             row = conn.execute(
                 "SELECT id FROM runs "
-                f"WHERE {owner.sql} AND run_kind = 'external' "  # nosec B608
+                f"WHERE {owner.sql} AND run_kind = 'external' "  # nosec
                 "ORDER BY started DESC LIMIT 1",
                 owner.params,
             ).fetchone()
         else:
             owner = personal_only_owner_predicate(context)
             row = conn.execute(
-                f"SELECT id FROM runs WHERE {owner.sql} "  # nosec B608
+                f"SELECT id FROM runs WHERE {owner.sql} "  # nosec
                 "AND run_kind = 'external' ORDER BY started DESC LIMIT 1",
                 owner.params,
             ).fetchone()

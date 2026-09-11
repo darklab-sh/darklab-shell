@@ -106,6 +106,16 @@ async function confirmAssessmentAction(page, actionId) {
   await confirm.locator(`[data-confirm-action-id="${actionId}"]`).click()
 }
 
+async function setAssessmentListScrollTop(list, scrollTop) {
+  await expect.poll(() => list.evaluate((node, requestedScrollTop) => {
+    const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight)
+    if (maxScrollTop < requestedScrollTop) return node.scrollTop
+    node.scrollTop = requestedScrollTop
+    node.dispatchEvent(new Event('scroll'))
+    return node.scrollTop
+  }, scrollTop)).toBe(scrollTop)
+}
+
 async function installSafeAssessmentLaunchFixture(page) {
   let launched = false
   await page.route('**/projects/*/assessments**', async (route) => {
@@ -793,12 +803,7 @@ test.describe('project assessment qualification', () => {
     const firstTarget = targetList.locator('.project-assessment-target-toggle').first()
     await firstTarget.click()
     await expect(firstTarget).toHaveAttribute('aria-expanded', 'true')
-    await expect.poll(() => targetList.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true)
-    await targetList.evaluate((node) => {
-      node.scrollTop = 120
-      node.dispatchEvent(new Event('scroll'))
-    })
-    await expect.poll(() => targetList.evaluate(node => node.scrollTop)).toBe(120)
+    await setAssessmentListScrollTop(targetList, 120)
 
     const complete = assessment.getByRole('button', { name: 'Complete cycle' })
     await complete.focus()

@@ -25,13 +25,6 @@ from services.session.variables import (
 )
 
 
-def mask_session_token(token: str) -> str:
-    """Return a display-safe masked version of a session token or session UUID."""
-    if token.startswith("tok_"):
-        return "tok_" + token[4:8] + "••••"
-    return token[:8] + "••••••••"
-
-
 def run_builtin_credential(_cmd: str, _session_id: str) -> list[dict[str, object]]:
     """Return the fail-safe stub for the browser-owned credential command."""
     return [output_line("credential: access controls run in the browser — reload the page and try again.")]

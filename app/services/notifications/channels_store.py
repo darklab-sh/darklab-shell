@@ -47,9 +47,9 @@ from services.secrets.storage import delete_secret
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.teams.ownership_queries import (
     PersonalTeamRows,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
-from services.teams.scope import owner_context_for_scope, personal_owner_context
+from services.teams.scope import owner_context_for_scope
 
 CHANNEL_SECRET_FIELDS = {
     CHANNEL_KIND_WEBHOOK: ("url",),
@@ -163,7 +163,7 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
 
 
 def _owner_where(session_token: str, team_id: str = "") -> tuple[str, tuple[str, ...]]:
-    owner = token_keyed_owner_predicate(
+    owner = workspace_keyed_owner_predicate(
         owner_context_for_scope(session_token, team_id=team_id),
         team_column="team_id",
         personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
@@ -709,24 +709,6 @@ def delete_notification_channel(
             except ValueError, MasterKeyError, SecretDecryptError:
                 continue
     return removed
-
-
-def migrate_notification_channels_session(conn, from_session_id: str, to_session_id: str) -> dict[str, int]:
-    source_owner = token_keyed_owner_predicate(personal_owner_context(from_session_id))
-    channels_result = conn.execute(
-        "UPDATE notification_channels SET personal_workspace_id = ? WHERE "  # nosec B608
-        + source_owner.sql,
-        (to_session_id, *source_owner.params),
-    )
-    events_result = conn.execute(
-        "UPDATE notification_events SET personal_workspace_id = ? WHERE "  # nosec B608
-        + source_owner.sql,
-        (to_session_id, *source_owner.params),
-    )
-    return {
-        "migrated_notification_channels": int(getattr(channels_result, "rowcount", 0) or 0),
-        "migrated_notification_events": int(getattr(events_result, "rowcount", 0) or 0),
-    }
 
 
 def send_test_notification(

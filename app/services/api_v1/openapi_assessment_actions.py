@@ -49,7 +49,7 @@ def assessment_action_paths() -> dict[str, Any]:
     ]
     errors = {
         "400": _response("Invalid assessment action request", _ref("ApiError")),
-        "401": _response("Missing, invalid, or revoked token", _ref("ApiError")),
+        "401": _response("Missing, invalid, expired, or revoked PAT", _ref("ApiError")),
         "403": _response("Team role cannot start runs", _ref("ApiError")),
         "404": _response("Project assessment check not found", _ref("ApiError")),
         "409": _response("Plan is stale or the action is unavailable", _ref("ApiError")),

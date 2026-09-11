@@ -326,7 +326,7 @@ async function loadSessionPreferences() {
   try {
     const sessionId = _preferenceSessionId().trim();
     const defaults = _defaultSessionPreferences();
-    const localFallback = sessionId && !sessionId.startsWith('tok_')
+    const localFallback = sessionId && !sessionId.startsWith('crd_') && !sessionId.startsWith('pat_')
       ? _buildCookieSessionPreferenceSnapshot()
       : null;
     let prefs = null;

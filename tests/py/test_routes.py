@@ -39,7 +39,12 @@ import app as shell_app_module
 from conftest import build_test_config
 from conftest import make_test_app as _test_app
 from conftest import reusable_test_app
-from identity_helpers import anonymous_session_id, principal_identity, register_durable_session_token
+from identity_helpers import (
+    anonymous_session_id,
+    browser_identity_headers,
+    principal_identity,
+    principal_owner,
+)
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
@@ -636,7 +641,7 @@ class TestSecretsRoutes:
     def test_session_secrets_crud_never_returns_value(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": anonymous_session_id("secrets-route-session")}
+            headers = browser_identity_headers(anonymous_session_id("secrets-route-session"))
             create = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -692,7 +697,7 @@ class TestSecretsRoutes:
         try:
             resp = client.post(
                 "/session/secrets",
-                headers={"X-Session-ID": anonymous_session_id("secrets-invalid-name-session")},
+                headers={**browser_identity_headers(anonymous_session_id("secrets-invalid-name-session"))},
                 json={"name": "../token", "value": "secret"},
             )
             assert resp.status_code == 400
@@ -710,34 +715,34 @@ class TestSecretsRoutes:
 
             created = client.post(
                 "/session/secrets",
-                headers={"X-Session-ID": "../bad"},
+                headers={**browser_identity_headers("../bad")},
                 json={"name": "SHODAN_API_KEY", "value": "secret"},
             )
             guarded_writes = [
-                client.post("/projects", headers={"X-Session-ID": "../bad"}, json={"name": "Invalid"}),
+                client.post("/projects", headers={**browser_identity_headers("../bad")}, json={"name": "Invalid"}),
                 client.post(
                     "/session/preferences",
-                    headers={"X-Session-ID": "../bad"},
+                    headers={**browser_identity_headers("../bad")},
                     json={"preferences": {"pref_timestamps": True}},
                 ),
                 client.post(
                     "/session/recent-values",
-                    headers={"X-Session-ID": "../bad"},
+                    headers={**browser_identity_headers("../bad")},
                     json={"values": [{"kind": "domain", "value": "darklab.sh"}]},
                 ),
                 client.post(
                     "/session/starred",
-                    headers={"X-Session-ID": "../bad"},
+                    headers={**browser_identity_headers("../bad")},
                     json={"command": "nmap darklab.sh"},
                 ),
                 client.post(
                     "/share",
-                    headers={"X-Session-ID": "../bad"},
+                    headers={**browser_identity_headers("../bad")},
                     json={"run_id": "run-missing"},
                 ),
                 client.post(
                     "/history/bulk-delete",
-                    headers={"X-Session-ID": "../bad"},
+                    headers={**browser_identity_headers("../bad")},
                     json={"run_ids": ["run-missing"]},
                 ),
             ]
@@ -753,7 +758,7 @@ class TestSecretsRoutes:
     def test_session_secrets_reject_duplicate_consumer_env_binding(self, monkeypatch, tmp_path):
         client, patchers = self._secret_client(monkeypatch, tmp_path)
         try:
-            headers = {"X-Session-ID": anonymous_session_id("secrets-consumer-env-session")}
+            headers = {**browser_identity_headers(anonymous_session_id("secrets-consumer-env-session"))}
             first = client.post(
                 "/session/secrets",
                 headers=headers,
@@ -798,13 +803,13 @@ class TestAtlasImportRoutes:
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
 
     def test_prepared_import_draft_read_is_bounded_owner_scoped_and_expires(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_draft_owner"
-            other_session_id = "tok_atlas_import_draft_other"
+            session_id = principal_owner(str("tok_atlas_import_draft_owner"))
+            other_session_id = principal_owner(str("tok_atlas_import_draft_other"))
             self._register_session_token(session_id)
             self._register_session_token(other_session_id)
             preview = client.post(
@@ -821,7 +826,7 @@ class TestAtlasImportRoutes:
                         "zap-report.csv",
                     ),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert preview.status_code == 200
@@ -829,7 +834,7 @@ class TestAtlasImportRoutes:
 
             reviewed = client.get(
                 f"/atlas/imports/drafts/{created['draft_id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert reviewed.status_code == 200
             payload = reviewed.get_json()
@@ -846,7 +851,7 @@ class TestAtlasImportRoutes:
 
             cross_owner = client.get(
                 f"/atlas/imports/drafts/{created['draft_id']}",
-                headers={"X-Session-ID": other_session_id},
+                headers={**browser_identity_headers(other_session_id)},
             )
             assert cross_owner.status_code == 404
             assert cross_owner.get_json()["error"] == "draft_not_found"
@@ -859,7 +864,7 @@ class TestAtlasImportRoutes:
                 conn.commit()
             changed = client.get(
                 f"/atlas/imports/drafts/{created['draft_id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert changed.status_code == 409
             assert changed.get_json()["error"] == "digest_mismatch"
@@ -872,7 +877,7 @@ class TestAtlasImportRoutes:
                 conn.commit()
             expired = client.get(
                 f"/atlas/imports/drafts/{created['draft_id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert expired.status_code == 410
             assert expired.get_json()["error"] == "draft_expired"
@@ -886,7 +891,7 @@ class TestAtlasImportRoutes:
 
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_routes"
+            session_id = principal_owner(str("tok_atlas_import_routes"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_import_routes"
             archived_project_id = "proj_atlas_import_archived"
@@ -933,7 +938,7 @@ class TestAtlasImportRoutes:
                         "import_name": "Quarterly triage",
                         "file": (io.BytesIO(csv_payload), "triage.csv"),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert preview.status_code == 200
@@ -948,7 +953,7 @@ class TestAtlasImportRoutes:
                 for call in mock_import_log.call_args_list
                 if call.args[0] == "ATLAS_IMPORT_PREVIEW_SUCCEEDED"
             )
-            assert preview_success_extra["session"].startswith("tok_atla")
+            assert preview_success_extra["session"].startswith("crd_")
             assert preview_success_extra["session"].endswith("********")
             assert preview_success_extra["format_id"] == "generic_csv"
             assert preview_success_extra["source_tool_key"] == "external_csv"
@@ -958,7 +963,7 @@ class TestAtlasImportRoutes:
             preview_created_extra = next(
                 call.kwargs["extra"] for call in mock_import_log.call_args_list if call.args[0] == "ATLAS_IMPORT_PREVIEW_CREATED"
             )
-            assert preview_created_extra["session"].startswith("tok_atla")
+            assert preview_created_extra["session"].startswith("crd_")
             assert preview_created_extra["session"].endswith("********")
             assert preview_created_extra["source_tool_key"] == "external_csv"
             assert "source_tool" not in preview_created_extra
@@ -970,7 +975,7 @@ class TestAtlasImportRoutes:
             with mock.patch.object(atlas_import_workflow.log, "info") as mock_apply_log:
                 archived_rejected = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": preview_payload["row_set_digest"],
@@ -983,7 +988,7 @@ class TestAtlasImportRoutes:
 
                 applied = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": preview_payload["row_set_digest"],
@@ -1004,7 +1009,7 @@ class TestAtlasImportRoutes:
 
                 applied_again = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": preview_payload["row_set_digest"],
@@ -1018,7 +1023,7 @@ class TestAtlasImportRoutes:
 
                 applied_again_stale_digest = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": "stale-digest-after-apply",
@@ -1041,7 +1046,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Quota check",
                     "file": (io.BytesIO(quota_payload), "quota.csv"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert quota_preview.status_code == 200
@@ -1056,7 +1061,7 @@ class TestAtlasImportRoutes:
             ):
                 quota_rejected = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": quota_preview_payload["draft_id"],
                         "row_set_digest": quota_preview_payload["row_set_digest"],
@@ -1117,7 +1122,7 @@ class TestAtlasImportRoutes:
             apply_success_extra = next(
                 call.kwargs["extra"] for call in mock_apply_log.call_args_list if call.args[0] == "ATLAS_IMPORT_APPLY_SUCCEEDED"
             )
-            assert apply_success_extra["session"].startswith("tok_atla")
+            assert apply_success_extra["session"].startswith("crd_")
             assert apply_success_extra["session"].endswith("********")
             assert apply_success_extra["draft_id"] == preview_payload["draft_id"]
             assert apply_success_extra["batch_id"] == applied_payload["batch_id"]
@@ -1130,7 +1135,7 @@ class TestAtlasImportRoutes:
             apply_created_extra = next(
                 call.kwargs["extra"] for call in mock_apply_log.call_args_list if call.args[0] == "ATLAS_IMPORT_APPLIED"
             )
-            assert apply_created_extra["session"].startswith("tok_atla")
+            assert apply_created_extra["session"].startswith("crd_")
             assert apply_created_extra["session"].endswith("********")
             assert apply_created_extra["source_tool_key"] == "external_csv"
             assert "source_tool" not in apply_created_extra
@@ -1179,7 +1184,7 @@ class TestAtlasImportRoutes:
     def test_cyclonedx_import_applies_typed_batch_evidence_without_trusting_vex_triage(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_cyclonedx_import"
+            session_id = principal_owner(str("tok_atlas_cyclonedx_import"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_cyclonedx_import"
             now = datetime.now(timezone.utc).isoformat()
@@ -1243,7 +1248,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Application SBOM",
                     "file": (io.BytesIO(payload), "application.cdx.json"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -1267,7 +1272,7 @@ class TestAtlasImportRoutes:
 
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1307,7 +1312,7 @@ class TestAtlasImportRoutes:
     def test_nessus_import_applies_exact_service_version_evidence(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_nessus_versions"
+            session_id = principal_owner(str("tok_atlas_nessus_versions"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_nessus_versions"
             now = datetime.now(timezone.utc).isoformat()
@@ -1339,7 +1344,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Versioned services",
                     "file": (io.BytesIO(payload), "services.nessus"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -1349,7 +1354,7 @@ class TestAtlasImportRoutes:
             assert preview_payload["samples"]["evidence"][0]["evidence_type"] == ("nessus_service_version")
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1382,7 +1387,7 @@ class TestAtlasImportRoutes:
     def test_greenbone_import_reuses_atlas_dedupe_and_project_mapping(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_greenbone_import"
+            session_id = principal_owner(str("tok_atlas_greenbone_import"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_greenbone_import"
             now = datetime.now(timezone.utc).isoformat()
@@ -1429,7 +1434,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Quarterly Greenbone report",
                     "file": (io.BytesIO(payload), "greenbone-report.xml"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -1440,7 +1445,7 @@ class TestAtlasImportRoutes:
             assert preview_payload["samples"]["findings"][0]["source_detail"]["nvt_oid"] == ("1.3.6.1.4.1.25623.1.0.12345")
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1497,7 +1502,7 @@ class TestAtlasImportRoutes:
     def test_create_project_targets_only_reports_target_entity_side_effects(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_target_only"
+            session_id = principal_owner(str("tok_atlas_import_target_only"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_import_target_only"
             with db_connect() as conn:
@@ -1516,7 +1521,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Target-only triage",
                     "file": (io.BytesIO(csv_payload), "target-only.csv"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert preview.status_code == 200
@@ -1524,7 +1529,7 @@ class TestAtlasImportRoutes:
 
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1559,7 +1564,7 @@ class TestAtlasImportRoutes:
     def test_port_import_links_entity_without_creating_project_target(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_port"
+            session_id = principal_owner(str("tok_atlas_import_port"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_import_port"
             now = datetime.now(timezone.utc).isoformat()
@@ -1597,7 +1602,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Port import",
                     "file": (io.BytesIO(jsonl_payload), "ports.jsonl"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -1611,7 +1616,7 @@ class TestAtlasImportRoutes:
 
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1656,7 +1661,7 @@ class TestAtlasImportRoutes:
     def test_create_project_targets_quota_rejects_without_partial_import_rows(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_target_quota"
+            session_id = principal_owner(str("tok_atlas_import_target_quota"))
             self._register_session_token(session_id)
             project_id = "proj_atlas_import_target_quota"
             with db_connect() as conn:
@@ -1679,7 +1684,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Target quota triage",
                     "file": (io.BytesIO(csv_payload), "target-quota.csv"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert preview.status_code == 200
@@ -1697,7 +1702,7 @@ class TestAtlasImportRoutes:
             ):
                 rejected = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": preview_payload["row_set_digest"],
@@ -1744,7 +1749,7 @@ class TestAtlasImportRoutes:
 
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_existing_mix"
+            session_id = principal_owner(str("tok_atlas_import_existing_mix"))
             self._register_session_token(session_id)
             run_id = "run_existing_import_mix"
             entity_id = "ent_existing_import_mix"
@@ -1821,7 +1826,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Existing scan mix",
                     "file": (io.BytesIO(csv_payload), "existing-mix.csv"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert preview.status_code == 200
@@ -1833,7 +1838,7 @@ class TestAtlasImportRoutes:
 
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1880,11 +1885,11 @@ class TestAtlasImportRoutes:
             assert entity_import_link["last_observed_at"] == import_later_at
             assert finding_import_count == 2
 
-            listed = client.get("/atlas/findings?q=mixed", headers={"X-Session-ID": session_id})
-            detail = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
+            listed = client.get("/atlas/findings?q=mixed", headers={**browser_identity_headers(session_id)})
+            detail = client.get(f"/atlas/entities/{entity_id}", headers={**browser_identity_headers(session_id)})
             imported_triage = client.put(
                 f"/findings/{finding_id}/triage",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"verification_status": "needs_retest", "verification_steps": "Re-run imported proof."},
             )
 
@@ -1907,7 +1912,7 @@ class TestAtlasImportRoutes:
     def test_import_routes_keep_uploaded_filename_and_text_fields_as_safe_json_data(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_untrusted_text"
+            session_id = principal_owner(str("tok_atlas_import_untrusted_text"))
             self._register_session_token(session_id)
             title = '<script>alert("atlas")</script> TLS finding'
             evidence = "<img src=x onerror=alert(1)> evidence & notes"
@@ -1937,7 +1942,7 @@ class TestAtlasImportRoutes:
                     "import_name": "Unsafe text import",
                     "file": (io.BytesIO(csv_body.getvalue().encode()), "../../triage<script>.csv"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -1948,7 +1953,7 @@ class TestAtlasImportRoutes:
 
             applied = client.post(
                 "/atlas/imports/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "draft_id": preview_payload["draft_id"],
                     "row_set_digest": preview_payload["row_set_digest"],
@@ -1973,7 +1978,7 @@ class TestAtlasImportRoutes:
             assert "<" not in draft_row["filename"]
             assert ">" not in draft_row["filename"]
 
-            listed = client.get("/atlas/findings?q=TLS", headers={"X-Session-ID": session_id})
+            listed = client.get("/atlas/findings?q=TLS", headers={**browser_identity_headers(session_id)})
             assert listed.status_code == 200
             assert "application/json" in listed.content_type
             listed_finding = listed.get_json()["findings"][0]
@@ -1981,7 +1986,9 @@ class TestAtlasImportRoutes:
             assert listed_finding["raw_line"] == evidence
             assert listed_finding["import_sources"][0]["filename"] == "triage_script_.csv"
 
-            detail = client.get(f"/atlas/entities/{listed_finding['entity_id']}", headers={"X-Session-ID": session_id})
+            detail = client.get(
+                f"/atlas/entities/{listed_finding['entity_id']}", headers={**browser_identity_headers(session_id)}
+            )
             assert detail.status_code == 200
             assert "application/json" in detail.content_type
             detail_payload = detail.get_json()
@@ -1995,7 +2002,7 @@ class TestAtlasImportRoutes:
     def test_reimport_preserves_operator_edited_remediation(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_remediation"
+            session_id = principal_owner(str("tok_atlas_import_remediation"))
             self._register_session_token(session_id)
 
             def burp_payload(remediation):
@@ -2030,14 +2037,14 @@ SQL syntax error near q</response>
                         "import_name": name,
                         "file": (io.BytesIO(payload), f"{name}.xml"),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
                 assert preview.status_code == 200
                 preview_payload = preview.get_json()
                 applied = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview_payload["draft_id"],
                         "row_set_digest": preview_payload["row_set_digest"],
@@ -2055,19 +2062,19 @@ SQL syntax error near q</response>
                     burp_payload("Use parameterized queries."),
                     "burp-remediation-first",
                 )
-            listed = client.get("/atlas/findings?q=SQL", headers={"X-Session-ID": session_id})
+            listed = client.get("/atlas/findings?q=SQL", headers={**browser_identity_headers(session_id)})
             assert listed.status_code == 200
             finding_id = listed.get_json()["findings"][0]["id"]
             imported_triage = client.get(
                 f"/findings/{finding_id}/triage",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert imported_triage.status_code == 200
             assert imported_triage.get_json()["triage"]["remediation"] == "Use parameterized queries."
 
             operator_triage = client.put(
                 f"/findings/{finding_id}/triage",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "remediation": "Use the platform query builder and add regression coverage.",
                     "verification_steps": "Re-run Burp active scan.",
@@ -2083,7 +2090,7 @@ SQL syntax error near q</response>
                 )
             preserved_triage = client.get(
                 f"/findings/{finding_id}/triage",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
             assert first_apply["counts"]["findings_created"] == 1
@@ -2134,7 +2141,7 @@ SQL syntax error near q</response>
     def test_apply_rejects_digest_mismatch_and_stale_or_invalid_previews(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_digest"
+            session_id = principal_owner(str("tok_atlas_import_digest"))
             self._register_session_token(session_id)
             with mock.patch("blueprints.atlas.preview_atlas_import", return_value={"ok": True}) as mock_preview:
                 streamed_preview = client.post(
@@ -2148,7 +2155,7 @@ SQL syntax error near q</response>
                             "stream.csv",
                         ),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert streamed_preview.status_code == 200
@@ -2164,7 +2171,7 @@ SQL syntax error near q</response>
                 declared_oversized = client.post(
                     "/atlas/imports/preview",
                     data={},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                     environ_overrides={"CONTENT_LENGTH": str(3 * 1024 * 1024)},
                 )
@@ -2175,7 +2182,7 @@ SQL syntax error near q</response>
             oversized_warning = mock_preview_warning.call_args
             assert oversized_warning.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED"
             assert oversized_warning.kwargs["extra"]["reason"] == "request_too_large"
-            assert oversized_warning.kwargs["extra"]["session"].startswith("tok_atla")
+            assert oversized_warning.kwargs["extra"]["session"].startswith("crd_")
             assert oversized_warning.kwargs["extra"]["session"].endswith("********")
             assert oversized_warning.kwargs["extra"]["http_status"] == 413
 
@@ -2191,7 +2198,7 @@ SQL syntax error near q</response>
                             "triage.csv",
                         ),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert unsupported.status_code == 400
@@ -2204,7 +2211,7 @@ SQL syntax error near q</response>
                 if call.args[0] == "ATLAS_IMPORT_PREVIEW_REJECTED" and "session" in call.kwargs["extra"]
             )
             assert preview_rejected_extra["reason"] == "invalid_import_file"
-            assert preview_rejected_extra["session"].startswith("tok_atla")
+            assert preview_rejected_extra["session"].startswith("crd_")
             assert preview_rejected_extra["session"].endswith("********")
             assert preview_rejected_extra["format_id"] == "content_sniff_me"
             assert preview_rejected_extra["source_tool_key"] == "external_csv"
@@ -2222,7 +2229,7 @@ SQL syntax error near q</response>
                             "too-large.csv",
                         ),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert oversized.status_code == 400
@@ -2240,7 +2247,7 @@ SQL syntax error near q</response>
                         "expired.csv",
                     ),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert expired_preview.status_code == 200
@@ -2255,7 +2262,7 @@ SQL syntax error near q</response>
             with mock.patch("blueprints.atlas.log.warning") as mock_apply_warning:
                 stale_apply = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": expired_draft_id,
                         "row_set_digest": expired_preview.get_json()["row_set_digest"],
@@ -2288,7 +2295,7 @@ SQL syntax error near q</response>
                         "applying.csv",
                     ),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert stale_applying.status_code == 200
@@ -2320,7 +2327,7 @@ SQL syntax error near q</response>
                         "preview-cleanup.csv",
                     ),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert stale_preview_cleanup.status_code == 200
@@ -2350,7 +2357,7 @@ SQL syntax error near q</response>
                         "triage.csv",
                     ),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
             assert preview.status_code == 200
@@ -2363,7 +2370,7 @@ SQL syntax error near q</response>
             with mock.patch("blueprints.atlas.log.warning") as mock_apply_warning:
                 rejected = client.post(
                     "/atlas/imports/apply",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     json={
                         "draft_id": preview.get_json()["draft_id"],
                         "row_set_digest": "bad-digest",
@@ -2404,7 +2411,7 @@ SQL syntax error near q</response>
                             "too-many.csv",
                         ),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert too_many_findings.status_code == 400
@@ -2438,7 +2445,7 @@ SQL syntax error near q</response>
                             "config.csv",
                         ),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert invalid_config_preview.status_code == 200
@@ -2457,7 +2464,7 @@ SQL syntax error near q</response>
     def test_preview_accepts_bounded_compressed_report_and_hashes_the_upload(self, tmp_path):
         client, patchers = self._client(tmp_path)
         try:
-            session_id = "tok_atlas_import_compressed"
+            session_id = principal_owner(str("tok_atlas_import_compressed"))
             self._register_session_token(session_id)
             report = b"row_type,entity_kind,entity_value\nentity,domain,compressed-preview.darklab.sh\n"
             uploaded = gzip.compress(report)
@@ -2470,7 +2477,7 @@ SQL syntax error near q</response>
                     "import_name": "Compressed preview",
                     "file": (io.BytesIO(uploaded), "report.csv.gz"),
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 content_type="multipart/form-data",
             )
 
@@ -2493,7 +2500,7 @@ SQL syntax error near q</response>
                         "import_name": "Oversized expansion",
                         "file": (io.BytesIO(gzip.compress(report + b"#" * (1024 * 1024))), "large.csv.gz"),
                     },
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                     content_type="multipart/form-data",
                 )
             assert oversized.status_code == 400
@@ -2520,13 +2527,13 @@ class TestTeamRoutes:
         return get_client(), patchers
 
     def _register_session_token(self, session_id):
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
 
     def _create_team(self, client, session_id, name="Darklab Operators"):
         self._register_session_token(session_id)
         return client.post(
             "/session/teams",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"name": name, "display_name": "Owner"},
         )
 
@@ -2534,13 +2541,13 @@ class TestTeamRoutes:
         self._register_session_token(member_token)
         invite = client.post(
             f"/session/teams/{team_id}/invites",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"role": role, "label": f"{display_name} invite"},
         )
         assert invite.status_code == 201
         joined = client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": member_token},
+            headers={**browser_identity_headers(member_token)},
             json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
         )
         assert joined.status_code in {200, 201}
@@ -2552,9 +2559,9 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_atlas_import_owner"
-            operator_token = "tok_team_atlas_import_operator"
-            viewer_token = "tok_team_atlas_import_viewer"
+            owner_token = principal_owner(str("tok_team_atlas_import_owner"))
+            operator_token = principal_owner(str("tok_team_atlas_import_operator"))
+            viewer_token = principal_owner(str("tok_team_atlas_import_viewer"))
             self._register_session_token(operator_token)
             self._register_session_token(viewer_token)
             monkeypatch.setitem(
@@ -2566,33 +2573,33 @@ class TestTeamRoutes:
             team_id = created.get_json()["team"]["id"]
             operator_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Import triager"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                     json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Import triager"},
                 ).status_code
                 == 201
             )
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "Import viewer"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Import viewer"},
                 ).status_code
                 == 201
             )
 
-            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+            viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
             csv_payload = (
                 "row_type,entity_kind,entity_value,title,severity,evidence\n"
                 "finding,domain,team-import.example,Team import finding,high,evidence\n"
@@ -2849,7 +2856,7 @@ class TestTeamRoutes:
     def test_team_create_list_and_detail(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            session_id = "tok_team_owner"
+            session_id = principal_owner(str("tok_team_owner"))
             created = self._create_team(client, session_id)
 
             assert created.status_code == 201
@@ -2867,11 +2874,11 @@ class TestTeamRoutes:
             assert audit_rows[0]["details"] == {"source": "browser", "role": "owner"}
             assert payload["recovery_code"] not in json.dumps(audit_rows)
 
-            listed = client.get("/session/teams", headers={"X-Session-ID": session_id})
+            listed = client.get("/session/teams", headers={**browser_identity_headers(session_id)})
             assert listed.status_code == 200
             assert listed.get_json()["teams"][0]["id"] == payload["team"]["id"]
 
-            detail = client.get(f"/session/teams/{payload['team']['id']}", headers={"X-Session-ID": session_id})
+            detail = client.get(f"/session/teams/{payload['team']['id']}", headers={**browser_identity_headers(session_id)})
             assert detail.status_code == 200
             detail_payload = detail.get_json()
             assert detail_payload["members"][0]["role"] == "owner"
@@ -2913,8 +2920,8 @@ class TestTeamRoutes:
     def test_team_browser_read_routes_have_dedicated_token_limit(self, monkeypatch, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            session_id = "tok_team_read_rate"
-            other_session_id = "tok_team_read_rate_other"
+            session_id = principal_owner(str("tok_team_read_rate"))
+            other_session_id = principal_owner(str("tok_team_read_rate_other"))
             self._register_session_token(session_id)
             self._register_session_token(other_session_id)
             monkeypatch.setitem(shell_app_module.CFG, "rate_limit_per_minute", 1000)
@@ -2923,9 +2930,9 @@ class TestTeamRoutes:
             monkeypatch.setitem(shell_app_module.CFG, "team_read_rate_limit_per_second", 100)
             monkeypatch.setitem(shell_app_module.CFG, "team_write_rate_limit_per_minute", 1000)
 
-            first = client.get("/session/teams", headers={"X-Session-ID": session_id})
-            second = client.get("/session/teams", headers={"X-Session-ID": session_id})
-            other = client.get("/session/teams", headers={"X-Session-ID": other_session_id})
+            first = client.get("/session/teams", headers={**browser_identity_headers(session_id)})
+            second = client.get("/session/teams", headers={**browser_identity_headers(session_id)})
+            other = client.get("/session/teams", headers={**browser_identity_headers(other_session_id)})
 
             assert first.status_code == 200
             assert second.status_code == 429
@@ -2948,21 +2955,21 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_secrets_owner"
-            operator_token = "tok_team_secrets_operator"
+            owner_token = principal_owner(str("tok_team_secrets_owner"))
+            operator_token = principal_owner(str("tok_team_secrets_operator"))
             self._register_session_token(operator_token)
             created = self._create_team(client, owner_token, name="Secret Operators")
             team_id = created.get_json()["team"]["id"]
             owner_member_id = created.get_json()["team"]["member"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Secret operator"},
             )
             assert invite.status_code == 201
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Secret operator"},
             )
             assert joined.status_code == 201
@@ -2984,24 +2991,24 @@ class TestTeamRoutes:
             ):
                 personal_secret = client.post(
                     "/session/secrets",
-                    headers={"X-Session-ID": owner_token},
+                    headers={**browser_identity_headers(owner_token)},
                     json={"name": "SHODAN_API_KEY", "value": "personal-shodan"},
                 )
                 team_secret = client.post(
                     "/session/secrets",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                     json={"name": "SHODAN_API_KEY", "value": "team-shodan"},
                 )
                 operator_denied = client.post(
                     "/session/secrets",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                     json={"name": "VT_API_KEY", "value": "operator-secret"},
                 )
                 team_list = client.get(
                     "/session/secrets",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
-                personal_list = client.get("/session/secrets", headers={"X-Session-ID": operator_token})
+                personal_list = client.get("/session/secrets", headers={**browser_identity_headers(operator_token)})
 
                 assert personal_secret.status_code == 201
                 assert team_secret.status_code == 201
@@ -3080,9 +3087,9 @@ class TestTeamRoutes:
     def test_team_invite_join_role_update_and_revoke(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_invite_owner"
-            operator_token = "tok_team_invite_operator"
-            late_operator_token = "tok_team_invite_late_operator"
+            owner_token = principal_owner(str("tok_team_invite_owner"))
+            operator_token = principal_owner(str("tok_team_invite_operator"))
+            late_operator_token = principal_owner(str("tok_team_invite_late_operator"))
             self._register_session_token(operator_token)
             self._register_session_token(late_operator_token)
             created = self._create_team(client, owner_token)
@@ -3090,7 +3097,7 @@ class TestTeamRoutes:
 
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Operator invite"},
             )
             assert invite.status_code == 201
@@ -3100,7 +3107,7 @@ class TestTeamRoutes:
 
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite_payload["code"], "display_name": "Operator"},
             )
             assert joined.status_code == 201
@@ -3110,7 +3117,7 @@ class TestTeamRoutes:
 
             late_join = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": late_operator_token},
+                headers={**browser_identity_headers(late_operator_token)},
                 json={"code": invite_payload["code"], "display_name": "Late operator"},
             )
             assert late_join.status_code == 400
@@ -3119,7 +3126,7 @@ class TestTeamRoutes:
             with mock.patch.object(shell_app_module.log, "warning") as mock_warn:
                 denied = client.post(
                     f"/session/teams/{team_id}/invites",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                     json={"role": "viewer"},
                 )
             assert denied.status_code == 403
@@ -3132,7 +3139,7 @@ class TestTeamRoutes:
 
             promoted = client.patch(
                 f"/session/teams/{team_id}/members/{operator_member['id']}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "admin"},
             )
             assert promoted.status_code == 200
@@ -3140,20 +3147,20 @@ class TestTeamRoutes:
 
             admin_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"role": "viewer"},
             )
             assert admin_invite.status_code == 201
 
             revoked = client.delete(
                 f"/session/teams/{team_id}/invites/{invite_payload['id']}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert revoked.status_code == 200
             assert revoked.get_json()["removed"] is True
             removed = client.delete(
                 f"/session/teams/{team_id}/members/{operator_member['id']}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert removed.status_code == 200
             assert removed.get_json()["removed"] is True
@@ -3186,10 +3193,10 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_activity_owner_" + uuid.uuid4().hex[:8]
-            admin_token = "tok_team_activity_admin_" + uuid.uuid4().hex[:8]
-            viewer_token = "tok_team_activity_viewer_" + uuid.uuid4().hex[:8]
-            outsider_token = "tok_team_activity_outsider_" + uuid.uuid4().hex[:8]
+            owner_token = principal_owner(str("tok_team_activity_owner_" + uuid.uuid4().hex[:8]))
+            admin_token = principal_owner(str("tok_team_activity_admin_" + uuid.uuid4().hex[:8]))
+            viewer_token = principal_owner(str("tok_team_activity_viewer_" + uuid.uuid4().hex[:8]))
+            outsider_token = principal_owner(str("tok_team_activity_outsider_" + uuid.uuid4().hex[:8]))
             self._register_session_token(outsider_token)
             created = self._create_team(client, owner_token, name="Team Activity Route")
             assert created.status_code == 201
@@ -3277,7 +3284,7 @@ class TestTeamRoutes:
 
             owner = client.get(
                 f"/session/teams/{team_id}/activity?event_type=team.role_change&date_from=2026-06-06&date_to=2026-06-06",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert owner.status_code == 200
             owner_payload = owner.get_json()
@@ -3291,7 +3298,7 @@ class TestTeamRoutes:
 
             actor_filtered = client.get(
                 f"/session/teams/{team_id}/activity?actor=Activity%20Admin&date_from=2026-06-06&date_to=2026-06-06",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert actor_filtered.status_code == 200
             actor_payload = actor_filtered.get_json()
@@ -3303,7 +3310,7 @@ class TestTeamRoutes:
 
             target_filtered = client.get(
                 f"/session/teams/{team_id}/activity?target_type=notification&target_id=chn_team_activity",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert target_filtered.status_code == 200
             target_payload = target_filtered.get_json()
@@ -3312,7 +3319,7 @@ class TestTeamRoutes:
 
             first_page = client.get(
                 f"/session/teams/{team_id}/activity?event_type=team.role_change&date_from=2026-06-06&date_to=2026-06-06&limit=1",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert first_page.status_code == 200
             first_payload = first_page.get_json()
@@ -3324,7 +3331,7 @@ class TestTeamRoutes:
             second_page = client.get(
                 f"/session/teams/{team_id}/activity?event_type=team.role_change"
                 "&date_from=2026-06-06&date_to=2026-06-06&limit=1&offset=1",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert second_page.status_code == 200
             second_payload = second_page.get_json()
@@ -3335,7 +3342,7 @@ class TestTeamRoutes:
 
             empty_filtered = client.get(
                 f"/session/teams/{team_id}/activity?actor=Missing%20Actor",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             assert empty_filtered.status_code == 200
             empty_payload = empty_filtered.get_json()
@@ -3344,20 +3351,20 @@ class TestTeamRoutes:
 
             admin = client.get(
                 f"/session/teams/{team_id}/activity?target_type=team",
-                headers={"X-Session-ID": admin_token},
+                headers={**browser_identity_headers(admin_token)},
             )
             assert admin.status_code == 200
 
             viewer = client.get(
                 f"/session/teams/{team_id}/activity",
-                headers={"X-Session-ID": viewer_token},
+                headers={**browser_identity_headers(viewer_token)},
             )
             assert viewer.status_code == 403
             assert viewer.get_json()["error"] == "team_activity_forbidden"
 
             outsider = client.get(
                 f"/session/teams/{team_id}/activity",
-                headers={"X-Session-ID": outsider_token},
+                headers={**browser_identity_headers(outsider_token)},
             )
             assert outsider.status_code == 404
         finally:
@@ -3369,20 +3376,20 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_role_audit_owner"
-            operator_token = "tok_team_role_audit_operator"
+            owner_token = principal_owner(str("tok_team_role_audit_owner"))
+            operator_token = principal_owner(str("tok_team_role_audit_operator"))
             self._register_session_token(operator_token)
             created = self._create_team(client, owner_token, name="Role Audit Rollback")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Role rollback operator"},
             )
             assert invite.status_code == 201
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Rollback operator"},
             )
             assert joined.status_code == 201
@@ -3394,13 +3401,13 @@ class TestTeamRoutes:
             ):
                 promoted = client.patch(
                     f"/session/teams/{team_id}/members/{operator_member['id']}",
-                    headers={"X-Session-ID": owner_token},
+                    headers={**browser_identity_headers(owner_token)},
                     json={"role": "admin"},
                 )
 
             assert promoted.status_code == 500
             assert promoted.get_json()["error"] == "team_route_failed"
-            detail = client.get(f"/session/teams/{team_id}", headers={"X-Session-ID": owner_token})
+            detail = client.get(f"/session/teams/{team_id}", headers={**browser_identity_headers(owner_token)})
             assert detail.status_code == 200
             current_member = next(item for item in detail.get_json()["members"] if item["id"] == operator_member["id"])
             assert current_member["role"] == "operator"
@@ -3412,9 +3419,9 @@ class TestTeamRoutes:
     def test_team_owner_guard_and_recovery_redeem(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_recovery_owner"
-            recovery_token = "tok_team_recovery_second"
-            late_recovery_token = "tok_team_recovery_late"
+            owner_token = principal_owner(str("tok_team_recovery_owner"))
+            recovery_token = principal_owner(str("tok_team_recovery_second"))
+            late_recovery_token = principal_owner(str("tok_team_recovery_late"))
             self._register_session_token(recovery_token)
             self._register_session_token(late_recovery_token)
             created = self._create_team(client, owner_token)
@@ -3425,7 +3432,7 @@ class TestTeamRoutes:
 
             blocked_leave = client.post(
                 f"/session/teams/{team_id}/leave",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={},
             )
             assert blocked_leave.status_code == 409
@@ -3433,7 +3440,7 @@ class TestTeamRoutes:
 
             blocked_self_demote = client.patch(
                 f"/session/teams/{team_id}/members/{owner_member_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator"},
             )
             assert blocked_self_demote.status_code == 409
@@ -3441,7 +3448,7 @@ class TestTeamRoutes:
 
             redeemed = client.post(
                 "/session/teams/recovery/redeem",
-                headers={"X-Session-ID": recovery_token},
+                headers={**browser_identity_headers(recovery_token)},
                 json={"code": recovery_code, "display_name": "Second owner"},
             )
             assert redeemed.status_code == 200
@@ -3450,7 +3457,7 @@ class TestTeamRoutes:
 
             late_redeem = client.post(
                 "/session/teams/recovery/redeem",
-                headers={"X-Session-ID": late_recovery_token},
+                headers={**browser_identity_headers(late_recovery_token)},
                 json={"code": recovery_code, "display_name": "Late owner"},
             )
             assert late_redeem.status_code == 400
@@ -3458,7 +3465,7 @@ class TestTeamRoutes:
 
             allowed_self_demote = client.patch(
                 f"/session/teams/{team_id}/members/{owner_member_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator"},
             )
             assert allowed_self_demote.status_code == 200
@@ -3466,7 +3473,7 @@ class TestTeamRoutes:
 
             leave = client.post(
                 f"/session/teams/{team_id}/leave",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={},
             )
             assert leave.status_code == 200
@@ -3474,7 +3481,7 @@ class TestTeamRoutes:
 
             blocked_second_leave = client.post(
                 f"/session/teams/{team_id}/leave",
-                headers={"X-Session-ID": recovery_token},
+                headers={**browser_identity_headers(recovery_token)},
                 json={},
             )
             assert blocked_second_leave.status_code == 409
@@ -3501,7 +3508,7 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_recovery_audit_owner"
+            owner_token = principal_owner(str("tok_team_recovery_audit_owner"))
             created = self._create_team(client, owner_token, name="Recovery Audit Rollback")
             team_id = created.get_json()["team"]["id"]
             with db_connect() as conn:
@@ -3519,7 +3526,7 @@ class TestTeamRoutes:
             ):
                 rotated = client.post(
                     f"/session/teams/{team_id}/recovery/rotate",
-                    headers={"X-Session-ID": owner_token},
+                    headers={**browser_identity_headers(owner_token)},
                 )
 
             assert rotated.status_code == 500
@@ -3542,9 +3549,9 @@ class TestTeamRoutes:
     def test_archived_team_rejects_invite_and_recovery_redeem(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_archived_owner"
-            invited_token = "tok_team_archived_invited"
-            recovery_token = "tok_team_archived_recovery"
+            owner_token = principal_owner(str("tok_team_archived_owner"))
+            invited_token = principal_owner(str("tok_team_archived_invited"))
+            recovery_token = principal_owner(str("tok_team_archived_recovery"))
             self._register_session_token(invited_token)
             self._register_session_token(recovery_token)
             created = self._create_team(client, owner_token, name="Archived Operators")
@@ -3553,49 +3560,49 @@ class TestTeamRoutes:
             recovery_code = payload["recovery_code"]
             project_created = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Archived Auto Promote"},
             )
             project_id = project_created.get_json()["project"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Archived invite"},
             )
             invite_code = invite.get_json()["invite"]["code"]
             archived = client.patch(
                 f"/session/teams/{team_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"status": "archived"},
             )
 
             invited_join = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": invited_token},
+                headers={**browser_identity_headers(invited_token)},
                 json={"code": invite_code, "display_name": "Late operator"},
             )
             recovery_join = client.post(
                 "/session/teams/recovery/redeem",
-                headers={"X-Session-ID": recovery_token},
+                headers={**browser_identity_headers(recovery_token)},
                 json={"code": recovery_code, "display_name": "Late owner"},
             )
             scoped_run = client.post(
                 "/runs",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"command": "echo archived"},
             )
             blocked_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Blocked archived invite"},
             )
             blocked_recovery_rotate = client.post(
                 f"/session/teams/{team_id}/recovery/rotate",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             blocked_auto_rule = client.post(
                 f"/projects/{project_id}/auto-promote-rules",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={
                     "name": "Blocked archived rule",
                     "target_entity_kind": "domain",
@@ -3626,16 +3633,18 @@ class TestTeamRoutes:
             assert recovery_join.status_code == 409
             assert recovery_join.get_json()["error"] == "team_archived"
             assert "archived" in recovery_join.get_json()["message"]
-            from services.teams.storage import token_hash
-
             with db_connect() as conn:
                 invited_member = conn.execute(
-                    "SELECT 1 FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-                    (team_id, token_hash(invited_token)),
+                    "SELECT 1 FROM team_members tm "
+                    "JOIN personal_workspaces pw ON pw.principal_id = tm.principal_id "
+                    "WHERE tm.team_id = ? AND pw.id = ?",
+                    (team_id, invited_token),
                 ).fetchone()
                 recovery_member = conn.execute(
-                    "SELECT 1 FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-                    (team_id, token_hash(recovery_token)),
+                    "SELECT 1 FROM team_members tm "
+                    "JOIN personal_workspaces pw ON pw.principal_id = tm.principal_id "
+                    "WHERE tm.team_id = ? AND pw.id = ?",
+                    (team_id, recovery_token),
                 ).fetchone()
                 invite_row = conn.execute(
                     "SELECT use_count FROM team_invites WHERE team_id = ?",
@@ -3651,7 +3660,7 @@ class TestTeamRoutes:
             assert recovery_row["used_at"] == ""
             reactivated = client.patch(
                 f"/session/teams/{team_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"status": "active"},
             )
             assert reactivated.status_code == 200
@@ -3673,8 +3682,8 @@ class TestTeamRoutes:
     def test_active_team_scope_isolates_history_runs_and_recent_values(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_scope_owner"
-            outsider_token = "tok_team_scope_outsider"
+            owner_token = principal_owner(str("tok_team_scope_owner"))
+            outsider_token = principal_owner(str("tok_team_scope_outsider"))
             self._register_session_token(outsider_token)
             created = self._create_team(client, owner_token, name="Scope Operators")
             team_id = created.get_json()["team"]["id"]
@@ -3711,22 +3720,22 @@ class TestTeamRoutes:
                 )
                 conn.commit()
 
-            personal_history = client.get("/history?type=runs", headers={"X-Session-ID": owner_token})
+            personal_history = client.get("/history?type=runs", headers={**browser_identity_headers(owner_token)})
             team_history = client.get(
                 "/history?type=runs",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
             outsider_history = client.get(
                 "/history?type=runs",
-                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(outsider_token), "X-Team-ID": team_id},
             )
             personal_permalink = client.get(
                 f"/history/{team_run_id}?json",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
             team_detail = client.get(
                 f"/history/{team_run_id}?json",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
 
             assert personal_history.status_code == 200
@@ -3747,28 +3756,28 @@ class TestTeamRoutes:
 
             personal_recent = client.post(
                 "/session/recent-values",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"values": [{"kind": "domain", "value": "personal.example"}]},
             )
             team_recent = client.post(
                 "/session/recent-values",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"values": [{"kind": "domain", "value": "team.example"}]},
             )
             assert personal_recent.status_code == 200
             assert team_recent.status_code == 200
             assert client.get(
                 "/session/recent-values?kind=domain",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             ).get_json()["values"]["domain"] == ["personal.example"]
             assert client.get(
                 "/session/recent-values?kind=domain",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             ).get_json()["values"]["domain"] == ["team.example"]
 
             saved = client.post(
                 "/run/client",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={
                     "command": "theme list",
                     "exit_code": 0,
@@ -3790,20 +3799,20 @@ class TestTeamRoutes:
     def test_history_bulk_delete_and_clear_respect_active_team_scope(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_clear_owner"
-            viewer_token = "tok_team_clear_viewer"
+            owner_token = principal_owner(str("tok_team_clear_owner"))
+            viewer_token = principal_owner(str("tok_team_clear_viewer"))
             self._register_session_token(viewer_token)
             created = self._create_team(client, owner_token, name="History Clear Operators")
             team_id = created.get_json()["team"]["id"]
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "History viewer"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
                 ).status_code
                 == 201
@@ -3838,7 +3847,7 @@ class TestTeamRoutes:
                     )
                 conn.commit()
 
-            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
             viewer_single = client.delete(f"/history/{team_bulk_id}", headers=viewer_headers)
             viewer_bulk = client.post(
                 "/history/bulk-delete",
@@ -3857,18 +3866,18 @@ class TestTeamRoutes:
             viewer_clear = client.delete("/history", headers=viewer_headers)
             personal_bulk = client.post(
                 "/history/bulk-delete",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"run_ids": [personal_bulk_id, team_bulk_id]},
             )
-            personal_clear = client.delete("/history", headers={"X-Session-ID": owner_token})
+            personal_clear = client.delete("/history", headers={**browser_identity_headers(owner_token)})
             team_bulk = client.post(
                 "/history/bulk-delete",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"run_ids": [team_bulk_id, personal_clear_id]},
             )
             team_clear = client.delete(
                 "/history",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
 
             assert viewer_single.status_code == 403
@@ -3918,27 +3927,27 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_caps_owner"
-            operator_token = "tok_team_caps_operator"
-            viewer_token = "tok_team_caps_viewer"
+            owner_token = principal_owner(str("tok_team_caps_owner"))
+            operator_token = principal_owner(str("tok_team_caps_operator"))
+            viewer_token = principal_owner(str("tok_team_caps_viewer"))
             self._register_session_token(operator_token)
             self._register_session_token(viewer_token)
             created = self._create_team(client, owner_token, name="Capability Operators")
             team_id = created.get_json()["team"]["id"]
             operator_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Capability operator"},
             )
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "Capability viewer"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                     json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Operator"},
                 ).status_code
                 == 201
@@ -3946,15 +3955,15 @@ class TestTeamRoutes:
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
                 ).status_code
                 == 201
             )
 
-            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+            operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+            viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
 
             project_created = client.post("/projects", headers=owner_headers, json={"name": "Capability Review"})
             project_id = project_created.get_json()["project"]["id"]
@@ -4089,7 +4098,7 @@ class TestTeamRoutes:
             viewer_active_get = client.get("/projects/active", headers=viewer_headers)
             viewer_personal_switcher = client.get(
                 "/projects?mode=switcher",
-                headers={"X-Session-ID": viewer_token},
+                headers={**browser_identity_headers(viewer_token)},
             )
             viewer_active_clear = client.delete("/projects/active", headers=viewer_headers)
             operator_target_create = client.post(
@@ -4226,26 +4235,26 @@ class TestTeamRoutes:
     def test_team_viewers_can_preview_auto_promote_rules_but_not_mutate_them(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_auto_promote_owner"
-            viewer_token = "tok_team_auto_promote_viewer"
+            owner_token = principal_owner(str("tok_team_auto_promote_owner"))
+            viewer_token = principal_owner(str("tok_team_auto_promote_viewer"))
             self._register_session_token(viewer_token)
             created = self._create_team(client, owner_token, name="Auto Promote Operators")
             team_id = created.get_json()["team"]["id"]
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "Auto-promote viewer"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Viewer"},
                 ).status_code
                 == 201
             )
-            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+            viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
             project_created = client.post("/projects", headers=owner_headers, json={"name": "Auto Promote"})
             project_id = project_created.get_json()["project"]["id"]
             seen_at = "2026-05-28T15:30:00+00:00"
@@ -4315,10 +4324,10 @@ class TestTeamRoutes:
     def test_active_team_scope_shares_user_workflows_with_role_gated_writes(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_workflows_owner"
-            admin_token = "tok_team_workflows_admin"
-            operator_token = "tok_team_workflows_operator"
-            outsider_token = "tok_team_workflows_outsider"
+            owner_token = principal_owner(str("tok_team_workflows_owner"))
+            admin_token = principal_owner(str("tok_team_workflows_admin"))
+            operator_token = principal_owner(str("tok_team_workflows_operator"))
+            outsider_token = principal_owner(str("tok_team_workflows_outsider"))
             self._register_session_token(admin_token)
             self._register_session_token(operator_token)
             self._register_session_token(outsider_token)
@@ -4326,18 +4335,18 @@ class TestTeamRoutes:
             team_id = created.get_json()["team"]["id"]
             admin_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "admin", "label": "Workflow admin"},
             )
             operator_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Workflow operator"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": admin_token},
+                    headers={**browser_identity_headers(admin_token)},
                     json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Workflow admin"},
                 ).status_code
                 == 201
@@ -4345,7 +4354,7 @@ class TestTeamRoutes:
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                     json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "Workflow operator"},
                 ).status_code
                 == 201
@@ -4365,27 +4374,27 @@ class TestTeamRoutes:
                 ],
                 "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
             }
-            team_headers = {"X-Session-ID": admin_token, "X-Team-ID": team_id}
+            team_headers = {**browser_identity_headers(admin_token), "X-Team-ID": team_id}
             created_workflow = client.post("/session/workflows", json=payload, headers=team_headers)
             workflow = created_workflow.get_json()["workflow"]
 
             operator_list = client.get(
                 "/session/workflows",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             catalog = client.get(
                 "/workflows",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
-            personal_list = client.get("/session/workflows", headers={"X-Session-ID": operator_token})
+            personal_list = client.get("/session/workflows", headers={**browser_identity_headers(operator_token)})
             outsider_list = client.get(
                 "/session/workflows",
-                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(outsider_token), "X-Team-ID": team_id},
             )
             operator_update = client.put(
                 f"/session/workflows/{workflow['id']}",
                 json={**payload, "title": "Operator edit"},
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             admin_update = client.put(
                 f"/session/workflows/{workflow['id']}",
@@ -4424,28 +4433,28 @@ class TestTeamRoutes:
     def test_active_team_scope_shares_projects_and_team_run_links(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_project_owner"
-            operator_token = "tok_team_project_operator"
-            outsider_token = "tok_team_project_outsider"
+            owner_token = principal_owner(str("tok_team_project_owner"))
+            operator_token = principal_owner(str("tok_team_project_operator"))
+            outsider_token = principal_owner(str("tok_team_project_outsider"))
             self._register_session_token(operator_token)
             self._register_session_token(outsider_token)
             created = self._create_team(client, owner_token, name="Project Operators")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Project operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Project operator"},
             )
             assert joined.status_code == 201
 
             project_created = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Shared recon"},
             )
             assert project_created.status_code == 201
@@ -4453,30 +4462,30 @@ class TestTeamRoutes:
             assert project_created.get_json()["project"]["team_id"] == team_id
             operator_personal_project = client.post(
                 "/projects",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"name": "Personal recon"},
             )
             assert operator_personal_project.status_code == 201
             operator_personal_project_id = operator_personal_project.get_json()["project"]["id"]
 
-            personal_list = client.get("/projects", headers={"X-Session-ID": owner_token})
+            personal_list = client.get("/projects", headers={**browser_identity_headers(owner_token)})
             operator_list = client.get(
                 "/projects",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             active_set = client.post(
                 "/projects/active",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"project_id": project_id},
             )
-            active_personal = client.get("/projects/active", headers={"X-Session-ID": operator_token})
+            active_personal = client.get("/projects/active", headers={**browser_identity_headers(operator_token)})
             active_team = client.get(
                 "/projects/active",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             outsider_list = client.get(
                 "/projects",
-                headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(outsider_token), "X-Team-ID": team_id},
             )
             assert personal_list.status_code == 200
             assert project_id not in {item["id"] for item in personal_list.get_json()["projects"]}
@@ -4524,25 +4533,25 @@ class TestTeamRoutes:
 
             personal_link_denied = client.post(
                 f"/projects/{project_id}/links",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"entity_type": "run", "entity_id": personal_run_id},
             )
             team_linked = client.post(
                 f"/projects/{project_id}/links",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"entity_type": "run", "entity_id": team_run_id},
             )
             team_runs = client.get(
                 f"/projects/{project_id}/runs",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             team_projects_with_counts = client.get(
                 "/projects?include_counts=1",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             personal_project_detail = client.get(
                 f"/projects/{project_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
             )
 
             assert personal_link_denied.status_code == 404
@@ -4620,20 +4629,20 @@ class TestTeamRoutes:
 
             archived = client.patch(
                 f"/session/teams/{team_id}",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"status": "archived"},
             )
             archived_list = client.get(
                 "/projects?include_archived=1",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             archived_detail = client.get(
                 f"/projects/{project_id}",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             archived_create = client.post(
                 "/projects",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"name": "Blocked while archived"},
             )
 
@@ -4651,27 +4660,27 @@ class TestTeamRoutes:
     def test_project_slugs_are_unique_inside_personal_and_team_scopes(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_project_slug_owner"
+            owner_token = principal_owner(str("tok_team_project_slug_owner"))
             team_id = self._create_team(client, owner_token, name="Slug Operators").get_json()["team"]["id"]
 
             personal_first = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"name": "Case"},
             )
             personal_second = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"name": "Case"},
             )
             team_first = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Case"},
             )
             team_second = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Case"},
             )
 
@@ -4699,7 +4708,7 @@ class TestTeamRoutes:
             "workspace_inactivity_ttl_hours": 1,
         }
         try:
-            owner_token = "tok_team_workspace_run_owner"
+            owner_token = principal_owner(str("tok_team_workspace_run_owner"))
             created = self._create_team(client, owner_token, name="Workspace Runtime Operators")
             team_id = created.get_json()["team"]["id"]
             registry = {
@@ -4741,7 +4750,7 @@ class TestTeamRoutes:
                 resp = client.post(
                     "/runs",
                     json={"command": "nmap -iL targets.txt -oN scan.txt", "tab_id": "tab-team"},
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
 
             assert resp.status_code == 202
@@ -4761,26 +4770,26 @@ class TestTeamRoutes:
     def test_active_team_scope_shares_cross_member_project_entities_and_findings(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_project_cross_owner"
-            operator_token = "tok_team_project_cross_operator"
+            owner_token = principal_owner(str("tok_team_project_cross_owner"))
+            operator_token = principal_owner(str("tok_team_project_cross_operator"))
             self._register_session_token(operator_token)
             created = self._create_team(client, owner_token, name="Cross Member Operators")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Cross member operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Cross member operator"},
             )
             assert joined.status_code == 201
 
             project_created = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Cross member project"},
             )
             assert project_created.status_code == 201
@@ -4850,7 +4859,7 @@ class TestTeamRoutes:
                 )
                 conn.commit()
 
-            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
             label_created = client.post(
                 f"/entities/atlas_entity/{entity_id}/labels",
                 headers=operator_headers,
@@ -4868,11 +4877,11 @@ class TestTeamRoutes:
             findings = client.get(f"/projects/{project_id}/findings", headers=operator_headers)
             personal_summary = client.get(
                 f"/projects/{project_id}/summary",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
             )
             personal_overview = client.get(
                 f"/projects/{project_id}/overview",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
             )
 
             assert label_created.status_code == 201
@@ -4914,34 +4923,34 @@ class TestTeamRoutes:
         client, patchers = self._team_client(tmp_path)
         workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
         try:
-            owner_token = "tok_team_artifacts_owner"
-            operator_token = "tok_team_artifacts_operator"
+            owner_token = principal_owner(str("tok_team_artifacts_owner"))
+            operator_token = principal_owner(str("tok_team_artifacts_operator"))
             self._register_session_token(operator_token)
             created = self._create_team(client, owner_token, name="Artifact Operators")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Artifact operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Artifact operator"},
             )
             assert joined.status_code == 201
-            from services.teams.storage import token_hash
-
             with db_connect() as conn:
                 operator_member = conn.execute(
-                    "SELECT id FROM team_members WHERE team_id = ? AND session_token_hash = ?",
-                    (team_id, token_hash(operator_token)),
+                    "SELECT tm.id FROM team_members tm "
+                    "JOIN personal_workspaces pw ON pw.principal_id = tm.principal_id "
+                    "WHERE tm.team_id = ? AND pw.id = ?",
+                    (team_id, operator_token),
                 ).fetchone()
             operator_member_id = operator_member["id"]
 
             project_created = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Shared artifacts"},
             )
             assert project_created.status_code == 201
@@ -5007,31 +5016,31 @@ class TestTeamRoutes:
 
             team_artifacts = client.get(
                 f"/projects/{project_id}/artifacts",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
             )
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 artifact_preview = client.get(
                     f"/projects/{project_id}/artifacts/{artifact_id}/preview",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
             artifact_label = client.post(
                 f"/entities/run_file_artifact/{artifact_id}/labels",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"label": "reviewed"},
             )
             artifact_note = client.put(
                 f"/entities/run_file_artifact/{artifact_id}/note",
-                headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 json={"body": "Team artifact note"},
             )
             personal_artifacts = client.get(
                 f"/projects/{project_id}/artifacts",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
             )
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 package_created = client.post(
                     f"/projects/{project_id}/packages",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                     json={
                         "name": "Team Evidence",
                         "labels": ["handoff"],
@@ -5066,16 +5075,16 @@ class TestTeamRoutes:
 
             owner_packages = client.get(
                 f"/projects/{project_id}/packages",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 package_download = client.get(
                     f"/projects/{project_id}/packages/{package['id']}/download",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
                 package_job_started = client.post(
                     f"/projects/{project_id}/packages/{package['id']}/download-jobs",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
 
             assert owner_packages.status_code == 200
@@ -5093,14 +5102,14 @@ class TestTeamRoutes:
                 time.sleep(0.02)
                 package_job_status = client.get(
                     f"/projects/{project_id}/packages/{package['id']}/download-jobs/{package_job['id']}",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
                 assert package_job_status.status_code == 200
                 package_job = package_job_status.get_json()["job"]
             assert package_job["status"] == "complete"
             package_job_download = client.get(
                 f"/projects/{project_id}/packages/{package['id']}/download-jobs/{package_job['id']}/download",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
             assert package_job_download.status_code == 200
             package_job_download.close()
@@ -5138,21 +5147,21 @@ class TestTeamRoutes:
         client, patchers = self._team_client(tmp_path)
         workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
         try:
-            owner_token = "tok_team_files_owner"
-            operator_token = "tok_team_files_operator"
-            outsider_token = "tok_team_files_outsider"
+            owner_token = principal_owner(str("tok_team_files_owner"))
+            operator_token = principal_owner(str("tok_team_files_operator"))
+            outsider_token = principal_owner(str("tok_team_files_outsider"))
             self._register_session_token(operator_token)
             self._register_session_token(outsider_token)
             created = self._create_team(client, owner_token, name="Files Operators")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Files operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Files operator"},
             )
             assert joined.status_code == 201
@@ -5160,12 +5169,12 @@ class TestTeamRoutes:
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 personal_write = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": owner_token},
+                    headers={**browser_identity_headers(owner_token)},
                     json={"path": "personal.txt", "text": "personal\n"},
                 )
                 team_write = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                     json={"path": "shared/notes.txt", "text": "team notes\n"},
                 )
                 from services.teams.capabilities import Capability, ROLE_CAPABILITIES
@@ -5178,43 +5187,43 @@ class TestTeamRoutes:
                 ):
                     label = client.post(
                         "/entities/workspace_file/shared/notes.txt/labels",
-                        headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                        headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                         json={"label": "handoff"},
                     )
                     note = client.put(
                         "/entities/workspace_file/shared/notes.txt/note",
-                        headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                        headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                         json={"body": "Shared team context."},
                     )
                 operator_list = client.get(
                     "/workspace/files",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
                 operator_read = client.get(
                     "/workspace/files/read?path=shared/notes.txt",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
                 operator_download = client.get(
                     "/workspace/files/download?path=shared/notes.txt",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
-                personal_list = client.get("/workspace/files", headers={"X-Session-ID": operator_token})
+                personal_list = client.get("/workspace/files", headers={**browser_identity_headers(operator_token)})
                 personal_read = client.get(
                     "/workspace/files/read?path=shared/notes.txt",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                 )
                 outsider_list = client.get(
                     "/workspace/files",
-                    headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(outsider_token), "X-Team-ID": team_id},
                 )
                 moved = client.post(
                     "/workspace/files/move",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                     json={"source": "shared/notes.txt", "destination": "shared/moved.txt"},
                 )
                 moved_read = client.get(
                     "/workspace/files/read?path=shared/moved.txt",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
 
             assert personal_write.status_code == 200
@@ -5260,7 +5269,7 @@ class TestTeamRoutes:
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 deleted = client.delete(
                     "/workspace/files?path=shared/moved.txt",
-                    headers={"X-Session-ID": operator_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(operator_token), "X-Team-ID": team_id},
                 )
             assert deleted.status_code == 200
         finally:
@@ -5271,19 +5280,19 @@ class TestTeamRoutes:
         client, patchers = self._team_client(tmp_path)
         workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
         try:
-            owner_token = "tok_team_files_archive_owner"
-            viewer_token = "tok_team_files_archive_viewer"
+            owner_token = principal_owner(str("tok_team_files_archive_owner"))
+            viewer_token = principal_owner(str("tok_team_files_archive_viewer"))
             self._register_session_token(viewer_token)
             created = self._create_team(client, owner_token, name="Readonly Files")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "Files viewer"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": viewer_token},
+                headers={**browser_identity_headers(viewer_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Files viewer"},
             )
             assert joined.status_code == 201
@@ -5291,70 +5300,70 @@ class TestTeamRoutes:
             with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
                 written = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                     json={"path": "shared/readme.txt", "text": "shared readme\n"},
                 )
                 viewer_list = client.get(
                     "/workspace/files",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                 )
                 viewer_read = client.get(
                     "/workspace/files/read?path=shared/readme.txt",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                 )
                 viewer_download = client.get(
                     "/workspace/files/download?path=shared/readme.txt",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                 )
                 viewer_write = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                     json={"path": "blocked.txt", "text": "nope"},
                 )
                 viewer_mkdir = client.post(
                     "/workspace/directories",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                     json={"path": "blocked"},
                 )
                 viewer_move = client.post(
                     "/workspace/files/move",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                     json={"source": "shared/readme.txt", "destination": "shared/moved.txt"},
                 )
                 viewer_copy = client.post(
                     "/workspace/files/copy",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                     json={"source": "shared/readme.txt", "destination": "shared/copy.txt"},
                 )
                 viewer_touch = client.post(
                     "/workspace/files/touch",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                     json={"path": "shared/empty.txt"},
                 )
                 viewer_delete = client.delete(
                     "/workspace/files?path=shared/readme.txt",
-                    headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                 )
                 archived = client.patch(
                     f"/session/teams/{team_id}",
-                    headers={"X-Session-ID": owner_token},
+                    headers={**browser_identity_headers(owner_token)},
                     json={"status": "archived"},
                 )
                 archived_list = client.get(
                     "/workspace/files",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
                 archived_read = client.get(
                     "/workspace/files/read?path=shared/readme.txt",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
                 archived_download = client.get(
                     "/workspace/files/download?path=shared/readme.txt",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 )
                 archived_write = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                     json={"path": "archived.txt", "text": "nope"},
                 )
 
@@ -5401,27 +5410,27 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_notifications_owner"
-            admin_token = "tok_team_notifications_admin"
-            viewer_token = "tok_team_notifications_viewer"
+            owner_token = principal_owner(str("tok_team_notifications_owner"))
+            admin_token = principal_owner(str("tok_team_notifications_admin"))
+            viewer_token = principal_owner(str("tok_team_notifications_viewer"))
             self._register_session_token(admin_token)
             self._register_session_token(viewer_token)
             created = self._create_team(client, owner_token, name="Notification Operators")
             team_id = created.get_json()["team"]["id"]
             admin_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "admin", "label": "Notification admin"},
             )
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "Notification viewer"},
             )
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": admin_token},
+                    headers={**browser_identity_headers(admin_token)},
                     json={"code": admin_invite.get_json()["invite"]["code"], "display_name": "Notification admin"},
                 ).status_code
                 == 201
@@ -5429,13 +5438,13 @@ class TestTeamRoutes:
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "Notification viewer"},
                 ).status_code
                 == 201
             )
 
-            team_headers = {"X-Session-ID": admin_token, "X-Team-ID": team_id}
+            team_headers = {**browser_identity_headers(admin_token), "X-Team-ID": team_id}
             created_channel = client.post(
                 "/session/notification-channels",
                 headers=team_headers,
@@ -5454,15 +5463,15 @@ class TestTeamRoutes:
 
             viewer_team_channels = client.get(
                 "/session/notification-channels",
-                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
             )
             admin_personal_channels = client.get(
                 "/session/notification-channels",
-                headers={"X-Session-ID": admin_token},
+                headers={**browser_identity_headers(admin_token)},
             )
             viewer_create = client.post(
                 "/session/notification-channels",
-                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
                 json={"kind": "webhook", "secret_values": {"url": "https://blocked.invalid/hook"}},
             )
             with db_connect() as conn:
@@ -5486,11 +5495,11 @@ class TestTeamRoutes:
 
             viewer_team_events = client.get(
                 "/session/notification-events?limit=5",
-                headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
             )
             admin_personal_events = client.get(
                 "/session/notification-events?limit=5",
-                headers={"X-Session-ID": admin_token},
+                headers={**browser_identity_headers(admin_token)},
             )
 
             assert viewer_team_channels.status_code == 200
@@ -5515,10 +5524,10 @@ class TestTeamRoutes:
 
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_ai_owner"
-            operator_token = "tok_team_ai_operator"
-            viewer_token = "tok_team_ai_viewer"
-            outsider_token = "tok_team_ai_outsider"
+            owner_token = principal_owner(str("tok_team_ai_owner"))
+            operator_token = principal_owner(str("tok_team_ai_operator"))
+            viewer_token = principal_owner(str("tok_team_ai_viewer"))
+            outsider_token = principal_owner(str("tok_team_ai_outsider"))
             self._register_session_token(operator_token)
             self._register_session_token(viewer_token)
             self._register_session_token(outsider_token)
@@ -5526,12 +5535,12 @@ class TestTeamRoutes:
             team_id = created.get_json()["team"]["id"]
             operator_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "AI operator"},
             )
             viewer_invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "viewer", "label": "AI viewer"},
             )
             assert operator_invite.status_code == 201
@@ -5539,7 +5548,7 @@ class TestTeamRoutes:
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": operator_token},
+                    headers={**browser_identity_headers(operator_token)},
                     json={"code": operator_invite.get_json()["invite"]["code"], "display_name": "AI operator"},
                 ).status_code
                 == 201
@@ -5547,7 +5556,7 @@ class TestTeamRoutes:
             assert (
                 client.post(
                     "/session/teams/join",
-                    headers={"X-Session-ID": viewer_token},
+                    headers={**browser_identity_headers(viewer_token)},
                     json={"code": viewer_invite.get_json()["invite"]["code"], "display_name": "AI viewer"},
                 ).status_code
                 == 201
@@ -5592,9 +5601,9 @@ class TestTeamRoutes:
                 )
                 conn.commit()
 
-            team_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-            owner_team_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-            viewer_team_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+            team_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+            owner_team_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+            viewer_team_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
             ai_cfg_patch = {
                 "ai_enabled": True,
                 "ai_feature_summary": True,
@@ -5615,10 +5624,10 @@ class TestTeamRoutes:
                 listed_for_viewer = client.get(f"/runs/{run_id}/ai-assists", headers=viewer_team_headers)
                 viewer_summary = client.post(f"/runs/{run_id}/ai-summary", json={}, headers=viewer_team_headers)
                 viewer_next = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers=viewer_team_headers)
-                personal_operator = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": operator_token})
+                personal_operator = client.get(f"/runs/{run_id}/ai-assists", headers={**browser_identity_headers(operator_token)})
                 outsider_team = client.get(
                     f"/runs/{run_id}/ai-assists",
-                    headers={"X-Session-ID": outsider_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(outsider_token), "X-Team-ID": team_id},
                 )
 
                 queued_payload = queued.get_json()
@@ -5663,7 +5672,7 @@ class TestTeamRoutes:
                 if call.args and call.args[0] == "AI_ASSIST_ENQUEUE_RESULT"
             ]
             assert reuse_events[0]["inserted"] is False
-            assert reuse_events[0]["session"].startswith("tok_team")
+            assert reuse_events[0]["session"].startswith("crd_")
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5800,12 +5809,8 @@ class TestTeamRoutes:
                 f"/api/v1/atlas/entities/{team_entity_id}",
                 headers=operator.api_headers(team_id=team_id),
             )
-            operator_personal_entity = client.get(
-                f"/atlas/entities/{team_entity_id}", headers=operator.browser_headers()
-            )
-            outsider_summary = client.get(
-                "/atlas", headers=outsider.browser_headers(team_id=team_id)
-            )
+            operator_personal_entity = client.get(f"/atlas/entities/{team_entity_id}", headers=operator.browser_headers())
+            outsider_summary = client.get("/atlas", headers=outsider.browser_headers(team_id=team_id))
 
             assert personal_summary.status_code == 200
             assert personal_summary.get_json()["counts"]["domain"] == 1
@@ -5834,19 +5839,19 @@ class TestTeamRoutes:
     def test_active_team_scope_shares_atlas_metadata_and_targets(self, tmp_path):
         client, patchers = self._team_client(tmp_path)
         try:
-            owner_token = "tok_team_atlas_metadata_owner"
-            operator_token = "tok_team_atlas_metadata_operator"
+            owner_token = principal_owner(str("tok_team_atlas_metadata_owner"))
+            operator_token = principal_owner(str("tok_team_atlas_metadata_operator"))
             self._register_session_token(operator_token)
             created = self._create_team(client, owner_token, name="Atlas Metadata Operators")
             team_id = created.get_json()["team"]["id"]
             invite = client.post(
                 f"/session/teams/{team_id}/invites",
-                headers={"X-Session-ID": owner_token},
+                headers={**browser_identity_headers(owner_token)},
                 json={"role": "operator", "label": "Atlas metadata operator"},
             )
             joined = client.post(
                 "/session/teams/join",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
                 json={"code": invite.get_json()["invite"]["code"], "display_name": "Atlas metadata operator"},
             )
             assert joined.status_code == 201
@@ -5905,12 +5910,12 @@ class TestTeamRoutes:
 
             project_created = client.post(
                 "/projects",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 json={"name": "Team Atlas Metadata"},
             )
             project_id = project_created.get_json()["project"]["id"]
-            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
+            operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+            owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
 
             label_created = client.post(
                 f"/entities/atlas_entity/{entity_id}/labels",
@@ -5945,7 +5950,7 @@ class TestTeamRoutes:
             owner_targets = client.get(f"/projects/{project_id}/targets", headers=owner_headers)
             operator_personal_labels = client.get(
                 f"/entities/atlas_entity/{entity_id}/labels",
-                headers={"X-Session-ID": operator_token},
+                headers={**browser_identity_headers(operator_token)},
             )
 
             assert label_created.status_code == 201
@@ -5998,7 +6003,7 @@ class TestNotificationChannelRoutes:
         self._register_session_token(session_id)
         return client.post(
             "/session/notification-channels",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "kind": "webhook",
                 "label": "Ops webhook",
@@ -6008,13 +6013,13 @@ class TestNotificationChannelRoutes:
         )
 
     def _register_session_token(self, session_id):
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
 
-    def test_notification_channels_require_durable_session_tokens(self, monkeypatch, tmp_path):
+    def test_notification_channels_require_a_durable_credential(self, monkeypatch, tmp_path):
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
             anonymous_headers = {
-                "X-Session-ID": anonymous_session_id("sess-anonymous"),
+                **browser_identity_headers(anonymous_session_id("sess-anonymous")),
             }
             resp = client.get("/session/notification-channels", headers=anonymous_headers)
             kind_contract = client.get(
@@ -6022,9 +6027,9 @@ class TestNotificationChannelRoutes:
                 headers=anonymous_headers,
             )
             assert resp.status_code == 401
-            assert resp.get_json()["error"] == "session_token_required"
+            assert resp.get_json()["error"] == "credential_required"
             assert kind_contract.status_code == 401
-            assert kind_contract.get_json()["error"] == "session_token_required"
+            assert kind_contract.get_json()["error"] == "credential_required"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -6034,7 +6039,7 @@ class TestNotificationChannelRoutes:
 
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
-            session_id = "tok_notification_routes"
+            session_id = principal_owner(str("tok_notification_routes"))
             created = self._create_webhook_channel(client, session_id)
             assert created.status_code == 201
             assert "https://example.invalid/hook" not in created.get_data(as_text=True)
@@ -6046,17 +6051,17 @@ class TestNotificationChannelRoutes:
             secret_name = channel_secret_name(payload["id"], "url")
             assert get_channel_secret(session_id, secret_name) == "https://example.invalid/hook"
 
-            listed = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            listed = client.get("/session/notification-channels", headers={**browser_identity_headers(session_id)})
             assert listed.status_code == 200
             assert "https://example.invalid/hook" not in listed.get_data(as_text=True)
             assert listed.get_json()["channels"][0]["id"] == payload["id"]
-            kind_contract = client.get("/session/notification-channel-kinds", headers={"X-Session-ID": session_id})
+            kind_contract = client.get("/session/notification-channel-kinds", headers={**browser_identity_headers(session_id)})
             webhook_kind = next(item for item in kind_contract.get_json()["kinds"] if item["kind"] == "webhook")
             assert webhook_kind["secret_fields"] == [{"name": "url", "label": "Webhook URL"}]
 
             kind_change = client.patch(
                 f"/session/notification-channels/{payload['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "kind": "telegram",
                     "label": "Wrong type",
@@ -6071,7 +6076,7 @@ class TestNotificationChannelRoutes:
 
             updated = client.patch(
                 f"/session/notification-channels/{payload['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "kind": "webhook",
                     "label": "Muted webhook",
@@ -6091,7 +6096,7 @@ class TestNotificationChannelRoutes:
 
             secret_replaced = client.patch(
                 f"/session/notification-channels/{payload['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "kind": "webhook",
                     "label": "Replacement webhook",
@@ -6127,7 +6132,7 @@ class TestNotificationChannelRoutes:
 
         _client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
-            session_id = "tok_notification_atomic_secret"
+            session_id = principal_owner(str("tok_notification_atomic_secret"))
             self._register_session_token(session_id)
             monkeypatch.setattr(channels_store, "_channel_id", lambda: "ntc_atomic_secret")
             created = channels_store.create_notification_channel(
@@ -6168,14 +6173,14 @@ class TestNotificationChannelRoutes:
             lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
         )
         try:
-            session_id = "tok_notification_test_send"
+            session_id = principal_owner(str("tok_notification_test_send"))
             created = self._create_webhook_channel(client, session_id)
             assert created.status_code == 201
             channel_id = created.get_json()["channel"]["id"]
 
             resp = client.post(
                 f"/session/notification-channels/{channel_id}/test",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert resp.status_code == 200
             payload = resp.get_json()
@@ -6210,11 +6215,11 @@ class TestNotificationChannelRoutes:
             lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
         )
         try:
-            session_id = "tok_notification_test_single"
+            session_id = principal_owner(str("tok_notification_test_single"))
             first = self._create_webhook_channel(client, session_id).get_json()["channel"]
             second_resp = client.post(
                 "/session/notification-channels",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "kind": "webhook",
                     "label": "Second webhook",
@@ -6223,20 +6228,20 @@ class TestNotificationChannelRoutes:
                 },
             )
             second = second_resp.get_json()["channel"]
-            listed_before_update = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            listed_before_update = client.get("/session/notification-channels", headers={**browser_identity_headers(session_id)})
             assert [channel["id"] for channel in listed_before_update.get_json()["channels"]] == [first["id"], second["id"]]
             muted_second = client.patch(
                 f"/session/notification-channels/{second['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"muted": True},
             )
             assert muted_second.status_code == 200
-            listed_after_update = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            listed_after_update = client.get("/session/notification-channels", headers={**browser_identity_headers(session_id)})
             assert [channel["id"] for channel in listed_after_update.get_json()["channels"]] == [first["id"], second["id"]]
 
             resp = client.post(
                 f"/session/notification-channels/{second['id']}/test",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
             assert resp.status_code == 200
@@ -6273,13 +6278,13 @@ class TestNotificationChannelRoutes:
             lambda url, payload, config, label, **_kwargs: ChannelResult.retry("webhook rejected the test"),
         )
         try:
-            session_id = "tok_notification_test_failure"
+            session_id = principal_owner(str("tok_notification_test_failure"))
             created = self._create_webhook_channel(client, session_id)
             channel_id = created.get_json()["channel"]["id"]
 
             resp = client.post(
                 f"/session/notification-channels/{channel_id}/test",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
             payload = resp.get_json()
@@ -6299,7 +6304,7 @@ class TestNotificationChannelRoutes:
     def test_notification_event_audit_route_lists_session_channel_deliveries(self, monkeypatch, tmp_path):
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
-            session_id = "tok_notification_delivery_audit"
+            session_id = principal_owner(str("tok_notification_delivery_audit"))
             created = self._create_webhook_channel(client, session_id)
             channel_id = created.get_json()["channel"]["id"]
             with db_connect() as conn:
@@ -6384,7 +6389,7 @@ class TestNotificationChannelRoutes:
 
             resp = client.get(
                 f"/session/notification-events?channel_id={channel_id}&limit=5",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
             assert resp.status_code == 200
@@ -6408,88 +6413,16 @@ class TestNotificationChannelRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
-    def test_notification_channels_migrate_with_session_token_and_secrets(self, monkeypatch, tmp_path):
-        from services.notifications.models import ChannelResult
-
-        delivered = []
-        client, patchers = self._notification_client(monkeypatch, tmp_path)
-        monkeypatch.setattr(
-            "services.notifications.channels.webhook.post_json",
-            lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
-        )
-        try:
-            source_session_id = "tok_notification_migrate_source"
-            destination_token = "tok_notification_migrate_dest"
-            self._register_session_token(source_session_id)
-            self._register_session_token(destination_token)
-            created = self._create_webhook_channel(client, source_session_id).get_json()["channel"]
-            with db_connect() as conn:
-                conn.execute(
-                    "INSERT INTO notification_events "
-                    "(id, personal_workspace_id, channel_id, trigger, payload_json, status, attempts, "
-                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        "nte_migrates_with_channel",
-                        source_session_id,
-                        created["id"],
-                        "test",
-                        json.dumps({"trigger": "test"}),
-                        "pending",
-                        0,
-                        "",
-                        "",
-                        "",
-                        "",
-                        datetime.now(timezone.utc).isoformat(),
-                        "",
-                    ),
-                )
-                conn.commit()
-
-            migrate_resp = client.post(
-                "/session/migrate",
-                headers={"X-Session-ID": source_session_id},
-                json={"from_session_id": source_session_id, "to_session_id": destination_token},
-            )
-            listed = client.get("/session/notification-channels", headers={"X-Session-ID": destination_token})
-            test_resp = client.post(
-                f"/session/notification-channels/{created['id']}/test",
-                headers={"X-Session-ID": destination_token},
-            )
-
-            assert migrate_resp.status_code == 200
-            assert migrate_resp.get_json()["migrated_notification_channels"] == 1
-            assert migrate_resp.get_json()["migrated_notification_events"] == 1
-            assert listed.status_code == 200
-            assert listed.get_json()["channels"][0]["id"] == created["id"]
-            assert test_resp.status_code == 200
-            assert delivered[0][0] == "https://example.invalid/hook"
-            with db_connect() as conn:
-                source_channel_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM notification_channels WHERE personal_workspace_id = ?",
-                    (source_session_id,),
-                ).fetchone()["count"]
-                migrated_event = conn.execute(
-                    "SELECT personal_workspace_id FROM notification_events WHERE id = ?",
-                    ("nte_migrates_with_channel",),
-                ).fetchone()
-            assert int(source_channel_count) == 0
-            assert migrated_event["personal_workspace_id"] == destination_token
-        finally:
-            for patcher in reversed(patchers):
-                patcher.stop()
-
     def test_notification_channel_delete_removes_channel_and_vault_secrets(self, monkeypatch, tmp_path):
         from services.notifications.secrets import channel_secret_name, get_channel_secret
 
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
-            session_id = "tok_notification_delete"
+            session_id = principal_owner(str("tok_notification_delete"))
             self._register_session_token(session_id)
             created = client.post(
                 "/session/notification-channels",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "kind": "pushover",
                     "label": "Push alerts",
@@ -6506,12 +6439,12 @@ class TestNotificationChannelRoutes:
 
             deleted = client.delete(
                 f"/session/notification-channels/{channel_id}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert deleted.status_code == 200
             assert deleted.get_json()["removed"] is True
 
-            listed = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            listed = client.get("/session/notification-channels", headers={**browser_identity_headers(session_id)})
             assert listed.status_code == 200
             assert listed.get_json()["channels"] == []
             assert get_channel_secret(session_id, app_secret_name) is None
@@ -6541,14 +6474,14 @@ class TestProjectRoutes:
         package_presets.clear_package_preset_catalog_cache()
 
     def _register_session_token(self, session_id):
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
 
     def _create_team(self, client, session_id, name="Project Activity Team"):
         self._register_session_token(session_id)
         team_name = f"{name} {uuid.uuid4().hex[:8]}"
         resp = client.post(
             "/session/teams",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"name": team_name, "display_name": "Owner"},
         )
         assert resp.status_code == 201
@@ -6558,13 +6491,13 @@ class TestProjectRoutes:
         self._register_session_token(member_token)
         invite = client.post(
             f"/session/teams/{team_id}/invites",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"role": role, "label": f"{display_name} invite"},
         )
         assert invite.status_code == 201
         joined = client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": member_token},
+            headers={**browser_identity_headers(member_token)},
             json={"code": invite.get_json()["invite"]["code"], "display_name": display_name},
         )
         assert joined.status_code in {200, 201}
@@ -6574,7 +6507,7 @@ class TestProjectRoutes:
         resp = client.post(
             "/projects",
             json={"name": name, "description": "Quarterly case folder", "color": "green"},
-            headers=headers or {"X-Session-ID": session_id},
+            headers=headers or {**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
@@ -6616,7 +6549,7 @@ class TestProjectRoutes:
         resp = client.post(
             f"/projects/{project_id}/links",
             json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
@@ -6625,7 +6558,7 @@ class TestProjectRoutes:
         resp = client.post(
             f"/projects/{project_id}/targets",
             json={"type": target_type, "value": value},
-            headers=headers or {"X-Session-ID": session_id},
+            headers=headers or {**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 201
         return resp.get_json()["target"]
@@ -6641,7 +6574,7 @@ class TestProjectRoutes:
 
         created_response = client.post(
             route,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "name": "Anonymous baseline",
                 "role": "anonymous",
@@ -6662,7 +6595,7 @@ class TestProjectRoutes:
         ):
             secret_response = client.post(
                 "/session/secrets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "name": name,
                     "value": f"value-for-{name.lower()}",
@@ -6672,7 +6605,7 @@ class TestProjectRoutes:
             assert secret_response.status_code == 201
         protected_response = client.post(
             route,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "name": "Custom Secret bindings",
                 "role": "member",
@@ -6691,7 +6624,7 @@ class TestProjectRoutes:
         }
         missing_username = client.post(
             route,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "name": "Incomplete basic authentication",
                 "role": "member",
@@ -6708,12 +6641,12 @@ class TestProjectRoutes:
         )
 
         detail_route = f"{route}/{created['id']}"
-        listed = client.get(route, headers={"X-Session-ID": session_id})
-        detail = client.get(detail_route, headers={"X-Session-ID": session_id})
-        foreign = client.get(detail_route, headers={"X-Session-ID": other_session})
+        listed = client.get(route, headers={**browser_identity_headers(session_id)})
+        detail = client.get(detail_route, headers={**browser_identity_headers(session_id)})
+        foreign = client.get(detail_route, headers={**browser_identity_headers(other_session)})
         updated = client.patch(
             detail_route,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"revision": created["revision"], "enabled": False},
         )
         assert {item["id"] for item in listed.get_json()["profiles"]} == {
@@ -6728,10 +6661,10 @@ class TestProjectRoutes:
 
         removed = client.delete(
             detail_route,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert removed.get_json() == {"ok": True, "removed": True}
-        assert client.get(detail_route, headers={"X-Session-ID": session_id}).status_code == 404
+        assert client.get(detail_route, headers={**browser_identity_headers(session_id)}).status_code == 404
 
     def test_project_http_profiles_skip_invalid_confirmed_targets(self):
         client = get_client()
@@ -6749,10 +6682,10 @@ class TestProjectRoutes:
         route = f"/projects/{project['id']}/http-profiles"
 
         with mock.patch.object(http_profile_scope_service.log, "warning") as warning_log:
-            listed = client.get(route, headers={"X-Session-ID": session_id})
+            listed = client.get(route, headers={**browser_identity_headers(session_id)})
             created = client.post(
                 route,
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={
                     "name": "Valid target scope",
                     "role": "anonymous",
@@ -6790,11 +6723,11 @@ class TestProjectRoutes:
         ):
             resp = client.get(
                 f"/projects/{project['id']}/overview",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             foreign_resp = client.get(
                 f"/projects/{foreign_project['id']}/overview",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -6852,7 +6785,7 @@ class TestProjectRoutes:
             with pytest.raises(RuntimeError, match="overview exploded"):
                 client.get(
                     f"/projects/{project['id']}/overview?window_start=2026-01-01T00:00:00Z",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
 
         error_log.assert_called_once()
@@ -6875,7 +6808,7 @@ class TestProjectRoutes:
         assessment_resp = client.post(
             f"/projects/{project['id']}/assessments",
             json={"profile_key": "network", "title": "Overview assessment"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert assessment_resp.status_code == 201
         assessment_id = assessment_resp.get_json()["assessment"]["id"]
@@ -6930,7 +6863,7 @@ class TestProjectRoutes:
 
         resp = client.get(
             f"/projects/{project['id']}/overview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 200
@@ -6978,11 +6911,11 @@ class TestProjectRoutes:
         finding_params = urlencode(target_row["deep_link_hints"]["findings"])
         entities_resp = client.get(
             f"/projects/{project['id']}/entities?{entity_params}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         findings_resp = client.get(
             f"/projects/{project['id']}/findings?{finding_params}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert entities_resp.status_code == 200
@@ -6994,7 +6927,7 @@ class TestProjectRoutes:
         from services.watchers import service as watcher_service
 
         client = get_client()
-        session_id = "tok_project_overview_window_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_overview_window_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         project = self._create_project(client, session_id, name="Overview Windowed")
         target = self._create_target(client, session_id, project["id"], value="api.example.com")
@@ -7055,7 +6988,7 @@ class TestProjectRoutes:
 
         resp = client.get(
             f"/projects/{project['id']}/overview?window_start=2026-05-20T09:00:00Z&window_end=2026-05-20T10:00:00Z",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 200
@@ -7085,20 +7018,20 @@ class TestProjectRoutes:
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
             json={"name": "Audit package", "redaction_mode": "redacted"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
 
         package_delete = client.delete(
             f"/projects/{project['id']}/packages/{package['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert package_delete.status_code == 200
         unlink = client.delete(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unlink.status_code == 200
 
@@ -7153,7 +7086,7 @@ class TestProjectRoutes:
 
         first_page = client.get(
             f"/projects/{project['id']}/activity?limit=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert first_page.status_code == 200
         first_payload = first_page.get_json()
@@ -7162,7 +7095,7 @@ class TestProjectRoutes:
 
         filtered = client.get(
             f"/projects/{project['id']}/activity?event_type=project.link&date_from=2026-06-06&date_to=2026-06-06",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         payload = filtered.get_json()
         assert filtered.status_code == 200
@@ -7175,17 +7108,16 @@ class TestProjectRoutes:
         assert "team-row" not in event_json
         hidden_actor = client.get(
             f"/projects/{project['id']}/activity?actor={quote(token_hash(session_id))}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert hidden_actor.status_code == 200
         assert hidden_actor.get_json()["events"] == []
 
     def test_project_monitoring_route_returns_scoped_watchers_and_missing_run_state(self):
-        from core.helpers import get_log_session_id
         from services.watchers import service as watcher_service
 
         client = get_client()
-        session_id = "tok_project_monitoring_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_monitoring_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         project = self._create_project(client, session_id, name="Monitoring Case")
         run_id = self._seed_run(session_id, "nmap -sV darklab.sh")
@@ -7225,15 +7157,15 @@ class TestProjectRoutes:
         with mock.patch.object(project_routes.log, "info") as info_log:
             resp = client.get(
                 f"/projects/{project['id']}/monitoring",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             summary_resp = client.get(
                 f"/projects/{project['id']}/monitoring/summary",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             window_summary_resp = client.get(
                 f"/projects/{project['id']}/monitoring/summary?window_start=2026-01-01T00:00:00Z&window_end=2027-01-01T00:00:00Z",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -7261,7 +7193,7 @@ class TestProjectRoutes:
         viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_VIEWED",))
         assert viewed.kwargs["extra"] == {
             "ip": mock.ANY,
-            "session": get_log_session_id(session_id),
+            "session": mock.ANY,
             "team_id": "",
             "project_id": project["id"],
             "fire_limit": 8,
@@ -7274,7 +7206,7 @@ class TestProjectRoutes:
         summary_viewed = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_SUMMARY_VIEWED",))
         assert summary_viewed.kwargs["extra"] == {
             "ip": mock.ANY,
-            "session": get_log_session_id(session_id),
+            "session": mock.ANY,
             "team_id": "",
             "project_id": project["id"],
             "fire_limit": 8,
@@ -7312,7 +7244,7 @@ class TestProjectRoutes:
         )
         anonymous_resp = client.get(
             f"/projects/{anonymous_project['id']}/monitoring",
-            headers={"X-Session-ID": anonymous_id},
+            headers={**browser_identity_headers(anonymous_id)},
         )
 
         assert anonymous_resp.status_code == 200
@@ -7325,7 +7257,7 @@ class TestProjectRoutes:
         from services.watchers import service as watcher_service
 
         client = get_client()
-        session_id = "tok_project_monitoring_deleted_current_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_monitoring_deleted_current_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         project = self._create_project(client, session_id, name="Monitoring Deleted Current")
         suffix = uuid.uuid4().hex[:8]
@@ -7370,7 +7302,7 @@ class TestProjectRoutes:
 
         resp = client.get(
             f"/projects/{project['id']}/monitoring",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 200
@@ -7389,8 +7321,8 @@ class TestProjectRoutes:
         from services.watchers import service as watcher_service
 
         client = get_client()
-        session_id = "tok_project_monitoring_targets_" + uuid.uuid4().hex[:8]
-        other_session_id = "tok_project_monitoring_other_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_monitoring_targets_" + uuid.uuid4().hex[:8]))
+        other_session_id = principal_owner(str("tok_project_monitoring_other_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         self._register_session_token(other_session_id)
         project = self._create_project(client, session_id, name="Monitoring Targets")
@@ -7427,7 +7359,7 @@ class TestProjectRoutes:
 
         resp = client.get(
             f"/projects/{project['id']}/monitoring",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 200
@@ -7443,11 +7375,10 @@ class TestProjectRoutes:
         assert [target["value"] for target in payload["monitors"][0]["linked_targets"]] == ["visible.darklab.sh"]
 
     def test_project_monitoring_fire_ack_route_updates_fire_and_audits_metadata(self):
-        from core.helpers import get_log_session_id
         from services.watchers import service as watcher_service
 
         client = get_client()
-        session_id = "tok_project_monitoring_ack_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_monitoring_ack_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         project = self._create_project(client, session_id, name="Monitoring Triage")
         run_id = self._seed_run(session_id, "nmap -sV darklab.sh")
@@ -7475,7 +7406,7 @@ class TestProjectRoutes:
         with mock.patch.object(project_routes.log, "info") as info_log:
             resp = client.patch(
                 f"/projects/{project['id']}/monitoring/fires/{fire.id}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"ack_state": "expected", "ack_note": "Maintenance window"},
             )
 
@@ -7495,7 +7426,7 @@ class TestProjectRoutes:
         updated_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_MONITORING_FIRE_ACK_UPDATED",))
         assert updated_log.kwargs["extra"] == {
             "ip": mock.ANY,
-            "session": get_log_session_id(session_id),
+            "session": mock.ANY,
             "team_id": "",
             "project_id": project["id"],
             "watcher_id": watcher.id,
@@ -7507,7 +7438,7 @@ class TestProjectRoutes:
         with mock.patch.object(project_routes.log, "warning") as warning_log:
             rejected = client.patch(
                 f"/projects/{project['id']}/monitoring/fires/{fire.id}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"ack_state": "invalid"},
             )
         assert rejected.status_code == 400
@@ -7518,7 +7449,7 @@ class TestProjectRoutes:
         with mock.patch.object(project_routes.log, "debug") as debug_log:
             missing = client.patch(
                 f"/projects/{project['id']}/monitoring/fires/missing-fire",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"ack_state": "expected"},
             )
         assert missing.status_code == 404
@@ -7526,10 +7457,9 @@ class TestProjectRoutes:
         assert debug_log.call_args.kwargs["extra"]["fire_id"] == "missing-fire"
 
     def test_project_monitoring_risk_ack_route_updates_event_and_audits_metadata(self):
-        from core.helpers import get_log_session_id
 
         client = get_client()
-        session_id = "tok_project_risk_ack_" + uuid.uuid4().hex[:8]
+        session_id = principal_owner(str("tok_project_risk_ack_" + uuid.uuid4().hex[:8]))
         self._register_session_token(session_id)
         project = self._create_project(client, session_id, name="Risk Triage")
         other_project = self._create_project(client, session_id, name="Other Risk Triage")
@@ -7561,7 +7491,7 @@ class TestProjectRoutes:
         with mock.patch.object(project_routes.log, "info") as info_log:
             resp = client.patch(
                 f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
                 json={"ack_state": "needs_action", "ack_note": note},
             )
 
@@ -7589,7 +7519,7 @@ class TestProjectRoutes:
         updated_log = next(call for call in info_log.call_args_list if call.args == ("PROJECT_RISK_ESCALATION_ACK_UPDATED",))
         assert updated_log.kwargs["extra"] == {
             "ip": mock.ANY,
-            "session": get_log_session_id(session_id),
+            "session": mock.ANY,
             "team_id": "",
             "project_id": project["id"],
             "escalation_id": escalation_id,
@@ -7599,7 +7529,7 @@ class TestProjectRoutes:
 
         rejected = client.patch(
             f"/projects/{project['id']}/monitoring/risk-events/{escalation_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"ack_state": "invalid"},
         )
         assert rejected.status_code == 400
@@ -7607,7 +7537,7 @@ class TestProjectRoutes:
 
         wrong_project = client.patch(
             f"/projects/{other_project['id']}/monitoring/risk-events/{escalation_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"ack_state": "resolved"},
         )
         assert wrong_project.status_code == 404
@@ -7616,10 +7546,10 @@ class TestProjectRoutes:
         from services.watchers import service as watcher_service
 
         client = get_client()
-        owner_token = "tok_project_monitoring_team_owner_" + uuid.uuid4().hex[:8]
-        viewer_token = "tok_project_monitoring_team_viewer_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_project_monitoring_team_operator_" + uuid.uuid4().hex[:8]
-        outsider_token = "tok_project_monitoring_team_outsider_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_project_monitoring_team_owner_" + uuid.uuid4().hex[:8]))
+        viewer_token = principal_owner(str("tok_project_monitoring_team_viewer_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_project_monitoring_team_operator_" + uuid.uuid4().hex[:8]))
+        outsider_token = principal_owner(str("tok_project_monitoring_team_outsider_" + uuid.uuid4().hex[:8]))
         team = self._create_team(client, owner_token, name="Monitoring Team")
         team_id = team["id"]
         self._join_team(
@@ -7643,11 +7573,11 @@ class TestProjectRoutes:
             client,
             owner_token,
             name="Team Monitoring",
-            headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
         )
-        viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
-        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-        outsider_headers = {"X-Session-ID": outsider_token, "X-Team-ID": team_id}
+        viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
+        operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+        outsider_headers = {**browser_identity_headers(outsider_token), "X-Team-ID": team_id}
         suffix = uuid.uuid4().hex[:8]
         baseline_run_id = f"run_team_monitor_base_{suffix}"
         current_run_id = f"run_team_monitor_current_{suffix}"
@@ -7767,9 +7697,9 @@ class TestProjectRoutes:
             patcher.start()
         db_init()
         client = get_client()
-        owner_token = "tok_project_digest_owner_" + uuid.uuid4().hex[:8]
-        viewer_token = "tok_project_digest_viewer_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_project_digest_operator_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_project_digest_owner_" + uuid.uuid4().hex[:8]))
+        viewer_token = principal_owner(str("tok_project_digest_viewer_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_project_digest_operator_" + uuid.uuid4().hex[:8]))
         try:
             team = self._create_team(client, owner_token, name="Digest Settings Team")
             team_id = team["id"]
@@ -7793,7 +7723,7 @@ class TestProjectRoutes:
                 client,
                 owner_token,
                 name="Digest Settings",
-                headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
             )
             with db_connect() as conn:
                 conn.execute(
@@ -7806,9 +7736,9 @@ class TestProjectRoutes:
                 )
                 conn.commit()
 
-            viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
-            owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-            operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+            viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
+            owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+            operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
             route = f"/projects/{project['id']}/digest-settings"
             viewer_get = client.get(route, headers=viewer_headers)
             viewer_patch = client.patch(
@@ -7885,8 +7815,8 @@ class TestProjectRoutes:
         from services.audit.recorder import record_event
 
         client = get_client()
-        owner_token = "tok_project_activity_owner_" + uuid.uuid4().hex[:8]
-        viewer_token = "tok_project_activity_viewer_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_project_activity_owner_" + uuid.uuid4().hex[:8]))
+        viewer_token = principal_owner(str("tok_project_activity_viewer_" + uuid.uuid4().hex[:8]))
         team = self._create_team(client, owner_token)
         team_id = team["id"]
         viewer_member = self._join_team(
@@ -7901,7 +7831,7 @@ class TestProjectRoutes:
             client,
             owner_token,
             name="Team Scoped Activity",
-            headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
         )
         foreign = self._create_project(
             client,
@@ -7928,7 +7858,7 @@ class TestProjectRoutes:
 
         ok = client.get(
             f"/projects/{team_project['id']}/activity",
-            headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
         )
         assert ok.status_code == 200
         payload = ok.get_json()
@@ -7941,7 +7871,7 @@ class TestProjectRoutes:
 
         denied = client.get(
             f"/projects/{foreign['id']}/activity",
-            headers={"X-Session-ID": viewer_token, "X-Team-ID": team_id},
+            headers={**browser_identity_headers(viewer_token), "X-Team-ID": team_id},
         )
         assert denied.status_code == 404
 
@@ -7962,12 +7892,12 @@ class TestProjectRoutes:
         ):
             client.delete(
                 f"/projects/{project['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         still_present = client.get(
             f"/projects/{project['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert still_present.status_code == 200
         assert json.loads(still_present.data)["project"]["id"] == project["id"]
@@ -7982,7 +7912,7 @@ class TestProjectRoutes:
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
             json={"name": "Rollback package", "redaction_mode": "redacted"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
@@ -7997,12 +7927,12 @@ class TestProjectRoutes:
         ):
             client.delete(
                 f"/projects/{project['id']}/packages/{package['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         still_present = client.get(
             f"/projects/{project['id']}/packages/{package['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert still_present.status_code == 200
         assert json.loads(still_present.data)["package"]["id"] == package["id"]
@@ -8047,7 +7977,7 @@ class TestProjectRoutes:
         resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "host", "value": "192.0.2.10"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target = json.loads(resp.data)["target"]
 
@@ -8063,29 +7993,29 @@ class TestProjectRoutes:
         resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "url", "value": "https://portal.darklab.sh/login"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target = json.loads(resp.data)["target"]
         slash_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "url", "value": "https://portal.darklab.sh/login/"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         slash_target = json.loads(slash_resp.data)["target"]
         updated_resp = client.put(
             f"/projects/{project['id']}/targets/{target['id']}",
             json={"type": "url", "value": "https://portal.darklab.sh/login/"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         updated_target = json.loads(updated_resp.data)["target"]
         resolved = client.post(
             f"/projects/{project['id']}/probes/targets/resolve",
             json={"target_value": "https://portal.darklab.sh/login/"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         listed = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             rows = {
@@ -8145,7 +8075,7 @@ class TestProjectRoutes:
             resp = client.post(
                 f"/projects/{project['id']}/targets",
                 json=payload,
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert resp.status_code == 201
             targets.append(json.loads(resp.data)["target"])
@@ -8160,19 +8090,19 @@ class TestProjectRoutes:
         domain_page = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets?type=domain&limit=1",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         search_page = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets?q=login",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         auto_page = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets?auto_discovered=1",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
 
@@ -8193,7 +8123,7 @@ class TestProjectRoutes:
             client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "host", "value": "darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         with db_connect() as conn:
@@ -8321,24 +8251,24 @@ class TestProjectRoutes:
         assert project["slug"] == "external-review"
         assert project["status"] == "active"
 
-        listed = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        listed = json.loads(client.get("/projects", headers={**browser_identity_headers(session_id)}).data)
         assert [item["id"] for item in listed["projects"]] == [project["id"]]
 
-        get_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        get_resp = client.get(f"/projects/{project['id']}", headers={**browser_identity_headers(session_id)})
         assert json.loads(get_resp.data)["project"]["description"] == "Quarterly case folder"
 
         project_label = client.post(
             f"/entities/project/{project['id']}/labels",
             json={"label": "important"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert project_label.status_code == 201
-        labeled_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        labeled_list = json.loads(client.get("/projects", headers={**browser_identity_headers(session_id)}).data)
         assert [label["label"] for label in labeled_list["projects"][0]["labels"]] == ["important"]
         paged_list = json.loads(
             client.get(
                 "/projects?include_archived=1&include_counts=1&limit=1&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert paged_list["total"] == 1
@@ -8349,14 +8279,14 @@ class TestProjectRoutes:
         labeled_get = json.loads(
             client.get(
                 f"/projects/{project['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [label["label"] for label in labeled_get["project"]["labels"]] == ["important"]
         labeled_summary = json.loads(
             client.get(
                 f"/projects/{project['id']}/summary",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [label["label"] for label in labeled_summary["project"]["labels"]] == ["important"]
@@ -8364,17 +8294,17 @@ class TestProjectRoutes:
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         duplicate_target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         invalid_target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "unsupported", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert target_resp.status_code == 201
         assert duplicate_target_resp.status_code == 201
@@ -8393,26 +8323,26 @@ class TestProjectRoutes:
             client.put(
                 f"/projects/{project['id']}/targets/{target['id']}",
                 json={"confidence": 0.8},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         assert updated_target["confidence"] == 0.8
         target_label = client.post(
             f"/entities/target/{target['id']}/labels",
             json={"label": "Primary web domain"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_note = client.put(
             f"/entities/target/{target['id']}/note",
             json={"body": "Scope approved"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert target_label.status_code == 201
         assert target_note.status_code == 200
         targets = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["id"] for item in targets["targets"]] == [target["id"]]
@@ -8422,7 +8352,7 @@ class TestProjectRoutes:
             client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "host", "value": "api.darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         with sqlite3.connect(DB_PATH) as conn:
@@ -8442,18 +8372,18 @@ class TestProjectRoutes:
             conn.commit()
         hidden_targets = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": anonymous_session_id("other-session")},
+            headers={**browser_identity_headers(anonymous_session_id("other-session"))},
         )
         assert hidden_targets.status_code == 404
         delete_target_resp = client.delete(
             f"/projects/{project['id']}/targets/{target['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_target_resp.status_code == 200
         targets_after_delete = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["id"] for item in targets_after_delete["targets"]] == [fallback_target["id"]]
@@ -8506,7 +8436,7 @@ class TestProjectRoutes:
         update_resp = client.put(
             f"/projects/{project['id']}",
             json={"name": "Renamed Review", "status": "archived", "notes": "private notes"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert update_resp.status_code == 200
         updated = json.loads(update_resp.data)["project"]
@@ -8523,26 +8453,28 @@ class TestProjectRoutes:
                 == "private notes"
             )
 
-        default_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        default_list = json.loads(client.get("/projects", headers={**browser_identity_headers(session_id)}).data)
         assert default_list["projects"] == []
-        archived_list = json.loads(client.get("/projects?include_archived=1", headers={"X-Session-ID": session_id}).data)
+        archived_list = json.loads(
+            client.get("/projects?include_archived=1", headers={**browser_identity_headers(session_id)}).data
+        )
         assert [item["id"] for item in archived_list["projects"]] == [project["id"]]
 
         unarchive_resp = client.put(
             f"/projects/{project['id']}",
             json={"status": "active"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unarchive_resp.status_code == 200
         unarchived = json.loads(unarchive_resp.data)["project"]
         assert unarchived["status"] == "active"
-        default_list_after_unarchive = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        default_list_after_unarchive = json.loads(client.get("/projects", headers={**browser_identity_headers(session_id)}).data)
         assert [item["id"] for item in default_list_after_unarchive["projects"]] == [project["id"]]
 
         cleanup_target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "cleanup.darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert cleanup_target_resp.status_code == 201
         cleanup_target = json.loads(cleanup_target_resp.data)["target"]
@@ -8570,9 +8502,9 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        delete_resp = client.delete(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        delete_resp = client.delete(f"/projects/{project['id']}", headers={**browser_identity_headers(session_id)})
         assert delete_resp.status_code == 200
-        missing_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        missing_resp = client.get(f"/projects/{project['id']}", headers={**browser_identity_headers(session_id)})
         assert missing_resp.status_code == 404
         with sqlite3.connect(DB_PATH) as conn:
             assert (
@@ -8613,14 +8545,14 @@ class TestProjectRoutes:
             client.post(
                 f"/projects/{deleted_project['id']}/targets",
                 json={"type": "domain", "value": "darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         remaining_target = json.loads(
             client.post(
                 f"/projects/{remaining_project['id']}/targets",
                 json={"type": "host", "value": "api.darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         run_id = "run_project_delete_target_" + uuid.uuid4().hex
@@ -8641,7 +8573,7 @@ class TestProjectRoutes:
 
         delete_resp = client.delete(
             f"/projects/{deleted_project['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_resp.status_code == 200
         with sqlite3.connect(DB_PATH) as conn:
@@ -8675,14 +8607,14 @@ class TestProjectRoutes:
         page = json.loads(
             client.get(
                 "/projects?include_archived=1&limit=1&offset=1",
-                headers={"X-Session-ID": session_a},
+                headers={**browser_identity_headers(session_a)},
             ).data
         )
         assert page["total"] == 2
         assert page["offset"] == 1
         assert len(page["projects"]) == 1
 
-        hidden = client.get(f"/projects/{first['id']}", headers={"X-Session-ID": session_b})
+        hidden = client.get(f"/projects/{first['id']}", headers={**browser_identity_headers(session_b)})
         assert hidden.status_code == 404
 
     def test_sets_gets_and_clears_active_project(self):
@@ -8690,24 +8622,24 @@ class TestProjectRoutes:
         session_id = self._session_id("project-active")
         project = self._create_project(client, session_id, "Active Case")
 
-        empty = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        empty = json.loads(client.get("/projects/active", headers={**browser_identity_headers(session_id)}).data)
         assert empty["project"] is None
 
         set_resp = client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert set_resp.status_code == 200
         assert json.loads(set_resp.data)["project"]["id"] == project["id"]
 
-        current = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        current = json.loads(client.get("/projects/active", headers={**browser_identity_headers(session_id)}).data)
         assert current["project"]["slug"] == "active-case"
 
-        clear_resp = client.delete("/projects/active", headers={"X-Session-ID": session_id})
+        clear_resp = client.delete("/projects/active", headers={**browser_identity_headers(session_id)})
         assert clear_resp.status_code == 200
         assert json.loads(clear_resp.data)["cleared"] is True
-        cleared = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        cleared = json.loads(client.get("/projects/active", headers={**browser_identity_headers(session_id)}).data)
         assert cleared["project"] is None
 
         cli_session = self._session_id("project-cli")
@@ -8793,14 +8725,14 @@ class TestProjectRoutes:
             resp = client.post(
                 "/projects/active",
                 json={"project_id": project["id"]},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert resp.status_code == 200
 
         empty_page = json.loads(
             client.get(
                 "/projects?mode=switcher&limit=3",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [project["id"] for project in empty_page["projects"][:2]] == [alpha["id"], beta["id"]]
@@ -8810,7 +8742,7 @@ class TestProjectRoutes:
         search_page = json.loads(
             client.get(
                 "/projects?mode=switcher&q=needle&limit=2",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [project["id"] for project in search_page["projects"]] == [gamma["id"], zzz["id"]]
@@ -8820,13 +8752,13 @@ class TestProjectRoutes:
         archived = client.put(
             f"/projects/{beta['id']}",
             json={"status": "archived"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert archived.status_code == 200
         pruned_page = json.loads(
             client.get(
                 "/projects?mode=switcher&limit=4",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert beta["id"] not in {project["id"] for project in pruned_page["projects"]}
@@ -8835,7 +8767,7 @@ class TestProjectRoutes:
         client = get_client()
         session_id = self._session_id("package-presets")
 
-        resp = client.get("/projects/package-presets", headers={"X-Session-ID": session_id})
+        resp = client.get("/projects/package-presets", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 200
         body = json.loads(resp.data)
@@ -8861,7 +8793,7 @@ class TestProjectRoutes:
             """)
             )
             with mock.patch.dict(project_routes.CFG, {"package_presets_file": str(path)}, clear=False):
-                resp = client.get("/projects/package-presets", headers={"X-Session-ID": session_id})
+                resp = client.get("/projects/package-presets", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 200
         assert json.loads(resp.data)["presets"][0]["id"] == "brief"
@@ -8889,7 +8821,7 @@ class TestProjectRoutes:
                 resp = client.post(
                     f"/projects/{project['id']}/packages",
                     json={"name": "Customer package", "preset": "customer_handoff"},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
 
         assert resp.status_code == 201
@@ -8937,7 +8869,7 @@ class TestProjectRoutes:
             conn.commit()
         legacy_resp = client.get(
             f"/projects/{project['id']}/packages/{legacy_package_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert legacy_resp.status_code == 200
         legacy_package = json.loads(legacy_resp.data)["package"]
@@ -8972,7 +8904,7 @@ class TestProjectRoutes:
             conn.commit()
         unknown_resp = client.get(
             f"/projects/{project['id']}/packages/{legacy_unknown_package_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unknown_resp.status_code == 200
         unknown_package = json.loads(unknown_resp.data)["package"]
@@ -8987,7 +8919,7 @@ class TestProjectRoutes:
         resp = client.post(
             f"/projects/{project['id']}/packages",
             json={"name": "Unknown preset", "preset": "unknown_customer"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 400
@@ -9003,33 +8935,33 @@ class TestProjectRoutes:
         cross_session = client.post(
             "/projects/active",
             json={"project_id": other_project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert cross_session.status_code == 404
 
         set_resp = client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert set_resp.status_code == 200
         client.put(
             f"/projects/{project['id']}",
             json={"status": "archived"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        archived = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        archived = json.loads(client.get("/projects/active", headers={**browser_identity_headers(session_id)}).data)
         assert archived["project"] is None
 
         revived = self._create_project(client, session_id, "Delete Me")
         client.post(
             "/projects/active",
             json={"project_id": revived["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        delete_resp = client.delete(f"/projects/{revived['id']}", headers={"X-Session-ID": session_id})
+        delete_resp = client.delete(f"/projects/{revived['id']}", headers={**browser_identity_headers(session_id)})
         assert delete_resp.status_code == 200
-        deleted = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        deleted = json.loads(client.get("/projects/active", headers={**browser_identity_headers(session_id)}).data)
         assert deleted["project"] is None
 
     def test_entity_note_routes_enforce_session_and_payload_boundaries(self):
@@ -9042,13 +8974,13 @@ class TestProjectRoutes:
         create_resp = client.put(
             f"/entities/run/{run_id}/note",
             json={"body": "Owner-only note"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert create_resp.status_code == 200
 
         for method in ("get", "put", "delete"):
             request = getattr(client, method)
-            kwargs = {"headers": {"X-Session-ID": other_session}}
+            kwargs = {"headers": {**browser_identity_headers(other_session)}}
             if method == "put":
                 kwargs["json"] = {"body": "Cross-session overwrite"}
             resp = request(f"/entities/run/{run_id}/note", **kwargs)
@@ -9057,40 +8989,40 @@ class TestProjectRoutes:
         missing_body = client.put(
             f"/entities/run/{run_id}/note",
             json={},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert missing_body.status_code == 400
         whitespace_body = client.put(
             f"/entities/run/{run_id}/note",
             json={"body": "   "},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert whitespace_body.status_code == 400
         non_object = client.put(
             f"/entities/run/{run_id}/note",
             json=["not", "an", "object"],
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert non_object.status_code == 400
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
         unsupported_type = client.put(
             f"/entities/not_supported/{run_id}/note",
             json={"body": "Nope"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unsupported_type.status_code == 400
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
         missing_entity = client.put(
             "/entities/run/missing-run/note",
             json={"body": "Missing"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert missing_entity.status_code == 404
 
         owner_note = json.loads(
             client.get(
                 f"/entities/run/{run_id}/note",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["note"]
         assert owner_note["body"] == "Owner-only note"
@@ -9098,37 +9030,37 @@ class TestProjectRoutes:
         snapshot_label_resp = client.post(
             f"/entities/snapshot/{snapshot_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert snapshot_label_resp.status_code == 201
         snapshot_note_resp = client.put(
             f"/entities/snapshot/{snapshot_id}/note",
             json={"body": "Snapshot context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert snapshot_note_resp.status_code == 200
         snapshot_labels = json.loads(
             client.get(
                 f"/entities/snapshot/{snapshot_id}/labels",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["labels"]
         assert [item["label"] for item in snapshot_labels] == ["handoff"]
         snapshot_note = json.loads(
             client.get(
                 f"/entities/snapshot/{snapshot_id}/note",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["note"]
         assert snapshot_note["body"] == "Snapshot context"
 
         cross_session_label = client.get(
             f"/entities/snapshot/{snapshot_id}/labels",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         )
         cross_session_note = client.get(
             f"/entities/snapshot/{snapshot_id}/note",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         )
         assert cross_session_label.status_code == 404
         assert cross_session_note.status_code == 404
@@ -9136,11 +9068,11 @@ class TestProjectRoutes:
         delete_label_resp = client.delete(
             f"/entities/snapshot/{snapshot_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         delete_note_resp = client.delete(
             f"/entities/snapshot/{snapshot_id}/note",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_label_resp.status_code == 200
         assert delete_note_resp.status_code == 200
@@ -9162,53 +9094,53 @@ class TestProjectRoutes:
 
         one_linked = client.get(
             self._project_compare_url(project["id"]),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert one_linked.status_code == 400
         removed_project_route = client.get(
             f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert removed_project_route.status_code == 404
 
         self._link_run(client, session_id, project["id"], right_run_id)
         default_pair = client.get(
             self._project_compare_url(project["id"]),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert default_pair.status_code == 200
         assert default_pair.get_json()["left_run_id"] == left_run_id
         assert default_pair.get_json()["right_run_id"] == right_run_id
         explicit_reversed = client.get(
             self._project_compare_url(project["id"], left=right_run_id, right=left_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert explicit_reversed.status_code == 200
         assert explicit_reversed.get_json()["left_run_id"] == right_run_id
         assert explicit_reversed.get_json()["right_run_id"] == left_run_id
         same_run = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=left_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert same_run.status_code == 400
         unlinked = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=unlinked_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unlinked.status_code == 400
         cross_session = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=other_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert cross_session.status_code == 400
         missing_baseline = client.get(
             self._project_compare_url(project["id"], left=left_run_id, baseline_label="missing"),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert missing_baseline.status_code == 400
         missing_project = client.get(
             self._project_compare_url("missing-project", left=left_run_id, right=right_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert missing_project.status_code == 404
 
@@ -9223,7 +9155,7 @@ class TestProjectRoutes:
 
         resp = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 200
         payload = json.loads(resp.data)
@@ -9314,7 +9246,7 @@ class TestProjectRoutes:
 
         diff_resp = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert diff_resp.status_code == 200
         diff_payload = json.loads(diff_resp.data)
@@ -9327,7 +9259,7 @@ class TestProjectRoutes:
         with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
                 self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert capped_resp.status_code == 200
         capped = json.loads(capped_resp.data)
@@ -9385,11 +9317,11 @@ class TestProjectRoutes:
 
         history_resp = client.get(
             f"/history/compare?left={left_run_id}&right={right_run_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project_resp = client.get(
             self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert history_resp.status_code == 200
         assert project_resp.status_code == 200
@@ -9411,20 +9343,20 @@ class TestProjectRoutes:
 
         linked = client.get(
             f"/history/compare/lines?left={left_run_id}&right={right_run_id}&project_id={project['id']}&side=a&start=0&end=0",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert linked.status_code == 200
         assert json.loads(linked.data)["lines"] == []
 
         unlinked = client.get(
             f"/history/compare/lines?left={left_run_id}&right={unlinked_run_id}&project_id={project['id']}&side=a&start=0&end=0",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unlinked.status_code == 400
 
         cross_session = client.get(
             f"/history/compare/lines?left={left_run_id}&right={right_run_id}&project_id={project['id']}&side=a&start=0&end=0",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         )
         assert cross_session.status_code == 404
 
@@ -9437,7 +9369,7 @@ class TestProjectRoutes:
         notes_resp = client.put(
             f"/projects/{project['id']}",
             json={"notes": "Package notes for the external handoff."},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert notes_resp.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
@@ -9503,12 +9435,12 @@ class TestProjectRoutes:
         link_resp = client.post(
             f"/projects/{project['id']}/links",
             json=payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         duplicate_resp = client.post(
             f"/projects/{project['id']}/links",
             json=payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert link_resp.status_code == 201
         assert duplicate_resp.status_code == 201
@@ -9518,23 +9450,23 @@ class TestProjectRoutes:
         baseline_link_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": baseline_run_id, "source": "manual"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert baseline_link_resp.status_code == 201
 
-        links = json.loads(client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data)
+        links = json.loads(client.get(f"/projects/{project['id']}/links", headers={**browser_identity_headers(session_id)}).data)
         assert {item["entity_id"] for item in links["links"]} == {run_id, baseline_run_id}
         assert all("provenance" not in item for item in links["links"])
 
         label_resp = client.post(
             f"/entities/run/{run_id}/labels",
             json={"label": "baseline"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         duplicate_label = client.post(
             f"/entities/run/{run_id}/labels",
             json={"label": "baseline"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert label_resp.status_code == 201
         assert duplicate_label.status_code == 201
@@ -9543,7 +9475,7 @@ class TestProjectRoutes:
         labels = json.loads(
             client.get(
                 f"/entities/run/{run_id}/labels",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["label"] for item in labels["labels"]] == ["baseline"]
@@ -9551,7 +9483,7 @@ class TestProjectRoutes:
         note_resp = client.put(
             f"/entities/run/{run_id}/note",
             json={"body": "Confirm service owner"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert note_resp.status_code == 200
         note = json.loads(note_resp.data)["note"]
@@ -9566,7 +9498,7 @@ class TestProjectRoutes:
             client.put(
                 f"/entities/run/{run_id}/note",
                 json={"body": "Confirmed service owner"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["note"]
         assert updated_note["id"] == note["id"]
@@ -9574,7 +9506,7 @@ class TestProjectRoutes:
         note_payload = json.loads(
             client.get(
                 f"/entities/run/{run_id}/note",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert note_payload["note"]["id"] == note["id"]
@@ -9662,13 +9594,13 @@ class TestProjectRoutes:
             summary = json.loads(
                 client.get(
                     f"/projects/{project['id']}/summary",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )
             artifacts_page = json.loads(
                 client.get(
                     f"/projects/{project['id']}/artifacts?limit=1&offset=0",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )
             assert artifacts_page["total"] == 2
@@ -9677,13 +9609,13 @@ class TestProjectRoutes:
             all_artifacts = json.loads(
                 client.get(
                     f"/projects/{project['id']}/artifacts?limit=10&offset=0",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )
             searched_artifacts = json.loads(
                 client.get(
                     f"/projects/{project['id']}/artifacts?limit=10&offset=0&q=run",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )
             artifact_statuses = {item["workspace_path"]: item for item in all_artifacts["artifacts"]}
@@ -9700,7 +9632,7 @@ class TestProjectRoutes:
             assert [item["workspace_path"] for item in searched_artifacts["artifacts"]] == ["reports/run.txt"]
             preview_resp = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{run_id}/preview",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert preview_resp.status_code == 200
             preview_payload = json.loads(preview_resp.data)
@@ -9708,7 +9640,7 @@ class TestProjectRoutes:
             assert preview_payload["text"] == "0123456789"
             download_resp = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{run_id}/download",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert download_resp.status_code == 200
             assert download_resp.data == b"0123456789"
@@ -9716,7 +9648,7 @@ class TestProjectRoutes:
             assert "attachment" in download_resp.headers["Content-Disposition"]
             ticket_resp = client.post(
                 f"/projects/{project['id']}/artifacts/rfa_{run_id}/download-ticket",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert ticket_resp.status_code == 200
             ticket_download = client.get(ticket_resp.get_json()["url"])
@@ -9725,14 +9657,14 @@ class TestProjectRoutes:
             assert ticket_download.headers["Content-Length"] == "10"
             missing_preview = client.get(
                 f"/projects/{project['id']}/artifacts/rfa_{baseline_run_id}/preview",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert missing_preview.status_code == 404
             artifact_path.write_bytes(b"abcdefghij")
             changed_artifacts = json.loads(
                 client.get(
                     f"/projects/{project['id']}/artifacts?limit=10&offset=0",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )
             changed_artifact = {item["workspace_path"]: item for item in changed_artifacts["artifacts"]}["reports/run.txt"]
@@ -9757,7 +9689,7 @@ class TestProjectRoutes:
         counted_list = json.loads(
             client.get(
                 "/projects?include_archived=1&include_counts=1&limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         counted_project = next(item for item in counted_list["projects"] if item["id"] == project["id"])
@@ -9776,7 +9708,7 @@ class TestProjectRoutes:
         paged_runs = json.loads(
             client.get(
                 f"/projects/{project['id']}/runs?limit=1&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert paged_runs["total"] == 2
@@ -9788,7 +9720,7 @@ class TestProjectRoutes:
             client.get(
                 f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
                 "&label=important&note_state=noted&severity=high&scope=finding",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["run_id"] for item in project_findings["findings"]] == [run_id]
@@ -9799,7 +9731,7 @@ class TestProjectRoutes:
                 "finding_ids": [f"fnd_{run_id}", f"fnd_{outside_run_id}", "missing-finding"],
                 "review_state": "important",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert bulk_review_resp.status_code == 200
         bulk_review_data = json.loads(bulk_review_resp.data)
@@ -9812,7 +9744,7 @@ class TestProjectRoutes:
         assert audit_rows[0]["details"]["finding_ids"] == [f"fnd_{run_id}"]
         activity_resp = client.get(
             f"/projects/{project['id']}/activity?event_type=finding.review_change&target_type=finding&target_id=fnd_{run_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert activity_resp.status_code == 200
         assert [event["target"]["id"] for event in activity_resp.get_json()["events"]] == [f"fnd_{run_id}"]
@@ -9830,21 +9762,21 @@ class TestProjectRoutes:
             client.get(
                 f"/projects/{project['id']}/findings?run_id={run_id}&run_id={baseline_run_id}"
                 f"&review_state=new&review_state=reviewed&review_state=important&label=important&label=missing",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["run_id"] for item in multi_value_findings["findings"]] == [run_id]
         unnoted_findings = json.loads(
             client.get(
                 f"/projects/{project['id']}/findings?note_state=unnoted",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["run_id"] for item in unnoted_findings["findings"]] == [baseline_run_id]
         paged_findings = json.loads(
             client.get(
                 f"/projects/{project['id']}/findings?limit=1&offset=1",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert paged_findings["total"] == 3
@@ -9856,7 +9788,7 @@ class TestProjectRoutes:
         comparison = json.loads(
             client.get(
                 self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["raw_line"] for item in comparison["objects"]["findings"]["added"]] == ["80/tcp open http"]
@@ -9866,13 +9798,13 @@ class TestProjectRoutes:
         baseline_label = client.post(
             f"/entities/run/{baseline_run_id}/labels",
             json={"label": "baseline"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert baseline_label.status_code == 201
         baseline_comparison = json.loads(
             client.get(
                 self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert baseline_comparison["left_run_id"] == baseline_run_id
@@ -9880,14 +9812,14 @@ class TestProjectRoutes:
         assert baseline_comparison["baseline_label"] == "baseline"
         invalid_project_findings = client.get(
             f"/projects/{project['id']}/findings?review_state=maybe",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert invalid_project_findings.status_code == 400
         evidence_target = json.loads(
             client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "domain", "value": "darklab.sh", "source_run_id": run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["target"]
         with sqlite3.connect(DB_PATH) as conn:
@@ -9918,7 +9850,7 @@ class TestProjectRoutes:
                 "verification_status": "ready_to_verify",
                 "verification_notes": "Internal ticket APP-123.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert triage_resp.status_code == 200
         triage_payload = triage_resp.get_json()
@@ -9926,7 +9858,7 @@ class TestProjectRoutes:
         assessment_resp = client.post(
             f"/projects/{project['id']}/assessments",
             json={"profile_key": "network", "title": "Package assessment context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert assessment_resp.status_code == 201
         assessment_id = assessment_resp.get_json()["assessment"]["id"]
@@ -9950,7 +9882,7 @@ class TestProjectRoutes:
                     "target_ids": [evidence_target["id"]],
                 },
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
@@ -10042,12 +9974,12 @@ class TestProjectRoutes:
         package_label_resp = client.post(
             f"/entities/package/{package['id']}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         package_note_resp = client.put(
             f"/entities/package/{package['id']}/note",
             json={"body": "Package review note"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert package_label_resp.status_code == 201
         assert package_note_resp.status_code == 200
@@ -10055,7 +9987,7 @@ class TestProjectRoutes:
         packages = json.loads(
             client.get(
                 f"/projects/{project['id']}/packages",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert [item["id"] for item in packages["packages"]] == [package["id"]]
@@ -10064,7 +9996,7 @@ class TestProjectRoutes:
         package_get = json.loads(
             client.get(
                 f"/projects/{project['id']}/packages/{package['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert package_get["package"]["name"] == "Draft Evidence"
@@ -10076,7 +10008,7 @@ class TestProjectRoutes:
         ):
             package_download = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert package_download.status_code == 200
         assert "attachment" in package_download.headers["Content-Disposition"]
@@ -10289,7 +10221,7 @@ class TestProjectRoutes:
         summary_after_package = json.loads(
             client.get(
                 f"/projects/{project['id']}/summary",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         assert summary_after_package["counts"]["packages"] == 1
@@ -10299,39 +10231,41 @@ class TestProjectRoutes:
 
         hidden_label = client.get(
             f"/entities/run/{run_id}/labels",
-            headers={"X-Session-ID": anonymous_session_id("other-session")},
+            headers={**browser_identity_headers(anonymous_session_id("other-session"))},
         )
         assert hidden_label.status_code == 404
 
         delete_note = client.delete(
             f"/entities/run/{run_id}/note",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_note.status_code == 200
         delete_label = client.delete(
             f"/entities/run/{run_id}/labels",
             json={"label": "baseline"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_label.status_code == 200
         delete_package = client.delete(
             f"/projects/{project['id']}/packages/{package['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_package.status_code == 200
 
         unlink_resp = client.delete(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unlink_resp.status_code == 200
         client.delete(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": baseline_run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        empty_links = json.loads(client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data)
+        empty_links = json.loads(
+            client.get(f"/projects/{project['id']}/links", headers={**browser_identity_headers(session_id)}).data
+        )
         assert empty_links["links"] == []
 
         execute_builtin_command(f"project use {project['slug']}", session_id)
@@ -10344,13 +10278,13 @@ class TestProjectRoutes:
             missing_label = client.post(
                 "/entities/workspace_file/reports/missing.txt/labels",
                 json={"label": "ghost"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert missing_label.status_code == 404
             missing_note = client.put(
                 "/entities/workspace_file/reports/missing.txt/note",
                 json={"body": "ghost"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert missing_note.status_code == 404
 
@@ -10408,7 +10342,7 @@ class TestProjectRoutes:
         first_page = json.loads(
             client.get(
                 f"/projects/{project['id']}/findings?limit=3&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         collapsed_page = json.loads(
@@ -10421,7 +10355,7 @@ class TestProjectRoutes:
                         "collapsed_group": "katana -u https://darklab.sh",
                     }
                 ),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         collapsed_page_without_counts = json.loads(
@@ -10435,7 +10369,7 @@ class TestProjectRoutes:
                         "include_collapsed_group_counts": "0",
                     }
                 ),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         page_without_count = json.loads(
@@ -10450,7 +10384,7 @@ class TestProjectRoutes:
                         "include_group_counts": "0",
                     }
                 ),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
         search_page = json.loads(
@@ -10464,7 +10398,7 @@ class TestProjectRoutes:
                         "include_group_counts": "0",
                     }
                 ),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )
 
@@ -10519,7 +10453,7 @@ class TestProjectRoutes:
         legacy_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": first_run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert legacy_resp.status_code == 201
         legacy_data = json.loads(legacy_resp.data)
@@ -10534,7 +10468,7 @@ class TestProjectRoutes:
                 "entity_type": "run",
                 "entity_ids": [first_run_id, second_run_id, builtin_run_id, other_run_id, missing_run_id],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert bulk_resp.status_code == 200
         bulk_data = json.loads(bulk_resp.data)
@@ -10557,7 +10491,7 @@ class TestProjectRoutes:
         unlink_resp = client.delete(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_ids": [first_run_id, second_run_id, other_run_id, missing_run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert unlink_resp.status_code == 200
         unlink_data = json.loads(unlink_resp.data)
@@ -10581,7 +10515,7 @@ class TestProjectRoutes:
         preview_resp = client.post(
             f"/projects/{project['id']}/links/run-entities/preview",
             json={"run_ids": [run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         link_resp = client.post(
             f"/projects/{project['id']}/links",
@@ -10591,12 +10525,12 @@ class TestProjectRoutes:
                 "source": "manual",
                 "include_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         second_preview_resp = client.post(
             f"/projects/{project['id']}/links/run-entities/preview",
             json={"run_ids": [run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert preview_resp.status_code == 200
@@ -10647,47 +10581,47 @@ class TestProjectRoutes:
             preview = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview",
                 json=payload,
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             rejected_preview = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview",
                 json={**payload, "match_mode": "contains", "pattern": "a"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             created = client.post(
                 f"/projects/{project['id']}/auto-promote-rules",
                 json=payload,
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             rule = created.get_json()["rule"]
             listed = client.get(
                 f"/projects/{project['id']}/auto-promote-rules",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             updated = client.put(
                 f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
                 json={**payload, "name": "Owned domain updated", "enabled": True},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             applied = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{rule['id']}/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             applied_again = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{rule['id']}/apply",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             deleted = client.delete(
                 f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             deleted_again = client.delete(
                 f"/projects/{project['id']}/auto-promote-rules/{rule['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             listed_after_delete = client.get(
                 f"/projects/{project['id']}/auto-promote-rules",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert preview.status_code == 200
@@ -10782,29 +10716,29 @@ class TestProjectRoutes:
             preview_default_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview",
                 json=payload,
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-default-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-preview-default-limit")),
             )
             preview_lower_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview?limit=3",
                 json=payload,
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-lower-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-preview-lower-limit")),
             )
             preview_capped_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/preview?limit=99",
                 json=payload,
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-preview-capped-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-preview-capped-limit")),
             )
             apply_default_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply",
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-default-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-apply-default-limit")),
             )
             apply_lower_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=4",
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-lower-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-apply-lower-limit")),
             )
             apply_capped_limit = client.post(
                 f"/projects/{project['id']}/auto-promote-rules/{fake_rule['id']}/apply?limit=99",
-                headers={"X-Session-ID": anonymous_session_id(f"{session_id}-apply-capped-limit")},
+                headers=browser_identity_headers(anonymous_session_id(f"{session_id}-apply-capped-limit")),
             )
 
         assert preview_default_limit.status_code == 200
@@ -10831,7 +10765,7 @@ class TestProjectRoutes:
         created = client.post(
             f"/projects/{project['id']}/auto-promote-rules",
             json=disabled_payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert created.status_code == 201
         rule_id = created.get_json()["rule"]["id"]
@@ -10839,11 +10773,11 @@ class TestProjectRoutes:
         preview = client.post(
             f"/projects/{project['id']}/auto-promote-rules/preview",
             json=disabled_payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         applied = client.post(
             f"/projects/{project['id']}/auto-promote-rules/{rule_id}/apply",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert preview.status_code == 400
@@ -10859,7 +10793,7 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id, name="URL Target Finalize")
         active_set = client.post(
             "/projects/active",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"project_id": project["id"]},
         )
         run_id = "run-url-target-finalize-" + uuid.uuid4().hex
@@ -10936,12 +10870,12 @@ class TestProjectRoutes:
         project = self._create_project(client, session_id)
         active_set = client.post(
             "/projects/active",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={"project_id": project["id"]},
         )
         enabled = client.post(
             f"/projects/{project['id']}/auto-promote-rules",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "name": "Finalize domains",
                 "target_entity_kind": "domain",
@@ -10952,7 +10886,7 @@ class TestProjectRoutes:
         )
         client.post(
             f"/projects/{project['id']}/auto-promote-rules",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "name": "Disabled IPs",
                 "enabled": False,
@@ -11231,7 +11165,7 @@ class TestProjectRoutes:
                 "source": "manual",
                 "include_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             conn.execute(
@@ -11244,7 +11178,7 @@ class TestProjectRoutes:
         preview_resp = client.post(
             f"/projects/{project['id']}/links/run-entities/remove-preview",
             json={"run_ids": [run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with mock.patch.object(project_routes.log, "info") as mock_unlink_info:
             unlink_resp = client.delete(
@@ -11254,7 +11188,7 @@ class TestProjectRoutes:
                     "entity_id": run_id,
                     "include_entities": True,
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert link_resp.status_code == 201
@@ -11382,7 +11316,7 @@ class TestProjectRoutes:
                 "source": "manual",
                 "include_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             conn.execute(
@@ -11405,7 +11339,7 @@ class TestProjectRoutes:
         auto_target_preview_resp = client.post(
             f"/projects/{auto_target_project['id']}/links/run-entities/remove-preview",
             json={"run_ids": [auto_target_run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert auto_target_link_resp.status_code == 201
@@ -11463,7 +11397,7 @@ class TestProjectRoutes:
                 "source": "manual",
                 "include_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             conn.execute(
@@ -11485,7 +11419,7 @@ class TestProjectRoutes:
         custom_preview_resp = client.post(
             f"/projects/{custom_project['id']}/links/run-entities/remove-preview",
             json={"run_ids": [custom_run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert custom_link_resp.status_code == 201
@@ -11529,7 +11463,7 @@ class TestProjectRoutes:
                 "source": "manual",
                 "include_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             conn.execute(
@@ -11546,7 +11480,7 @@ class TestProjectRoutes:
                 "include_entities": True,
                 "include_curated_entities": True,
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert curated_unlink_resp.status_code == 200
@@ -11563,13 +11497,13 @@ class TestProjectRoutes:
 
     def test_team_project_run_unlink_preview_matches_delete_for_owner_scoped_entities(self):
         client = get_client()
-        owner_token = "tok_project_unlink_owner_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_project_unlink_operator_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_project_unlink_owner_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_project_unlink_operator_" + uuid.uuid4().hex[:8]))
         team = self._create_team(client, owner_token, name="Project Unlink Cleanup")
         team_id = team["id"]
         self._join_team(client, owner_token, team_id, operator_token, role="operator", display_name="Operator")
-        owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+        operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
         project = self._create_project(client, owner_token, headers=owner_headers)
         run_id = self._seed_run(owner_token, "nmap team-unlink.darklab.sh", team_id=team_id)
         self._seed_run_entities(owner_token, run_id, team_id=team_id)
@@ -11649,13 +11583,13 @@ class TestProjectRoutes:
 
     def test_team_project_run_unlink_keeps_entity_with_cross_member_curated_child_finding(self):
         client = get_client()
-        owner_token = "tok_project_unlink_child_owner_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_project_unlink_child_operator_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_project_unlink_child_owner_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_project_unlink_child_operator_" + uuid.uuid4().hex[:8]))
         team = self._create_team(client, owner_token, name="Project Unlink Child Cleanup")
         team_id = team["id"]
         self._join_team(client, owner_token, team_id, operator_token, role="operator", display_name="Operator")
-        owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+        operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
         project = self._create_project(client, owner_token, headers=owner_headers)
         suffix = uuid.uuid4().hex[:12]
         run_id = "run-team-unlink-child-" + suffix
@@ -11818,7 +11752,7 @@ class TestProjectRoutes:
                 "entity_type": "run",
                 "entity_ids": [f"run-{index}" for index in range(101)],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data) == {"error": "too_many", "limit": 100}
@@ -11835,7 +11769,7 @@ class TestProjectRoutes:
             legacy_resp = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "run", "entity_id": first_run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert legacy_resp.status_code == 201
 
@@ -11845,7 +11779,7 @@ class TestProjectRoutes:
                     "entity_type": "run",
                     "entity_ids": [second_run_id, third_run_id],
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert bulk_resp.status_code == 200
@@ -11883,17 +11817,17 @@ class TestProjectRoutes:
             bulk_link = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "atlas_entity", "entity_ids": entity_ids},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             first_target = client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "domain", "value": "example.com"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_target = client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "domain", "value": "example.net"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert bulk_link.status_code == 200
@@ -11923,7 +11857,7 @@ class TestProjectRoutes:
             bulk_link = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "atlas_entity", "entity_ids": entity_ids},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert bulk_link.status_code == 200
@@ -11946,7 +11880,7 @@ class TestProjectRoutes:
         project_note = client.put(
             f"/projects/{project['id']}",
             json={"notes": "Project private note should stay out"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert project_note.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
@@ -12022,14 +11956,14 @@ class TestProjectRoutes:
                 "verification_status": "ready_to_verify",
                 "verification_notes": "Internal verification note should stay out for secret.darklab.sh.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert triage_resp.status_code == 200
 
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "secret.darklab.sh", "source_run_id": run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert target_resp.status_code == 201
         target_id = json.loads(target_resp.data)["target"]["id"]
@@ -12057,7 +11991,7 @@ class TestProjectRoutes:
                         "target_ids": [target_id],
                     },
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
@@ -12088,7 +12022,7 @@ class TestProjectRoutes:
         with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
             package_download = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert package_download.status_code == 200
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
@@ -12194,17 +12128,17 @@ class TestProjectRoutes:
             first_link = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "run", "entity_id": first_run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             duplicate_link = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "run", "entity_id": first_run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_link = client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "run", "entity_id": second_run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert first_link.status_code == 201
             assert duplicate_link.status_code == 201
@@ -12213,12 +12147,12 @@ class TestProjectRoutes:
             first_target = client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "domain", "value": "darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_target = client.post(
                 f"/projects/{project['id']}/targets",
                 json={"type": "domain", "value": "example.com"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert first_target.status_code == 201
             assert second_target.status_code == 409
@@ -12226,12 +12160,12 @@ class TestProjectRoutes:
             first_package = client.post(
                 f"/projects/{project['id']}/packages",
                 json={"name": "First package"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_package = client.post(
                 f"/projects/{project['id']}/packages",
                 json={"name": "Second package"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert first_package.status_code == 201
             assert second_package.status_code == 409
@@ -12239,17 +12173,17 @@ class TestProjectRoutes:
             first_label = client.post(
                 f"/entities/run/{first_run_id}/labels",
                 json={"label": "baseline"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             duplicate_label = client.post(
                 f"/entities/run/{first_run_id}/labels",
                 json={"label": "baseline"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_label = client.post(
                 f"/entities/run/{first_run_id}/labels",
                 json={"label": "important"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert first_label.status_code == 201
             assert duplicate_label.status_code == 201
@@ -12258,12 +12192,12 @@ class TestProjectRoutes:
             first_note = client.put(
                 f"/entities/run/{first_run_id}/note",
                 json={"body": "first note"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second_note = client.put(
                 f"/entities/run/{first_run_id}/note",
                 json={"body": "second note"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert first_note.status_code == 200
             assert second_note.status_code == 200
@@ -12308,12 +12242,12 @@ class TestProjectRoutes:
                 client.post(
                     f"/projects/{project['id']}/packages",
                     json={"name": "Oversize", "include_artifacts": True},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 ).data
             )["package"]
             resp = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert resp.status_code == 413
         assert "ZIP exceeds configured size limit" in json.loads(resp.data)["error"]
@@ -12337,13 +12271,13 @@ class TestProjectRoutes:
                         "target_ids": [],
                     },
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["package"]
 
         job_resp = client.post(
             f"/projects/{project['id']}/packages/{package['id']}/download-jobs",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert job_resp.status_code == 202
         job = json.loads(job_resp.data)["job"]
@@ -12353,7 +12287,7 @@ class TestProjectRoutes:
             time.sleep(0.02)
             status_resp = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert status_resp.status_code == 200
             job = json.loads(status_resp.data)["job"]
@@ -12371,7 +12305,7 @@ class TestProjectRoutes:
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}/download-ticket",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert ticket_resp.status_code == 200
         download_resp = client.get(ticket_resp.get_json()["url"])
@@ -12414,14 +12348,14 @@ class TestProjectRoutes:
         assessment_resp = client.post(
             f"/projects/{project['id']}/assessments",
             json={"profile_key": "network", "title": "Report assessment context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert assessment_resp.status_code == 201
         assessment_id = assessment_resp.get_json()["assessment"]["id"]
 
         default_resp = client.get(
             f"/projects/{project['id']}/report",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert default_resp.status_code == 200
         default_payload = json.loads(default_resp.data)
@@ -12437,7 +12371,7 @@ class TestProjectRoutes:
         save_resp = client.post(
             f"/projects/{project['id']}/report",
             json={"draft": draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert save_resp.status_code == 200
         saved = json.loads(save_resp.data)["report"]
@@ -12449,21 +12383,21 @@ class TestProjectRoutes:
         second_save = client.post(
             f"/projects/{project['id']}/report",
             json={"draft": draft, "expected_updated": updated},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert second_save.status_code == 200
         draft["metadata"]["client"] = "Missing token"
         missing_token_save = client.post(
             f"/projects/{project['id']}/report",
             json={"draft": draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert missing_token_save.status_code == 409
         draft["metadata"]["client"] = "Stale"
         stale_save = client.post(
             f"/projects/{project['id']}/report",
             json={"draft": draft, "expected_updated": updated},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert stale_save.status_code == 409
 
@@ -12499,7 +12433,7 @@ class TestProjectRoutes:
             preview_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert compose_context.call_count == 1
         assert list_report_runs.call_count == 1
@@ -12521,7 +12455,7 @@ class TestProjectRoutes:
         bad_date_resp = client.post(
             f"/projects/{project['id']}/report/preview",
             json={"draft": bad_date_draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert bad_date_resp.status_code == 400
         assert "YYYY-MM-DD to YYYY-MM-DD" in bad_date_resp.get_json()["error"]
@@ -12542,7 +12476,7 @@ class TestProjectRoutes:
             selection_error_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": failure_draft},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert selection_error_resp.status_code == 400
         assert selection_error_resp.get_json()["error"] == "report selection includes an unknown run item"
@@ -12572,7 +12506,7 @@ class TestProjectRoutes:
             render_error_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": render_failure_draft},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert render_error_resp.status_code == 500
         assert render_error_resp.get_json()["error"] == "report preview failed"
@@ -12587,7 +12521,7 @@ class TestProjectRoutes:
             job_resp = client.post(
                 f"/projects/{project['id']}/report/export",
                 json={},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert job_resp.status_code == 202
             job = json.loads(job_resp.data)["job"]
@@ -12596,7 +12530,7 @@ class TestProjectRoutes:
                 time.sleep(0.02)
                 status_resp = client.get(
                     f"/projects/{project['id']}/report/export-jobs/{job['id']}",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
                 assert status_resp.status_code == 200
                 job = json.loads(status_resp.data)["job"]
@@ -12644,7 +12578,7 @@ class TestProjectRoutes:
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/report/export-jobs/{job['id']}/download-ticket",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert ticket_resp.status_code == 200
         download_resp = client.get(ticket_resp.get_json()["url"])
@@ -12730,7 +12664,7 @@ class TestProjectRoutes:
             job_resp = client.post(
                 f"/projects/{project['id']}/report/export",
                 json={},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert job_resp.status_code == 202
             job = json.loads(job_resp.data)["job"]
@@ -12739,7 +12673,7 @@ class TestProjectRoutes:
                 time.sleep(0.02)
                 status_resp = client.get(
                     f"/projects/{project['id']}/report/export-jobs/{job['id']}",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
                 assert status_resp.status_code == 200
                 job = json.loads(status_resp.data)["job"]
@@ -12759,7 +12693,7 @@ class TestProjectRoutes:
 
         ticket_resp = client.post(
             f"/projects/{project['id']}/report/export-jobs/{job['id']}/download-ticket",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert ticket_resp.status_code == 413
 
@@ -12779,7 +12713,7 @@ class TestProjectRoutes:
             job_resp = client.post(
                 f"/projects/{project['id']}/report/export",
                 json={},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert job_resp.status_code == 202
             job = json.loads(job_resp.data)["job"]
@@ -12788,7 +12722,7 @@ class TestProjectRoutes:
                 time.sleep(0.02)
                 status_resp = client.get(
                     f"/projects/{project['id']}/report/export-jobs/{job['id']}",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
                 assert status_resp.status_code == 200
                 job = json.loads(status_resp.data)["job"]
@@ -12885,7 +12819,7 @@ class TestProjectRoutes:
 
         default_payload = client.get(
             f"/projects/{project['id']}/report",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()
         draft = deepcopy(default_payload["report"]["draft"])
         draft["selection"]["run_ids"] = [selected_run_id]
@@ -12893,7 +12827,7 @@ class TestProjectRoutes:
         preview_resp = client.post(
             f"/projects/{project['id']}/report/preview",
             json={"draft": draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert preview_resp.status_code == 200
         preview_text = preview_resp.get_json()["preview"]["markdown"] + preview_resp.get_json()["preview"]["html"]
@@ -12907,7 +12841,7 @@ class TestProjectRoutes:
         finding_preview_resp = client.post(
             f"/projects/{project['id']}/report/preview",
             json={"draft": finding_draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert finding_preview_resp.status_code == 200
         finding_preview_text = (
@@ -12919,12 +12853,12 @@ class TestProjectRoutes:
         referenced_target = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "referenced.example", "source_run_id": selected_run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["target"]
         selected_target = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "selected.example", "source_run_id": selected_run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["target"]
         referenced_finding_id = f"fnd_report_ref_{fixture_suffix}"
         with sqlite3.connect(DB_PATH) as conn:
@@ -12969,7 +12903,7 @@ class TestProjectRoutes:
         all_preview_resp = client.post(
             f"/projects/{project['id']}/report/preview",
             json={"draft": all_draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert all_preview_resp.status_code == 200
         all_preview_text = all_preview_resp.get_json()["preview"]["markdown"] + all_preview_resp.get_json()["preview"]["html"]
@@ -13144,7 +13078,7 @@ class TestProjectRoutes:
 
         default_payload = client.get(
             f"/projects/{project['id']}/report",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()
         selector_cases = [
             {
@@ -13193,7 +13127,7 @@ class TestProjectRoutes:
             page_query = urlencode({"limit": 50, "offset": 0, **case["query"]}, doseq=True)
             page_resp = client.get(
                 f"/projects/{project['id']}/{case['endpoint']}?{page_query}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert page_resp.status_code == 200
             page_rows = page_resp.get_json()[case["payload_key"]]
@@ -13201,7 +13135,7 @@ class TestProjectRoutes:
             page_two_query = urlencode({"limit": 50, "offset": 50, **case["query"]}, doseq=True)
             page_two_resp = client.get(
                 f"/projects/{project['id']}/{case['endpoint']}?{page_two_query}",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert page_two_resp.status_code == 200
             page_two_rows = page_two_resp.get_json()[case["payload_key"]]
@@ -13232,7 +13166,7 @@ class TestProjectRoutes:
                 preview_resp = client.post(
                     f"/projects/{project['id']}/report/preview",
                     json={"draft": draft},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
             assert preview_resp.status_code == 200
             context_ids = [item["id"] for item in context[case["context_key"]]]
@@ -13281,7 +13215,7 @@ class TestProjectRoutes:
 
         default_payload = client.get(
             f"/projects/{project['id']}/report",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()
         draft = default_payload["report"]["draft"]
         draft["selection"]["run_ids"] = [run_id]
@@ -13289,7 +13223,7 @@ class TestProjectRoutes:
         preview_resp = client.post(
             f"/projects/{project['id']}/report/preview",
             json={"draft": draft},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert preview_resp.status_code == 200
         markdown = preview_resp.get_json()["preview"]["markdown"]
@@ -13308,7 +13242,7 @@ class TestProjectRoutes:
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "secret.darklab.sh", "source_run_id": run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert target_resp.status_code == 201
         target_id = target_resp.get_json()["target"]["id"]
@@ -13360,13 +13294,13 @@ class TestProjectRoutes:
                 "verification_status": "ready_to_verify",
                 "verification_notes": "Internal verification note should stay out.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert triage_resp.status_code == 200
 
         default_payload = client.get(
             f"/projects/{project['id']}/report",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()
         draft = default_payload["report"]["draft"]
         draft["metadata"]["engagement_name"] = "Sensitive Readout"
@@ -13384,7 +13318,7 @@ class TestProjectRoutes:
             preview_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": draft},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert preview_resp.status_code == 200
         preview = preview_resp.get_json()["preview"]
@@ -13409,7 +13343,7 @@ class TestProjectRoutes:
             raw_preview_resp = client.post(
                 f"/projects/{project['id']}/report/preview",
                 json={"draft": draft},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert raw_preview_resp.status_code == 200
         raw_preview = raw_preview_resp.get_json()["preview"]
@@ -13441,11 +13375,11 @@ class TestProjectRoutes:
         with mock.patch.dict(shell_app_module.CFG, {"workspace_enabled": False}, clear=False):
             summary_resp = client.get(
                 f"/projects/{project['id']}/summary",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             artifacts_resp = client.get(
                 f"/projects/{project['id']}/artifacts?limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             assert summary_resp.status_code == 200
             assert json.loads(summary_resp.data)["artifacts"] == []
@@ -13457,11 +13391,11 @@ class TestProjectRoutes:
 
             preview_resp = client.get(
                 f"/projects/{project['id']}/artifacts/{artifact_id}/preview",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             download_resp = client.get(
                 f"/projects/{project['id']}/artifacts/{artifact_id}/download",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             package_resp = client.post(
                 f"/projects/{project['id']}/packages",
@@ -13470,7 +13404,7 @@ class TestProjectRoutes:
                     "include_artifacts": True,
                     "selection": {"run_ids": [run_id], "artifact_ids": [artifact_id]},
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert preview_resp.status_code == 403
@@ -13675,11 +13609,11 @@ class TestProjectRoutes:
 
             first = client.get(
                 f"/projects/{project['id']}/web-surface?limit=1&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             second = client.get(
                 f"/projects/{project['id']}/web-surface?limit=1&offset=1",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             filtered = client.get(
                 f"/projects/{project['id']}/web-surface?"
@@ -13694,16 +13628,16 @@ class TestProjectRoutes:
                         "limit": "1",
                     }
                 ),
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             with mock.patch("services.projects.web_surface.MAX_GALLERY_ROWS", 1):
                 capped_filtered = client.get(
                     f"/projects/{project['id']}/web-surface?target=app.example",
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
             foreign = client.get(
                 f"/projects/{project['id']}/web-surface",
-                headers={"X-Session-ID": other_session},
+                headers={**browser_identity_headers(other_session)},
             )
 
         assert first.status_code == 200
@@ -13777,7 +13711,7 @@ class TestProjectRoutes:
             return client.post(
                 f"/projects/{project['id']}/links",
                 json=payload,
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         with sqlite3.connect(DB_PATH) as conn:
@@ -13858,7 +13792,7 @@ class TestProjectRoutes:
         created_resp = client.post(
             f"/projects/{project['id']}/findings",
             json=create_payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert created_resp.status_code == 201
@@ -13879,7 +13813,7 @@ class TestProjectRoutes:
         duplicate_resp = client.post(
             f"/projects/{project['id']}/findings",
             json=create_payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert duplicate_resp.status_code == 409
         duplicate = duplicate_resp.get_json()
@@ -13894,7 +13828,7 @@ class TestProjectRoutes:
                 "severity": "critical",
                 "cve_ids": ["CVE-2026-12345"],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert updated_resp.status_code == 200
         updated = updated_resp.get_json()["finding"]
@@ -13906,7 +13840,7 @@ class TestProjectRoutes:
         stale_resp = client.patch(
             f"/projects/{project['id']}/findings/{created['id']}",
             json={"expected_revision": 1, "severity": "low"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert stale_resp.status_code == 409
         assert stale_resp.get_json() == {
@@ -13918,7 +13852,7 @@ class TestProjectRoutes:
 
         findings_resp = client.get(
             f"/projects/{project['id']}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         listed = next(item for item in findings_resp.get_json()["findings"] if item["id"] == created["id"])
         assert listed["manual_revision"] == 2
@@ -13948,7 +13882,7 @@ class TestProjectRoutes:
         override_resp = client.post(
             f"/projects/{project['id']}/findings",
             json=override_payload,
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert override_resp.status_code == 201
         override = override_resp.get_json()
@@ -13963,7 +13897,7 @@ class TestClientLogRoute:
             resp = client.post(
                 "/log",
                 json={
-                    "context": "session-token set",
+                    "context": "credential use",
                     "message": "ReferenceError: global is not defined",
                     "details": {
                         "selection_key": "run_ids",
@@ -13979,7 +13913,7 @@ class TestClientLogRoute:
         mock_warning.assert_called_once()
         assert mock_warning.call_args[0][0] == "CLIENT_ERROR"
         extra = mock_warning.call_args.kwargs["extra"]
-        assert extra["context"] == "session-token set"
+        assert extra["context"] == "credential use"
         assert extra["client_message"] == "ReferenceError: global is not defined"
         assert extra["client_details"] == {
             "selection_key": "run_ids",
@@ -16690,7 +16624,7 @@ class TestWorkflowsRoute:
         session_id = anonymous_session_id("workflow-route-" + __import__("uuid").uuid4().hex[:8])
         resp = client.post(
             "/session/workflows",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
             json={
                 "title": "Saved DNS",
                 "description": "custom sequence",
@@ -16710,7 +16644,7 @@ class TestWorkflowsRoute:
         )
         assert resp.status_code == 201
 
-        data = json.loads(client.get("/workflows", headers={"X-Session-ID": session_id}).data)
+        data = json.loads(client.get("/workflows", headers={**browser_identity_headers(session_id)}).data)
 
         assert data["items"][0]["title"] == "Saved DNS"
         assert data["items"][0]["source"] == "user"
@@ -16728,14 +16662,14 @@ class TestSessionPreferencesRoute:
             empty = json.loads(
                 client.get(
                     "/session/preferences",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             assert empty["preferences"] == {}
 
             current_resp = client.post(
                 "/session/preferences",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"preferences": {"pref_tour_seen_version": 3}},
             )
             assert current_resp.status_code == 200
@@ -16744,7 +16678,7 @@ class TestSessionPreferencesRoute:
 
             stale_resp = client.post(
                 "/session/preferences",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"preferences": {"pref_tour_seen_version": 1}},
             )
             assert stale_resp.status_code == 200
@@ -16754,7 +16688,7 @@ class TestSessionPreferencesRoute:
             loaded = json.loads(
                 client.get(
                     "/session/preferences",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             assert loaded["preferences"]["pref_tour_seen_version"] == 1
@@ -16769,14 +16703,14 @@ class TestSessionPreferencesRoute:
         try:
             client.post(
                 "/session/preferences",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"preferences": {"pref_compare_context": "10"}},
             )
             with mock.patch(
                 "blueprints.session.load_tour",
                 return_value={"version": 4, "chapters": [{"id": "intro"}]},
             ):
-                resp = client.post("/session/tour-seen", headers={"X-Session-ID": session})
+                resp = client.post("/session/tour-seen", headers={**browser_identity_headers(session)})
             assert resp.status_code == 200
             data = json.loads(resp.data)
             assert data["tour_version"] == 4
@@ -16785,45 +16719,6 @@ class TestSessionPreferencesRoute:
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute("DELETE FROM session_preferences WHERE personal_workspace_id = ?", (session,))
-                conn.commit()
-
-    def test_tour_seen_version_migrates_with_session_token(self):
-        client = get_client()
-        from_session = anonymous_session_id("anon-tour-" + uuid.uuid4().hex[:8])
-        token = "tok_" + uuid.uuid4().hex
-        try:
-            register_durable_session_token(token)
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.execute(
-                    "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) "
-                    "VALUES (?, ?, datetime('now'))",
-                    (from_session, json.dumps({"pref_tour_seen_version": 5})),
-                )
-                conn.commit()
-
-            resp = client.post(
-                "/session/migrate",
-                headers={"X-Session-ID": from_session},
-                json={"from_session_id": from_session, "to_session_id": token},
-            )
-            assert resp.status_code == 200
-            data = json.loads(resp.data)
-            assert data["migrated_preferences"] == 1
-
-            prefs = json.loads(
-                client.get(
-                    "/session/preferences",
-                    headers={"X-Session-ID": token},
-                ).data
-            )
-            assert prefs["preferences"]["pref_tour_seen_version"] == 5
-        finally:
-            with sqlite3.connect(DB_PATH) as conn:
-                conn.execute(
-                    "DELETE FROM session_preferences WHERE personal_workspace_id IN (?, ?)",
-                    (from_session, token),
-                )
-                conn.execute("DELETE FROM session_tokens WHERE token = ?", (token,))
                 conn.commit()
 
 
@@ -16966,7 +16861,7 @@ class TestAtlasRoutes:
         return anonymous_session_id("atlas-" + uuid.uuid4().hex[:8])
 
     def _register_session_token(self, session_id):
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
 
     def _seed_entity_run(self, session_id, *, team_id=""):
         run_id = "run-" + uuid.uuid4().hex
@@ -17056,8 +16951,8 @@ class TestAtlasRoutes:
         other_session_id = self._session_id()
         _run_id, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
-        headers = {"X-Session-ID": session_id}
-        other_headers = {"X-Session-ID": other_session_id}
+        headers = {**browser_identity_headers(session_id)}
+        other_headers = {**browser_identity_headers(other_session_id)}
         project = json.loads(
             client.post(
                 "/projects",
@@ -17404,36 +17299,36 @@ class TestAtlasRoutes:
             )
             conn.commit()
 
-        summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
-        list_resp = client.get("/atlas/entities?type=domain", headers={"X-Session-ID": session_id})
-        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        summary_resp = client.get("/atlas", headers={**browser_identity_headers(session_id)})
+        list_resp = client.get("/atlas/entities?type=domain", headers={**browser_identity_headers(session_id)})
+        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
         related_finding_resp = client.get(
             f"/atlas/entities/{domain_id}?finding_bucket=related_urls",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         combined_finding_resp = client.get(
             f"/atlas/entities/{domain_id}?finding_bucket=combined",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         invalid_finding_bucket_resp = client.get(
             f"/atlas/entities/{domain_id}?finding_bucket=descendants",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         relationship_page_resp = client.get(
             f"/atlas/entities/{domain_id}?related_urls_offset=250&related_ports_offset=250&runs_offset=50",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         child_detail_resp = client.get(
             f"/atlas/entities/{child_url_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         unresolved_detail_resp = client.get(
             f"/atlas/entities/{unresolved_url_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         ipv6_detail_resp = client.get(
             f"/atlas/entities/{ipv6_entity_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             profile_statements = []
@@ -17577,36 +17472,36 @@ class TestAtlasRoutes:
             conn.commit()
         other_session_run_id, _ = self._seed_domain_finding_run(self._session_id(), "other.darklab.sh")
 
-        all_resp = client.get("/atlas/findings", headers={"X-Session-ID": session_id})
-        paged_entities_resp = client.get("/atlas/entities?type=domain&limit=1", headers={"X-Session-ID": session_id})
+        all_resp = client.get("/atlas/findings", headers={**browser_identity_headers(session_id)})
+        paged_entities_resp = client.get("/atlas/entities?type=domain&limit=1", headers={**browser_identity_headers(session_id)})
         exact_entities_resp = client.get(
             "/atlas/entities?type=domain&limit=1&include_total=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        paged_findings_resp = client.get("/atlas/findings?limit=1", headers={"X-Session-ID": session_id})
+        paged_findings_resp = client.get("/atlas/findings?limit=1", headers={**browser_identity_headers(session_id)})
         exact_findings_resp = client.get(
             "/atlas/findings?limit=1&include_total=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        summary_resp = client.get(f"/atlas?run_id={quote(first_run_id)}", headers={"X-Session-ID": session_id})
+        summary_resp = client.get(f"/atlas?run_id={quote(first_run_id)}", headers={**browser_identity_headers(session_id)})
         entity_resp = client.get(
             f"/atlas/entities?type=domain&run_id={quote(first_run_id)}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         first_resp = client.get(
             f"/atlas/findings?run_id={quote(first_run_id)}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         second_resp = client.get(
             f"/atlas/findings?run_id={quote(second_run_id)}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         other_resp = client.get(
             f"/atlas/findings?run_id={quote(other_session_run_id)}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        runs_resp = client.get("/atlas/runs", headers={"X-Session-ID": session_id})
-        searched_runs_resp = client.get("/atlas/runs?q=beta", headers={"X-Session-ID": session_id})
+        runs_resp = client.get("/atlas/runs", headers={**browser_identity_headers(session_id)})
+        searched_runs_resp = client.get("/atlas/runs?q=beta", headers={**browser_identity_headers(session_id)})
 
         assert all_resp.status_code == 200
         assert summary_resp.status_code == 200
@@ -17695,8 +17590,8 @@ class TestAtlasRoutes:
                 )
             conn.commit()
 
-        all_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
-        project_resp = client.get(f"/atlas?project_id={quote(project_id)}", headers={"X-Session-ID": session_id})
+        all_resp = client.get("/atlas", headers={**browser_identity_headers(session_id)})
+        project_resp = client.get(f"/atlas?project_id={quote(project_id)}", headers={**browser_identity_headers(session_id)})
 
         assert all_resp.status_code == 200
         assert project_resp.status_code == 200
@@ -17786,23 +17681,23 @@ class TestAtlasRoutes:
 
         entity_label_resp = client.get(
             "/atlas/entities?type=domain&q=metadata-domain-label",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         entity_note_resp = client.get(
             "/atlas/entities?type=domain&q=metadata-domain-note",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         finding_label_resp = client.get(
             "/atlas/findings?q=metadata-finding-label",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         finding_entity_note_resp = client.get(
             "/atlas/findings?q=metadata-domain-note",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         miss_resp = client.get(
             "/atlas/entities?type=domain&q=metadata-domain-label",
-            headers={"X-Session-ID": self._session_id()},
+            headers={**browser_identity_headers(self._session_id())},
         )
 
         assert entity_label_resp.status_code == 200
@@ -17858,7 +17753,7 @@ class TestAtlasRoutes:
                 )
             conn.commit()
 
-        resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 200
         detail = resp.get_json()
@@ -17882,7 +17777,7 @@ class TestAtlasRoutes:
 
         paged_resp = client.get(
             f"/atlas/entities/{domain_id}?runs_offset=50&findings_offset=50",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         paged_detail = paged_resp.get_json()
         assert paged_resp.status_code == 200
@@ -17909,16 +17804,16 @@ class TestAtlasRoutes:
         session_id = self._session_id()
         run_id, _ = self._seed_entity_run(session_id)
 
-        delete_resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session_id})
-        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
-        orphan_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+        delete_resp = client.delete(f"/history/{run_id}", headers={**browser_identity_headers(session_id)})
+        default_summary = client.get("/atlas", headers={**browser_identity_headers(session_id)})
+        orphan_summary = client.get("/atlas?orphan_filter=only", headers={**browser_identity_headers(session_id)})
         orphan_entities = client.get(
             "/atlas/entities?type=domain&orphan_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         orphan_findings = client.get(
             "/atlas/findings?orphan_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert delete_resp.status_code == 200
@@ -17940,10 +17835,10 @@ class TestAtlasRoutes:
 
         preview_resp = client.get(
             f"/history/{live_run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
-        orphan_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+        default_summary = client.get("/atlas", headers={**browser_identity_headers(session_id)})
+        orphan_summary = client.get("/atlas?orphan_filter=only", headers={**browser_identity_headers(session_id)})
 
         assert preview_resp.status_code == 200
         preview = json.loads(preview_resp.data)["cleanup"]
@@ -17953,15 +17848,15 @@ class TestAtlasRoutes:
         assert json.loads(default_summary.data)["findings"] == 1
         assert json.loads(orphan_summary.data)["counts"]["domain"] == 0
         assert json.loads(orphan_summary.data)["findings"] == 0
-        delete_resp = client.delete(f"/history/{live_run_id}", headers={"X-Session-ID": session_id})
-        orphan_only_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+        delete_resp = client.delete(f"/history/{live_run_id}", headers={**browser_identity_headers(session_id)})
+        orphan_only_summary = client.get("/atlas?orphan_filter=only", headers={**browser_identity_headers(session_id)})
         orphan_entities = client.get(
             "/atlas/entities?type=domain&orphan_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert delete_resp.status_code == 200
-        assert json.loads(client.get("/atlas", headers={"X-Session-ID": session_id}).data)["counts"]["domain"] == 0
+        assert json.loads(client.get("/atlas", headers={**browser_identity_headers(session_id)}).data)["counts"]["domain"] == 0
         assert json.loads(orphan_only_summary.data)["counts"]["domain"] == 1
         assert json.loads(orphan_only_summary.data)["findings"] == 1
         orphan_data = json.loads(orphan_entities.data)
@@ -17983,12 +17878,12 @@ class TestAtlasRoutes:
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with mock.patch.object(history_routes.log, "info") as mock_history_delete_info:
             delete_resp = client.delete(
                 f"/history/{run_id}?prune_atlas=1",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert preview_resp.status_code == 200
@@ -18073,11 +17968,11 @@ class TestAtlasRoutes:
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         delete_resp = client.delete(
             f"/history/{run_id}?prune_atlas=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert preview_resp.status_code == 200
@@ -18205,11 +18100,11 @@ class TestAtlasRoutes:
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         repeat_preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert preview_resp.status_code == 200
@@ -18300,7 +18195,7 @@ class TestAtlasRoutes:
         }
         delete_resp = client.delete(
             f"/history/{run_id}?prune_atlas=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert delete_resp.status_code == 200
         assert json.loads(delete_resp.data)["atlas_cleanup"] == {"entities": 0, "findings": 0}
@@ -18327,22 +18222,22 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Atlas Cleanup Project"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         link_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_ids": [run_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         default_delete_resp = client.delete(
             f"/history/{run_id}?prune_atlas=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert link_resp.status_code == 200
@@ -18381,22 +18276,22 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Curated Cleanup Project"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         link_resp = client.post(
             f"/atlas/entities/{domain_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         delete_resp = client.delete(
             f"/history/{run_id}?prune_atlas=1&prune_curated_atlas=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert link_resp.status_code == 201
@@ -18430,13 +18325,13 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Curated Parent With Imported Child"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         link_resp = client.post(
             f"/atlas/entities/{domain_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             finding_id = conn.execute(
@@ -18459,11 +18354,11 @@ class TestAtlasRoutes:
 
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         delete_resp = client.delete(
             f"/history/{run_id}?prune_atlas=1&prune_curated_atlas=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert project_resp.status_code == 201
@@ -18500,26 +18395,26 @@ class TestAtlasRoutes:
 
     def test_team_history_cleanup_preview_matches_delete_for_owner_scoped_atlas_rows(self):
         client = get_client()
-        owner_token = "tok_atlas_team_owner_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_atlas_team_operator_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_atlas_team_owner_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_atlas_team_operator_" + uuid.uuid4().hex[:8]))
         self._register_session_token(owner_token)
         self._register_session_token(operator_token)
         team_resp = client.post(
             "/session/teams",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"name": "Atlas Cleanup " + uuid.uuid4().hex[:8], "display_name": "Owner"},
         )
         assert team_resp.status_code == 201
         team_id = json.loads(team_resp.data)["team"]["id"]
         invite_resp = client.post(
             f"/session/teams/{team_id}/invites",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"role": "operator", "label": "Cleanup operator"},
         )
         assert invite_resp.status_code == 201
         join_resp = client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": operator_token},
+            headers={**browser_identity_headers(operator_token)},
             json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "Operator"},
         )
         assert join_resp.status_code == 201
@@ -18539,7 +18434,7 @@ class TestAtlasRoutes:
             )
             conn.commit()
 
-        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
             headers=operator_headers,
@@ -18616,26 +18511,26 @@ class TestAtlasRoutes:
 
     def test_team_history_cleanup_delete_matches_preview_for_cross_member_atlas_rows(self):
         client = get_client()
-        owner_token = "tok_atlas_cross_owner_" + uuid.uuid4().hex[:8]
-        operator_token = "tok_atlas_cross_operator_" + uuid.uuid4().hex[:8]
+        owner_token = principal_owner(str("tok_atlas_cross_owner_" + uuid.uuid4().hex[:8]))
+        operator_token = principal_owner(str("tok_atlas_cross_operator_" + uuid.uuid4().hex[:8]))
         self._register_session_token(owner_token)
         self._register_session_token(operator_token)
         team_resp = client.post(
             "/session/teams",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"name": "Atlas Cross Cleanup " + uuid.uuid4().hex[:8], "display_name": "Owner"},
         )
         assert team_resp.status_code == 201
         team_id = json.loads(team_resp.data)["team"]["id"]
         invite_resp = client.post(
             f"/session/teams/{team_id}/invites",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
             json={"role": "operator", "label": "Cross cleanup operator"},
         )
         assert invite_resp.status_code == 201
         join_resp = client.post(
             "/session/teams/join",
-            headers={"X-Session-ID": operator_token},
+            headers={**browser_identity_headers(operator_token)},
             json={"code": json.loads(invite_resp.data)["invite"]["code"], "display_name": "Operator"},
         )
         assert join_resp.status_code == 201
@@ -18692,7 +18587,7 @@ class TestAtlasRoutes:
             )
             conn.commit()
 
-        operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
+        operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
         preview_resp = client.get(
             f"/history/{run_id}/atlas-cleanup-preview",
             headers=operator_headers,
@@ -18718,17 +18613,17 @@ class TestAtlasRoutes:
         client = get_client()
         session_id = self._session_id()
         self._seed_entity_run(session_id)
-        list_resp = client.get("/atlas/findings", headers={"X-Session-ID": session_id})
+        list_resp = client.get("/atlas/findings", headers={**browser_identity_headers(session_id)})
         finding_id = json.loads(list_resp.data)["findings"][0]["id"]
 
         preview_resp = client.get(
             f"/atlas/findings/{finding_id}/delete-preview",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         delete_resp = client.delete(
             f"/atlas/findings/{finding_id}",
             json={"prune_source_run": True},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert preview_resp.status_code == 200
@@ -18762,14 +18657,14 @@ class TestAtlasRoutes:
 
         first_cleanup_resp = client.post(
             f"/atlas/runs/{first_run_id}/cleanup",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
         second_cleanup_resp = client.post(
             f"/atlas/runs/{second_run_id}/cleanup",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
+        summary_resp = client.get("/atlas", headers={**browser_identity_headers(session_id)})
 
         assert first_cleanup_resp.status_code == 200
         first_cleanup = json.loads(first_cleanup_resp.data)["cleanup"]
@@ -18802,18 +18697,18 @@ class TestAtlasRoutes:
         cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
         finding_session_id = self._session_id()
         self._seed_entity_run(finding_session_id)
-        list_resp = client.get("/atlas/findings", headers={"X-Session-ID": finding_session_id})
+        list_resp = client.get("/atlas/findings", headers={**browser_identity_headers(finding_session_id)})
         finding_id = json.loads(list_resp.data)["findings"][0]["id"]
 
         entity_resp = client.post(
             "/atlas/entities/bulk-delete",
             json={"entity_ids": [domain_id, "missing-entity"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         finding_resp = client.post(
             "/atlas/findings/bulk-delete",
             json={"finding_ids": [finding_id, "missing-finding"]},
-            headers={"X-Session-ID": finding_session_id},
+            headers={**browser_identity_headers(finding_session_id)},
         )
 
         assert entity_resp.status_code == 200
@@ -18855,13 +18750,13 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Scoped Atlas Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         owner_link_resp = client.post(
             f"/atlas/entities/{domain_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             finding_id = conn.execute(
@@ -18945,54 +18840,54 @@ class TestAtlasRoutes:
         before = owner_state()
 
         with mock.patch("services.atlas.intel_bridge.lookup_entity", side_effect=AssertionError("cross-session lookup")):
-            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": wrong_session_id})
+            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(wrong_session_id)})
             review_resp = client.post(
                 "/atlas/findings/review",
                 json={"finding_ids": [finding_id], "review_state": "important"},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             bulk_entity_resp = client.post(
                 "/atlas/entities/bulk-delete",
                 json={"entity_ids": [domain_id]},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             entity_delete_resp = client.delete(
                 f"/atlas/entities/{domain_id}",
                 json={"prune_source_run": True},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             bulk_finding_resp = client.post(
                 "/atlas/findings/bulk-delete",
                 json={"finding_ids": [finding_id]},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             finding_suppression_resp = client.put(
                 f"/atlas/findings/{finding_id}/suppression",
                 json={"suppressed": True},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             entity_suppression_resp = client.put(
                 f"/atlas/entities/{domain_id}/suppression",
                 json={"suppressed": True},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             finding_delete_resp = client.delete(
                 f"/atlas/findings/{finding_id}",
                 json={"prune_source_run": True},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             refresh_resp = client.post(
                 f"/atlas/entities/{domain_id}/refresh_intel",
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             link_resp = client.post(
                 f"/atlas/entities/{domain_id}/project_links",
                 json={"project_id": project["id"]},
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
             unlink_resp = client.delete(
                 f"/atlas/entities/{domain_id}/project_links/{project['id']}",
-                headers={"X-Session-ID": wrong_session_id},
+                headers={**browser_identity_headers(wrong_session_id)},
             )
 
         assert owner_link_resp.status_code == 201
@@ -19046,7 +18941,7 @@ class TestAtlasRoutes:
         with mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
             resp = client.post(
                 f"/atlas/entities/{domain_id}/refresh_intel",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -19062,7 +18957,7 @@ class TestAtlasRoutes:
         assert row["status"] == "ok"
         assert row["summary"] == "data available"
         assert json.loads(row["data_json"])["summary"]["has_intel"] is True
-        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
         detail = json.loads(detail_resp.data)
         assert detail["intel_summary"]["status"] == "available"
         assert detail["intel_summary"]["freshness"] == "unknown"
@@ -19119,7 +19014,7 @@ class TestAtlasRoutes:
         ):
             response = client.post(
                 f"/atlas/entities/{cve_entity_id}/refresh_intel",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert response.status_code == 200
@@ -19186,7 +19081,7 @@ class TestAtlasRoutes:
         ):
             refresh_resp = client.post(
                 f"/atlas/entities/{domain_id}/refresh_intel",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             with db_connect() as conn:
                 stored = conn.execute(
@@ -19198,8 +19093,8 @@ class TestAtlasRoutes:
             body_path = os.path.join(tmp, pointer["rel_path"])
             assert os.path.exists(body_path)
 
-            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
-            delete_resp = client.delete(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
+            delete_resp = client.delete(f"/atlas/entities/{domain_id}", headers={**browser_identity_headers(session_id)})
 
             assert refresh_resp.status_code == 200
             assert detail_resp.status_code == 200
@@ -19213,7 +19108,7 @@ class TestAtlasRoutes:
         session_id = self._session_id()
         self._seed_entity_run(session_id)
 
-        list_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
+        list_resp = client.get("/atlas/findings?review_state=new", headers={**browser_identity_headers(session_id)})
         data = json.loads(list_resp.data)
         finding_id = data["findings"][0]["id"]
         entity_id = data["findings"][0]["entity_id"]
@@ -19253,15 +19148,15 @@ class TestAtlasRoutes:
         bulk_resp = client.post(
             "/atlas/findings/review",
             json={"finding_ids": [finding_id, "missing-finding"], "review_state": "important"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         grouped_findings = client.get(
             "/atlas/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["findings"]
         run_findings = client.get(
             f"/entities/run/{run_id}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["findings"]
         with db_connect() as conn:
             conn.execute(
@@ -19275,25 +19170,25 @@ class TestAtlasRoutes:
             conn.commit()
         missing_triage_get_resp = client.get(
             "/findings/missing-finding/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         missing_triage_put_resp = client.put(
             "/findings/missing-finding/triage",
             json={"verification_status": "ready_to_verify"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         cross_scope_triage_get_resp = client.get(
             f"/findings/{finding_id}/triage",
-            headers={"X-Session-ID": wrong_session_id},
+            headers={**browser_identity_headers(wrong_session_id)},
         )
         cross_scope_triage_put_resp = client.put(
             f"/findings/{finding_id}/triage",
             json={"verification_status": "ready_to_verify"},
-            headers={"X-Session-ID": wrong_session_id},
+            headers={**browser_identity_headers(wrong_session_id)},
         )
         triage_get_empty_resp = client.get(
             f"/findings/{finding_id}/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with (
             mock.patch("blueprints.projects.log.debug") as triage_debug,
@@ -19307,7 +19202,7 @@ class TestAtlasRoutes:
                     "verification_status": "ready_to_verify",
                     "verification_notes": "Coordinate with the service owner.",
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         with (
             mock.patch("blueprints.projects.upsert_finding_triage_details", return_value=None),
@@ -19316,40 +19211,40 @@ class TestAtlasRoutes:
             triage_update_miss_resp = client.put(
                 f"/findings/{finding_id}/triage",
                 json={"verification_status": "verified"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         triage_invalid_resp = client.put(
             f"/findings/{finding_id}/triage",
             json={"verification_status": "done"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         triage_oversized_resp = client.put(
             f"/findings/{finding_id}/triage",
             json={"remediation": "x" * 20001},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         triage_null_resp = client.put(
             f"/findings/{finding_id}/triage",
             data="null",
             content_type="application/json",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with mock.patch("blueprints.projects.log.warning") as malformed_warning:
             triage_malformed_resp = client.put(
                 f"/findings/{finding_id}/triage",
                 data="{",
                 content_type="application/json",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         triage_empty_body_resp = client.put(
             f"/findings/{finding_id}/triage",
             data="",
             content_type="application/json",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         triage_after_bad_payloads_resp = client.get(
             f"/findings/{finding_id}/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         self._seed_domain_finding_run(session_id, "no-triage.darklab.test")
         self._seed_domain_finding_run(session_id, "explicit-not-started.darklab.test")
@@ -19368,23 +19263,23 @@ class TestAtlasRoutes:
                 "remediation": "Keep this queued for later verification.",
                 "verification_status": "not_started",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         filtered_resp = client.get(
             "/atlas/findings?verification_status=ready_to_verify",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         filtered_not_started_resp = client.get(
             "/atlas/findings?verification_status=not_started",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         filtered_empty_resp = client.get(
             "/atlas/findings?verification_status=verified",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         filtered_invalid_resp = client.get(
             "/atlas/findings?verification_status=done",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert list_resp.status_code == 200
@@ -19485,7 +19380,7 @@ class TestAtlasRoutes:
         run_id, _recorded = self._seed_entity_run(session_id)
         source_finding = client.get(
             "/atlas/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["findings"][0]
         source_finding_id = source_finding["id"]
         target_finding_id = "fnd_merge_target_" + uuid.uuid4().hex
@@ -19528,12 +19423,12 @@ class TestAtlasRoutes:
                 "verification_steps": "Repeat the source check.",
                 "verification_notes": "Keep source evidence separate.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_review = client.put(
             f"/findings/{target_finding_id}/review",
             json={"review_state": "important"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_triage = client.put(
             f"/findings/{target_finding_id}/triage",
@@ -19543,17 +19438,17 @@ class TestAtlasRoutes:
                 "verification_steps": "Repeat the target check.",
                 "verification_notes": "Target verification stays independent.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         candidates_resp = client.post(
             f"/findings/{source_finding_id}/remediation-merge/candidates",
             json={"query": "CVE-2026-99999"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         preview_resp = client.post(
             f"/findings/{source_finding_id}/remediation-merge/preview",
             json={"target_finding_id": target_finding_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         preview = preview_resp.get_json()["preview"]
         stale_resp = client.post(
@@ -19562,12 +19457,12 @@ class TestAtlasRoutes:
                 "target_finding_id": target_finding_id,
                 "preview_token": "stale-preview-token",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_changed = client.put(
             f"/findings/{target_finding_id}/review",
             json={"review_state": "reviewed"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         changed_disposition_resp = client.post(
             f"/findings/{source_finding_id}/remediation-merge",
@@ -19575,17 +19470,17 @@ class TestAtlasRoutes:
                 "target_finding_id": target_finding_id,
                 "preview_token": preview["preview_token"],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_restored = client.put(
             f"/findings/{target_finding_id}/review",
             json={"review_state": "important"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         refreshed_preview_resp = client.post(
             f"/findings/{source_finding_id}/remediation-merge/preview",
             json={"target_finding_id": target_finding_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         refreshed_preview = refreshed_preview_resp.get_json()["preview"]
         apply_resp = client.post(
@@ -19594,42 +19489,42 @@ class TestAtlasRoutes:
                 "target_finding_id": target_finding_id,
                 "preview_token": refreshed_preview["preview_token"],
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         merged_again_resp = client.post(
             f"/findings/{source_finding_id}/remediation-merge/preview",
             json={"target_finding_id": target_finding_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         cross_scope_candidates = client.post(
             f"/findings/{source_finding_id}/remediation-merge/candidates",
             json={"query": "CVE-2026-99999"},
-            headers={"X-Session-ID": other_session_id},
+            headers={**browser_identity_headers(other_session_id)},
         )
         cross_scope_preview = client.post(
             f"/findings/{source_finding_id}/remediation-merge/preview",
             json={"target_finding_id": target_finding_id},
-            headers={"X-Session-ID": other_session_id},
+            headers={**browser_identity_headers(other_session_id)},
         )
         merged_findings = {
             item["id"]: item
             for item in client.get(
                 "/atlas/findings",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).get_json()["findings"]
         }
         source_after_merge = client.get(
             f"/findings/{source_finding_id}/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["triage"]
         target_after_merge = client.get(
             f"/findings/{target_finding_id}/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["triage"]
         review_resp = client.put(
             f"/findings/{source_finding_id}/review",
             json={"review_state": "reviewed"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         guidance_resp = client.put(
             f"/findings/{source_finding_id}/triage",
@@ -19639,17 +19534,17 @@ class TestAtlasRoutes:
                 "verification_steps": "Repeat the source check.",
                 "verification_notes": "Keep source evidence separate.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target_after_guidance = client.get(
             f"/findings/{target_finding_id}/triage",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).get_json()["triage"]
         review_states = {
             item["id"]: item["review_state"]
             for item in client.get(
                 "/atlas/findings",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).get_json()["findings"]
         }
         with db_connect() as conn:
@@ -19720,51 +19615,53 @@ class TestAtlasRoutes:
         session_id = self._session_id()
         _, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
-        finding_id = json.loads(client.get("/atlas/findings", headers={"X-Session-ID": session_id}).data)["findings"][0]["id"]
+        finding_id = json.loads(client.get("/atlas/findings", headers={**browser_identity_headers(session_id)}).data)["findings"][
+            0
+        ]["id"]
         project_resp = client.post(
             "/projects",
             json={"name": "Suppression Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "atlas_entity", "entity_id": domain_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         entity_suppress_resp = client.put(
             f"/atlas/entities/{domain_id}/suppression",
             json={"suppressed": True, "reason": "too noisy"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         finding_suppress_resp = client.put(
             f"/atlas/findings/{finding_id}/suppression",
             json={"suppressed": True},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
+        default_summary = client.get("/atlas", headers={**browser_identity_headers(session_id)})
         suppressed_entities = client.get(
             "/atlas/entities?type=domain&suppression_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         suppressed_findings = client.get(
             "/atlas/findings?suppression_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         default_export = client.get(
             "/atlas/entities/export?format=jsonl&type=domain",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         suppressed_export = client.get(
             "/atlas/entities/export?format=jsonl&type=domain&suppression_filter=only",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        project_summary = client.get(f"/projects/{project['id']}/summary", headers={"X-Session-ID": session_id})
+        project_summary = client.get(f"/projects/{project['id']}/summary", headers={**browser_identity_headers(session_id)})
         restore_resp = client.post(
             "/atlas/findings/suppression",
             json={"finding_ids": [finding_id], "suppressed": False},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert entity_suppress_resp.status_code == 200
@@ -19817,17 +19714,17 @@ class TestAtlasRoutes:
                     "entity_types": ["domain"],
                 },
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         view = json.loads(create_resp.data)["view"]
-        list_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
-        isolated_resp = client.get("/atlas/views", headers={"X-Session-ID": other_session_id})
+        list_resp = client.get("/atlas/views", headers={**browser_identity_headers(session_id)})
+        isolated_resp = client.get("/atlas/views", headers={**browser_identity_headers(other_session_id)})
         preferences_resp = client.post(
             "/session/preferences",
             json={"preferences": {"pref_timestamps": "on"}},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        after_preferences_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+        after_preferences_resp = client.get("/atlas/views", headers={**browser_identity_headers(session_id)})
         update_resp = client.put(
             f"/atlas/views/{view['id']}",
             json={
@@ -19840,10 +19737,10 @@ class TestAtlasRoutes:
                     "finding_status": "reviewed",
                 },
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        delete_resp = client.delete(f"/atlas/views/{view['id']}", headers={"X-Session-ID": session_id})
-        after_delete_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+        delete_resp = client.delete(f"/atlas/views/{view['id']}", headers={**browser_identity_headers(session_id)})
+        after_delete_resp = client.get("/atlas/views", headers={**browser_identity_headers(session_id)})
 
         assert create_resp.status_code == 201
         assert view["name"] == "High signal"
@@ -19874,7 +19771,7 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Unscoped Finding Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         with db_connect() as conn:
@@ -19887,7 +19784,7 @@ class TestAtlasRoutes:
         client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": run_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             recorded = record_run_findings(
@@ -19904,17 +19801,17 @@ class TestAtlasRoutes:
             )
             conn.commit()
 
-        atlas_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
+        atlas_resp = client.get("/atlas/findings?review_state=new", headers={**browser_identity_headers(session_id)})
         project_findings_resp = client.get(
             f"/projects/{project['id']}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
-        run_findings_resp = client.get(f"/entities/run/{run_id}/findings", headers={"X-Session-ID": session_id})
+        run_findings_resp = client.get(f"/entities/run/{run_id}/findings", headers={**browser_identity_headers(session_id)})
         finding = json.loads(atlas_resp.data)["findings"][0]
         review_resp = client.put(
             f"/findings/{finding['id']}/review",
             json={"review_state": "needs_followup"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         triage_resp = client.put(
             f"/findings/{finding['id']}/triage",
@@ -19922,19 +19819,19 @@ class TestAtlasRoutes:
                 "verification_status": "verified",
                 "verification_steps": "Confirm TLSv1.0 is disabled.",
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         updated_project_findings_resp = client.get(
             f"/projects/{project['id']}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         verified_project_findings_resp = client.get(
             f"/projects/{project['id']}/findings?verification_status=verified",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         wrong_verification_project_findings_resp = client.get(
             f"/projects/{project['id']}/findings?verification_status=needs_retest",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert len(recorded) == 1
@@ -20012,7 +19909,7 @@ class TestAtlasRoutes:
             ).fetchone()[0]
             conn.commit()
 
-        resp = client.get(f"/entities/run/{run_id}/findings", headers={"X-Session-ID": session_id})
+        resp = client.get(f"/entities/run/{run_id}/findings", headers={**browser_identity_headers(session_id)})
         findings = json.loads(resp.data)["findings"]
 
         assert resp.status_code == 200
@@ -20024,7 +19921,7 @@ class TestAtlasRoutes:
 
         paged_resp = client.get(
             f"/entities/run/{run_id}/findings?limit=1&offset=0",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         paged = json.loads(paged_resp.data)
 
@@ -20044,30 +19941,30 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Atlas Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
 
         link_resp = client.post(
             f"/atlas/entities/{domain_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         targets_resp = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         summary_resp = client.get(
             f"/projects/{project['id']}/summary",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         unlink_resp = client.delete(
             f"/atlas/entities/{domain_id}/project_links/{project['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         targets_after_unlink = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert link_resp.status_code == 201
@@ -20090,7 +19987,7 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Entity Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         with db_connect() as conn:
@@ -20110,17 +20007,17 @@ class TestAtlasRoutes:
         bulk_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id, other_domain_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         for linked_run_id in (run_id, other_run_id):
             client.post(
                 f"/projects/{project['id']}/links",
                 json={"entity_type": "run", "entity_id": linked_run_id},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         summary_resp = client.get(
             f"/projects/{project['id']}/summary",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with (
             mock.patch.object(project_routes.log, "debug") as debug_log,
@@ -20128,23 +20025,23 @@ class TestAtlasRoutes:
         ):
             entities_resp = client.get(
                 f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             run_filtered_resp = client.get(
                 f"/projects/{project['id']}/entities?run_id={run_id}&limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             target_filtered_resp = client.get(
                 f"/projects/{project['id']}/entities?target_id={domain_id}&limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             host_filtered_resp = client.get(
                 f"/projects/{project['id']}/entities?host_entity_id=&host_entity_id={domain_id}&limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             missing_entities_resp = client.get(
                 f"/projects/missing-entity-project/entities?host_entity_id={domain_id}&limit=10&offset=0",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         data = json.loads(summary_resp.data)
         entity_page = json.loads(entities_resp.data)
@@ -20240,17 +20137,17 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Entity Finding Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         link_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "atlas_entity", "entity_id": domain_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project_findings_resp = client.get(
             f"/projects/{project['id']}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(project_findings_resp.data)
 
@@ -20270,27 +20167,27 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Bulk Entity Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         unlink_resp = client.delete(
             f"/projects/{project['id']}/links",
             json={"entity_type": "atlas_entity", "entity_ids": [domain_id, "missing-entity"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         summary_resp = client.get(
             f"/projects/{project['id']}/summary",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         entities_resp = client.get(
             f"/projects/{project['id']}/entities?limit=10&offset=0",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(unlink_resp.data)
 
@@ -20332,18 +20229,18 @@ class TestAtlasRoutes:
         project_resp = client.post(
             "/projects",
             json={"name": "Atlas Export"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             f"/atlas/entities/{domain_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         client.post(
             f"/atlas/entities/{port_id}/project_links",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         with db_connect() as conn:
             for entity_id, label, note in (
@@ -20377,23 +20274,23 @@ class TestAtlasRoutes:
 
         csv_resp = client.get(
             f"/atlas/entities/export?format=csv&type=domain&project_id={quote(project['id'])}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         jsonl_resp = client.get(
             f"/atlas/entities/export?format=jsonl&type=domain&project_id={quote(project['id'])}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         port_csv_resp = client.get(
             f"/atlas/entities/export?format=csv&type=port&project_id={quote(project['id'])}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         port_jsonl_resp = client.get(
             f"/atlas/entities/export?format=jsonl&type=port&project_id={quote(project['id'])}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         invalid_resp = client.get(
             "/atlas/entities/export?format=xml",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert csv_resp.status_code == 200
@@ -20474,7 +20371,9 @@ class TestWorkspaceRoutes:
                 self._cfg(tmp, workspace_enabled=False),
             ),
         ):
-            resp = client.get("/workspace/files", headers={"X-Session-ID": anonymous_session_id("workspace-disabled")})
+            resp = client.get(
+                "/workspace/files", headers={**browser_identity_headers(anonymous_session_id("workspace-disabled"))}
+            )
         assert resp.status_code == 403
         assert json.loads(resp.data)["error"] == "Files are disabled on this instance"
 
@@ -20485,7 +20384,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": file_path, "text": "darklab.sh\n"},
             )
             assert created.status_code == 200
@@ -20495,20 +20394,20 @@ class TestWorkspaceRoutes:
 
             appended = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": file_path, "text": "again\n", "append": True},
             )
             assert appended.status_code == 200
             assert json.loads(appended.data)["file"] == {"path": file_path, "size": 17}
             invalid_append = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": file_path, "text": "ignored", "append": "yes"},
             )
             assert invalid_append.status_code == 400
             assert json.loads(invalid_append.data)["error"] == "append must be a boolean"
 
-            listed_response = client.get("/workspace/files", headers={"X-Session-ID": session})
+            listed_response = client.get("/workspace/files", headers={**browser_identity_headers(session)})
             assert listed_response.headers["Cache-Control"] == "no-store"
             listed = json.loads(listed_response.data)
             assert listed["files"][0]["path"] == file_path
@@ -20517,7 +20416,7 @@ class TestWorkspaceRoutes:
 
             read = client.get(
                 f"/workspace/files/read?path={file_path}",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert json.loads(read.data) == {
                 "path": file_path,
@@ -20529,7 +20428,7 @@ class TestWorkspaceRoutes:
             binary_path.write_bytes(b"SQLite format 3\x00binary")
             binary = client.get(
                 "/workspace/files/read?path=asset.db",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert binary.status_code == 415
             assert "download it instead" in json.loads(binary.data)["error"]
@@ -20537,14 +20436,14 @@ class TestWorkspaceRoutes:
             with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 unreadable = client.get(
                     f"/workspace/files/read?path={file_path}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             assert unreadable.status_code == 403
             assert json.loads(unreadable.data)["error"] == "workspace file is not readable"
 
             deleted = client.delete(
                 f"/workspace/files?path={file_path}",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert deleted.status_code == 200
             deleted_files = json.loads(deleted.data)["workspace"]["files"]
@@ -20603,14 +20502,14 @@ class TestWorkspaceRoutes:
             ):
                 best_effort_write = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                     json={"path": best_effort_path, "text": "persisted despite audit failure\n"},
                 )
 
             assert best_effort_write.status_code == 200
             best_effort_read = client.get(
                 f"/workspace/files/read?path={best_effort_path}",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert best_effort_read.status_code == 200
             assert json.loads(best_effort_read.data)["text"] == "persisted despite audit failure\n"
@@ -20641,7 +20540,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": file_path, "text": "darklab.sh\n"},
             )
             assert created.status_code == 200
@@ -20655,12 +20554,12 @@ class TestWorkspaceRoutes:
             ):
                 client.delete(
                     f"/workspace/files?path={file_path}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
 
             read = client.get(
                 f"/workspace/files/read?path={file_path}",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert read.status_code == 200
             assert json.loads(read.data)["text"] == "darklab.sh\n"
@@ -20671,21 +20570,21 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             resp = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": anonymous_session_id("workspace-owner")},
+                headers={**browser_identity_headers(anonymous_session_id("workspace-owner"))},
                 json={"path": "targets.txt", "text": "owned\n"},
             )
             assert resp.status_code == 200
 
             other = client.get(
                 "/workspace/files/read?path=targets.txt",
-                headers={"X-Session-ID": anonymous_session_id("workspace-other")},
+                headers={**browser_identity_headers(anonymous_session_id("workspace-other"))},
             )
             assert other.status_code == 404
 
     def test_workspace_diff_supports_shell_output_modes(self):
         client = get_client()
         session = anonymous_session_id("workspace-diff-" + uuid.uuid4().hex[:8])
-        headers = {"X-Session-ID": session}
+        headers = {**browser_identity_headers(session)}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for path, text in (
                 ("reports/old.txt", "alpha\nbeta\n"),
@@ -20762,7 +20661,7 @@ class TestWorkspaceRoutes:
     def test_workspace_diff_rejects_file_sources_above_line_and_byte_limits(self):
         client = get_client()
         session = anonymous_session_id("workspace-diff-limits-" + uuid.uuid4().hex[:8])
-        headers = {"X-Session-ID": session}
+        headers = {**browser_identity_headers(session)}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for path, text in (
                 ("peer.txt", "peer\n"),
@@ -20796,7 +20695,7 @@ class TestWorkspaceRoutes:
         client = get_client()
         session = anonymous_session_id("workspace-run-diff-" + uuid.uuid4().hex[:8])
         other_session = anonymous_session_id(session + "-other")
-        headers = {"X-Session-ID": session}
+        headers = {**browser_identity_headers(session)}
         tab_id = "tab-run-diff"
         run_ids = [f"{session}-old", f"{session}-new", f"{session}-other"]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
@@ -20893,7 +20792,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "targets.txt", "text": "darklab.sh\n"},
             )
             assert created.status_code == 200
@@ -20912,7 +20811,7 @@ class TestWorkspaceRoutes:
                 )
                 conn.commit()
 
-            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            listed = client.get("/workspace/files", headers={**browser_identity_headers(session)})
             assert listed.status_code == 200
             listed_file = listed.get_json()["files"][0]
             assert listed_file["path"] == "targets.txt"
@@ -20921,7 +20820,7 @@ class TestWorkspaceRoutes:
 
             read = client.get(
                 "/workspace/files/read?path=targets.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert read.status_code == 200
             assert [label["label"] for label in read.get_json()["labels"]] == ["important"]
@@ -20929,13 +20828,13 @@ class TestWorkspaceRoutes:
 
             created_dir = client.post(
                 "/workspace/directories",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports"},
             )
             assert created_dir.status_code == 200
             moved = client.post(
                 "/workspace/files/move",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"source": "targets.txt", "destination": "reports/targets.txt"},
             )
             assert moved.status_code == 200
@@ -20960,7 +20859,7 @@ class TestWorkspaceRoutes:
 
             deleted = client.delete(
                 "/workspace/files?path=reports/targets.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert deleted.status_code == 200
             with sqlite3.connect(DB_PATH) as conn:
@@ -20986,7 +20885,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/directories",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": directory_path},
             )
             assert created.status_code == 200
@@ -20997,7 +20896,7 @@ class TestWorkspaceRoutes:
             }
             assert created_data["workspace"]["usage"]["file_count"] == 0
 
-            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            listed = client.get("/workspace/files", headers={**browser_identity_headers(session)})
             assert listed.status_code == 200
             assert directory_path in {item["path"] for item in listed.get_json()["directories"]}
             audit_rows = _audit_event_rows(target_id=directory_path, event_type="file.write")
@@ -21016,25 +20915,25 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports/one.txt", "text": "one\n"},
             )
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports/nested/two.txt", "text": "two\n"},
             )
 
             info = client.get(
                 "/workspace/files/info?path=reports",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert info.status_code == 200
             assert info.get_json() == {"path": "reports", "kind": "directory", "file_count": 2}
 
             deleted = client.delete(
                 "/workspace/files?path=reports",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert deleted.status_code == 200
             data = deleted.get_json()
@@ -21054,23 +20953,23 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/directories",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": archive_path},
             )
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": one_path, "text": "one\n"},
             )
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": two_path, "text": "two\n"},
             )
 
             moved_file = client.post(
                 "/workspace/files/move",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"source": one_path, "destination": archive_path},
             )
             assert moved_file.status_code == 200
@@ -21083,14 +20982,14 @@ class TestWorkspaceRoutes:
             assert (
                 client.get(
                     f"/workspace/files/read?path={one_path}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).status_code
                 == 404
             )
             assert (
                 client.get(
                     f"/workspace/files/read?path={moved_one_path}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).get_json()["text"]
                 == "one\n"
             )
@@ -21109,7 +21008,7 @@ class TestWorkspaceRoutes:
 
             moved_folder = client.post(
                 "/workspace/files/move",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"source": reports_path, "destination": moved_reports_path},
             )
             assert moved_folder.status_code == 200
@@ -21121,7 +21020,7 @@ class TestWorkspaceRoutes:
             }
             nested = client.get(
                 f"/workspace/files/read?path={moved_reports_path}/nested/two.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             assert nested.status_code == 200
             assert nested.get_json()["text"] == "two\n"
@@ -21134,7 +21033,7 @@ class TestWorkspaceRoutes:
 
             moved_to_root = client.post(
                 "/workspace/files/move",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"source": moved_one_path, "destination": "/"},
             )
             assert moved_to_root.status_code == 200
@@ -21143,7 +21042,7 @@ class TestWorkspaceRoutes:
     def test_copy_and_touch_file_routes(self):
         client = get_client()
         session = anonymous_session_id("workspace-copy-touch-" + uuid.uuid4().hex[:8])
-        headers = {"X-Session-ID": session}
+        headers = {**browser_identity_headers(session)}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             assert (
                 client.post(
@@ -21216,12 +21115,12 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports/one.txt", "text": "one\n"},
             )
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports/nested/two.txt", "text": "two\n"},
             )
 
@@ -21234,12 +21133,12 @@ class TestWorkspaceRoutes:
             for payload in cases:
                 resp = client.post(
                     "/workspace/files/move",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                     json=payload,
                 )
                 assert resp.status_code == 400
 
-            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            listed = client.get("/workspace/files", headers={**browser_identity_headers(session)})
             files = {item["path"] for item in listed.get_json()["files"]}
             assert files == {"reports/one.txt", "reports/nested/two.txt"}
 
@@ -21257,13 +21156,13 @@ class TestWorkspaceRoutes:
             ):
                 resp = client.post(
                     "/workspace/files",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                     json={"path": bad_path, "text": "x"},
                 )
                 assert resp.status_code == 400
                 directory = client.post(
                     "/workspace/directories",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                     json={"path": bad_path},
                 )
                 assert directory.status_code == 400
@@ -21277,15 +21176,15 @@ class TestWorkspaceRoutes:
                 encoded = quote(bad_path, safe="")
                 read = client.get(
                     f"/workspace/files/read?path={encoded}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
                 deleted = client.delete(
                     f"/workspace/files?path={encoded}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
                 downloaded = client.get(
                     f"/workspace/files/download?path={encoded}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
 
                 assert read.status_code == 400
@@ -21298,13 +21197,13 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             created = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": ".config/amass.txt", "text": "hidden ok\n"},
             )
-            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            listed = client.get("/workspace/files", headers={**browser_identity_headers(session)})
             read = client.get(
                 "/workspace/files/read?path=.config%2Famass.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
             assert created.status_code == 200
@@ -21325,7 +21224,7 @@ class TestWorkspaceRoutes:
         ):
             non_object = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 data="not-json",
                 content_type="text/plain",
             )
@@ -21333,7 +21232,7 @@ class TestWorkspaceRoutes:
 
             non_text = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "targets.txt", "text": ["darklab.sh"]},
             )
             assert non_text.status_code == 400
@@ -21341,7 +21240,7 @@ class TestWorkspaceRoutes:
 
             too_big = client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "targets.txt", "text": "x"},
             )
             assert too_big.status_code == 413
@@ -21352,16 +21251,16 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "notes/targets.txt", "text": "darklab.sh\n"},
             )
             resp = client.get(
                 "/workspace/files/download?path=notes/targets.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             ticket_resp = client.post(
                 "/workspace/files/download-ticket",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "notes/targets.txt"},
             )
             ticket_download = client.get(ticket_resp.get_json()["url"])
@@ -21383,7 +21282,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             client.post(
                 "/workspace/files",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={"path": "reports/targets.txt", "text": "darklab.sh\n"},
             )
             with sqlite3.connect(DB_PATH) as conn:
@@ -21410,7 +21309,7 @@ class TestWorkspaceRoutes:
                     ("rfa_" + uuid.uuid4().hex[:16], session, run_id),
                 )
                 conn.commit()
-            resp = client.get("/workspace/files", headers={"X-Session-ID": session})
+            resp = client.get("/workspace/files", headers={**browser_identity_headers(session)})
         data = json.loads(resp.data)
         file_row = next(item for item in data["files"] if item["path"] == "reports/targets.txt")
         assert file_row["artifact_count"] == 1
@@ -21455,7 +21354,7 @@ class TestWorkspaceRoutes:
                 os.utime(expired_root, (1000, 1000))
 
                 with mock.patch("app.time.monotonic", return_value=1000):
-                    resp = client.get("/health", headers={"X-Session-ID": current_session})
+                    resp = client.get("/health", headers={**browser_identity_headers(current_session)})
 
                 assert resp.status_code == 200
                 assert current_root.exists()
@@ -21518,7 +21417,7 @@ class TestRunRoute:
         )
 
         client = get_client()
-        headers = {"X-Session-ID": anonymous_session_id("broker-unavailable")}
+        headers = {**browser_identity_headers(anonymous_session_id("broker-unavailable"))}
         with (
             mock.patch.object(shell_app_module.log, "warning") as warning,
             mock.patch("blueprints.run.broker_available", return_value=False),
@@ -21536,7 +21435,7 @@ class TestRunRoute:
         assessment_log = mock.Mock()
         common = {
             "request_id": "request-1",
-            "session_id": "tok_private-session-token",
+            "session_id": "crd_private-credential",
             "team_id": "",
             "project_id": "prj_1",
             "assessment_id": "asm_1",
@@ -21592,7 +21491,7 @@ class TestRunRoute:
             resp = client.post(
                 "/runs",
                 json={"command": "nmap -sV darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
         assert resp.status_code == 202
         assert json.loads(resp.data) == {
@@ -21609,7 +21508,7 @@ class TestRunRoute:
 
     def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
-        headers = {"X-Session-ID": anonymous_session_id("invalid-run-payloads")}
+        headers = {**browser_identity_headers(anonymous_session_id("invalid-run-payloads"))}
         public_started = mock.Mock(run_id="run-public-context", status="running")
         with (
             mock.patch("blueprints.run.broker_available", return_value=True),
@@ -21644,7 +21543,7 @@ class TestRunRoute:
 
     def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
-        headers = {"X-Session-ID": anonymous_session_id("disallowed-brokered-run")}
+        headers = {**browser_identity_headers(anonymous_session_id("disallowed-brokered-run"))}
         with (
             mock.patch("blueprints.run.broker_available", return_value=True),
             mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")),
@@ -21709,7 +21608,7 @@ class TestRunRoute:
             resp = client.post(
                 "/runs",
                 json={"command": "ping darklab.sh", "tab_id": "tab-1"},
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-1"},
             )
             workflow_handlers = replace(
                 run_routes._run_start_handlers(),
@@ -21831,7 +21730,7 @@ class TestRunRoute:
         ):
             resp = client.post(
                 "/pty/runs",
-                headers={"X-Session-ID": anonymous_session_id("member-session"), "X-Team-ID": "team-1"},
+                headers={**browser_identity_headers(anonymous_session_id("member-session")), "X-Team-ID": "team-1"},
                 json={"command": "mtr --interactive darklab.sh", "tab_id": "tab-1"},
             )
 
@@ -21850,7 +21749,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-1/events?after=9-0&limit=25",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {
@@ -21868,7 +21767,7 @@ class TestRunRoute:
         ):
             team_resp = client.get(
                 "/runs/run-team/events?after=9-0&limit=25",
-                headers={"X-Session-ID": anonymous_session_id("member-session"), "X-Team-ID": "team-1"},
+                headers={**browser_identity_headers(anonymous_session_id("member-session")), "X-Team-ID": "team-1"},
             )
 
         assert team_resp.status_code == 200
@@ -21883,7 +21782,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-other/events",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
 
         assert resp.status_code == 404
@@ -21899,7 +21798,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-1/stream?after=9-0&tab_id=tab-1",
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -21917,7 +21816,7 @@ class TestRunRoute:
             team_resp = client.get(
                 "/runs/run-team/stream?after=9-0&tab_id=tab-1",
                 headers={
-                    "X-Session-ID": anonymous_session_id("member-session"),
+                    **browser_identity_headers(anonymous_session_id("member-session")),
                     "X-Team-ID": "team-1",
                     "X-Client-ID": "client-1",
                 },
@@ -21939,7 +21838,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-1/stream?tab_id=tab-1",
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-1"},
             )
             body = resp.get_data(as_text=True)
 
@@ -21959,7 +21858,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-fast/stream",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -21976,7 +21875,7 @@ class TestRunRoute:
         ):
             resp = client.get(
                 "/runs/run-other/stream",
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-1"},
             )
 
         assert resp.status_code == 404
@@ -22005,11 +21904,11 @@ class TestRunRoute:
         ):
             events_resp = client.get(
                 "/runs/run-team-scope/events",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
             stream_resp = client.get(
                 "/runs/run-team-scope/stream",
-                headers={"X-Session-ID": anonymous_session_id("session-1")},
+                headers={**browser_identity_headers(anonymous_session_id("session-1"))},
             )
 
         expected = {
@@ -22032,7 +21931,7 @@ class TestRunRoute:
         client = get_client()
         resp = client.post(
             "/runs/run-1/owner",
-            headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
+            headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-2"},
             json={"tab_id": "tab-2"},
         )
         assert resp.status_code == 404
@@ -22047,7 +21946,7 @@ class TestRunRoute:
         ):
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1", "tab_id": "tab-2"},
             )
         assert resp.status_code == 200
@@ -22076,7 +21975,7 @@ class TestRunRoute:
             team_resp = client.post(
                 "/kill",
                 headers={
-                    "X-Session-ID": anonymous_session_id("member-session"),
+                    **browser_identity_headers(anonymous_session_id("member-session")),
                     "X-Team-ID": "team-1",
                     "X-Client-ID": "client-2",
                 },
@@ -22106,7 +22005,7 @@ class TestRunRoute:
         ):
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id("session-1"), "X-Client-ID": "client-2"},
+                headers={**browser_identity_headers(anonymous_session_id("session-1")), "X-Client-ID": "client-2"},
                 json={"run_id": "run-1"},
             )
         assert resp.status_code == 404
@@ -22121,7 +22020,7 @@ class TestRunRoute:
         ):
             viewer_resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": anonymous_session_id("viewer-session"), "X-Team-ID": "team-1"},
+                headers={**browser_identity_headers(anonymous_session_id("viewer-session")), "X-Team-ID": "team-1"},
                 json={"run_id": "run-team"},
             )
 
@@ -22131,7 +22030,7 @@ class TestRunRoute:
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
-        headers = {"X-Session-ID": anonymous_session_id("disallowed-command")}
+        headers = {**browser_identity_headers(anonymous_session_id("disallowed-command"))}
         # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
         with (
@@ -22147,7 +22046,7 @@ class TestRunRoute:
 
     def test_shell_operator_returns_403(self):
         client = get_client()
-        headers = {"X-Session-ID": anonymous_session_id("shell-operator")}
+        headers = {**browser_identity_headers(anonymous_session_id("shell-operator"))}
         with (
             mock.patch("blueprints.run.broker_available", return_value=True),
             mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])),
@@ -22172,7 +22071,7 @@ class TestRunRoute:
         try:
             resp = client.post(
                 "/run/client",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={
                     "command": "theme list",
                     "exit_code": 0,
@@ -22214,7 +22113,7 @@ class TestRunRoute:
             history = json.loads(
                 client.get(
                     "/history?type=runs&include_total=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             assert history["runs"][0]["command"] == "theme list"
@@ -22225,7 +22124,7 @@ class TestRunRoute:
             detail = json.loads(
                 client.get(
                     f"/history/{run_id}?json&preview=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             assert detail["command"] == "theme list"
@@ -22259,7 +22158,7 @@ class TestRunRoute:
             with mock.patch("blueprints.run.OutputSignalClassifier", return_value=fake_classifier):
                 resp = client.post(
                     "/run/client",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                     json={
                         "command": "theme current",
                         "exit_code": 0,
@@ -22315,7 +22214,7 @@ class TestRunRoute:
             offloaded_line = "Available themes: " + ("x" * 4100) + " needle-after-pointer-preview"
             resp = client.post(
                 "/run/client",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={
                     "command": "theme list",
                     "exit_code": 0,
@@ -22336,15 +22235,15 @@ class TestRunRoute:
             detail = json.loads(
                 client.get(
                     f"/history/{run_id}?json&preview=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             search_resp = client.get(
                 "/history?q=needle-after-pointer-preview&scope=all&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             search_data = json.loads(search_resp.data)
-            delete_resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session})
+            delete_resp = client.delete(f"/history/{run_id}", headers={**browser_identity_headers(session)})
 
             assert resp.status_code == 200
             assert detail["output"] == [offloaded_line]
@@ -22363,7 +22262,7 @@ class TestRunRoute:
         with mock.patch("blueprints.run.resolve_effective_cfg", return_value=run_cfg):
             resp = client.post(
                 "/run/client",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={
                     "command": "theme current",
                     "exit_code": 0,
@@ -22398,7 +22297,7 @@ class TestRunRoute:
         try:
             resp = client.post(
                 "/run/client",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
                 json={
                     "command": "tour",
                     "exit_code": 0,
@@ -22415,7 +22314,7 @@ class TestRunRoute:
             history = json.loads(
                 client.get(
                     "/history?type=runs&include_total=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             assert history["runs"][0]["command"] == "tour"
@@ -22431,19 +22330,19 @@ class TestRunRoute:
         session = anonymous_session_id("client-run-project-" + uuid.uuid4().hex[:8])
         project_resp = client.post(
             "/projects",
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
             json={"name": "Client Project"},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             "/projects/active",
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
             json={"project_id": project["id"]},
         )
 
         resp = client.post(
             "/run/client",
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
             json={
                 "command": "theme current",
                 "exit_code": 0,
@@ -22488,12 +22387,12 @@ class TestRunRoute:
 class TestHistoryRoute:
     def test_get_returns_200(self):
         client = get_client()
-        resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id("test-session")})
+        resp = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("test-session"))})
         assert resp.status_code == 200
 
     def test_get_returns_runs_list(self):
         client = get_client()
-        data = json.loads(client.get("/history", headers={"X-Session-ID": anonymous_session_id("test-session")}).data)
+        data = json.loads(client.get("/history", headers={**browser_identity_headers(anonymous_session_id("test-session"))}).data)
         assert "items" in data
         assert isinstance(data["items"], list)
         assert "runs" in data
@@ -22537,7 +22436,7 @@ class TestHistoryRoute:
                 (session, "nmap -sT ip.darklab.sh"),
             )
             conn.commit()
-            data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+            data = json.loads(client.get("/history/stats", headers={**browser_identity_headers(session)}).data)
             assert data["runs"]["total"] == 4
             assert data["runs"]["succeeded"] == 1
             assert data["runs"]["failed"] == 1
@@ -22583,7 +22482,7 @@ class TestHistoryRoute:
                 conn.commit()
 
             with mock.patch("services.history.queries.history_table_exists", return_value=False):
-                data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+                data = json.loads(client.get("/history/stats", headers={**browser_identity_headers(session)}).data)
 
             assert data["runs"]["total"] == 1
             assert data["runs"]["succeeded"] == 1
@@ -22600,7 +22499,7 @@ class TestHistoryRoute:
         client = get_client()
         session = anonymous_session_id("history-insights-empty-" + uuid.uuid4().hex[:8])
 
-        auto = json.loads(client.get("/history/insights?days=auto", headers={"X-Session-ID": session}).data)
+        auto = json.loads(client.get("/history/insights?days=auto", headers={**browser_identity_headers(session)}).data)
         assert auto["days"] == 28
         assert len(auto["activity"]) == 28
         assert auto["first_run_date"] is None
@@ -22613,7 +22512,7 @@ class TestHistoryRoute:
         assert auto["windows"]["constellation"]["days"] == 90
         assert auto["windows"]["constellation"]["sparse"] is True
 
-        long_window = json.loads(client.get("/history/insights?days=999", headers={"X-Session-ID": session}).data)
+        long_window = json.loads(client.get("/history/insights?days=999", headers={**browser_identity_headers(session)}).data)
         assert long_window["days"] == 365
         assert len(long_window["activity"]) == 365
         assert long_window["windows"]["activity"]["days"] == 365
@@ -22701,7 +22600,7 @@ class TestHistoryRoute:
                 (run_ids[3], session, "sleep 60", today, None, None, "[]", 0),
             )
             conn.commit()
-            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            data = json.loads(client.get("/history/insights", headers={**browser_identity_headers(session)}).data)
             assert data["days"] == 61
             assert len(data["activity"]) == 61
             assert data["start_date"] == (now - timedelta(days=60)).date().isoformat()
@@ -22724,7 +22623,7 @@ class TestHistoryRoute:
             assert nmap_constellation["max_kind"] == "error"
             assert data["events"][0]["root"] == "sleep"
 
-            fixed = json.loads(client.get("/history/insights?days=7", headers={"X-Session-ID": session}).data)
+            fixed = json.loads(client.get("/history/insights?days=7", headers={**browser_identity_headers(session)}).data)
             assert fixed["days"] == 28
             assert len(fixed["activity"]) == 28
             assert fixed["windows"]["activity"]["days"] == 28
@@ -22761,7 +22660,7 @@ class TestHistoryRoute:
                 conn.commit()
 
             with mock.patch("services.commands.registry.load_commands_registry", side_effect=RuntimeError("registry down")):
-                data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+                data = json.loads(client.get("/history/insights", headers={**browser_identity_headers(session)}).data)
 
             assert data["command_mix"][0]["root"] == "nmap"
             assert data["command_mix"][0]["category"] == "Other"
@@ -22802,7 +22701,7 @@ class TestHistoryRoute:
                 insert_runs(conn, session_40, 40)
                 conn.commit()
 
-            data_25 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_25}).data)
+            data_25 = json.loads(client.get("/history/insights", headers={**browser_identity_headers(session_25)}).data)
             assert data_25["windows"]["command_mix"]["days"] == 30
             assert data_25["windows"]["command_mix"]["total_runs"] == 25
             assert data_25["windows"]["command_mix"]["sparse"] is False
@@ -22810,7 +22709,7 @@ class TestHistoryRoute:
             assert data_25["windows"]["constellation"]["total_runs"] == 25
             assert data_25["windows"]["constellation"]["sparse"] is True
 
-            data_40 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_40}).data)
+            data_40 = json.loads(client.get("/history/insights", headers={**browser_identity_headers(session_40)}).data)
             assert data_40["windows"]["command_mix"]["days"] == 30
             assert data_40["windows"]["constellation"]["days"] == 30
             assert data_40["windows"]["constellation"]["total_runs"] == 40
@@ -22869,7 +22768,7 @@ class TestHistoryRoute:
                     (run_ids[3], session, "help", day_one, (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
                 )
                 conn.commit()
-            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            data = json.loads(client.get("/history/insights", headers={**browser_identity_headers(session)}).data)
             mix_roots = {item["root"] for item in data["command_mix"]}
             constellation_roots = {item["root"] for item in data["constellation"]}
             event_roots = {item["root"] for item in data["events"]}
@@ -22916,7 +22815,7 @@ class TestHistoryRoute:
                 )
                 conn.commit()
 
-            headers = {"X-Session-ID": session_id}
+            headers = {**browser_identity_headers(session_id)}
             preview = client.get(
                 "/history/delete-preview?command_root=nmap",
                 headers=headers,
@@ -22953,7 +22852,9 @@ class TestHistoryRoute:
     def test_delete_specific_nonexistent_run_returns_ok(self):
         # Deleting a run_id that doesn't exist should still return ok (idempotent)
         client = get_client()
-        resp = client.delete("/history/nonexistent-run-id", headers={"X-Session-ID": anonymous_session_id("test-session")})
+        resp = client.delete(
+            "/history/nonexistent-run-id", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+        )
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
 
@@ -23092,13 +22993,13 @@ class TestHistoryRoute:
                     "snapshot_ids": ["snap-" + full_run_id, "snap-" + owned_run_id, "snap-" + other_run_id],
                     "format": "jsonl",
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             with mock.patch.object(history_routes, "BULK_HISTORY_EXPORT_MAX_BYTES", 260):
                 truncated_export_resp = client.post(
                     "/history/bulk-export",
                     json={"run_ids": [large_run_id], "snapshot_ids": [], "format": "jsonl"},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
             txt_export_resp = client.post(
                 "/history/bulk-export",
@@ -23107,7 +23008,7 @@ class TestHistoryRoute:
                     "snapshot_ids": ["snap-" + owned_run_id],
                     "format": "txt",
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             resp = client.post(
                 "/history/bulk-delete",
@@ -23122,7 +23023,7 @@ class TestHistoryRoute:
                         missing_run_id,
                     ],
                 },
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
         assert export_resp.status_code == 200
         assert export_resp.content_type == "application/x-ndjson; charset=utf-8"
@@ -23214,7 +23115,7 @@ class TestHistoryRoute:
         non_string_resp = client.post(
             "/history/bulk-delete",
             json={"run_ids": ["run-ok", 123]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert non_string_resp.status_code == 400
         assert json.loads(non_string_resp.data) == {"error": "run_ids entries must be strings"}
@@ -23222,7 +23123,7 @@ class TestHistoryRoute:
         overlong_resp = client.post(
             "/history/bulk-delete",
             json={"run_ids": [overlong_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert overlong_resp.status_code == 400
         assert json.loads(overlong_resp.data) == {"error": "run_ids entries are too long", "limit": 512}
@@ -23230,7 +23131,7 @@ class TestHistoryRoute:
         too_many_resp = client.post(
             "/history/bulk-delete",
             json={"run_ids": [f"run-{index}" for index in range(101)]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert too_many_resp.status_code == 400
         assert json.loads(too_many_resp.data) == {"error": "too_many", "limit": 100}
@@ -23238,7 +23139,7 @@ class TestHistoryRoute:
         empty_export_resp = client.post(
             "/history/bulk-export",
             json={"run_ids": [], "snapshot_ids": [], "format": "jsonl"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert empty_export_resp.status_code == 400
         assert json.loads(empty_export_resp.data) == {"error": "selection_required"}
@@ -23246,7 +23147,7 @@ class TestHistoryRoute:
         bad_format_resp = client.post(
             "/history/bulk-export",
             json={"run_ids": ["run-ok"], "format": "zip"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert bad_format_resp.status_code == 400
         assert json.loads(bad_format_resp.data) == {"error": "unsupported_format", "formats": ["txt", "jsonl"]}
@@ -23254,7 +23155,7 @@ class TestHistoryRoute:
         too_many_export_resp = client.post(
             "/history/bulk-export",
             json={"run_ids": [f"run-{index}" for index in range(501)], "format": "jsonl"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert too_many_export_resp.status_code == 400
         assert json.loads(too_many_export_resp.data) == {"error": "too_many", "limit": 500}
@@ -23263,7 +23164,7 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.get(
             "/history/nonexistent-run-id",
-            headers={"X-Session-ID": anonymous_session_id("history-missing-run-session")},
+            headers={**browser_identity_headers(anonymous_session_id("history-missing-run-session"))},
         )
         assert resp.status_code == 404
 
@@ -23350,8 +23251,10 @@ class TestHistoryRoute:
                 mock.patch.object(process, "redis_client", process._FakeRedisClient()),
             ):
                 with mock.patch.object(ai_assists.log, "info") as info_log:
-                    queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
-                    suggested = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers={"X-Session-ID": session})
+                    queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={**browser_identity_headers(session)})
+                    suggested = client.post(
+                        f"/runs/{run_id}/ai-next-commands", json={}, headers={**browser_identity_headers(session)}
+                    )
                     enqueue_events = [
                         (call.args[0], call.kwargs["extra"])
                         for call in info_log.call_args_list
@@ -23359,13 +23262,13 @@ class TestHistoryRoute:
                     ]
                 missing_summary_session = client.post(f"/runs/{run_id}/ai-summary", json={})
                 missing_next_session = client.post(f"/runs/{run_id}/ai-next-commands", json={})
-                listed = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": session})
-                cross = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": other_session})
-                active = client.post(f"/runs/{active_run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
+                listed = client.get(f"/runs/{run_id}/ai-assists", headers={**browser_identity_headers(session)})
+                cross = client.get(f"/runs/{run_id}/ai-assists", headers={**browser_identity_headers(other_session)})
+                active = client.post(f"/runs/{active_run_id}/ai-summary", json={}, headers={**browser_identity_headers(session)})
                 invalid_body = client.post(
                     f"/runs/{guard_run_id}/ai-summary",
                     json=[],
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.execute(
@@ -23374,8 +23277,10 @@ class TestHistoryRoute:
                     )
                     conn.commit()
                 with mock.patch.object(ai_assists.log, "info") as reuse_log:
-                    cached = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
-                    forced = client.post(f"/runs/{run_id}/ai-summary", json={"force": True}, headers={"X-Session-ID": session})
+                    cached = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={**browser_identity_headers(session)})
+                    forced = client.post(
+                        f"/runs/{run_id}/ai-summary", json={"force": True}, headers={**browser_identity_headers(session)}
+                    )
 
                 guard_cases = []
                 base_guard_cfg = {
@@ -23421,7 +23326,7 @@ class TestHistoryRoute:
                                 client.post(
                                     path,
                                     json={},
-                                    headers={"X-Session-ID": session},
+                                    headers={**browser_identity_headers(session)},
                                 ),
                             )
                         )
@@ -23440,7 +23345,7 @@ class TestHistoryRoute:
                             client.post(
                                 f"/runs/{guard_run_id}/ai-summary",
                                 json={},
-                                headers={"X-Session-ID": session},
+                                headers={**browser_identity_headers(session)},
                             ),
                         )
                     )
@@ -23452,7 +23357,7 @@ class TestHistoryRoute:
                             client.post(
                                 f"/runs/{guard_run_id}/ai-summary",
                                 json={},
-                                headers={"X-Session-ID": session},
+                                headers={**browser_identity_headers(session)},
                             ),
                         )
                     )
@@ -23470,12 +23375,12 @@ class TestHistoryRoute:
                     rate_first = client.post(
                         f"/runs/{guard_run_id}/ai-summary",
                         json={},
-                        headers={"X-Session-ID": session},
+                        headers={**browser_identity_headers(session)},
                     )
                     rate_limited = client.post(
                         f"/runs/{guard_run_id}/ai-summary",
                         json={},
-                        headers={"X-Session-ID": session},
+                        headers={**browser_identity_headers(session)},
                     )
                 with (
                     mock.patch.dict(config.CFG, base_guard_cfg, clear=False),
@@ -23485,7 +23390,7 @@ class TestHistoryRoute:
                     no_context = client.post(
                         f"/runs/{no_context_run_id}/ai-summary",
                         json={},
-                        headers={"X-Session-ID": session},
+                        headers={**browser_identity_headers(session)},
                     )
 
             queued_payload = json.loads(queued.data)
@@ -23605,7 +23510,7 @@ class TestHistoryRoute:
             conn.close()
 
             with mock.patch.dict("config.CFG", {"history_panel_limit": 2}):
-                resp = client.get("/history", headers={"X-Session-ID": session})
+                resp = client.get("/history", headers={**browser_identity_headers(session)})
             data = json.loads(resp.data)
             commands = [r["command"] for r in data["runs"]]
 
@@ -23639,7 +23544,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history/commands?limit=3",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -23678,7 +23583,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history?page=2&page_size=1&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -23721,7 +23626,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history?starred_only=1&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -23771,7 +23676,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history?type=snapshots&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -23829,13 +23734,13 @@ class TestHistoryRoute:
             builtins = json.loads(
                 client.get(
                     "/history?type=runs_builtin&include_total=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
             external = json.loads(
                 client.get(
                     "/history?type=runs_external&include_total=1",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 ).data
             )
 
@@ -23857,7 +23762,7 @@ class TestHistoryRoute:
         project_resp = client.post(
             "/projects",
             json={"name": "History Project"},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
         project = json.loads(project_resp.data)["project"]
         linked_run = f"{session}-run-linked"
@@ -23894,7 +23799,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 f"/history?project_id={project['id']}&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -23910,7 +23815,7 @@ class TestHistoryRoute:
 
             snapshots_resp = client.get(
                 f"/history?type=snapshots&project_id={project['id']}&include_total=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             snapshots = json.loads(snapshots_resp.data)
             assert snapshots["total_count"] == 0
@@ -23984,7 +23889,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get("/history?q=dig", headers={"X-Session-ID": session})
+            resp = client.get("/history?q=dig", headers={**browser_identity_headers(session)})
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
             assert data["runs"][0]["artifact_count"] == 1
@@ -24047,7 +23952,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get("/history?type=runs&scope=command&q=amass", headers={"X-Session-ID": session})
+            resp = client.get("/history?type=runs&scope=command&q=amass", headers={**browser_identity_headers(session)})
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["amass enum -d darklab.sh"]
         finally:
@@ -24083,7 +23988,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            resp = client.get("/history?command_root=nmap", headers={"X-Session-ID": session})
+            resp = client.get("/history?command_root=nmap", headers={**browser_identity_headers(session)})
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["nmap -Pn darklab.sh", "nmap -sV darklab.sh"]
             assert data["roots"] == ["nmap"]
@@ -24149,14 +24054,14 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history?exit_code=nonzero&date_range=24h",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["curl recent fail"]
 
             resp = client.get(
                 "/history?exit_code=-15&date_range=24h",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["ping stopped"]
@@ -24180,7 +24085,7 @@ class TestHistoryRoute:
         with mock.patch("blueprints.history.active_runs_for_session", return_value=active_runs) as active_mock:
             resp = client.get(
                 "/history/active",
-                headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(session), "X-Client-ID": "client-1"},
             )
 
         assert resp.status_code == 200
@@ -24230,7 +24135,7 @@ class TestHistoryRoute:
         ):
             resp = client.get(
                 "/history/active?include_scheduled=1&include_assessment_batches=1",
-                headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
+                headers={**browser_identity_headers(session), "X-Client-ID": "client-1"},
             )
 
         assert resp.status_code == 200
@@ -24297,7 +24202,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history/cmp-source/compare-candidates",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -24477,7 +24382,7 @@ class TestHistoryRoute:
             with mock.patch.object(history_routes.log, "info") as compare_log:
                 resp = client.get(
                     f"/history/compare?left={left_id}&right={right_id}",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             data = json.loads(resp.data)
 
@@ -24718,12 +24623,12 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history/compare/lines?left=cmp-lines-left&right=cmp-lines-right&side=a&start=1&end=3",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
             compare_resp = client.get(
                 "/history/compare?left=cmp-lines-left&right=cmp-lines-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             compare_data = json.loads(compare_resp.data)
 
@@ -24765,19 +24670,19 @@ class TestHistoryRoute:
 
             invalid_side = client.get(
                 "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=x&start=0&end=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             out_of_range = client.get(
                 "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=a&start=0&end=2",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             stale_start = client.get(
                 "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right&side=a&start=2&end=4",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             cross_session = client.get(
                 "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-other&side=a&start=0&end=1",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
             assert invalid_side.status_code == 400
@@ -24828,7 +24733,7 @@ class TestHistoryRoute:
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
                 line_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             line_data = json.loads(line_limited.data)
             assert line_limited.status_code == 200
@@ -24840,7 +24745,7 @@ class TestHistoryRoute:
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
                 byte_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             byte_data = json.loads(byte_limited.data)
             assert byte_limited.status_code == 200
@@ -24852,7 +24757,7 @@ class TestHistoryRoute:
             with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
                 oversized_line = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right&side=a&start=0&end=3",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             oversized_data = json.loads(oversized_line.data)
             assert oversized_line.status_code == 200
@@ -25029,7 +24934,7 @@ class TestHistoryRoute:
             with mock.patch.object(history_routes.log, "info") as compare_log:
                 resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             data = json.loads(resp.data)
 
@@ -25131,7 +25036,7 @@ class TestHistoryRoute:
 
             web_resp = client.get(
                 "/history/compare?left=cmp-web-left&right=cmp-web-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             web_data = json.loads(web_resp.data)
             assert web_resp.status_code == 200
@@ -25161,7 +25066,7 @@ class TestHistoryRoute:
             ):
                 capped_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             capped = json.loads(capped_resp.data)
             assert capped_resp.status_code == 200
@@ -25189,7 +25094,7 @@ class TestHistoryRoute:
             with mock.patch("services.runs.comparison.COMPARE_MAX_CHANGED_LINES", 2):
                 line_limited_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
             line_limited = json.loads(line_limited_resp.data)
             assert line_limited_resp.status_code == 200
@@ -25235,23 +25140,23 @@ class TestHistoryRoute:
 
             missing_left = client.get(
                 "/history/compare?right=cmp-errors-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             missing_right = client.get(
                 "/history/compare?left=cmp-errors-left",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             same_run = client.get(
                 "/history/compare?left=cmp-errors-left&right=cmp-errors-left",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             missing_run = client.get(
                 "/history/compare?left=cmp-errors-left&right=missing-run",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             identical = client.get(
                 "/history/compare?left=cmp-errors-left&right=cmp-errors-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
             assert missing_left.status_code == 400
@@ -25342,7 +25247,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history/compare?left=cmp-findings-left&right=cmp-findings-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -25395,7 +25300,7 @@ class TestHistoryRoute:
 
             resp = client.get(
                 "/history/compare?left=cmp-long-left&right=cmp-long-right",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             data = json.loads(resp.data)
 
@@ -25426,14 +25331,16 @@ class TestShareRoute:
             resp = client.post(
                 "/share",
                 json={"label": "test snapshot", "content": ["line1", "line2"], "apply_redaction": True},
-                headers={"X-Session-ID": anonymous_session_id("test-session")},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
             assert resp.status_code == 200
             data = json.loads(resp.data)
             assert "id" in data
             assert "url" in data
 
-            delete = client.delete(f"/share/{data['id']}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            delete = client.delete(
+                f"/share/{data['id']}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert delete.status_code == 200
 
         audit_rows = _audit_event_rows(target_id=data["id"])
@@ -25458,7 +25365,7 @@ class TestShareRoute:
             create_resp = client.post(
                 "/share",
                 json={"label": "large snapshot", "content": content},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             share_id = json.loads(create_resp.data)["id"]
             with db_connect() as conn:
@@ -25471,8 +25378,8 @@ class TestShareRoute:
             body_path = os.path.join(tmp, pointer["rel_path"])
             assert os.path.exists(body_path)
 
-            fetch_resp = client.get(f"/share/{share_id}?json", headers={"X-Session-ID": session_id})
-            delete_resp = client.delete(f"/share/{share_id}", headers={"X-Session-ID": session_id})
+            fetch_resp = client.get(f"/share/{share_id}?json", headers={**browser_identity_headers(session_id)})
+            delete_resp = client.delete(f"/share/{share_id}", headers={**browser_identity_headers(session_id)})
 
             assert fetch_resp.status_code == 200
             assert json.loads(fetch_resp.data)["content"] == content
@@ -25486,7 +25393,7 @@ class TestShareRoute:
         project_resp = client.post(
             "/projects",
             json={"name": "Snapshot Source"},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
         project = json.loads(project_resp.data)["project"]
         conn = sqlite3.connect(DB_PATH)
@@ -25501,14 +25408,14 @@ class TestShareRoute:
         link_resp = client.post(
             f"/projects/{project['id']}/links",
             json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
         assert link_resp.status_code == 201
 
         resp = client.post(
             "/share",
             json={"label": "linked snapshot", "content": ["line1"], "run_id": run_id},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
         assert resp.status_code == 200
         assert "id" in json.loads(resp.data)
@@ -25531,7 +25438,9 @@ class TestShareRoute:
     def test_post_rejects_non_string_label(self):
         client = get_client()
         resp = client.post(
-            "/share", json={"label": 123, "content": []}, headers={"X-Session-ID": anonymous_session_id("test-session")}
+            "/share",
+            json={"label": 123, "content": []},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Label must be a string"
@@ -25541,7 +25450,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": {"text": "line"}},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content must be a list"
@@ -25551,7 +25460,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": ["ok", 123]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content items must be strings or objects"
@@ -25561,7 +25470,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"cls": "notice"}]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -25571,7 +25480,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": 123, "cls": "notice"}]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
@@ -25581,7 +25490,7 @@ class TestShareRoute:
         resp = client.post(
             "/share",
             json={"label": "bad content", "content": [{"text": "hello", "cls": 123}]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Content objects must use string cls values"
@@ -25597,7 +25506,7 @@ class TestShareRoute:
                     {"text": "hi", "cls": "notice"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -25622,7 +25531,7 @@ class TestShareRoute:
                         {"text": "Authorization: Bearer abc123", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id("test-session")},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25667,7 +25576,7 @@ class TestShareRoute:
                         {"text": "after historical finding", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id("test-session")},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25702,7 +25611,7 @@ class TestShareRoute:
                         {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
                     ],
                 },
-                headers={"X-Session-ID": anonymous_session_id("test-session")},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
             share_id = json.loads(create_resp.data)["id"]
             fetch = client.get(f"/share/{share_id}?json")
@@ -25718,7 +25627,7 @@ class TestShareRoute:
                 "apply_redaction": "yes",
                 "content": [{"text": "line 1", "cls": ""}],
             },
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         assert resp.status_code == 400
         data = json.loads(resp.data)
@@ -25726,7 +25635,9 @@ class TestShareRoute:
 
     def test_post_rejects_non_object_json(self):
         client = get_client()
-        resp = client.post("/share", json=["bad", "payload"], headers={"X-Session-ID": anonymous_session_id("test-session")})
+        resp = client.post(
+            "/share", json=["bad", "payload"], headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+        )
         assert resp.status_code == 400
         assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
 
@@ -25745,25 +25656,25 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "delete-me", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
+            headers={**browser_identity_headers(anonymous_session_id("delete-share-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         label_resp = client.post(
             f"/entities/snapshot/{share_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
+            headers={**browser_identity_headers(anonymous_session_id("delete-share-session"))},
         )
         note_resp = client.put(
             f"/entities/snapshot/{share_id}/note",
             json={"body": "Snapshot context"},
-            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
+            headers={**browser_identity_headers(anonymous_session_id("delete-share-session"))},
         )
         assert label_resp.status_code == 201
         assert note_resp.status_code == 200
 
         resp = client.delete(
             f"/share/{share_id}",
-            headers={"X-Session-ID": anonymous_session_id("delete-share-session")},
+            headers={**browser_identity_headers(anonymous_session_id("delete-share-session"))},
         )
 
         assert resp.status_code == 200
@@ -25789,24 +25700,24 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "delete-me", "content": ["line"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         share_id = json.loads(create_resp.data)["id"]
         other_resp = client.post(
             "/share",
             json={"label": "keep-me", "content": ["line"]},
-            headers={"X-Session-ID": other_session_id},
+            headers={**browser_identity_headers(other_session_id)},
         )
         other_share_id = json.loads(other_resp.data)["id"]
         label_resp = client.post(
             f"/entities/snapshot/{share_id}/labels",
             json={"label": "handoff"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         note_resp = client.put(
             f"/entities/snapshot/{share_id}/note",
             json={"body": "Snapshot context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert label_resp.status_code == 201
         assert note_resp.status_code == 200
@@ -25814,7 +25725,7 @@ class TestShareRoute:
         resp = client.post(
             "/share/bulk-delete",
             json={"snapshot_ids": [share_id, other_share_id, "missing-share"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         assert resp.status_code == 200
@@ -25853,7 +25764,7 @@ class TestShareRoute:
         non_string_resp = client.post(
             "/share/bulk-delete",
             json={"snapshot_ids": ["snap-ok", {"bad": "id"}]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert non_string_resp.status_code == 400
         assert json.loads(non_string_resp.data) == {"error": "snapshot_ids entries must be strings"}
@@ -25861,7 +25772,7 @@ class TestShareRoute:
         overlong_resp = client.post(
             "/share/bulk-delete",
             json={"snapshot_ids": [overlong_id]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert overlong_resp.status_code == 400
         assert json.loads(overlong_resp.data) == {"error": "snapshot_ids entries are too long", "limit": 512}
@@ -25869,7 +25780,7 @@ class TestShareRoute:
         too_many_resp = client.post(
             "/share/bulk-delete",
             json={"snapshot_ids": [f"snap-{index}" for index in range(101)]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert too_many_resp.status_code == 400
         assert json.loads(too_many_resp.data) == {"error": "too_many", "limit": 100}
@@ -25880,7 +25791,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "my label", "content": ["hello", "world"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -25896,7 +25807,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "html test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25908,7 +25819,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "theme selector test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         client.set_cookie("pref_theme_name", "apricot_sand")
@@ -25949,7 +25860,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "bundle mode test", "content": ["line"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         with mock.patch.dict("config.CFG", {"asset_bundle_mode": "bundle"}):
@@ -25970,7 +25881,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "unique-label-xyz", "content": []},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -25988,7 +25899,7 @@ class TestShareRoute:
                     {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -26010,7 +25921,7 @@ class TestShareRoute:
                     {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
 
@@ -26026,7 +25937,9 @@ class TestShareRoute:
     def test_get_share_html_content_type(self):
         client = get_client()
         create_resp = client.post(
-            "/share", json={"label": "ct-test", "content": []}, headers={"X-Session-ID": anonymous_session_id("test-session")}
+            "/share",
+            json={"label": "ct-test", "content": []},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -26042,7 +25955,7 @@ class TestShareRoute:
                     {"text": "line 1", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
                 ],
             },
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
@@ -26058,7 +25971,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "meta-lines-test", "content": ["a", "b", "c"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -26071,7 +25984,7 @@ class TestShareRoute:
         create_resp = client.post(
             "/share",
             json={"label": "no-exit-test", "content": ["output line"]},
-            headers={"X-Session-ID": anonymous_session_id("test-session")},
+            headers={**browser_identity_headers(anonymous_session_id("test-session"))},
         )
         share_id = json.loads(create_resp.data)["id"]
         body = client.get(f"/share/{share_id}").get_data(as_text=True)
@@ -26167,7 +26080,7 @@ class TestHistorySessionIsolation:
     def test_empty_history_for_fresh_session(self):
         client = get_client()
         data = json.loads(
-            client.get("/history", headers={"X-Session-ID": anonymous_session_id("fresh-session-no-runs-xyz")}).data
+            client.get("/history", headers={**browser_identity_headers(anonymous_session_id("fresh-session-no-runs-xyz"))}).data
         )
         assert data["runs"] == []
 
@@ -26184,8 +26097,8 @@ class TestHistorySessionIsolation:
         conn.close()
         try:
             client = get_client()
-            runs_a = json.loads(client.get("/history", headers={"X-Session-ID": session_a}).data)["runs"]
-            runs_b = json.loads(client.get("/history", headers={"X-Session-ID": session_b}).data)["runs"]
+            runs_a = json.loads(client.get("/history", headers={**browser_identity_headers(session_a)}).data)["runs"]
+            runs_b = json.loads(client.get("/history", headers={**browser_identity_headers(session_b)}).data)["runs"]
             assert any(r["id"] == run_id for r in runs_a)
             assert not any(r["id"] == run_id for r in runs_b)
         finally:
@@ -26212,7 +26125,7 @@ class TestHistorySessionIsolation:
         conn.close()
         try:
             client = get_client()
-            client.delete("/history", headers={"X-Session-ID": session_a})
+            client.delete("/history", headers={**browser_identity_headers(session_a)})
             # Session B's run should be unaffected
             conn = sqlite3.connect(DB_PATH)
             count = conn.execute("SELECT COUNT(*) FROM runs WHERE id=?", (run_b,)).fetchone()[0]
@@ -26321,7 +26234,9 @@ class TestRunPermalinkRoute:
         run_id = "permalink-html-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert resp.status_code == 200
             assert b"<html" in resp.data.lower()
         finally:
@@ -26364,7 +26279,9 @@ class TestRunPermalinkRoute:
             )
             conn.commit()
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert b"nmap -sV 10.0.0.1" in resp.data
             assert b"1 artifact" in resp.data
             assert b"1 Atlas entity" in resp.data
@@ -26420,7 +26337,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .data
             )
@@ -26442,7 +26359,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id("other-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("other-session"))},
                 )
                 .data
             )
@@ -26453,35 +26370,23 @@ class TestRunPermalinkRoute:
 
     def test_team_owned_permalink_loads_without_active_team_scope(self):
         run_id = "permalink-team-owned-test-run"
-        owner_token = "tok_permalink_team_owner"
+        owner_token = principal_owner(str("tok_permalink_team_owner"))
         client = get_client()
-        team_id = f"team_permalink_{uuid.uuid4().hex[:12]}"
-        member_id = f"tmem_permalink_{uuid.uuid4().hex[:12]}"
-        created = datetime.now(timezone.utc).isoformat()
-        from services.teams.storage import token_hash
+        from services.teams.storage import create_team
 
-        register_durable_session_token(owner_token)
+        browser_identity_headers(owner_token)
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT INTO teams "
-                "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
-                (
-                    team_id,
-                    "Permalink Team",
-                    f"permalink-team-{uuid.uuid4().hex[:8]}",
-                    member_id,
-                    token_hash(owner_token),
-                    created,
-                    created,
-                ),
+            conn.row_factory = sqlite3.Row
+            principal_id = conn.execute("SELECT principal_id FROM personal_workspaces WHERE id = ?", (owner_token,)).fetchone()[
+                "principal_id"
+            ]
+            team = create_team(
+                conn,
+                name="Permalink Team",
+                slug=f"permalink-team-{uuid.uuid4().hex[:8]}",
+                creator_principal_id=principal_id,
             )
-            conn.execute(
-                "INSERT INTO team_members "
-                "(id, team_id, session_token, session_token_hash, role, display_name, status, joined_at) "
-                "VALUES (?, ?, ?, ?, 'owner', 'Owner', 'active', ?)",
-                (member_id, team_id, owner_token, token_hash(owner_token), created),
-            )
+            team_id = str(team["id"])
             conn.commit()
         self._insert_run(
             run_id,
@@ -26500,11 +26405,13 @@ class TestRunPermalinkRoute:
         conn.commit()
         conn.close()
         try:
-            public_resp = client.get(f"/history/{run_id}", headers={"X-Session-ID": owner_token})
+            public_resp = client.get(f"/history/{run_id}", headers={**browser_identity_headers(owner_token)})
             assert public_resp.status_code == 200
             assert b"dig team.example" in public_resp.data
 
-            public_json = json.loads(client.get(f"/history/{run_id}?json", headers={"X-Session-ID": owner_token}).data)
+            public_json = json.loads(
+                client.get(f"/history/{run_id}?json", headers={**browser_identity_headers(owner_token)}).data
+            )
             assert public_json["command"] == "dig team.example"
             assert "team answer section" in public_json["output"]
             assert public_json["label_count"] == 0
@@ -26512,7 +26419,7 @@ class TestRunPermalinkRoute:
             team_json = json.loads(
                 client.get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": owner_token, "X-Team-ID": team_id},
+                    headers={**browser_identity_headers(owner_token), "X-Team-ID": team_id},
                 ).data
             )
             assert team_json["label_count"] == 1
@@ -26522,7 +26429,6 @@ class TestRunPermalinkRoute:
                 conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))
                 conn.execute("DELETE FROM team_members WHERE team_id=?", (team_id,))
                 conn.execute("DELETE FROM teams WHERE id=?", (team_id,))
-                conn.execute("DELETE FROM session_tokens WHERE token=?", (owner_token,))
                 conn.commit()
             self._delete_run(run_id)
 
@@ -26540,7 +26446,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}?json",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .data
             )
@@ -26564,7 +26470,7 @@ class TestRunPermalinkRoute:
         try:
             resp = get_client().get(
                 f"/history/{run_id}?json",
-                headers={"X-Session-ID": anonymous_session_id("test-session")},
+                headers={**browser_identity_headers(anonymous_session_id("test-session"))},
             )
             data = json.loads(resp.data)
             assert resp.status_code == 200
@@ -26589,7 +26495,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}?json&preview=1",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .data
             )
@@ -26609,7 +26515,9 @@ class TestRunPermalinkRoute:
         metadata = OutputSignalClassifier(command).classify_line(line)
         self._insert_run(run_id, command, [{"text": line, **metadata}])
         try:
-            resp = get_client().get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}?json", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             data = json.loads(resp.data)
             assert resp.status_code == 200
             source_detail = data["output_entries"][0]["source_detail"]
@@ -26624,7 +26532,9 @@ class TestRunPermalinkRoute:
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
@@ -26639,7 +26549,9 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert b"full line 1" in resp.data
             assert b"preview line" not in resp.data
         finally:
@@ -26649,7 +26561,9 @@ class TestRunPermalinkRoute:
         run_id = "permalink-preview-truncated-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             assert b"preview truncated" in resp.data
         finally:
             self._delete_run(run_id)
@@ -26658,7 +26572,9 @@ class TestRunPermalinkRoute:
         run_id = "permalink-toggle-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             body = resp.get_data(as_text=True)
             assert 'id="toggle-ln"' in body
             assert 'id="toggle-ts" disabled' in body
@@ -26673,7 +26589,9 @@ class TestRunPermalinkRoute:
         ]
         self._insert_run(run_id, "ping google.com", structured_preview)
         try:
-            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("test-session")})
+            resp = get_client().get(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("test-session"))}
+            )
             body = resp.get_data(as_text=True)
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
@@ -26716,7 +26634,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .get_data(as_text=True)
             )
@@ -26740,7 +26658,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .get_data(as_text=True)
             )
@@ -26764,7 +26682,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .get_data(as_text=True)
             )
@@ -26787,7 +26705,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .get_data(as_text=True)
             )
@@ -26812,7 +26730,7 @@ class TestRunPermalinkRoute:
                 get_client()
                 .get(
                     f"/history/{run_id}",
-                    headers={"X-Session-ID": anonymous_session_id("test-session")},
+                    headers={**browser_identity_headers(anonymous_session_id("test-session"))},
                 )
                 .get_data(as_text=True)
             )

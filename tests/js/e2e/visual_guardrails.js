@@ -6,7 +6,7 @@ import { expect } from '@playwright/test'
 import {
   CAPTURE_SEEDED_HISTORY_MIN_ROOTS,
   CAPTURE_SEEDED_HISTORY_MIN_RUNS,
-  CAPTURE_SESSION_TOKEN,
+  CAPTURE_ANONYMOUS_ID,
   DESKTOP_VISUAL_CONTRACT,
   MOBILE_VISUAL_CONTRACT,
 } from '../../../.tooling/playwright.visual.contracts.js'
@@ -22,7 +22,7 @@ export async function assertVisualFlowGuardrails(
   {
     mode,
     requireSeededHistory = false,
-    expectedSessionToken = CAPTURE_SESSION_TOKEN,
+    expectedAnonymousId = CAPTURE_ANONYMOUS_ID,
     expectedViewport = null,
   } = {},
 ) {
@@ -31,9 +31,9 @@ export async function assertVisualFlowGuardrails(
   expect(viewport).toEqual(expectedViewport || contract.viewport)
 
   const state = await page.evaluate(async () => {
-    const sessionToken = (() => {
+    const anonymousId = (() => {
       try {
-        return localStorage.getItem('session_token') || ''
+        return localStorage.getItem('anonymous_id') || ''
       } catch (_) {
         return ''
       }
@@ -47,7 +47,7 @@ export async function assertVisualFlowGuardrails(
         const resp = await apiFetch(url, options)
         return resp.json()
       }
-      const headers = sessionToken ? { 'X-Session-ID': sessionToken } : {}
+      const headers = anonymousId ? { 'X-Darklab-Anonymous-ID': anonymousId } : {}
       const resp = await fetch(url, { ...options, headers })
       return resp.json()
     }
@@ -59,7 +59,7 @@ export async function assertVisualFlowGuardrails(
       maxTouchPoints: navigator.maxTouchPoints || 0,
       userAgent: navigator.userAgent,
       mobileTerminalMode: document.body.classList.contains('mobile-terminal-mode'),
-      sessionToken,
+      anonymousId,
       status,
       historyRuns: Math.max(
         0,
@@ -83,7 +83,7 @@ export async function assertVisualFlowGuardrails(
   expect(['ok', 'none', 'down']).toContain(state.status.redis)
 
   if (requireSeededHistory) {
-    expect(state.sessionToken).toBe(expectedSessionToken)
+    expect(state.anonymousId).toBe(expectedAnonymousId)
     expect(state.historyRuns).toBeGreaterThanOrEqual(CAPTURE_SEEDED_HISTORY_MIN_RUNS)
     expect(state.historyRoots).toBeGreaterThanOrEqual(CAPTURE_SEEDED_HISTORY_MIN_ROOTS)
     expect(state.status.redis).toBe('ok')

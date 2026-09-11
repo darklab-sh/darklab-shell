@@ -41,7 +41,7 @@ def team_member_for_api(team_id: str, session_token: str) -> dict[str, Any]:
 
 def list_teams_for_api(session_id: str) -> list[dict[str, Any]]:
     with get_db_connect()() as conn:
-        return team_storage.list_teams_for_token(conn, session_id)
+        return team_storage.list_teams_for_principal(conn, session_id)
 
 
 def create_team_for_api(
@@ -57,10 +57,10 @@ def create_team_for_api(
             conn,
             name=name,
             slug=slug,
-            creator_session_token=session_id,
+            creator_principal_id=session_id,
             display_name=display_name,
         )
-        detail = team_storage.team_detail(conn, team["id"], current_session_token=session_id)
+        detail = team_storage.team_detail(conn, team["id"], current_principal_id=session_id)
         _record_team_api_audit(
             AuditEventType.TEAM_CREATE,
             team_id=team["id"],
@@ -77,7 +77,7 @@ def team_detail_for_api(team_id: str, session_id: str) -> tuple[dict[str, Any], 
         actor = team_storage.get_team_membership(conn, team_id, session_id)
         if not actor:
             raise TeamNotFound("Team not found.")
-        detail = team_storage.team_detail(conn, team_id, current_session_token=session_id)
+        detail = team_storage.team_detail(conn, team_id, current_principal_id=session_id)
     if not detail:
         raise TeamNotFound("Team not found.")
     return actor, detail
@@ -98,7 +98,7 @@ def update_team_for_api(
         paused = {"watchers": 0, "schedules": 0}
         if status == "archived":
             paused = pause_automation(conn, team_id, reason="team_archived")
-        detail = team_storage.team_detail(conn, team_id, current_session_token=session_id)
+        detail = team_storage.team_detail(conn, team_id, current_principal_id=session_id)
         event_type = AuditEventType.TEAM_ARCHIVE if status == "archived" else AuditEventType.TEAM_REACTIVATE
         _record_team_api_audit(
             event_type,
@@ -183,10 +183,10 @@ def redeem_team_invite_for_api(
         member = team_storage.redeem_team_invite(
             conn,
             code=code,
-            session_token=session_id,
+            principal_id=session_id,
             display_name=display_name,
         )
-        detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+        detail = team_storage.team_detail(conn, member["team_id"], current_principal_id=session_id)
         _record_team_api_audit(
             AuditEventType.TEAM_JOIN,
             team_id=member["team_id"],
@@ -315,10 +315,10 @@ def redeem_team_recovery_for_api(
         member = team_storage.redeem_team_recovery_code(
             conn,
             code=code,
-            session_token=session_id,
+            principal_id=session_id,
             display_name=display_name,
         )
-        detail = team_storage.team_detail(conn, member["team_id"], current_session_token=session_id)
+        detail = team_storage.team_detail(conn, member["team_id"], current_principal_id=session_id)
         _record_team_api_audit(
             AuditEventType.TEAM_RECOVERY_REDEEM,
             team_id=member["team_id"],

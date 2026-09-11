@@ -17,12 +17,14 @@ from services.teams.ownership_queries import (
     personal_only_owner_predicate,
     team_capable_owner_predicate,
     team_only_owner_predicate,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
 from services.teams.scope import personal_owner_context, team_owner_context
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+OWNER_A = "wsp_" + "a" * 32
+OWNER_B = "wsp_" + "b" * 32
 
 
 def _mixed_owner_rows(conn):
@@ -39,10 +41,10 @@ def _mixed_owner_rows(conn):
     conn.executemany(
         "INSERT INTO owner_adapter_rows (id, personal_workspace_id, legacy_token_owner, team_id) VALUES (?, ?, ?, ?)",
         (
-            ("owner-a-null", "tok_owner_a", "tok_owner_a", None),
-            ("owner-a-empty", "tok_owner_a", "tok_owner_a", ""),
-            ("owner-b-empty", "tok_owner_b", "tok_owner_b", ""),
-            ("team-row", "tok_owner_a", "tok_owner_a", "team_red"),
+            ("owner-a-null", OWNER_A, "attribution-a", None),
+            ("owner-a-empty", OWNER_A, "attribution-a", ""),
+            ("owner-b-empty", OWNER_B, "attribution-b", ""),
+            ("team-row", OWNER_A, "attribution-a", "team_red"),
         ),
     )
 
@@ -56,11 +58,12 @@ def _selected_ids(conn, predicate):
 
 
 def _assert_mixed_owner_results(conn):
-    owner_a = personal_owner_context("tok_owner_a")
+    owner_a = personal_owner_context(OWNER_A)
     team = team_owner_context(
         "team_red",
         actor_member_id="tmem_owner",
-        actor_session_id="tok_owner_a",
+        actor_principal_id="prn_" + "a" * 32,
+        actor_credential_id="crd_" + "a" * 32,
     )
 
     assert _selected_ids(conn, personal_only_owner_predicate(owner_a)) == [
@@ -106,7 +109,7 @@ def _assert_mixed_owner_results(conn):
     assert _selected_ids(conn, team_only_owner_predicate(team)) == ["team-row"]
     assert _selected_ids(
         conn,
-        token_keyed_owner_predicate(
+        workspace_keyed_owner_predicate(
             owner_a,
             team_column="team_id",
             personal_team_rows=PersonalTeamRows.NULL_OR_EMPTY,
@@ -114,7 +117,7 @@ def _assert_mixed_owner_results(conn):
     ) == ["owner-a-empty", "owner-a-null"]
     assert _selected_ids(
         conn,
-        token_keyed_owner_predicate(team, token_column="team_id"),
+        workspace_keyed_owner_predicate(team, workspace_column="team_id"),
     ) == ["team-row"]
 
 
@@ -125,22 +128,23 @@ def test_owner_query_adapters_preserve_mixed_sqlite_result_sets():
 
 
 def test_composite_and_attribution_adapters_keep_roles_separate():
-    owner = personal_owner_context("tok_owner_a")
+    owner = personal_owner_context(OWNER_A)
     composite = composite_owner_predicate(
         owner,
-        owner_key_shape=OwnerKeyShape.SESSION_TOKEN,
+        owner_key_shape=OwnerKeyShape.PERSONAL_WORKSPACE,
         key_values=(("name", "API_KEY"), ("revision", 3)),
     )
     assert composite.sql == "personal_workspace_id = ? AND name = ? AND revision = ?"
-    assert composite.params == ("tok_owner_a", "API_KEY", 3)
+    assert composite.params == (OWNER_A, "API_KEY", 3)
 
     team = team_owner_context(
         "team_red",
         actor_member_id="tmem_owner",
-        actor_session_id="tok_owner_a",
+        actor_principal_id="prn_" + "a" * 32,
+        actor_credential_id="crd_" + "a" * 32,
     )
-    assert attribution_values(team).principal_id == ""
-    assert attribution_values(team).credential_id == ""
+    assert attribution_values(team).principal_id == "prn_" + "a" * 32
+    assert attribution_values(team).credential_id == "crd_" + "a" * 32
     assert attribution_values(team).member_id == "tmem_owner"
     assert attribution_values(owner).principal_id == ""
     assert attribution_values(owner).credential_id == ""
@@ -149,18 +153,18 @@ def test_composite_and_attribution_adapters_keep_roles_separate():
 
 @pytest.mark.parametrize("identifier", ("team-id", "team_id; DROP TABLE runs", "runs.team.id", ""))
 def test_owner_query_adapters_reject_unsafe_identifiers(identifier):
-    owner = personal_owner_context("tok_owner_a")
+    owner = personal_owner_context(OWNER_A)
     with pytest.raises(TeamError, match="safe SQL identifier"):
         personal_only_owner_predicate(owner, owner_column=identifier)
 
 
 def test_owner_query_adapters_require_explicit_table_shape():
-    owner = personal_owner_context("tok_owner_a")
+    owner = personal_owner_context(OWNER_A)
     team = team_owner_context("team_red")
     with pytest.raises(TeamError, match="explicit personal-row representation"):
         team_capable_owner_predicate(owner, personal_team_rows="")  # type: ignore[arg-type]
     with pytest.raises(TeamError, match="explicit personal-row representation"):
-        token_keyed_owner_predicate(owner, team_column="team_id")
+        workspace_keyed_owner_predicate(owner, team_column="team_id")
     with pytest.raises(TeamError, match="Personal-only table"):
         personal_only_owner_predicate(team)
     with pytest.raises(TeamError, match="Team-only table"):

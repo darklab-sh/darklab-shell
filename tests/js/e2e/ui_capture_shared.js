@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
-import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
+import { CAPTURE_ANONYMOUS_ID } from '../../../.tooling/playwright.visual.contracts.js'
 
 import { ensurePromptReady } from './helpers.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
@@ -1416,15 +1416,15 @@ export async function freshHome(
 ) {
   await page.context().clearCookies()
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.evaluate(({ sessionToken }) => {
+  await page.evaluate(({ anonymousId }) => {
     try {
       localStorage.clear()
       sessionStorage.clear()
-      if (sessionToken) localStorage.setItem('session_token', sessionToken)
+      if (anonymousId) localStorage.setItem('anonymous_id', anonymousId)
     } catch (_) {
       // Ignore storage-clear failures in non-standard contexts.
     }
-  }, { sessionToken: useCaptureSession ? CAPTURE_SESSION_TOKEN : '' })
+  }, { anonymousId: useCaptureSession ? CAPTURE_ANONYMOUS_ID : '' })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => {
     if (typeof applyThemeSelection !== 'function') return false

@@ -1442,8 +1442,12 @@ def test_slow_refresh_does_not_hold_the_sqlite_writer_lock(tmp_path, monkeypatch
         assert download_started.wait(5), "refresh did not reach the blocked downloader"
         with sqlite3.connect(db_path, timeout=0.5) as unrelated:
             unrelated.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("writer-during-refresh", "2026-08-11T00:00:00+00:00", ""),
+                "INSERT INTO principals (id, created_at, updated_at) VALUES (?, ?, ?)",
+                (
+                    "prn_" + "a" * 32,
+                    "2026-08-11T00:00:00+00:00",
+                    "2026-08-11T00:00:00+00:00",
+                ),
             )
             unrelated.commit()
     finally:
@@ -1455,7 +1459,8 @@ def test_slow_refresh_does_not_hold_the_sqlite_writer_lock(tmp_path, monkeypatch
     assert worker_result == {"source": "epss", "outcome": "not_modified"}
     with sqlite3.connect(db_path) as verify:
         assert verify.execute(
-            "SELECT COUNT(*) FROM session_tokens WHERE token = 'writer-during-refresh'"
+            "SELECT COUNT(*) FROM principals WHERE id = ?",
+            ("prn_" + "a" * 32,),
         ).fetchone()[0] == 1
         assert verify.execute(
             "SELECT lease_owner FROM cve_risk_refresh_leases WHERE source = 'epss'"

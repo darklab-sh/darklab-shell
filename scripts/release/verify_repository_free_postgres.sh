@@ -14,7 +14,7 @@ install_dir=${RELEASE_POSTGRES_INSTALL_DIR:-"$PWD/release-postgres-install"}
 compose_log=${RELEASE_POSTGRES_LOG_PATH:-"$PWD/release-postgres-compose.log"}
 suffix=$(printf '%s' "${CI_JOB_ID:-$$}" | tr -cd '0-9A-Za-z' | tail -c 20)
 smoke_port=$((21000 + ${CI_JOB_ID:-0} % 10000))
-session_id="00000000-0000-4000-8000-000000000001"
+anonymous_id="00000000-0000-4000-8000-000000000001"
 export COMPOSE_PROJECT_NAME="darklab-release-postgres-${suffix}"
 export COMPOSE_PROFILES=postgres
 
@@ -103,14 +103,14 @@ post_preferences() {
     compose exec -T shell curl -fsS \
         -X POST \
         -H 'Content-Type: application/json' \
-        -H "X-Session-ID: $session_id" \
+        -H "X-Darklab-Anonymous-ID: $anonymous_id" \
         --data "$preferences" \
         "http://127.0.0.1:${smoke_port}/session/preferences"
 }
 
 get_preferences() {
     compose exec -T shell curl -fsS \
-        -H "X-Session-ID: $session_id" \
+        -H "X-Darklab-Anonymous-ID: $anonymous_id" \
         "http://127.0.0.1:${smoke_port}/session/preferences"
 }
 

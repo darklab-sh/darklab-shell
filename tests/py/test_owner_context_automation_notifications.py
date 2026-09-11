@@ -23,8 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _mixed_automation_rows(conn: sqlite3.Connection) -> tuple[str, str]:
-    owner_a = "tok_automation_owner_a"
-    owner_b = "tok_automation_owner_b"
+    owner_a = "wsp_" + "a" * 32
+    owner_b = "wsp_" + "b" * 32
     conn.execute(
         "CREATE TABLE owner_automation_rows ("
         "id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, session_token TEXT NOT NULL, "

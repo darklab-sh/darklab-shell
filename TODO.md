@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Establish pseudonymous principals and hardened credentials](#establish-pseudonymous-principals-and-hardened-credentials)
   - [Add a restricted token deployment profile](#add-a-restricted-token-deployment-profile)
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
 - [Known Issues](#known-issues)
@@ -32,9 +31,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** The remaining planned work for v3.0.0 covers the pseudonymous principal and credential model, restricted deployment profile, and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.0 delivery scope.** The remaining planned work for v3.0.0 covers the restricted deployment profile and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
 
-Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. For authentication, land the final contract decisions before schema work; split the principal roadmap into its numbered phases and split Phase 3A further into bounded subsystem conversions. Additive foundations may merge early, but do not leave personal ownership partly resolved from session tokens and partly from principals between merge requests. Treat the semantic ownership switch, public interfaces, UI, and legacy removal as coordinated slices with explicit transition tests.
+Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile and managed-sign-in work in reviewable slices with explicit transition tests.
 
 After the restricted deployment profile merges, exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
 
@@ -91,137 +90,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
 
-### Establish pseudonymous principals and hardened credentials
-
-Separate the stable actor and personal workspace from the credential used to access them, so credentials can be added, rotated, expired, or revoked without moving or orphaning data. Treat this as a coordinated pre-release cutover: replace the session-token ownership model, raw-token storage, and `session-token` terminology rather than carrying compatibility code forward. The default deployment remains anonymous-first, and users can still carry a pseudonymous workspace between devices without providing a username, email address, or other personal information.
-
-This clean-cutover choice was rechecked on 2026-09-06: the public instance is still unadvertised, production still has one used operator-owned session token plus one never-seen test token, only the operator token appears in authenticated audit activity, and there are no external users to preserve. The latest production backup was extracted and its complete checksum tree verified. The default production path is therefore a clean application-data reset, while a specifically selected conversion of the operator's local data remains optional. The cutover preflight must repeat this audit and stop if new or unexplained use appears.
-
-This entry is the foundation for the restricted deployment and OIDC entries below. It includes principals, personal-workspace ownership, portable credentials, scoped API/CLI tokens, team and worker authorization, and the complete open-profile credential UI. The restricted request gate, HttpOnly cookie exchange, CSRF protection, and managed-provider sign-in remain in the later entries.
-
-#### Product and security contracts
-
-- Anonymous UUID sessions remain the default in the `open` profile. Visiting the app must not create a principal or durable server-side credential automatically.
-- Upgrading an anonymous workspace creates one stable pseudonymous principal, attaches one personal workspace, and issues the first portable credential atomically. The user does not choose whether individual data categories move.
-- A principal may have multiple independently labeled credentials. The same portable credential may be used on several devices, but the UI recommends separate credentials so one lost device can be revoked without affecting the others.
-- A credential authenticates a principal but never owns runs, files, projects, preferences, workflows, secrets, teams, or background work. Personal ownership resolves through the principal's workspace; team authorization resolves through principal membership and server-side capabilities.
-- Invalid, expired, or revoked credentials fail closed. A request that attempts credential authentication must never fall back to an anonymous UUID.
-- Empty or missing owner ids never resolve to a shared anonymous owner. Anonymous access uses an explicit, validated per-browser UUID context; failed credential authentication produces a typed authentication failure before owner resolution.
-- Each personal workspace stores an immutable, validated relative storage key or directory name that is independent of its principal and credentials. Attaching an anonymous workspace preserves its existing directory rather than renaming filesystem state during an ownership change.
-- Revoking one credential immediately blocks that credential from new authenticated actions, disconnects its long-lived streams within 15 seconds, and terminates its interactive PTYs. Already accepted noninteractive runs and durable definitions continue as principal-owned work by default; the revoke flow can also pause definitions created or last changed through that credential. Disabling a principal remains the guaranteed global stop.
-- Raw credential secrets are shown once, are never recoverable from the server, and never enter URLs, command arguments, prompt history, recents, saved transcripts, logs, audit details, diagnostics, exports, error responses, or telemetry.
-- The cutover invalidates existing `tok_` values, removes `/session/migrate`, and keeps no deprecated command, endpoint, header, or raw-owner compatibility alias.
-
-#### Phase 3B — Switch personal ownership and attribution to principals and workspaces
-
-**Steps**
-
-- [x] Change authenticated personal contexts to carry the principal's personal-workspace id as `owner_id` plus separate principal and credential actor metadata. Keep team contexts owned by `team_id` while attribution and capability checks use the principal/member identity rather than a token value.
-- [ ] Replace direct token/session ownership columns and foreign keys across the Phase 3A inventory with personal-workspace or principal references on both backends. Treat the existing `team_members.session_token_hash` and `teams.created_by_session_token_hash` fields as a digest-only precedent to migrate away from, not as durable owner keys to preserve.
-- [ ] Replace private actor references used for attribution with principal references while keeping public pseudonymous display data bounded and optional.
-- [ ] Replace `team_members` token references and uniqueness constraints with principal membership on both backends. Preserve owner, admin, operator, and viewer capability behavior and explicit personal/team scope selection.
-- [ ] Remove `/session/migrate`. Anonymous upgrade uses the atomic attachment operation; activating, adding, or rotating a credential never moves records.
-- [x] Re-key authenticated share mutations, including `delete_share`, through the new owner context. Review unauthenticated `get_share` permalink access separately so this phase does not accidentally change the public-share behavior reserved for the access-profile decision.
-
-**Acceptance criteria**
-
-- [ ] Cross-principal, personal/team, cross-team, import, export, retention, cleanup, and backup/restore tests prove that no route or service still authorizes from a credential value.
-- [ ] Credential rotation, device revocation, label changes, and team removal leave history, files, projects, preferences, secrets, audit attribution, and team-owned records correctly attached.
-- [ ] Repository schema/query scans find no remaining token owner or token foreign key outside intentionally historical migration fixtures.
-- [ ] The semantic diff is concentrated in the authentication-to-owner context boundary and explicit schema/storage adapters; it does not repeat Phase 3A's mechanical query churn or rely on compatibility shims.
-
-#### Phase 5 — Replace browser, API, CLI, and operator interfaces
-
-**Steps**
-
-- [ ] Replace the `session-token` command family with the `credential` command root. Status and list operations may render safe metadata in the terminal; create, use, rotate, and recovery operations that handle a raw secret open the shared Access UI instead of accepting secrets on the command line.
-- [ ] Replace the legacy session routes with principal/credential endpoints for anonymous upgrade, credential redemption/verification, current-principal summary, credential lifecycle management, and local access clearing. Regenerate the API v1 OpenAPI document after final route shapes settle.
-- [ ] Replace `X-Session-ID` with the recorded `X-Darklab-Credential`/`X-Darklab-Anonymous-ID` browser transport, and replace token-shaped CLI configuration with scoped PAT configuration. Keep CLI files owner-only and make diagnostics show only credential type, safe prefix, expiry, and principal state.
-- [x] Remove API v1's explicit `X-Session-ID` fallback from `token_from_request()` and require scoped PATs through `Authorization: Bearer`. Treat this as its own API-visible breaking change with focused contract tests, CLI migration guidance, changelog entry, and release-note callout.
-- [x] Add an operator lifecycle command for safe principal lookup, credential issuance, expiry, rotation, revocation, disable/enable, and recovery. Newly issued secrets print once and require an explicit output destination or interactive acknowledgement when appropriate.
-- [ ] Update command discovery, autocomplete, help, FAQ data, config validation, masking, audit classification, notification redaction, and administrative-command persistence rules for the replacement terminology.
-
-**Acceptance criteria**
-
-- [ ] No supported browser, API, CLI, or operator path accepts a legacy `tok_` credential, `X-Session-ID`, `/session/migrate`, or `session-token` command.
-- [ ] Secret-bearing values cannot enter terminal prompt history, command recents, saved client runs, shell history through documented CLI examples, URLs, or generated OpenAPI examples.
-- [ ] Browser portable credentials and PATs resolve the same principal while retaining separate credential type, scope, expiry, audit, and revocation behavior.
-- [x] CLI/API contract tests cover valid, missing, malformed, expired, revoked, under-scoped, and disabled-principal credentials.
-
-#### Phase 6 — Replace the session-token UI with principal and credential management
-
-**Steps**
-
-- [x] Add an **Access** tab to the existing Options tab strip, immediately after **Preferences**. Keep **Prompt Name** in Preferences, move durable identity controls out of the current Session Token card, and keep one shared controller/state model for desktop and mobile.
-- [x] Design the anonymous state around a clear user outcome: explain that the current workspace is private to this browser, offer a primary **Keep this workspace** action, and explain that no username, email address, or password is required.
-- [x] Make **Keep this workspace** atomically attach all current anonymous data, request an optional credential label, activate the new principal only after success, and leave the anonymous workspace untouched on any failure. Do not present the old optional category-by-category migration prompt.
-- [x] Present the first credential secret in a one-time reveal state with a masked-by-default field, explicit Reveal and Copy actions, a safe credential label, and a clear instruction to save it in a password manager. Remove the secret from the rendered DOM when the reveal closes and never offer the current always-available **Copy token** behavior later.
-- [x] Add **Use an existing credential** through a paste-safe secret input that never places the value in a URL or terminal command. A rejected credential keeps the current UI state, shows an inline error, and does not silently activate a fresh anonymous identity for the failed request.
-- [x] Render existing credentials as `.panel-row` items with label, safe prefix, type, created, last-used, expiry, revoked state, and a passive **Current** badge where applicable. Support add-for-another-device, rename, expiry, rotate, and revoke without ever returning an existing secret.
-- [x] Allow the same saved credential on several devices while recommending one labeled credential per device. Make **Remove access from this browser** clear only local credential state and return to an anonymous UUID; keep **Revoke credential** as a separate destructive server action.
-- [x] Before revocation, identify schedules, watchers, or other future actions attributed to that credential, explain that they continue by default, and offer **also pause related work**. After revocation, provide a direct way to review the affected items.
-- [x] Make rotation a two-step UI: issue and save the replacement first, then revoke the old credential through `showConfirm()`. Warn before revoking the current or last usable credential and point to the recorded operator recovery path.
-- [x] Update the desktop HUD and mobile session/scope summaries to show **ANON** or a safe durable-access hint without exposing a principal id or raw credential. Broadcast identity and credential changes through explicit UI events so other tabs refresh or leave revoked state consistently.
-- [x] Update Teams, Notifications, Schedules, Watchers, Secrets, onboarding, FAQ, command registry, autocomplete, diagnostics, and empty/error states to say **durable identity**, **principal**, or **access credential** instead of session token where that wording reaches users.
-- [x] Reuse the established UI contracts: `.tab-strip` for Access navigation, `.panel-row` for credential rows, `.form-control` and app-native selects for inputs, the existing button family, `showConfirm()` for revoke/disable actions, shared modal dismissal/focus trapping, `.nice-scroll` for long lists, and the existing semantic color tokens. Do not introduce a second modal system or one-off mobile controls.
-- [x] Keep the Options mobile sheet keyboard-safe and touch-sized. Use an in-panel list/detail or disclosure flow for credential details rather than stacking another modal over Options; keep action rows reachable at narrow widths and return focus to the action that opened each editor or confirmation.
-- [x] Add `role="status"`/`aria-live` feedback for successful lifecycle actions, `role="alert"` for validation/authentication failures, complete keyboard operation, visible focus, non-color-only status labels, and safe focus restoration after reveal, copy, rotate, revoke, and local-clear flows.
-- [x] Replace `session_token_controls.js` and its neutral bridge with focused principal/credential modules that communicate through imports, state APIs, or explicit UI events. Update asset configuration and committed source/bundle output without adding undocumented browser globals.
-
-**Acceptance criteria**
-
-- [x] Desktop and mobile users can remain anonymous, keep an anonymous workspace, save the one-time credential, use an existing credential, add a device credential, rotate, revoke, and remove local access without losing or moving principal-owned data.
-- [x] The UI never retrieves an existing raw credential after its one-time reveal, and DOM, clipboard-trigger labels, transcript, recents, browser logs, error artifacts, screenshots, and accessibility text expose only deliberately revealed or safely masked values.
-- [x] Credential lists and actions stay usable with zero, one, many, expired, revoked, and current credentials; slow, failed, duplicated, and out-of-order responses cannot replace newer authoritative state.
-- [ ] Options, HUD, terminal command, Teams, Notifications, Schedules, Watchers, and cross-tab state all agree on anonymous, durable, expired, revoked, and disabled-principal status.
-- [ ] The stolen-device UI path clearly separates local removal, credential revocation, related durable-work handling, and principal disablement so an operator can choose the narrowest effective response.
-- [x] Playwright covers the complete Access flow on desktop and mobile in source and bundled asset modes, including keyboard/focus behavior, narrow action stacking, one-time reveal removal, invalid credential handling, last-credential warnings, cross-tab refresh, and a revoked-current-credential path.
-- [x] UI capture scenes and their reviewer notes cover anonymous Access, first-credential reveal, credential list/current row, rotate confirmation, revoke warning, and mobile list/detail states across the maintained themes.
-
-#### Phase 7 — Perform the clean pre-release cutover and remove legacy identity code
-
-**Steps**
-
-- [ ] Add an operator preflight that verifies the backup, reports current legacy owner/token counts without displaying secrets, and confirms that deployment usage still matches the recorded pre-release assumption. Default to a fresh application-data set while retaining the old data/workspace state for rollback; require an explicit selection for the one operator-owned conversion path.
-- [ ] Run the SQLite preflight and cutover through the application container, or another explicitly verified runtime using the same SQLite build and FTS5 tokenizer support as the application that owns the database. The operator tool must refuse unverified direct host-side SQLite writes with a clear supported invocation; do not assume a host `sqlite3` or Python build is compatible merely because it can open `history.db`.
-- [ ] Check the production workspace root for the current shared-anonymous directory `sess_2f183a4e64493af3f377f745eda50236` (`sha256("anonymous")[:32]`). If it exists, inventory its contents without assuming they belong to one actor and record an explicit quarantine, archive, discard, or manual-review disposition before cutover; never attach mixed contents to the new principal automatically.
-- [ ] For a selected conversion, validate and persist each existing workspace directory name before changing ownership, then perform the database ownership conversion, constraints, and credential issuance in one transaction. Re-keying identity must not rename, copy, or delete workspace directories; startup fails clearly if a committed workspace storage key is missing, invalid, duplicated, or outside the configured root.
-- [ ] Treat `runs` and its external-content `runs_fts` table as one migration unit. Backfill new ownership fields with in-place `UPDATE` statements so ownership changes do not alter `rowid`, `command`, or `output_search_text`, and do not rebuild `runs` merely to re-key ownership. If removing legacy columns requires table reconstruction, preserve every `runs.rowid` explicitly, recreate the supporting triggers, and run `INSERT INTO runs_fts(runs_fts) VALUES ('rebuild')` in the same transaction before commit.
-- [ ] Replace the baseline comment that says runs are never updated after insert with the real invariant: ownership-only updates may occur, while any update to `command` or `output_search_text` must update or rebuild `runs_fts`. Add migration tests that fail if a future `runs` schema rewrite leaves the external-content index stale.
-- [ ] Invalidate all legacy `tok_` values, remove raw `session_tokens` storage, remove token-keyed team constraints and owner columns, remove `/session/token/*` and `/session/migrate`, remove `X-Session-ID`, and remove local-storage/current-command compatibility code in the same release.
-- [ ] Remove migration prompts, token-copy UI, token-aware browser bridges, masking paths that exist only for legacy commands, obsolete CLI config, and legacy fixtures rather than leaving dormant code behind.
-- [ ] Verify rollback restores the complete pre-cutover database and workspace state; rollback must not claim that newly issued credentials remain usable against the restored legacy application.
-
-**Acceptance criteria**
-
-- [ ] A copied legacy token cannot authenticate through any browser, API, CLI, worker, stream, or background path after cutover.
-- [ ] The database conversion is all-or-nothing: a failed transaction leaves the complete old ownership model, while a committed transaction contains only principal/workspace ownership and every workspace row still resolves the unchanged pre-cutover directory. No owner-derived filesystem rename is part of the transaction or recovery path.
-- [ ] SQLite cutover tests verify `runs`/`runs_fts` row-count and `rowid` parity, pass the FTS5 integrity check, and find a seeded known substring through the normal History search path after both a successful conversion and a rollback. A cutover attempted from an unverified host SQLite runtime fails before opening a write transaction.
-- [ ] The default clean-reset rehearsal starts against a fresh complete data set and can return to the retained pre-cutover database and workspace state without combining old and new identity records.
-- [ ] Repository searches find no live `session-token`, `tok_`, `X-Session-ID`, raw `session_tokens`, or `/session/migrate` contract outside historical changelog/decision context and intentional rejection tests.
-- [ ] The selected production data disposition is rehearsed against a restored backup before the production upgrade runs.
-
-#### Phase 8 — Qualify, document, and release the principal model
-
-**Steps**
-
-- [ ] Run the full mode matrix across browser, API, CLI, personal scope, team scope, Files, Projects, Assessments, Atlas, History/shares, interactive PTY, long-lived streams, schedules, watchers, workflows, notifications, secrets, backup/restore, SQLite, and Postgres.
-- [ ] Exercise `scripts/operations/migrate_sqlite_to_postgres.py` from a fully migrated SQLite source into a freshly initialized Postgres destination. Confirm the helper requires the new application migration level, copies principal/workspace/credential records and immutable workspace storage keys correctly, continues to skip SQLite FTS tables, and leaves Postgres search indexes valid. Enforce the recorded storage contract: the backend migration uses the declared existing workspace root and never copies files; a cross-host operator must restore that tree separately first, and unresolved or mismatched storage keys stop the migration before backend cutover.
-- [ ] Add focused security regression coverage for digest-only storage, one-time display, redaction, cross-principal isolation, invalid-credential fail-closed behavior, principal disablement, rate limiting, recovery abuse, concurrent lifecycle actions, and execution-time team authorization.
-- [ ] Measure indexed credential resolution and bounded last-used writes under representative request concurrency so the new authentication lookup does not create a database bottleneck.
-- [ ] Update `README.md`, `FEATURES.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `CONTRIBUTORS.md`, `DECISIONS.md`, `tests/README.md`, CLI help/man pages, API OpenAPI output, UI capture notes, release drafts, and `CHANGELOG.md`.
-- [ ] Recalculate and synchronize the maintained test counts in `ARCHITECTURE.md`, `CONTRIBUTING.md`, and `tests/README.md`, and regenerate the complete test appendix in `tests/README.md` before running the documentation guard.
-- [ ] Call out the intentional legacy credential invalidation, API v1 removal of the `X-Session-ID` fallback, superseded token-as-actor model, and the continue-by-default/optional-pause credential-revocation effect on durable work in the changelog, upgrade guidance, and release notes.
-- [ ] Run documentation links/contracts, Python and JavaScript unit/integration suites, Postgres tests through the approved helper, source/bundle Playwright suites through `bash scripts/run_playwright.sh --asset-bundle-mode ...`, asset checks, lint/type checks, audits, and container smoke tests.
-
-**Acceptance criteria**
-
-- [ ] Anonymous open-profile behavior remains the default and requires no identifying information, while durable users can recover the same principal-owned workspace from multiple independently revocable credentials.
-- [ ] No credential value is an owner key, no raw reusable secret is stored server-side, and no authorization decision depends on a browser-local token string.
-- [ ] Principal disablement, credential revocation, team-role changes, worker execution, API/CLI PATs, UI state, backup/restore, and rollback all match the recorded decisions on both database backends.
-- [ ] The supported SQLite-to-Postgres migration preserves the principal model and either resolves every persisted workspace storage key against the declared destination root or fails with actionable missing-root details before backend cutover.
-- [ ] All required validation passes from a clean checkout, generated assets and OpenAPI output are current, documentation describes final shipped behavior rather than migration phases, and the release notes call out the intentional pre-release credential invalidation.
-
 ### Add a restricted token deployment profile
 
 Give private deployments a real authentication boundary while keeping anonymous access the default. This entry adds the access profile contract, the fail-closed request gate, and the browser session exchange that a restricted deployment needs.
@@ -232,8 +100,8 @@ Give private deployments a real authentication boundary while keeping anonymous 
     - `token_required` rejects anonymous use and accepts only operator-issued pseudonymous access credentials.
     - `oidc_required` rejects anonymous use and requires a configured OpenID Connect provider, implemented by the managed sign-in entry below.
     - `mixed` allows anonymous use while offering optional credential or managed sign-in for operators who want portability, recovery, or centrally managed access.
-  - Enumerate every route that is reachable today without a session before defining the allowlist. Snapshot permalinks serve a full styled page with no session check at all, so an allowlist written only from health, static, sign-in, and callback routes would silently change or break existing behavior.
-  - Define the small public-route allowlist for restricted profiles, including health/readiness checks, static assets, sign-in or credential redemption, and provider callbacks. All other routes must fail closed before they read or mutate session-scoped data.
+  - Enumerate every route that is reachable today without an identity before defining the allowlist. Snapshot permalinks serve a full styled page with no identity check at all, so an allowlist written only from health, static, sign-in, and callback routes would silently change or break existing behavior.
+  - Define the small public-route allowlist for restricted profiles, including health/readiness checks, static assets, sign-in or credential redemption, and provider callbacks. All other routes must fail closed before they read or mutate owner-scoped data.
   - Apply the recorded public-share contract: `open` and `mixed` keep capability links enabled by default; `token_required` and `oidc_required` disable creation and return `404` for reads unless the operator explicitly enables unauthenticated public shares.
   - Return an explicit `401` for a missing, invalid, expired, or revoked credential in restricted profiles. Never downgrade a failed authentication attempt into an anonymous session.
 - [ ] Exchange portable credentials for shorter-lived browser sessions:
@@ -292,8 +160,8 @@ These are possible future improvements, split by whether they look worth carryin
 
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Worth scoping once outbound notifications and external automation mature. The headless API is the right place to receive webhooks that auto-create or update projects.
-- **Cross-session Atlas view.**
-  - Useful for operators managing multiple sessions or shared infrastructure, especially now that team mode makes shared context more important.
+- **Cross-workspace Atlas view.**
+  - Useful for operators managing multiple workspaces or shared infrastructure, especially now that team mode makes shared context more important.
 - **Extend comparison beyond run-to-run finding and artifact diffs.**
   - Snapshot and package-artifact comparisons are likely useful once evidence packages become a regular handoff surface.
 - **Package re-import preview/apply.**
@@ -351,10 +219,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Reuse the run-complete notification hook so push delivery becomes another channel rather than a separate completion system.
 - **Entry-level scope:**
   - Add a manifest, app icons, and a small service worker so users can "Add to Home Screen" and launch into a standalone mobile shell.
-  - VAPID-signed web-push subscription tied to the active session token; subscribe and unsubscribe from the Options sheet.
+  - VAPID-signed web-push subscription tied to the active personal workspace; subscribe and unsubscribe from the Options sheet.
 - **Architecture:**
   - New `app/static/manifest.webmanifest`, icon assets under `app/static/icons/`, and `app/static/sw.js` registered from `app.js` only when the runtime supports it.
-  - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; per-session-token subscription endpoint at `/session/push/subscribe`.
+  - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; a workspace-scoped subscription endpoint under the current notification API.
   - Service worker scope is intentionally narrow — render notifications and open the tab on click; no caching of dynamic transcript content so users never see stale output.
   - Gotchas: iOS Safari requires the user to install the PWA before push works; document this in CONFIGURATION.md.
 

@@ -10,7 +10,7 @@ from typing import Any
 from flask import request
 
 from services.audit.context import request_audit_fields
-from services.auth.resolver import AuthenticatedContext, LegacySessionContext
+from services.auth.resolver import AuthenticatedContext
 
 from .scope import team_owner_context
 
@@ -24,9 +24,7 @@ def required_team_identity() -> tuple[str, str]:
     context = get_authentication_result().context
     if isinstance(context, AuthenticatedContext):
         return context.principal_id, ""
-    if isinstance(context, LegacySessionContext):
-        return context.session_id, ""
-    return "", "session_token_required"
+    return "", "credential_required"
 
 
 def current_credential_id() -> str:

@@ -11,7 +11,10 @@ from services.diff.classifiers import registered_classifiers as registered_diff_
 from services.watchers.classifiers import registered_classifiers as registered_watcher_classifiers
 
 
-def _run(run_id: str, command: str, lines: Sequence[str | dict[str, Any]], *, session_id: str = "tok_watchers"):
+_WATCHER_WORKSPACE_ID = "wsp_" + "a" * 32
+
+
+def _run(run_id: str, command: str, lines: Sequence[str | dict[str, Any]], *, session_id: str = _WATCHER_WORKSPACE_ID):
     return {
         "id": run_id,
         "personal_workspace_id": session_id,
@@ -52,7 +55,7 @@ def _insert_finding(conn, finding_id: str, run_id: str, signature_hash: str, tit
         "INSERT OR IGNORE INTO findings "
         "(id, personal_workspace_id, signature_hash, fingerprint, title, raw_line, severity) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (finding_id, "tok_watchers", signature_hash, f"fp-{finding_id}", title, title, "medium"),
+        (finding_id, _WATCHER_WORKSPACE_ID, signature_hash, f"fp-{finding_id}", title, title, "medium"),
     )
     conn.execute(
         "INSERT INTO findings_occurrences (finding_id, run_id, line_number) VALUES (?, ?, ?)",

@@ -16,7 +16,7 @@ from typing import Any, Callable, cast
 import pytest
 
 from conftest import make_test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 from core.database import delete_run_artifacts
 from core.database_access import get_db_connect
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
@@ -79,6 +79,14 @@ _PRIVATE_EXECUTION_FIELDS = {
 }
 
 
+def _principal_id_for_workspace(conn, workspace_id: str) -> str:
+    row = conn.execute(
+        "SELECT principal_id FROM personal_workspaces WHERE id = ?", (workspace_id,)
+    ).fetchone()
+    assert row is not None
+    return str(row["principal_id"])
+
+
 def _assert_public_execution_payload(
     execution: dict[str, object],
     *private_values: str,
@@ -121,30 +129,30 @@ def _team_scope_fixture() -> dict[str, object]:
     from services.teams.storage import add_team_member, create_team
 
     suffix = uuid.uuid4().hex
-    owner_token = f"tok_workflow_owner_{suffix}"
-    operator_token = f"tok_workflow_operator_{suffix}"
-    viewer_token = f"tok_workflow_viewer_{suffix}"
+    owner_token = principal_owner(str(f"tok_workflow_owner_{suffix}"))
+    operator_token = principal_owner(str(f"tok_workflow_operator_{suffix}"))
+    viewer_token = principal_owner(str(f"tok_workflow_viewer_{suffix}"))
     with get_db_connect()() as conn:
         team = create_team(
             conn,
             name=f"Workflow team {suffix[:8]}",
-            creator_session_token=owner_token,
+            creator_principal_id=_principal_id_for_workspace(conn, owner_token),
         )
         operator = add_team_member(
             conn,
             team_id=str(team["id"]),
-            session_token=operator_token,
+            principal_id=_principal_id_for_workspace(conn, operator_token),
             role="operator",
         )
         viewer = add_team_member(
             conn,
             team_id=str(team["id"]),
-            session_token=viewer_token,
+            principal_id=_principal_id_for_workspace(conn, viewer_token),
             role="viewer",
         )
         conn.commit()
     for token in (owner_token, operator_token, viewer_token):
-        register_durable_session_token(token)
+        browser_identity_headers(token)
     return {
         "team": team,
         "owner_token": owner_token,
@@ -251,7 +259,7 @@ def test_v2_compiler_normalizes_and_rejects_duplicate_exact_exit_codes():
         .post(
             "/session/workflows",
             json=invalid,
-            headers={"X-Session-ID": anonymous_session_id("workflow-exit-code-field-error")},
+            headers={**browser_identity_headers(anonymous_session_id("workflow-exit-code-field-error"))},
         )
     )
     assert response.status_code == 400
@@ -1336,7 +1344,7 @@ def test_cancel_route_contains_missing_and_failed_process_signals(monkeypatch, c
 
         response = client.post(
             f"/workflow-executions/{execution['id']}/cancel",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert response.status_code == 200
         stored = get_execution(session_id, execution["id"])
@@ -1367,9 +1375,9 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     owner_token = str(fixture["owner_token"])
     operator_token = str(fixture["operator_token"])
     viewer_token = str(fixture["viewer_token"])
-    owner_headers = {"X-Session-ID": owner_token, "X-Team-ID": team_id}
-    operator_headers = {"X-Session-ID": operator_token, "X-Team-ID": team_id}
-    viewer_headers = {"X-Session-ID": viewer_token, "X-Team-ID": team_id}
+    owner_headers = {**browser_identity_headers(owner_token), "X-Team-ID": team_id}
+    operator_headers = {**browser_identity_headers(operator_token), "X-Team-ID": team_id}
+    viewer_headers = {**browser_identity_headers(viewer_token), "X-Team-ID": team_id}
     launches: list[str] = []
     monkeypatch.setattr(
         "blueprints.workflows.launch_execution_step",
@@ -1518,7 +1526,7 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
     assert (
         client.get(
             f"/workflow-executions/{owner_execution['id']}",
-            headers={"X-Session-ID": owner_token},
+            headers={**browser_identity_headers(owner_token)},
         ).status_code
         == 404
     )
@@ -1526,13 +1534,13 @@ def test_team_execution_routes_enforce_roles_scope_and_team_process_control(monk
         other_team = create_team(
             conn,
             name="Other workflow team " + uuid.uuid4().hex[:8],
-            creator_session_token=owner_token,
+            creator_principal_id=_principal_id_for_workspace(conn, owner_token),
         )
         conn.commit()
     assert (
         client.get(
             f"/workflow-executions/{owner_execution['id']}",
-            headers={"X-Session-ID": owner_token, "X-Team-ID": str(other_team["id"])},
+            headers={**browser_identity_headers(owner_token), "X-Team-ID": str(other_team["id"])},
         ).status_code
         == 404
     )
@@ -1626,7 +1634,7 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     created = client.post(
         "/session/workflows",
         json=_v2_definition(),
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["workflow"]
     launches = []
     monkeypatch.setattr(
@@ -1640,7 +1648,7 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
             "workflow_id": created["id"],
             "inputs": {"target": "example.com", "ports": "61001-61003"},
         },
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     execution = response.get_json()["execution"]
     batch_id = "abx_" + uuid.uuid4().hex
@@ -1692,45 +1700,45 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     _assert_public_execution_payload(execution, "example.com", "61001-61003", session_id)
     listed = client.get(
         "/workflow-executions?limit=10",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["executions"]
     assert [item["id"] for item in listed] == [execution["id"]]
     assert [step["step_id"] for step in listed[0]["steps"]] == ["resolve", "scan"]
     filtered = client.get(
         f"/workflow-executions?limit=10&workflow_id={created['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["executions"]
     unrelated = client.get(
         "/workflow-executions?limit=10&workflow_id=unrelated_workflow",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["executions"]
     assert [item["id"] for item in filtered] == [execution["id"]]
     assert unrelated == []
     assert (
         client.get(
             "/workflow-executions?limit=10",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         ).get_json()["executions"]
         == []
     )
     assert (
         client.get(
             f"/workflow-executions/{batch_id}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).status_code
         == 404
     )
     assert (
         client.get(
             f"/workflow-executions/{batch_id}/events",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).status_code
         == 404
     )
     assert (
         client.post(
             f"/workflow-executions/{batch_id}/cancel",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         ).status_code
         == 404
     )
@@ -1742,20 +1750,20 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     limited = client.post(
         "/workflow-executions",
         json={"workflow_id": created["id"], "inputs": {"target": "example.net", "ports": "80"}},
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     assert limited.status_code == 429
     assert limited.get_json()["error"] == "workflow_execution_limit"
     assert (
         client.get(
             f"/workflow-executions/{execution['id']}",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         ).status_code
         == 404
     )
     started_events = client.get(
         f"/workflow-executions/{execution['id']}/events?limit=1",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()
     assert [event["type"] for event in started_events["events"]] == ["started"]
     assert started_events["next_cursor"] == 1
@@ -1763,17 +1771,16 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     assert (
         client.get(
             f"/workflow-executions/{execution['id']}/events",
-            headers={"X-Session-ID": other_session},
+            headers={**browser_identity_headers(other_session)},
         ).status_code
         == 404
     )
-    blocked_migration = client.post(
+    removed_migration = client.post(
         "/session/migrate",
         json={"from_session_id": session_id, "to_session_id": str(uuid.uuid4())},
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
-    assert blocked_migration.status_code == 409
-    assert blocked_migration.get_json()["error"] == "active_workflow_execution"
+    assert removed_migration.status_code == 404
     from blueprints import run as run_routes
 
     old_run_id = "run-" + uuid.uuid4().hex
@@ -1804,14 +1811,14 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     monkeypatch.setattr(run_routes, "_signal_process_group", lambda pid: signal_group.append(pid))
     canceled = client.post(
         f"/workflow-executions/{execution['id']}/cancel",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     assert canceled.status_code == 200
     assert canceled.get_json()["execution"].get("_canceled_run_ids") is None
     assert signal_group == [4321]
     terminal_events = client.get(
         f"/workflow-executions/{execution['id']}/events?after=1",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()
     assert [event["type"] for event in terminal_events["events"]][-1] == "canceled"
     assert terminal_events["next_cursor"] == 1 + len(terminal_events["events"])
@@ -1823,15 +1830,15 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     update_response = client.put(
         f"/session/workflows/{created['id']}",
         json=changed_definition,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     delete_response = client.delete(
         f"/session/workflows/{created['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     saved_execution = client.get(
         f"/workflow-executions/{execution['id']}",
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     ).get_json()["execution"]
     stored_execution = get_execution(session_id, execution["id"])
     assert update_response.status_code == 200
@@ -1886,7 +1893,7 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
             )
         conn.commit()
 
-    headers = {"X-Session-ID": session_id}
+    headers = {**browser_identity_headers(session_id)}
     project = client.post(
         "/projects",
         json={"name": "Playbook evidence"},
@@ -1924,7 +1931,7 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
         assert private_value not in serialized
     hidden = client.get(
         f"/history/{first_run}?json=1",
-        headers={"X-Session-ID": anonymous_session_id("other-session")},
+        headers={**browser_identity_headers(anonymous_session_id("other-session"))},
     ).get_json()
     assert hidden["workflow_execution"] is None
     assert hidden["workflow_execution_id"] == ""
@@ -2003,7 +2010,7 @@ def test_linked_runs_expose_sanitized_workflow_provenance_to_history_and_project
         assert private_name not in fanout_serialized
     fanout_hidden = client.get(
         f"/history/{fanout_run}?json=1",
-        headers={"X-Session-ID": anonymous_session_id("other-session")},
+        headers={**browser_identity_headers(anonymous_session_id("other-session"))},
     ).get_json()
     assert fanout_hidden["workflow_execution"] is None
     assert fanout_hidden["workflow_execution_id"] == ""
@@ -2140,7 +2147,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
     collection_workflow_response = client.post(
         "/session/workflows",
         json=collection_source,
-        headers={"X-Session-ID": session_id},
+        headers={**browser_identity_headers(session_id)},
     )
     assert collection_workflow_response.status_code == 201
     collection_workflow = collection_workflow_response.get_json()["workflow"]
@@ -2153,7 +2160,7 @@ def test_server_orchestrator_launches_capture_fed_steps_through_normal_run_servi
             "tab_id": "tab-collection-context",
         },
         headers={
-            "X-Session-ID": session_id,
+            **browser_identity_headers(session_id),
             "X-Client-ID": "client-collection-context",
         },
     )
@@ -2342,7 +2349,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
     missing_value = "workflow-missing-" + uuid.uuid4().hex
     raw_command = f"true {private_value}"
     display_command = "true [redacted]"
-    headers = {"X-Session-ID": session_id}
+    headers = {**browser_identity_headers(session_id)}
     project_response = client.post("/projects", json={"name": "Workflow privacy"}, headers=headers)
     project_id = project_response.get_json()["project"]["id"]
     caplog.set_level(logging.DEBUG, logger="shell")
@@ -2922,30 +2929,30 @@ def test_step_launch_rechecks_team_and_initiator_state():
     assert stored["status"] == "failed"
     assert stored["failure_code"] == "team_unavailable"
 
-    owner_token = "tok_" + uuid.uuid4().hex
-    actor_token = "tok_" + uuid.uuid4().hex
-    viewer_token = "tok_" + uuid.uuid4().hex
+    owner_token = principal_owner(str("tok_" + uuid.uuid4().hex))
+    actor_token = principal_owner(str("tok_" + uuid.uuid4().hex))
+    viewer_token = principal_owner(str("tok_" + uuid.uuid4().hex))
     with get_db_connect()() as conn:
         team = create_team(
             conn,
             name="Workflow permissions " + uuid.uuid4().hex[:8],
-            creator_session_token=owner_token,
+            creator_principal_id=_principal_id_for_workspace(conn, owner_token),
         )
         actor = add_team_member(
             conn,
             team_id=team["id"],
-            session_token=actor_token,
+            principal_id=_principal_id_for_workspace(conn, actor_token),
             role="operator",
         )
         viewer = add_team_member(
             conn,
             team_id=team["id"],
-            session_token=viewer_token,
+            principal_id=_principal_id_for_workspace(conn, viewer_token),
             role="viewer",
         )
         conn.commit()
     for durable_token in (owner_token, actor_token, viewer_token):
-        register_durable_session_token(durable_token)
+        browser_identity_headers(durable_token)
 
     revoked_member_execution = create_execution(
         session_id=actor_token,
@@ -2977,51 +2984,6 @@ def test_step_launch_rechecks_team_and_initiator_state():
     assert executions.launch_execution_step(downgraded_execution["id"]) is None
     downgraded = executions.storage.get_execution_by_id(downgraded_execution["id"])
     assert downgraded is not None and downgraded["failure_code"] == "permission_revoked"
-
-    token = "tok_" + uuid.uuid4().hex
-    with get_db_connect()() as conn:
-        token_actor = add_team_member(
-            conn,
-            team_id=team["id"],
-            session_token=token,
-            role="operator",
-        )
-        conn.commit()
-    register_durable_session_token(token)
-    token_execution = create_execution(
-        session_id=token,
-        team_id=team["id"],
-        workflow_id="resolve_and_scan",
-        workflow_source="config",
-        definition=definition,
-        inputs={"target": "example.com", "ports": "443"},
-        actor_member_id=token_actor["id"],
-        actor_role="operator",
-    )
-    with get_db_connect()() as conn:
-        conn.execute("DELETE FROM session_tokens WHERE token = ?", (token,))
-        conn.commit()
-    assert executions.launch_execution_step(token_execution["id"]) is None
-    revoked_token = executions.storage.get_execution_by_id(token_execution["id"])
-    assert revoked_token is not None and revoked_token["failure_code"] == "token_revoked"
-
-    personal_token = "tok_" + uuid.uuid4().hex
-    register_durable_session_token(personal_token)
-    personal_execution = create_execution(
-        session_id=personal_token,
-        team_id="",
-        workflow_id="resolve_and_scan",
-        workflow_source="config",
-        definition=definition,
-        inputs={"target": "example.com", "ports": "443"},
-    )
-    with get_db_connect()() as conn:
-        conn.execute("DELETE FROM session_tokens WHERE token = ?", (personal_token,))
-        conn.commit()
-    assert executions.launch_execution_step(personal_execution["id"]) is None
-    personal_revoked = executions.storage.get_execution_by_id(personal_execution["id"])
-    assert personal_revoked is not None and personal_revoked["failure_code"] == "token_revoked"
-
 
 def test_recovery_replays_completed_runs_and_fails_vanished_runs(monkeypatch, caplog):
     from services.workflows import executions
@@ -3628,74 +3590,6 @@ def test_recovery_reclaims_stale_states_and_advances_completed_step_once(monkeyp
     invalid_fanout_stored = get_execution(session_id, invalid_fanout_id)
     assert invalid_fanout_stored is not None
     assert invalid_fanout_stored["failure_code"] == "recovery_state_invalid"
-
-
-def test_completed_personal_execution_moves_with_session_migration(monkeypatch):
-    from blueprints import session as session_routes
-
-    client = make_test_app().test_client()
-    source_session = anonymous_session_id("workflow-migrate-source-" + uuid.uuid4().hex)
-    destination_session = anonymous_session_id("workflow-migrate-destination-" + uuid.uuid4().hex)
-    definition = compile_execution_definition(
-        {
-            "version": 2,
-            "id": "migrated_execution",
-            "title": "Migrated execution",
-            "inputs": [],
-            "steps": [
-                {
-                    "id": "finish",
-                    "cmd": "true",
-                    "next": {"success": "complete", "failure": "stop"},
-                }
-            ],
-        }
-    )
-    execution = create_execution(
-        session_id=source_session,
-        team_id="",
-        workflow_id="migrated_execution",
-        workflow_source="personal",
-        definition=definition,
-        inputs={},
-    )
-    run_id = "run-migrated-" + uuid.uuid4().hex
-    assert claim_step_for_launch(execution["id"], "finish") is not None
-    assert bind_step_run(execution["id"], "finish", run_id)
-    assert finalize_run_step(run_id, 0) is not None
-    monkeypatch.setattr(
-        session_routes,
-        "migrate_session_workspace",
-        lambda _from_id, _to_id: type(
-            "Migration",
-            (),
-            {
-                "migrated_files": 0,
-                "skipped_files": 0,
-                "migrated_directories": 0,
-                "skipped_directories": 0,
-                "migrated_file_paths": (),
-            },
-        )(),
-    )
-
-    response = client.post(
-        "/session/migrate",
-        headers={"X-Session-ID": source_session},
-        json={
-            "from_session_id": source_session,
-            "to_session_id": destination_session,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.get_json()["migrated_workflow_executions"] == 1
-    assert get_execution(source_session, execution["id"]) is None
-    migrated = get_execution(destination_session, execution["id"])
-    assert migrated is not None
-    assert migrated["personal_workspace_id"] == destination_session
-    assert migrated["steps"][0]["step_id"] == "finish"
-    assert migrated["steps"][0]["run_id"] == run_id
 
 
 def test_finalization_hook_failure_marks_workflow_failed_without_raising(monkeypatch):

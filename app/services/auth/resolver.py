@@ -48,8 +48,6 @@ class AuthenticationState(str, Enum):
 
 AuthenticationMethod = Literal[
     "anonymous_header",
-    "legacy_session_header",
-    "legacy_bearer",
     "portable_header",
     "pat_bearer",
 ]
@@ -80,16 +78,7 @@ class AnonymousContext:
         object.__setattr__(self, "anonymous_id", validate_anonymous_uuid(self.anonymous_id))
 
 
-@dataclass(frozen=True)
-class LegacySessionContext:
-    """Temporary v2 session-token adapter; remove during the v3 clean cutover."""
-
-    session_id: str
-    authentication_method: AuthenticationMethod
-    created_at: str | None = None
-
-
-ResolvedContext = AuthenticatedContext | AnonymousContext | LegacySessionContext
+ResolvedContext = AuthenticatedContext | AnonymousContext
 
 
 @dataclass(frozen=True)
@@ -123,9 +112,6 @@ _PORTABLE_SECRET_RE = re.compile(
 _PAT_SECRET_RE = re.compile(
     r"\Adlp_v1_(?P<id>pat_[0-9a-f]{32})_(?P<secret>[A-Za-z0-9_-]{43})\Z"
 )
-_LEGACY_TOKEN_RE = re.compile(r"\Atok_[A-Za-z0-9_-]{1,124}\Z")
-
-
 def _failure(state: AuthenticationState, code: str, message: str) -> AuthenticationResult:
     return AuthenticationResult(
         state=state,
@@ -184,19 +170,23 @@ def _bearer(headers: HeaderValues) -> tuple[str, AuthenticationResult | None]:
 def _parse_transport(
     headers: HeaderValues,
 ) -> tuple[
-    _ParsedCredential | LegacySessionContext | AnonymousContext | None,
+    _ParsedCredential | AnonymousContext | None,
     AuthenticationResult | None,
 ]:
     portable = str(headers.get("X-Darklab-Credential") or "")
     anonymous = str(headers.get("X-Darklab-Anonymous-ID") or "")
-    legacy = str(headers.get("X-Session-ID") or "")
+    if "X-Session-ID" in headers:
+        return None, _failure(
+            AuthenticationState.MALFORMED_CREDENTIAL,
+            "legacy_identity_removed",
+            "X-Session-ID is no longer supported. Use a Darklab anonymous ID or access credential.",
+        )
     bearer, bearer_error = _bearer(headers)
     if bearer_error is not None:
         return None, bearer_error
     for name, value in (
         ("X-Darklab-Credential", portable),
         ("X-Darklab-Anonymous-ID", anonymous),
-        ("X-Session-ID", legacy),
     ):
         if name in headers and not value:
             return None, _failure(
@@ -204,13 +194,7 @@ def _parse_transport(
                 "malformed_credential",
                 "The supplied identity or credential is malformed.",
             )
-    supplied = sum(bool(value) for value in (portable, anonymous, legacy, bearer))
-    if legacy and supplied > 1:
-        return None, _failure(
-            AuthenticationState.MALFORMED_CREDENTIAL,
-            "legacy_identity_conflict",
-            "Legacy and v3 identity headers cannot be combined.",
-        )
+    supplied = sum(bool(value) for value in (portable, anonymous, bearer))
     if supplied > 1:
         return None, _failure(
             AuthenticationState.MALFORMED_CREDENTIAL,
@@ -221,13 +205,7 @@ def _parse_transport(
         if portable:
             return _decode_secret(portable, credential_type="portable", method="portable_header"), None
         if bearer:
-            if _LEGACY_TOKEN_RE.fullmatch(bearer):
-                return LegacySessionContext(bearer, "legacy_bearer"), None
             return _decode_secret(bearer, credential_type="pat", method="pat_bearer"), None
-        if legacy:
-            if _LEGACY_TOKEN_RE.fullmatch(legacy):
-                return LegacySessionContext(legacy, "legacy_session_header"), None
-            return AnonymousContext(validate_anonymous_uuid(legacy)), None
         if anonymous:
             return AnonymousContext(validate_anonymous_uuid(anonymous)), None
     except InvalidIdentityValue:
@@ -260,36 +238,6 @@ def _stored_context_timestamp(value: Any) -> str | None:
 def _last_used_write_is_due(value: Any, cutoff: datetime) -> bool:
     last_used = _as_utc(value)
     return last_used is None or last_used <= cutoff
-
-
-def _resolve_legacy(conn: Any, parsed: LegacySessionContext, *, now: datetime, touch_last_used: bool) -> AuthenticationResult:
-    row = conn.execute(
-        "SELECT token, created, last_seen_at FROM session_tokens WHERE token = ?",
-        (parsed.session_id,),
-    ).fetchone()
-    if row is None:
-        return _failure(
-            AuthenticationState.UNKNOWN_CREDENTIAL,
-            "revoked_token",
-            "The supplied credential is unknown or no longer available.",
-        )
-    data = _row_dict(row)
-    cutoff = now - timedelta(seconds=LAST_USED_WRITE_INTERVAL_SECONDS)
-    if touch_last_used and _last_used_write_is_due(data.get("last_seen_at"), cutoff):
-        conn.execute(
-            "UPDATE session_tokens SET last_seen_at = ? WHERE token = ? "
-            "AND (last_seen_at IS NULL OR last_seen_at <= ?)",
-            (timestamp(now), parsed.session_id, timestamp(cutoff)),
-        )
-    return AuthenticationResult(
-        state=AuthenticationState.VALID,
-        context=LegacySessionContext(
-            parsed.session_id,
-            parsed.authentication_method,
-            created_at=str(data.get("created") or "") or None,
-        ),
-        credential_supplied=True,
-    )
 
 
 def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, touch_last_used: bool) -> AuthenticationResult:
@@ -403,8 +351,6 @@ def resolve_authentication(
     active_now = active_now.astimezone(timezone.utc)
 
     def operation(active_conn: Any) -> AuthenticationResult:
-        if isinstance(parsed, LegacySessionContext):
-            return _resolve_legacy(active_conn, parsed, now=active_now, touch_last_used=touch_last_used)
         return _resolve_credential(active_conn, parsed, now=active_now, touch_last_used=touch_last_used)
 
     if conn is not None:

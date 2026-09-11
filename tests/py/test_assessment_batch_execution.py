@@ -531,7 +531,7 @@ def test_batch_child_provenance_reaches_run_assessment_and_package_surfaces(
 
     hidden = client.get(
         f"/history/{run_id}?json=1",
-        headers={"X-Session-ID": anonymous_session_id('other-session')},
+        headers={"X-Darklab-Anonymous-ID": anonymous_session_id('other-session')},
     ).get_json()
     assert hidden["assessment_batch"] is None
     assert hidden["assessment_batch_id"] == ""

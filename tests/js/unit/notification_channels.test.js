@@ -82,7 +82,7 @@ describe('notification channel preferences panel', () => {
   it('renders token-required and empty states from refresh responses', async () => {
     const apiFetch = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ error: 'session_token_required' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ error: 'authentication_required' }, 401))
       .mockResolvedValueOnce(jsonResponse({ channels: [] }))
     const { list, msg, refreshNotificationChannels } = loadNotificationChannels({ apiFetch })
 

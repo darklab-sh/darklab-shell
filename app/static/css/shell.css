@@ -1450,21 +1450,21 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
 }
 
-.options-session-token-desc {
+.options-access-desc {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 8px;
   line-height: 1.5;
 }
 
-.options-session-token-status {
+.options-access-status {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 8px;
 }
 
-.options-session-token-status.is-active {
+.options-access-status.is-active {
   color: var(--green);
 }
 
@@ -1524,18 +1524,18 @@ body.mobile-terminal-mode .output-follow-btn {
   border-top: 1px solid var(--border);
 }
 
-.options-session-token-status-row {
+.options-access-status-row {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
 }
 
-.options-session-token-status-row .options-session-token-status {
+.options-access-status-row .options-access-status {
   margin-bottom: 0;
 }
 
-.options-session-token-actions {
+.options-access-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -2420,13 +2420,13 @@ body.mobile-terminal-mode .output-follow-btn {
   box-shadow: 0 0 0 3px var(--green-glow);
 }
 
-.options-session-token-msg {
+.options-access-msg {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
 }
 
-.options-session-token-msg.is-error {
+.options-access-msg.is-error {
   color: var(--red);
 }
 

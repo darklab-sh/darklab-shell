@@ -77,13 +77,13 @@ describe('frontend browser global boundary inventory', () => {
     resolver_helper_calls_by_class: Object.freeze({
       bridge_dispatch: 96,
       global_only: 541,
-      import_first: 597,
+      import_first: 595,
     }),
     resolver_helper_calls_by_final_resolution: Object.freeze({
       allowlisted_global: 52,
       bridge_dispatch_report_only: 92,
       dynamic_or_non_literal: 27,
-      fallback_imported_binding: 380,
+      fallback_imported_binding: 378,
       fallback_local_binding: 14,
       global_publish: 77,
       guarded_compatibility_fallback: 503,

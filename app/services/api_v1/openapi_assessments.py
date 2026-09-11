@@ -34,7 +34,7 @@ def _error_response(description: str) -> dict[str, Any]:
 def _errors(*, not_found: str = "Assessment or Project not found") -> dict[str, Any]:
     return {
         "400": _error_response("Invalid assessment request"),
-        "401": _error_response("Missing, invalid, or revoked token"),
+        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
         "403": _error_response("Team role cannot mutate Project assessments"),
         "404": _error_response(not_found),
         "409": _error_response("Assessment conflict or quota exceeded"),

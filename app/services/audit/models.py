@@ -36,7 +36,6 @@ class AuditTargetType(str, Enum):
     TARGET = "target"
     SCHEDULE = "schedule"
     WATCHER = "watcher"
-    SESSION_TOKEN = "session_token"
     IMPORT = "import"
     WORKFLOW = "workflow"
     WORKFLOW_EXECUTION = "workflow_execution"
@@ -111,9 +110,6 @@ class AuditEventType(str, Enum):
     WATCHER_ACCEPT_BASELINE = "watcher.accept_baseline"
     WATCHER_RUN_NOW = "watcher.run_now"
     WATCHER_ACK = "watcher.ack"
-    SESSION_TOKEN_GENERATE = "session_token.generate"
-    SESSION_TOKEN_REVOKE = "session_token.revoke"
-    SESSION_MIGRATE = "session.migrate"
     IMPORT_APPLY = "import.apply"
     WORKFLOW_CREATE = "workflow.create"
     WORKFLOW_UPDATE = "workflow.update"
@@ -690,15 +686,6 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.WATCHER_ACK.value: _spec(
         AuditEventType.WATCHER_ACK, AuditTargetType.WATCHER, RecordingMode.BEST_EFFORT
-    ),
-    AuditEventType.SESSION_TOKEN_GENERATE.value: _spec(
-        AuditEventType.SESSION_TOKEN_GENERATE, AuditTargetType.SESSION_TOKEN, RecordingMode.BEST_EFFORT
-    ),
-    AuditEventType.SESSION_TOKEN_REVOKE.value: _spec(
-        AuditEventType.SESSION_TOKEN_REVOKE, AuditTargetType.SESSION_TOKEN, RecordingMode.FAIL_CLOSED
-    ),
-    AuditEventType.SESSION_MIGRATE.value: _spec(
-        AuditEventType.SESSION_MIGRATE, AuditTargetType.SESSION_TOKEN, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.IMPORT_APPLY.value: _spec(
         AuditEventType.IMPORT_APPLY, AuditTargetType.IMPORT, RecordingMode.BEST_EFFORT

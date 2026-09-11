@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Transactional attachment of anonymous data to a personal workspace."""
+"""Transactional attachment of personal data to a durable workspace."""
 
 from __future__ import annotations
 
@@ -137,11 +137,11 @@ def _background_authorization_schema_is_active(conn: Any) -> bool:
     ).fetchone() is not None
 
 
-def attach_anonymous_ownership(
+def attach_personal_ownership(
     conn: Any,
     *,
     backend: DatabaseBackend,
-    anonymous_id: str,
+    source_owner_id: str,
     workspace_id: str,
     principal_id: str,
     credential_id: str,
@@ -153,14 +153,14 @@ def attach_anonymous_ownership(
     counts: dict[str, int] = {}
     for table_name in PERSONAL_OWNER_TABLES:
         cursor = conn.execute(
-            f"UPDATE {table_name} SET personal_workspace_id = ? WHERE personal_workspace_id = ?",  # nosec B608 - fixed internal table tuple
-            (workspace_id, anonymous_id),
+            f"UPDATE {table_name} SET personal_workspace_id = ? WHERE personal_workspace_id = ?",  # nosec
+            (workspace_id, source_owner_id),
         )
         counts[table_name] = max(0, int(cursor.rowcount or 0))
 
     cursor = conn.execute(
         "UPDATE secrets SET owner_id = ? WHERE owner_id = ?",
-        (workspace_id, anonymous_id),
+        (workspace_id, source_owner_id),
     )
     counts["secrets"] = max(0, int(cursor.rowcount or 0))
 
@@ -170,7 +170,7 @@ def attach_anonymous_ownership(
         # last changed it. Those credential-attribution columns remain NULL.
         for table_name in _BACKGROUND_PRINCIPAL_TABLES:
             conn.execute(
-                f"UPDATE {table_name} SET principal_id = ? "  # nosec B608 - fixed internal table tuple
+                f"UPDATE {table_name} SET principal_id = ? "  # nosec
                 "WHERE personal_workspace_id = ? AND principal_id IS NULL",
                 (principal_id, workspace_id),
             )
@@ -181,7 +181,7 @@ def attach_anonymous_ownership(
         )
         for child_table, parent_key, parent_table in _BACKGROUND_CHILD_TABLES:
             conn.execute(
-                f"UPDATE {child_table} SET principal_id = ("  # nosec B608 - fixed internal identifier tuple
+                f"UPDATE {child_table} SET principal_id = ("  # nosec
                 f"SELECT {parent_table}.principal_id FROM {parent_table} "
                 f"WHERE {parent_table}.id = {child_table}.{parent_key}"
                 ") WHERE principal_id IS NULL AND EXISTS ("
@@ -192,12 +192,12 @@ def attach_anonymous_ownership(
 
     for table_name, legacy_column, principal_column, credential_column in _ATTRIBUTION_COLUMNS:
         conn.execute(
-            f"UPDATE {table_name} SET {principal_column} = ?, {credential_column} = ? "  # nosec B608 - fixed internal identifier tuple
+            f"UPDATE {table_name} SET {principal_column} = ?, {credential_column} = ? "  # nosec
             f"WHERE {legacy_column} = ?",
-            (principal_id, credential_id, anonymous_id),
+            (principal_id, credential_id, source_owner_id),
         )
 
-    anonymous_hash = hashlib.sha256(anonymous_id.encode("utf-8")).hexdigest()
+    source_owner_hash = hashlib.sha256(source_owner_id.encode("utf-8")).hexdigest()
     workspace_hash = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()
     conn.execute(
         "UPDATE audit_events SET owner_workspace_hash = ?, actor_principal_id = ?, "
@@ -208,10 +208,10 @@ def attach_anonymous_ownership(
             principal_id,
             hashlib.sha256(principal_id.encode("utf-8")).hexdigest(),
             credential_id,
-            anonymous_hash,
+            source_owner_hash,
         ),
     )
     return counts
 
 
-__all__ = ["PERSONAL_OWNER_TABLES", "attach_anonymous_ownership"]
+__all__ = ["PERSONAL_OWNER_TABLES", "attach_personal_ownership"]

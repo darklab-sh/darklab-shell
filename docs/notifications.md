@@ -1,12 +1,12 @@
 # Outbound Notifications
 
-darklab_shell can send queued notifications to external destinations for durable session-token users. Use this when a long run finishes while you are away from the browser, or when automation needs an audit trail of what was sent and what failed.
+darklab_shell can send queued notifications to external destinations for kept personal workspaces and teams. Use this when a long run finishes while you are away from the browser, or when automation needs an audit trail of what was sent and what failed.
 
 Browser desktop notifications are still controlled by the **Run Notifications** preference. This page covers outbound channels from the Options **Notifications** tab, the terminal `notify` built-in, `/api/v1`, and the bundled `darklab notify` CLI. Secret-valued channel creation stays in Options, the API, or the CLI's prompt/secret-file flow instead of accepting secrets in terminal command text.
 
 ## Channel Types
 
-Notification channels belong to a durable `tok_` session or to the active team scope. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked. In team scope, owners and admins manage shared channels, and every team member can read the team's delivery audit rows.
+Notification channels belong to a kept personal workspace or to the active team scope. Anonymous browser workspaces cannot create channels because delivery needs an owner that survives browser restarts and can be disabled. In team scope, owners and admins manage shared channels, and every team member can read the team's delivery audit rows.
 
 | Kind | Sends to | Secret fields | Config fields |
 | --- | --- | --- | --- |
@@ -48,14 +48,14 @@ Every outbound payload includes:
 }
 ```
 
-`app_name` comes from the configured `app_name` value. `run_complete` payloads also include the run id, command root, exit code, session-token hint, and a summary map:
+`app_name` comes from the configured `app_name` value. `run_complete` payloads also include the run id, command root, exit code, a short workspace hint, and a summary map:
 
 ```json
 {
   "trigger": "run_complete",
   "app_name": "darklab_shell",
   "occurred_at": "2026-05-20T00:00:00+00:00",
-  "session_token_hint": "1234",
+  "workspace_hint": "1234",
   "run_id": "run-id",
   "command_root": "nmap",
   "exit_code": 0,
@@ -86,7 +86,7 @@ Other accepted trigger names do not produce deliveries unless an app source queu
 
 Notification payloads are intentionally small:
 
-- session tokens are never sent; payloads include only the last four characters as `session_token_hint`
+- credential secrets and principal ids are never sent; run payloads include only the last four characters of the internal personal-workspace id as `workspace_hint`
 - run payloads use the command root, such as `nmap`, instead of the full command line
 - channel secrets are stored through the encrypted vault or operator config and are never returned by list APIs
 - Telegram, Pushover, and email error messages avoid echoing token values
@@ -123,18 +123,18 @@ Digest delivery uses explicit channel selection, so a channel does not need to s
 
 ## Webhook Quickstart
 
-Create a durable session token first, then point the API at your darklab_shell host:
+Create a scoped PAT from **Access**, then point the API at your darklab_shell host:
 
 ```bash
 export DARKLAB_API_URL="http://127.0.0.1:5001"
-export DARKLAB_TOKEN="tok_..."
+export DARKLAB_PAT="dlp_v1_pat_..."
 ```
 
 Create a generic webhook channel with curl:
 
 ```bash
 curl -sS \
-  -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  -H "Authorization: Bearer $DARKLAB_PAT" \
   -H "Content-Type: application/json" \
   -d '{
     "kind": "webhook",
@@ -202,12 +202,12 @@ The SMTP password is read from the environment variable named by `notifications.
 ## Operator Notes
 
 - The notification worker runs beside Gunicorn and is supervised by the container entrypoint when enabled.
-- Terminal, API, and CLI channel management require a durable session token.
+- Terminal channel management requires a kept personal workspace; API and CLI management require a scoped PAT.
 - Test sends use the same queued dispatcher path as real events and report whether the selected channel delivered, deferred, or failed the test event.
 - Manual test sends use `notifications.test_timeout_seconds`, so a broken webhook or SMTP relay returns feedback faster than normal background delivery.
 - Project digest notifications use explicit channel selection from Project Monitoring and appear in the same per-channel delivery history as run and watcher notifications.
 - Sent delivery audit rows are kept for `notifications.events.retention_days` days. Retry and dead-letter rows remain until they are retried or deleted with their channel/session data.
-- Delivery history stays attached to the session token even if a channel row is later deleted.
+- Delivery history stays attached to the personal workspace or team even if a channel row is later deleted.
 
 ## Related Docs
 

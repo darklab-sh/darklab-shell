@@ -24,7 +24,7 @@ SESSION_B = anonymous_session_id("test-session-fts-b")
 
 def get_client(session_id=SESSION_A, *, init_db: bool = True):
     client = _test_app(init_db=init_db).test_client()
-    client.environ_base["HTTP_X_SESSION_ID"] = session_id
+    client.environ_base["HTTP_X_DARKLAB_ANONYMOUS_ID"] = session_id
     return client
 
 

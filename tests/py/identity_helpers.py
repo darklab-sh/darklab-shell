@@ -10,12 +10,10 @@ identifiers should remain literal at the call site so their intent stays clear.
 
 from __future__ import annotations
 
-import secrets
 import hashlib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 
@@ -31,36 +29,8 @@ def anonymous_session_id(label: str | None = None) -> str:
 
 
 def identity_headers(identity: str) -> dict[str, str]:
-    """Return request headers that consistently reuse one identity."""
-    return {"X-Session-ID": identity}
-
-
-def register_durable_session_token(token: str) -> str:
-    """Persist a durable token through the same service used by the application."""
-    from services.session.storage import create_session_token, session_token_exists  # noqa: PLC0415
-
-    if not str(token).startswith("tok_"):
-        raise ValueError("durable test identities must start with 'tok_'")
-    if session_token_exists(token):
-        return token
-    create_session_token(
-        token,
-        datetime.now(timezone.utc).isoformat(),
-        audit_fields={"session_id": "", "actor_session_id": ""},
-        audit_details={"source": "test_fixture"},
-        audit_target_id=f"{token[:8]}********",
-    )
-    return token
-
-
-def durable_session_token(label: str | None = None) -> str:
-    """Create and persist a durable token through the production service."""
-    suffix = (
-        uuid.uuid5(_TEST_IDENTITY_NAMESPACE, f"durable:{label}").hex
-        if label
-        else secrets.token_hex(16)
-    )
-    return register_durable_session_token(f"tok_{suffix}")
+    """Return production request headers that consistently reuse one identity."""
+    return browser_identity_headers(identity)
 
 
 @dataclass(frozen=True)
@@ -100,14 +70,27 @@ class PrincipalIdentityFixture:
         return headers
 
 
+@dataclass(frozen=True)
+class PersistedPrincipalFixture:
+    """Stable principal/workspace ids for service tests that own their connection."""
+
+    principal_id: str
+    personal_workspace_id: str
+    storage_key: str
+
+
 _PRINCIPAL_IDENTITIES_BY_WORKSPACE: dict[str, PrincipalIdentityFixture] = {}
 
 
 def principal_identity(label: str | None = None) -> PrincipalIdentityFixture:
     """Issue separate production-shaped browser and API credentials."""
+    from services.secrets.vault import reset_master_key_cache_for_tests  # noqa: PLC0415
     from services.auth import storage  # noqa: PLC0415
     from services.auth.contracts import PAT_SCOPES  # noqa: PLC0415
 
+    # Some vault tests intentionally replace the deployment key. Always reload
+    # the restored test key before issuing a production-shaped credential.
+    reset_master_key_cache_for_tests()
     bundle = storage.create_principal_with_credential(credential_label=label or "Test browser")
     pat = storage.issue_credential(
         bundle.principal.id,
@@ -126,12 +109,37 @@ def principal_identity(label: str | None = None) -> PrincipalIdentityFixture:
     return fixture
 
 
+def principal_owner(label: str | None = None) -> str:
+    """Create a principal and return its personal workspace owner id."""
+    return principal_identity(label).owner_id
+
+
+def persisted_principal(conn: Any, label: str) -> PersistedPrincipalFixture:
+    """Insert a production-shaped principal and workspace on an explicit connection."""
+    normalized = str(label or "test-principal")
+    principal_id = "prn_" + hashlib.sha256(f"principal:{normalized}".encode()).hexdigest()[:32]
+    workspace_id = "wsp_" + hashlib.sha256(f"workspace:{normalized}".encode()).hexdigest()[:32]
+    storage_key = "ws_" + hashlib.sha256(f"storage:{normalized}".encode()).hexdigest()[:32]
+    created = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO principals (id, created_at, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (id) DO NOTHING",
+        (principal_id, created, created),
+    )
+    conn.execute(
+        "INSERT INTO personal_workspaces (id, principal_id, storage_key, created_at) "
+        "VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+        (workspace_id, principal_id, storage_key, created),
+    )
+    return PersistedPrincipalFixture(principal_id, workspace_id, storage_key)
+
+
 def browser_identity_headers(identity: str, *, team_id: str = "") -> dict[str, str]:
     """Use a portable credential for principals and a UUID for anonymous owners."""
     principal = _PRINCIPAL_IDENTITIES_BY_WORKSPACE.get(str(identity))
     if principal is not None:
         return principal.browser_headers(team_id=team_id)
-    headers = identity_headers(identity)
+    headers = {"X-Darklab-Anonymous-ID": str(identity)}
     if team_id:
         headers["X-Team-ID"] = team_id
     return headers
@@ -177,7 +185,7 @@ def anonymous_identity(label: str | None = None) -> IdentityFixture:
 
 
 def durable_identity(label: str | None = None) -> IdentityFixture:
-    return IdentityFixture(durable_session_token(label))
+    return IdentityFixture(principal_owner(label))
 
 
 def identity_client(client: Any, identity: str | IdentityFixture | None = None) -> IdentityClient:

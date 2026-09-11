@@ -48,7 +48,8 @@ from typing import Any, IO, cast
 import pytest
 import yaml
 
-from identity_helpers import anonymous_session_id
+from identity_helpers import anonymous_session_id, persisted_principal
+from core.helpers import get_log_session_id
 import core.process as process
 import services.pty.service as pty_service
 import services.runs.broker as run_broker
@@ -78,6 +79,8 @@ import services.secrets.storage as secrets_storage
 import services.secrets.vault as secrets_vault
 import services.workspace.file_mutations as workspace_file_mutations
 import services.workspace.files as workspace_module
+
+
 import services.commands.wordlists as wordlists
 from services.workflows.catalog import render_workflow_command
 from services.commands.registry import (
@@ -172,6 +175,20 @@ from services.workspace.files import (
     WORKSPACE_DIR_MODE,
     WORKSPACE_FILE_MODE,
 )
+
+_AI_PRINCIPAL_ID = "prn_" + hashlib.sha256(b"ai-test-principal").hexdigest()[:32]
+_AI_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"ai-test-workspace").hexdigest()[:32]
+_AI_WORKSPACE_STORAGE_KEY = "ws_" + hashlib.sha256(b"ai-test-storage").hexdigest()[:32]
+_SCHEDULER_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:scheduler").hexdigest()[:32]
+_WATCHER_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:watchers").hexdigest()[:32]
+_WATCHER_PRINCIPAL_ID = "prn_" + hashlib.sha256(b"principal:watchers").hexdigest()[:32]
+_OTHER_WATCHER_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:other-watchers").hexdigest()[:32]
+_NOTIFICATION_PRINCIPAL_ID = "prn_" + hashlib.sha256(b"principal:notifications").hexdigest()[:32]
+_NOTIFICATION_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:notifications").hexdigest()[:32]
+_TEAM_BUILTIN_OWNER_PRINCIPAL_ID = "prn_" + hashlib.sha256(b"principal:team-builtin-owner").hexdigest()[:32]
+_TEAM_BUILTIN_OWNER_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:team-builtin-owner").hexdigest()[:32]
+_TEAM_BUILTIN_OPERATOR_PRINCIPAL_ID = "prn_" + hashlib.sha256(b"principal:team-builtin-operator").hexdigest()[:32]
+_TEAM_BUILTIN_OPERATOR_WORKSPACE_ID = "wsp_" + hashlib.sha256(b"workspace:team-builtin-operator").hexdigest()[:32]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "development" / "seed_history.py"
@@ -510,30 +527,31 @@ class TestAIAssistContextAndStorage:
         return fake
 
     def _ai_db(self, monkeypatch, tmp_path):
-        from services.teams.storage import token_hash
-
         db_path = os.path.join(tmp_path, "ai-assist.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
         database.db_init()
         conn = database.db_connect()
         created = "2026-05-23T10:00:00+00:00"
-        legacy_hash = token_hash("tok_ai")
         conn.execute(
-            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
-            ("tok_ai", created),
+            "INSERT INTO principals (id, created_at, updated_at) VALUES (?, ?, ?)",
+            (_AI_PRINCIPAL_ID, created, created),
+        )
+        conn.execute(
+            "INSERT INTO personal_workspaces (id, principal_id, storage_key, created_at) VALUES (?, ?, ?, ?)",
+            (_AI_WORKSPACE_ID, _AI_PRINCIPAL_ID, _AI_WORKSPACE_STORAGE_KEY, created),
         )
         conn.execute(
             "INSERT INTO teams "
-            "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, created_at, updated_at) "
-            "VALUES ('team_ai', 'AI test team', 'ai-test-team', 'active', 'mem_ai', ?, ?, ?)",
-            (legacy_hash, created, created),
+            "(id, name, slug, status, created_by_member_id, created_at, updated_at) "
+            "VALUES ('team_ai', 'AI test team', 'ai-test-team', 'active', 'mem_ai', ?, ?)",
+            (created, created),
         )
         conn.execute(
             "INSERT INTO team_members "
-            "(id, team_id, session_token, session_token_hash, role, status, joined_at) "
-            "VALUES ('mem_ai', 'team_ai', 'tok_ai', ?, 'operator', 'active', ?)",
-            (legacy_hash, created),
+            "(id, team_id, principal_id, role, status, joined_at) "
+            "VALUES ('mem_ai', 'team_ai', ?, 'operator', 'active', ?)",
+            (_AI_PRINCIPAL_ID, created),
         )
         conn.commit()
         return conn
@@ -578,7 +596,7 @@ class TestAIAssistContextAndStorage:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "run-ai",
-                "tok_ai",
+                _AI_WORKSPACE_ID,
                 "external",
                 "nmap -sV darklab.sh",
                 "2026-05-23T10:00:00+00:00",
@@ -594,7 +612,7 @@ class TestAIAssistContextAndStorage:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "fnd_ai",
-                "tok_ai",
+                _AI_WORKSPACE_ID,
                 "run-ai",
                 "info",
                 "open_port",
@@ -611,7 +629,7 @@ class TestAIAssistContextAndStorage:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 "ent_ai",
-                "tok_ai",
+                _AI_WORKSPACE_ID,
                 "domain",
                 "darklab.sh",
                 "sig_darklab",
@@ -644,8 +662,8 @@ class TestAIAssistContextAndStorage:
             "ai_allow_full_output": False,
             "share_redaction_enabled": False,
         }
-        first = build_run_context("run-ai", session_id="tok_ai", cfg=cfg)
-        second = build_run_context("run-ai", session_id="tok_ai", cfg=cfg)
+        first = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg)
+        second = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg)
 
         assert first.context_hash == second.context_hash
         assert first.context["run"]["runtime_seconds"] == 2
@@ -670,7 +688,7 @@ class TestAIAssistContextAndStorage:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "triage_ai",
-                    "tok_ai",
+                    _AI_WORKSPACE_ID,
                     "fnd_ai",
                     "Patch darklab.sh HTTPS hardening.",
                     "Re-run nmap -sV darklab.sh.",
@@ -689,7 +707,7 @@ class TestAIAssistContextAndStorage:
             "share_redaction_enabled": False,
         }
         with mock.patch.object(ai_context.log, "debug") as debug:
-            context = ai_context.build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+            context = ai_context.build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="summary")
 
         assert context.input_chars <= 4000
         assert set(context.context) == {
@@ -728,7 +746,7 @@ class TestAIAssistContextAndStorage:
         assert "heavily_redacted" not in extra
         assert extra == {
             "run_id": "run-ai",
-            "session": "tok_ai********",
+            "session": get_log_session_id(_AI_WORKSPACE_ID),
             "variant": "summary",
             "output_source": "preview",
             "output_truncated": False,
@@ -788,7 +806,7 @@ class TestAIAssistContextAndStorage:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "run-ai-vulners",
-                    "tok_ai",
+                    _AI_WORKSPACE_ID,
                     "external",
                     "nmap -sV --script vulners 192.168.1.5",
                     "2026-05-23T10:00:00+00:00",
@@ -798,7 +816,7 @@ class TestAIAssistContextAndStorage:
                     len(events),
                 ),
             )
-            record_run_findings(conn, "tok_ai", "run-ai-vulners", entries)
+            record_run_findings(conn, _AI_WORKSPACE_ID, "run-ai-vulners", entries)
             conn.commit()
 
         cfg = {
@@ -807,7 +825,7 @@ class TestAIAssistContextAndStorage:
             "ai_allow_full_output": False,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai-vulners", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai-vulners", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="summary")
 
         assert len(context.context["findings"]) == 2
         assert context.context["findings"][1]["line"].startswith(
@@ -870,7 +888,7 @@ class TestAIAssistContextAndStorage:
             "ai_allow_full_output": True,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="next_commands")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="next_commands")
 
         assert context.input_chars <= 5000
         assert set(context.context) == {
@@ -993,8 +1011,8 @@ class TestAIAssistContextAndStorage:
                 return EmptyResult()
 
         conn = RecordingConn()
-        assert _load_findings(conn, "tok_ai", "run-ai") == []
-        assert _load_entities(conn, "tok_ai", "run-ai") == {}
+        assert _load_findings(conn, _AI_WORKSPACE_ID, "run-ai") == []
+        assert _load_entities(conn, _AI_WORKSPACE_ID, "run-ai") == {}
 
         joined = "\n".join(conn.sql)
         assert "COALESCE(suppressed, FALSE) = FALSE" in joined
@@ -1032,12 +1050,12 @@ class TestAIAssistContextAndStorage:
 
         monkeypatch.setattr(ai_context, "list_secret_metadata", mock.Mock(side_effect=RuntimeError("vault down")))
         with mock.patch.object(ai_context.log, "warning") as warning:
-            assert ai_context._secret_names("tok_secret") == set()
+            assert ai_context._secret_names(anonymous_session_id("tok_secret")) == set()
 
         warning.assert_called_once()
         assert warning.call_args.args == ("AI_CONTEXT_SECRET_METADATA_LOAD_FAILED",)
         assert warning.call_args.kwargs["exc_info"] is True
-        assert warning.call_args.kwargs["extra"]["session"] == "tok_secr********"
+        assert warning.call_args.kwargs["extra"]["session"] == get_log_session_id(anonymous_session_id("tok_secret"))
 
     def test_ai_suggestion_secret_lookup_failures_are_logged(self, monkeypatch):
         from services.ai import suggestions
@@ -1054,13 +1072,13 @@ class TestAIAssistContextAndStorage:
         )
 
         with mock.patch.object(suggestions.log, "warning") as warning:
-            assert suggestions._missing_required_secret("shodan host 8.8.8.8", "tok_secret") is True
+            assert suggestions._missing_required_secret("shodan host 8.8.8.8", anonymous_session_id("tok_secret")) is True
 
         warning.assert_called_once()
         assert warning.call_args.args == ("AI_SUGGESTION_SECRET_LOOKUP_FAILED",)
         assert warning.call_args.kwargs["exc_info"] is True
         assert warning.call_args.kwargs["extra"] == {
-            "session": "tok_secr********",
+            "session": get_log_session_id(anonymous_session_id("tok_secret")),
             "env": "SHODAN_API_KEY",
             "error_type": "ValueError",
         }
@@ -1274,7 +1292,7 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         cache_hits = []
         db_operations = []
@@ -1286,7 +1304,7 @@ class TestAIAssistContextAndStorage:
         )
 
         first, inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1297,7 +1315,7 @@ class TestAIAssistContextAndStorage:
         )
         assert inserted is True
         active, active_inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1313,7 +1331,7 @@ class TestAIAssistContextAndStorage:
         assert completed is not None
         assert completed["payload"] == {"summary": "ok"}
         cached, cached_inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1326,7 +1344,7 @@ class TestAIAssistContextAndStorage:
         assert cached["id"] == first["id"]
         assert cache_hits == ["summary"]
         forced, forced_inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1366,7 +1384,7 @@ class TestAIAssistContextAndStorage:
             )
             conn.commit()
         with mock.patch.object(ai_storage.log, "warning") as warning:
-            decoded = list_recent_assists_for_run("tok_ai", "run-ai", limit=1)
+            decoded = list_recent_assists_for_run(_AI_WORKSPACE_ID, "run-ai", limit=1)
         assert decoded[0]["id"] == forced["id"]
         assert decoded[0]["payload"] == {}
         assert decoded[0]["project_target_snapshot"] == []
@@ -1411,21 +1429,21 @@ class TestAIAssistContextAndStorage:
             "ai_timeout_seconds": 120,
         }
 
-        first = check_ai_route_rate_limit("tok_ai", cfg=cfg, redis_client=redis, now=100.0)
-        second = check_ai_route_rate_limit("tok_ai", cfg=cfg, redis_client=redis, now=101.0)
+        first = check_ai_route_rate_limit(_AI_WORKSPACE_ID, cfg=cfg, redis_client=redis, now=100.0)
+        second = check_ai_route_rate_limit(_AI_WORKSPACE_ID, cfg=cfg, redis_client=redis, now=101.0)
         assert first.allowed is True
         assert second.allowed is False
         assert second.error_code == "ai_rate_limited"
 
         trusted_first = check_ai_route_rate_limit(
-            "tok_diag",
+            anonymous_session_id("tok_diag"),
             cfg=cfg,
             redis_client=redis,
             now=102.0,
             bypass_session_limit=True,
         )
         trusted_second = check_ai_route_rate_limit(
-            "tok_diag",
+            anonymous_session_id("tok_diag"),
             cfg=cfg,
             redis_client=redis,
             now=103.0,
@@ -1442,18 +1460,18 @@ class TestAIAssistContextAndStorage:
             "ai_rate_limit_global_per_minute": 1,
         }
         global_first = check_ai_route_rate_limit(
-            "tok_waiting",
+            anonymous_session_id("tok_waiting"),
             cfg=global_limited_cfg,
             redis_client=global_limited_redis,
             now=240.0,
         )
         global_second = check_ai_route_rate_limit(
-            "tok_waiting",
+            anonymous_session_id("tok_waiting"),
             cfg=global_limited_cfg,
             redis_client=global_limited_redis,
             now=241.0,
         )
-        session_key = "ai:rate:session:91f3aeb6437e0033e7976996f84d6174:0"
+        session_key = "ai:rate:session:" + hashlib.sha256(anonymous_session_id("tok_waiting").encode()).hexdigest()[:32] + ":0"
         assert global_first.allowed is True
         assert global_second.allowed is False
         assert global_second.message == "AI assists are temporarily busy. Try again shortly."
@@ -1494,7 +1512,7 @@ class TestAIAssistContextAndStorage:
         )
 
         with enqueue_lock(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             model="llama",
@@ -1503,7 +1521,7 @@ class TestAIAssistContextAndStorage:
         ) as locked:
             assert locked is True
             with enqueue_lock(
-                "tok_ai",
+                _AI_WORKSPACE_ID,
                 "run-ai",
                 "summary",
                 model="llama",
@@ -1550,7 +1568,7 @@ class TestAIAssistContextAndStorage:
             }
 
             assist, inserted = ai_storage.enqueue_assist(
-                "tok_ai",
+                _AI_WORKSPACE_ID,
                 "run-ai",
                 "summary",
                 context,
@@ -1589,10 +1607,10 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", team_id="team_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, team_id="team_ai", cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         assist, inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1606,7 +1624,7 @@ class TestAIAssistContextAndStorage:
 
         class FakeClient:
             def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
-                assert session_token == "tok_ai"
+                assert session_token == _AI_WORKSPACE_ID
                 assert secret_scope_token == "team_ai"
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
@@ -1666,12 +1684,12 @@ class TestAIAssistContextAndStorage:
         assert row["duration_ms"] == 42
         provider_log = next(extra for event, extra in logs if event == "AI_ASSIST_PROVIDER_REQUEST")
         assert provider_log["team_id"] == "team_ai"
-        assert provider_log["session"] == "tok_ai********"
+        assert provider_log["session"] == get_log_session_id(_AI_WORKSPACE_ID)
         assert provider_log["secret_scope"] == "team"
         assert provider_log["read_timeout_seconds"] == 120.0
         completed_log = next(extra for event, extra in logs if event == "AI_ASSIST_COMPLETED")
         assert completed_log["team_id"] == "team_ai"
-        assert completed_log["session"] == "tok_ai********"
+        assert completed_log["session"] == get_log_session_id(_AI_WORKSPACE_ID)
         assert completed_log["secret_scope"] == "team"
         assert completed_log["provider_prompt_tokens"] == 12
         assert completed_log["provider_prompt_ms"] == 34
@@ -1782,10 +1800,10 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         assist, _inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1799,8 +1817,8 @@ class TestAIAssistContextAndStorage:
             calls = []
 
             def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
-                assert session_token == "tok_ai"
-                assert secret_scope_token == "tok_ai"
+                assert session_token == _AI_WORKSPACE_ID
+                assert secret_scope_token == _AI_WORKSPACE_ID
                 self.model = "llama3.1:8b"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -1846,10 +1864,10 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         assist, _inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "summary",
             context,
@@ -1886,9 +1904,9 @@ class TestAIAssistContextAndStorage:
         assert warning.call_args.args == ("AI_ASSIST_FAILED",)
         assert warning.call_args.kwargs["extra"] == {
             "team_id": "",
-            "principal_id": "",
+            "principal_id": _AI_PRINCIPAL_ID,
             "credential_id": "",
-            "session": "tok_ai********",
+            "session": get_log_session_id(_AI_WORKSPACE_ID),
             "secret_scope": "personal",
             "model": "llama3.1:8b",
             "prompt_version": "ai-assist-v1",
@@ -1923,10 +1941,10 @@ class TestAIAssistContextAndStorage:
             "ai_max_input_chars": 8000,
             "share_redaction_enabled": False,
         }
-        context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="next_commands")
+        context = build_run_context("run-ai", session_id=_AI_WORKSPACE_ID, cfg=cfg, variant="next_commands")
         prompt_version, source = resolved_prompt_version()
         assist, _inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "next_commands",
             context,
@@ -1940,8 +1958,8 @@ class TestAIAssistContextAndStorage:
 
         class FakeClient:
             def __init__(self, _cfg, *, session_token=None, secret_scope_token=None, progress_callback=None):
-                assert session_token == "tok_ai"
-                assert secret_scope_token == "tok_ai"
+                assert session_token == _AI_WORKSPACE_ID
+                assert secret_scope_token == _AI_WORKSPACE_ID
                 self.model = "Llama-3.1-8B-Instruct"
                 self.connect_timeout = 5.0
                 self.read_timeout = 120.0
@@ -2022,7 +2040,7 @@ class TestAIAssistContextAndStorage:
         assert heartbeats.count(assist["id"]) >= 2
 
         fallback_assist, _inserted = enqueue_assist(
-            "tok_ai",
+            _AI_WORKSPACE_ID,
             "run-ai",
             "next_commands",
             context,
@@ -2095,7 +2113,7 @@ class TestAIAssistContextAndStorage:
                     {"line": "443/tcp open ssl/http nginx", "line_number": 7},
                 ],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "ip.darklab.sh"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2129,7 +2147,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "80/tcp open http nginx", "line_number": 6}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[
                 {
                     "type": "source_run_target",
@@ -2167,7 +2185,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "443/tcp open https", "line_number": 7}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.3"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2197,7 +2215,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "443/tcp open https", "line_number": 7}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.3"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2224,7 +2242,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "443/tcp open https", "line_number": 7}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[
                 {"type": "source_run_target", "value": "192.168.1.3"},
                 {"type": "source_run_target", "value": "192.168.1.5"},
@@ -2259,7 +2277,7 @@ class TestAIAssistContextAndStorage:
                     {"line": "445/tcp open netbios-ssn", "line_number": 7},
                 ],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[
                 {"type": "source_run_target", "value": "192.168.1.3"},
                 {"type": "source_run_target", "value": "192.168.1.5"},
@@ -2296,7 +2314,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "443/tcp open https", "line_number": 7}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[
                 {"type": "source_run_target", "value": "192.168.1.3"},
                 {"type": "source_run_target", "value": "192.168.1.5"},
@@ -2328,7 +2346,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "445/tcp open microsoft-ds", "line_number": 7}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.100"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2356,7 +2374,7 @@ class TestAIAssistContextAndStorage:
                         },
                         "findings": [{"line": "80/tcp open http nginx", "line_number": 6}],
                     },
-                    session_id="tok_ai",
+                    session_id=_AI_WORKSPACE_ID,
                     project_target_snapshot=[{"type": "source_run_target", "value": "ip.darklab.sh"}],
                     cfg={**app_config.CFG, "share_redaction_enabled": True},
                 )
@@ -2410,7 +2428,7 @@ class TestAIAssistContextAndStorage:
                 },
                 "findings": [{"line": "/server-status (Status: 403)", "line_number": 6}],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "tor-stats.darklab.sh"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2446,7 +2464,7 @@ class TestAIAssistContextAndStorage:
                     {"line": "445/tcp open netbios-ssn Samba smbd", "line_number": 7},
                 ],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.5"}],
             cfg={**app_config.CFG, "share_redaction_enabled": True},
         )
@@ -2491,7 +2509,7 @@ class TestAIAssistContextAndStorage:
                     {"line": "445/tcp open microsoft-ds Samba smbd", "line_number": 7},
                 ],
             },
-            session_id="tok_ai",
+            session_id=_AI_WORKSPACE_ID,
             project_target_snapshot=[{"type": "source_run_target", "value": "192.168.1.5"}],
             cfg={**app_config.CFG, "share_redaction_enabled": False},
         )
@@ -3824,16 +3842,13 @@ class TestLoadConfig:
 
         database.db_init()
         with database.db_connect() as auth_conn:
-            auth_conn.execute(
-                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
-                "ON CONFLICT (token) DO NOTHING",
-                ("tok_session-a", "2026-08-09T15:00:00+00:00"),
-            )
+            artifact_identity = persisted_principal(auth_conn, "zap-artifact")
             auth_conn.commit()
 
         artifact_job = {
             "id": job_id,
-            "personal_workspace_id": "tok_session-a",
+            "personal_workspace_id": artifact_identity.personal_workspace_id,
+            "principal_id": artifact_identity.principal_id,
             "team_id": "",
             "actor_member_id": "",
             "plan_summary": safe_plan.summary.to_dict(),
@@ -4001,7 +4016,7 @@ class TestLoadConfig:
                 ) as create_job,
             ):
                 queued = zap_job_queue_module.queue_zap_job(
-                    "tok_session-a",
+                    artifact_identity.personal_workspace_id,
                     "prj_a",
                     "asm_a",
                     "chk_a",
@@ -4014,7 +4029,7 @@ class TestLoadConfig:
             store_plan.assert_called_once_with(job_id, safe_plan, artifact_cfg)
             assert create_job.call_args.kwargs["job_id"] == job_id
             assert create_job.call_args.args[:7] == (
-                "tok_session-a",
+                artifact_identity.personal_workspace_id,
                 "prj_a",
                 "asm_a",
                 "chk_a",
@@ -4069,7 +4084,7 @@ class TestLoadConfig:
         ) as preview_report:
             assert zap_worker_module._preview_report(artifact_job, report.payload) == draft_id
         assert preview_report.call_args.kwargs == {
-            "session_id": "tok_session-a",
+            "session_id": artifact_identity.personal_workspace_id,
             "team_id": "",
             "actor_member_id": "",
             "role": "",
@@ -4085,7 +4100,7 @@ class TestLoadConfig:
 
         with pytest.raises(AtlasImportError) as exc_info:
             preview_atlas_import(
-                session_id="tok_session-a",
+                session_id=artifact_identity.personal_workspace_id,
                 file_content=report.payload,
                 filename="report.json",
                 format_id="zap_json",
@@ -5284,7 +5299,7 @@ class TestProjectOverviewContract:
 
     def test_target_identity_uses_existing_atlas_entity_contract(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_contract", {"name": "Overview Contract"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_contract"), {"name": "Overview Contract"})
         assert project is not None
 
         with (
@@ -5292,13 +5307,13 @@ class TestProjectOverviewContract:
             mock.patch("services.projects.targets.log.warning") as warning_log,
         ):
             host_ip = project_workspace.add_project_target(
-                "tok_overview_contract",
+                anonymous_session_id("tok_overview_contract"),
                 project["id"],
                 {"type": "host", "value": "192.0.2.25"},
             )
             assert host_ip is not None
             host_domain = project_workspace.add_project_target(
-                "tok_overview_contract",
+                anonymous_session_id("tok_overview_contract"),
                 project["id"],
                 {"type": "host", "value": "Api.Example.COM"},
             )
@@ -5315,15 +5330,17 @@ class TestProjectOverviewContract:
         assert all(call.kwargs["extra"]["input_type"] == "host" for call in warning_log.call_args_list)
         assert all(call.kwargs["extra"]["value_hash"] for call in warning_log.call_args_list)
         duplicate_domain = project_workspace.add_project_target(
-            "tok_overview_contract",
+            anonymous_session_id("tok_overview_contract"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
         assert duplicate_domain is not None
-        foreign_project = project_workspace.create_project("tok_overview_foreign", {"name": "Foreign Contract"})
+        foreign_project = project_workspace.create_project(
+            anonymous_session_id("tok_overview_foreign"), {"name": "Foreign Contract"}
+        )
         assert foreign_project is not None
         foreign_domain = project_workspace.add_project_target(
-            "tok_overview_foreign",
+            anonymous_session_id("tok_overview_foreign"),
             foreign_project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
@@ -5349,7 +5366,7 @@ class TestProjectOverviewContract:
             (host_ip["id"], host_ip["id"]),
         ]
         target_page = project_workspace.list_project_targets(
-            "tok_overview_contract",
+            anonymous_session_id("tok_overview_contract"),
             project["id"],
             limit=10,
         )
@@ -5368,14 +5385,14 @@ class TestProjectOverviewContract:
         }
         with pytest.raises(ProjectWorkspaceError, match="target type must be domain, url, or ip"):
             project_workspace.add_project_target(
-                "tok_overview_contract",
+                anonymous_session_id("tok_overview_contract"),
                 project["id"],
                 {"type": "cidr", "value": "192.0.2.0/24"},
             )
 
     def test_legacy_host_value_type_auto_discovery_records_bare_domains(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_host_value_type", {"name": "Host Value Type"})
+        project = project_workspace.create_project(anonymous_session_id("tok_host_value_type"), {"name": "Host Value Type"})
         assert project is not None
         with database.db_connect() as conn:
             conn.execute(
@@ -5383,7 +5400,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run_host_value_type",
-                    "tok_host_value_type",
+                    anonymous_session_id("tok_host_value_type"),
                     "ping localhost",
                     "2026-06-30T00:00:00Z",
                     "2026-06-30T00:00:01Z",
@@ -5394,7 +5411,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run_nc_host_port_target",
-                    "tok_host_value_type",
+                    anonymous_session_id("tok_host_value_type"),
                     "nc -zv ip.darklab.sh 443 80",
                     "2026-06-30T00:00:00Z",
                     "2026-06-30T00:00:01Z",
@@ -5410,7 +5427,7 @@ class TestProjectOverviewContract:
             with mock.patch("services.projects.targets.log.warning") as warning_log:
                 recorded = project_workspace.record_project_target_discoveries(
                     conn,
-                    "tok_host_value_type",
+                    anonymous_session_id("tok_host_value_type"),
                     project["id"],
                     "run_host_value_type",
                     [
@@ -5450,7 +5467,7 @@ class TestProjectOverviewContract:
             with mock.patch("services.projects.targets.log.warning") as warning_log:
                 skipped = project_workspace.record_project_target_discoveries(
                     conn,
-                    "tok_host_value_type",
+                    anonymous_session_id("tok_host_value_type"),
                     project["id"],
                     "run_host_value_type_read_fail",
                     [
@@ -5470,7 +5487,7 @@ class TestProjectOverviewContract:
             assert warning_log.call_args.kwargs["extra"]["error_type"] == "WorkspaceError"
             nc_recorded = project_workspace.record_project_target_discoveries(
                 conn,
-                "tok_host_value_type",
+                anonymous_session_id("tok_host_value_type"),
                 project["id"],
                 "run_nc_host_port_target",
                 commands.command_project_target_inputs("nc -zv ip.darklab.sh 443 80"),
@@ -5486,7 +5503,7 @@ class TestProjectOverviewContract:
             "192.0.2.11",
         }
         assert [item["value"] for item in nc_recorded] == ["ip.darklab.sh"]
-        target_page = project_workspace.list_project_targets("tok_host_value_type", project["id"], limit=10)
+        target_page = project_workspace.list_project_targets(anonymous_session_id("tok_host_value_type"), project["id"], limit=10)
         assert target_page is not None
         targets = {item["value"]: item for item in target_page["targets"]}
         assert targets["localhost"]["type"] == "domain"
@@ -5517,7 +5534,9 @@ class TestProjectOverviewContract:
 
     def test_url_project_target_discovery_creates_atlas_url_and_host_link(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_url_target_discovery", {"name": "URL Target Discovery"})
+        project = project_workspace.create_project(
+            anonymous_session_id("tok_url_target_discovery"), {"name": "URL Target Discovery"}
+        )
         assert project is not None
         with database.db_connect() as conn:
             conn.execute(
@@ -5525,7 +5544,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run_url_target_discovery",
-                    "tok_url_target_discovery",
+                    anonymous_session_id("tok_url_target_discovery"),
                     "curl https://ip.darklab.sh",
                     "2026-06-30T00:00:00Z",
                     "2026-06-30T00:00:01Z",
@@ -5533,7 +5552,7 @@ class TestProjectOverviewContract:
             )
             recorded = project_workspace.record_project_target_discoveries(
                 conn,
-                "tok_url_target_discovery",
+                anonymous_session_id("tok_url_target_discovery"),
                 project["id"],
                 "run_url_target_discovery",
                 commands.command_project_target_inputs("curl https://ip.darklab.sh"),
@@ -5621,16 +5640,16 @@ class TestProjectOverviewContract:
 
     def test_get_project_intel_overview_returns_bounded_target_rollups(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_rollup", {"name": "Overview Rollup"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_rollup"), {"name": "Overview Rollup"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_rollup",
+            anonymous_session_id("tok_overview_rollup"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
         assert target is not None
         quiet_target = project_workspace.add_project_target(
-            "tok_overview_rollup",
+            anonymous_session_id("tok_overview_rollup"),
             project["id"],
             {"type": "ip", "value": "192.0.2.44"},
         )
@@ -5647,7 +5666,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                 (
                     "snap-overview-censys",
-                    "tok_overview_rollup",
+                    anonymous_session_id("tok_overview_rollup"),
                     target["id"],
                     "censys",
                     "Censys summary",
@@ -5679,7 +5698,7 @@ class TestProjectOverviewContract:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         finding_id,
-                        "tok_overview_rollup",
+                        anonymous_session_id("tok_overview_rollup"),
                         target["id"],
                         target["id"],
                         f"subject-{finding_id}",
@@ -5696,7 +5715,7 @@ class TestProjectOverviewContract:
                     "INSERT INTO finding_triage_details "
                     "(id, personal_workspace_id, finding_id, verification_status, created, updated) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (f"triage-{finding_id}", "tok_overview_rollup", finding_id, verification, now, now),
+                    (f"triage-{finding_id}", anonymous_session_id("tok_overview_rollup"), finding_id, verification, now, now),
                 )
             conn.execute(
                 "INSERT INTO finding_triage_details "
@@ -5704,7 +5723,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     "triage-overview-foreign-team",
-                    "tok_overview_foreign",
+                    anonymous_session_id("tok_overview_foreign"),
                     "team-overview-foreign",
                     "finding-overview-high",
                     "verified",
@@ -5714,7 +5733,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_rollup",
+                anonymous_session_id("tok_overview_rollup"),
                 "run-overview-port",
                 [
                     {
@@ -5741,7 +5760,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_rollup",
+                anonymous_session_id("tok_overview_rollup"),
                 "run-overview-no-port",
                 [],
                 seen_at=now,
@@ -5756,7 +5775,7 @@ class TestProjectOverviewContract:
                     "INSERT OR IGNORE INTO runs "
                     "(id, personal_workspace_id, command, started, finished, exit_code, output, output_preview) "
                     "VALUES (?, ?, ?, ?, ?, 0, '', '')",
-                    (run_id, "tok_overview_rollup", command, started, started),
+                    (run_id, anonymous_session_id("tok_overview_rollup"), command, started, started),
                 )
                 conn.execute(
                     "INSERT OR IGNORE INTO project_links "
@@ -5770,7 +5789,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "artifact-overview-new",
-                    "tok_overview_rollup",
+                    anonymous_session_id("tok_overview_rollup"),
                     "run-overview-port",
                     "/tmp/overview.txt",
                     "overview.txt",
@@ -5786,7 +5805,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "audit-overview-finding",
-                    token_hash("tok_overview_rollup"),
+                    token_hash(anonymous_session_id("tok_overview_rollup")),
                     "finding.triage.updated",
                     "finding",
                     "finding-overview-high",
@@ -5802,7 +5821,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, '', 'redacted', 1, ?, 'draft', ?, ?)",
                 (
                     "pkg-overview-latest",
-                    "tok_overview_rollup",
+                    anonymous_session_id("tok_overview_rollup"),
                     project["id"],
                     "Executive handoff",
                     json.dumps({"package_format_version": 2}),
@@ -5816,7 +5835,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 1, ?, ?)",
                 (
                     "rpt-overview-latest",
-                    "tok_overview_rollup",
+                    anonymous_session_id("tok_overview_rollup"),
                     project["id"],
                     json.dumps({"title": "Client edge report"}),
                     earlier,
@@ -5845,7 +5864,7 @@ class TestProjectOverviewContract:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         audit_id,
-                        token_hash("tok_overview_rollup"),
+                        token_hash(anonymous_session_id("tok_overview_rollup")),
                         event_type,
                         target_type,
                         target_id,
@@ -5857,7 +5876,7 @@ class TestProjectOverviewContract:
                 )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_rollup", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_rollup"), project["id"])
 
         assert overview is not None
         assert overview["payload_version"] == project_workspace.OVERVIEW_PAYLOAD_VERSION
@@ -6043,13 +6062,13 @@ class TestProjectOverviewContract:
         with database.db_connect() as conn:
             target_detail = entity_detail(
                 conn,
-                "tok_overview_rollup",
+                anonymous_session_id("tok_overview_rollup"),
                 target["id"],
                 project_id=project["id"],
             )
             quiet_detail = entity_detail(
                 conn,
-                "tok_overview_rollup",
+                anonymous_session_id("tok_overview_rollup"),
                 quiet_target["id"],
                 project_id=project["id"],
             )
@@ -6105,10 +6124,10 @@ class TestProjectOverviewContract:
         tmp_path,
     ):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_app_only", {"name": "App Only Ports"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_app_only"), {"name": "App Only Ports"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_app_only",
+            anonymous_session_id("tok_overview_app_only"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
@@ -6120,7 +6139,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-app-only",
-                    "tok_overview_app_only",
+                    anonymous_session_id("tok_overview_app_only"),
                     "nmap api.example.com",
                     now,
                     now,
@@ -6128,7 +6147,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_app_only",
+                anonymous_session_id("tok_overview_app_only"),
                 "run-overview-app-only",
                 [
                     {
@@ -6147,7 +6166,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_app_only", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_app_only"), project["id"])
 
         assert overview is not None
         assert overview["rollups"]["app_port_count"] == 1
@@ -6168,10 +6187,12 @@ class TestProjectOverviewContract:
         tmp_path,
     ):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_unlinked_ports", {"name": "Unlinked Ports"})
+        project = project_workspace.create_project(
+            anonymous_session_id("tok_overview_unlinked_ports"), {"name": "Unlinked Ports"}
+        )
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_unlinked_ports",
+            anonymous_session_id("tok_overview_unlinked_ports"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
@@ -6184,7 +6205,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, 'censys', 'ok', '', ?, ?, ?)",
                 (
                     "snap-overview-unlinked-provider",
-                    "tok_overview_unlinked_ports",
+                    anonymous_session_id("tok_overview_unlinked_ports"),
                     target["id"],
                     json.dumps(
                         {
@@ -6201,7 +6222,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-unlinked-port",
-                    "tok_overview_unlinked_ports",
+                    anonymous_session_id("tok_overview_unlinked_ports"),
                     "nmap api.example.com",
                     now,
                     now,
@@ -6209,7 +6230,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_unlinked_ports",
+                anonymous_session_id("tok_overview_unlinked_ports"),
                 "run-overview-unlinked-port",
                 [
                     {
@@ -6228,7 +6249,9 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_unlinked_ports", project["id"])
+        overview = project_workspace.get_project_intel_overview(
+            anonymous_session_id("tok_overview_unlinked_ports"), project["id"]
+        )
 
         assert overview is not None
         row = overview["targets"][0]
@@ -6247,10 +6270,10 @@ class TestProjectOverviewContract:
         tmp_path,
     ):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_curl_port", {"name": "Curl Port"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_curl_port"), {"name": "Curl Port"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_curl_port",
+            anonymous_session_id("tok_overview_curl_port"),
             project["id"],
             {"type": "ip", "value": "93.184.216.34"},
         )
@@ -6262,7 +6285,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-curl-port",
-                    "tok_overview_curl_port",
+                    anonymous_session_id("tok_overview_curl_port"),
                     "curl -v https://example.com",
                     now,
                     now,
@@ -6270,7 +6293,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_curl_port",
+                anonymous_session_id("tok_overview_curl_port"),
                 "run-overview-curl-port",
                 [
                     {
@@ -6289,7 +6312,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_curl_port", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_curl_port"), project["id"])
 
         assert overview is not None
         row = overview["targets"][0]
@@ -6312,10 +6335,10 @@ class TestProjectOverviewContract:
         tmp_path,
     ):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_port_edges", {"name": "Port Edges"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_port_edges"), {"name": "Port Edges"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_port_edges",
+            anonymous_session_id("tok_overview_port_edges"),
             project["id"],
             {"type": "domain", "value": "edge.example.com"},
         )
@@ -6327,7 +6350,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-port-edges",
-                    "tok_overview_port_edges",
+                    anonymous_session_id("tok_overview_port_edges"),
                     "nmap edge.example.com",
                     now,
                     now,
@@ -6335,7 +6358,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_port_edges",
+                anonymous_session_id("tok_overview_port_edges"),
                 "run-overview-port-edges",
                 [
                     {
@@ -6382,14 +6405,14 @@ class TestProjectOverviewContract:
             for entity_id, session_id, team_id, canonical_value, run_id in (
                 (
                     "ent-overview-foreign-port",
-                    "tok_overview_port_edges_foreign",
+                    anonymous_session_id("tok_overview_port_edges_foreign"),
                     "",
                     "edge.example.com:447/tcp",
                     "run-overview-foreign-port",
                 ),
                 (
                     "ent-overview-team-port",
-                    "tok_overview_port_edges",
+                    anonymous_session_id("tok_overview_port_edges"),
                     "team-overview-port-edges",
                     "edge.example.com:448/tcp",
                     "run-overview-team-port",
@@ -6421,7 +6444,7 @@ class TestProjectOverviewContract:
                 )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_port_edges", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_port_edges"), project["id"])
 
         assert overview is not None
         row = overview["targets"][0]
@@ -6444,10 +6467,10 @@ class TestProjectOverviewContract:
         from services.projects import overview as overview_service
 
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_port_limit", {"name": "Port Limit"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_port_limit"), {"name": "Port Limit"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_port_limit",
+            anonymous_session_id("tok_overview_port_limit"),
             project["id"],
             {"type": "domain", "value": "busy.example.com"},
         )
@@ -6460,7 +6483,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-port-limit",
-                    "tok_overview_port_limit",
+                    anonymous_session_id("tok_overview_port_limit"),
                     "nmap busy.example.com",
                     now,
                     now,
@@ -6468,7 +6491,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_port_limit",
+                anonymous_session_id("tok_overview_port_limit"),
                 "run-overview-port-limit",
                 [
                     {
@@ -6491,7 +6514,7 @@ class TestProjectOverviewContract:
             hidden_port = conn.execute(
                 "SELECT id FROM entities WHERE personal_workspace_id = ? AND canonical_value = ?",
                 (
-                    "tok_overview_port_limit",
+                    anonymous_session_id("tok_overview_port_limit"),
                     f"busy.example.com:{8000 + total_port_count - 1}/tcp",
                 ),
             ).fetchone()
@@ -6509,7 +6532,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_port_limit", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_port_limit"), project["id"])
 
         assert overview is not None
         row = overview["targets"][0]
@@ -6527,10 +6550,10 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_drops_deleted_run_scan_observations(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_deleted_scan", {"name": "Deleted Scan"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_deleted_scan"), {"name": "Deleted Scan"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_deleted_scan",
+            anonymous_session_id("tok_overview_deleted_scan"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
@@ -6542,7 +6565,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-deleted-scan",
-                    "tok_overview_deleted_scan",
+                    anonymous_session_id("tok_overview_deleted_scan"),
                     "nmap api.example.com",
                     now,
                     now,
@@ -6550,7 +6573,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_deleted_scan",
+                anonymous_session_id("tok_overview_deleted_scan"),
                 "run-overview-deleted-scan",
                 [
                     {
@@ -6569,7 +6592,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_deleted_scan"), project["id"])
         assert overview is not None
         assert overview["rollups"]["app_scan_target_count"] == 1
         assert overview["rollups"]["app_port_target_count"] == 1
@@ -6584,7 +6607,7 @@ class TestProjectOverviewContract:
             database.delete_run_artifacts(conn, ["run-overview-deleted-scan"])
             conn.commit()
 
-        refreshed = project_workspace.get_project_intel_overview("tok_overview_deleted_scan", project["id"])
+        refreshed = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_deleted_scan"), project["id"])
         assert refreshed is not None
         assert refreshed["rollups"]["app_scan_target_count"] == 0
         assert refreshed["rollups"]["app_port_target_count"] == 0
@@ -6605,10 +6628,12 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_uses_latest_app_port_service_attributes(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_service_update", {"name": "Service Update"})
+        project = project_workspace.create_project(
+            anonymous_session_id("tok_overview_service_update"), {"name": "Service Update"}
+        )
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_service_update",
+            anonymous_session_id("tok_overview_service_update"),
             project["id"],
             {"type": "ip", "value": "192.0.2.10"},
         )
@@ -6628,11 +6653,11 @@ class TestProjectOverviewContract:
                 conn.execute(
                     "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_preview) "
                     "VALUES (?, ?, ?, ?, ?, 0, '', '')",
-                    (run_id, "tok_overview_service_update", command, seen_at, seen_at),
+                    (run_id, anonymous_session_id("tok_overview_service_update"), command, seen_at, seen_at),
                 )
                 materialize_run_entities(
                     conn,
-                    "tok_overview_service_update",
+                    anonymous_session_id("tok_overview_service_update"),
                     run_id,
                     [
                         {
@@ -6647,7 +6672,9 @@ class TestProjectOverviewContract:
                 )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_service_update", project["id"])
+        overview = project_workspace.get_project_intel_overview(
+            anonymous_session_id("tok_overview_service_update"), project["id"]
+        )
 
         assert overview is not None
         assert overview["rollups"]["app_port_count"] == 1
@@ -6664,22 +6691,22 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_uses_url_host_app_port_evidence(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_url_ports", {"name": "URL Ports"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_url_ports"), {"name": "URL Ports"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_url_ports",
+            anonymous_session_id("tok_overview_url_ports"),
             project["id"],
             {"type": "url", "value": "https://api.example.com/login"},
         )
         assert target is not None
         second_url_target = project_workspace.add_project_target(
-            "tok_overview_url_ports",
+            anonymous_session_id("tok_overview_url_ports"),
             project["id"],
             {"type": "url", "value": "https://api.example.com/admin"},
         )
         assert second_url_target is not None
         host_target = project_workspace.add_project_target(
-            "tok_overview_url_ports",
+            anonymous_session_id("tok_overview_url_ports"),
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
@@ -6689,11 +6716,11 @@ class TestProjectOverviewContract:
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_preview) "
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
-                ("run-overview-url-host", "tok_overview_url_ports", "nmap api.example.com", now, now),
+                ("run-overview-url-host", anonymous_session_id("tok_overview_url_ports"), "nmap api.example.com", now, now),
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_url_ports",
+                anonymous_session_id("tok_overview_url_ports"),
                 "run-overview-url-host",
                 [
                     {
@@ -6716,7 +6743,7 @@ class TestProjectOverviewContract:
             ).fetchone()["id"]
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_url_ports", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_url_ports"), project["id"])
 
         assert overview is not None
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
@@ -6741,13 +6768,13 @@ class TestProjectOverviewContract:
         self._project_db(monkeypatch, tmp_path)
         team_id = "team-overview-url-scope"
         project = project_workspace.create_project(
-            "tok_team_url_owner",
+            anonymous_session_id("tok_team_url_owner"),
             {"name": "Team URL Scope"},
             team_id=team_id,
         )
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_team_url_owner",
+            anonymous_session_id("tok_team_url_owner"),
             project["id"],
             {"type": "url", "value": "https://shared.example.com/login"},
             team_id=team_id,
@@ -6759,11 +6786,17 @@ class TestProjectOverviewContract:
                 "INSERT INTO runs (id, personal_workspace_id, team_id, command, started, "
                 "finished, exit_code, output, output_preview) "
                 "VALUES (?, ?, '', ?, ?, ?, 0, '', '')",
-                ("run-overview-url-personal", "tok_personal_url_scope", "nmap shared.example.com", now, now),
+                (
+                    "run-overview-url-personal",
+                    anonymous_session_id("tok_personal_url_scope"),
+                    "nmap shared.example.com",
+                    now,
+                    now,
+                ),
             )
             materialize_run_entities(
                 conn,
-                "tok_personal_url_scope",
+                anonymous_session_id("tok_personal_url_scope"),
                 "run-overview-url-personal",
                 [
                     {
@@ -6784,11 +6817,18 @@ class TestProjectOverviewContract:
                 "INSERT INTO runs (id, personal_workspace_id, team_id, command, started, "
                 "finished, exit_code, output, output_preview) "
                 "VALUES (?, ?, ?, ?, ?, ?, 0, '', '')",
-                ("run-overview-url-team", "tok_team_url_member", team_id, "nmap shared.example.com", now, now),
+                (
+                    "run-overview-url-team",
+                    anonymous_session_id("tok_team_url_member"),
+                    team_id,
+                    "nmap shared.example.com",
+                    now,
+                    now,
+                ),
             )
             materialize_run_entities(
                 conn,
-                "tok_team_url_member",
+                anonymous_session_id("tok_team_url_member"),
                 "run-overview-url-team",
                 [
                     {
@@ -6825,7 +6865,7 @@ class TestProjectOverviewContract:
         assert team_url["host_entity_id"] != personal_host["id"]
 
         overview = project_workspace.get_project_intel_overview(
-            "tok_team_url_owner",
+            anonymous_session_id("tok_team_url_owner"),
             project["id"],
             team_id=team_id,
         )
@@ -6840,22 +6880,24 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_keeps_url_host_scan_states_honest(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_url_scan_states", {"name": "URL Scan States"})
+        project = project_workspace.create_project(
+            anonymous_session_id("tok_overview_url_scan_states"), {"name": "URL Scan States"}
+        )
         assert project is not None
         scanned_url = project_workspace.add_project_target(
-            "tok_overview_url_scan_states",
+            anonymous_session_id("tok_overview_url_scan_states"),
             project["id"],
             {"type": "url", "value": "https://scanned.example.com/login"},
         )
         assert scanned_url is not None
         unresolved_url = project_workspace.add_project_target(
-            "tok_overview_url_scan_states",
+            anonymous_session_id("tok_overview_url_scan_states"),
             project["id"],
             {"type": "url", "value": "https://unresolved.example.com/login"},
         )
         assert unresolved_url is not None
         host_target = project_workspace.add_project_target(
-            "tok_overview_url_scan_states",
+            anonymous_session_id("tok_overview_url_scan_states"),
             project["id"],
             {"type": "domain", "value": "scanned.example.com"},
         )
@@ -6865,11 +6907,17 @@ class TestProjectOverviewContract:
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output, output_preview) "
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
-                ("run-overview-url-no-ports", "tok_overview_url_scan_states", "nmap scanned.example.com", now, now),
+                (
+                    "run-overview-url-no-ports",
+                    anonymous_session_id("tok_overview_url_scan_states"),
+                    "nmap scanned.example.com",
+                    now,
+                    now,
+                ),
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_url_scan_states",
+                anonymous_session_id("tok_overview_url_scan_states"),
                 "run-overview-url-no-ports",
                 [{"entities": [{"type": "domain", "value": "scanned.example.com"}]}],
                 seen_at=now,
@@ -6881,7 +6929,9 @@ class TestProjectOverviewContract:
             ).fetchone()["id"]
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_url_scan_states", project["id"])
+        overview = project_workspace.get_project_intel_overview(
+            anonymous_session_id("tok_overview_url_scan_states"), project["id"]
+        )
 
         assert overview is not None
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
@@ -6909,16 +6959,16 @@ class TestProjectOverviewContract:
 
     def test_get_project_intel_overview_marks_stale_provider_data(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_stale", {"name": "Overview Stale"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_stale"), {"name": "Overview Stale"})
         assert project is not None
         stale_target = project_workspace.add_project_target(
-            "tok_overview_stale",
+            anonymous_session_id("tok_overview_stale"),
             project["id"],
             {"type": "domain", "value": "stale.example.com"},
         )
         assert stale_target is not None
         mixed_target = project_workspace.add_project_target(
-            "tok_overview_stale",
+            anonymous_session_id("tok_overview_stale"),
             project["id"],
             {"type": "domain", "value": "mixed.example.com"},
         )
@@ -6938,7 +6988,7 @@ class TestProjectOverviewContract:
                     "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                     (
                         snapshot_id,
-                        "tok_overview_stale",
+                        anonymous_session_id("tok_overview_stale"),
                         target_id,
                         provider,
                         f"{provider} summary",
@@ -6954,7 +7004,7 @@ class TestProjectOverviewContract:
                 )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_stale", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_stale"), project["id"])
 
         assert overview is not None
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
@@ -6971,7 +7021,7 @@ class TestProjectOverviewContract:
         with database.db_connect() as conn:
             stale_detail = entity_detail(
                 conn,
-                "tok_overview_stale",
+                anonymous_session_id("tok_overview_stale"),
                 stale_target["id"],
                 project_id=project["id"],
             )
@@ -6985,10 +7035,12 @@ class TestProjectOverviewContract:
 
     def test_get_project_intel_overview_prefers_fresh_provider_snapshots_for_certificate(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_multi_snapshot", {"name": "Overview Multi Snapshot"})
+        project = project_workspace.create_project(
+            anonymous_session_id("tok_overview_multi_snapshot"), {"name": "Overview Multi Snapshot"}
+        )
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_multi_snapshot",
+            anonymous_session_id("tok_overview_multi_snapshot"),
             project["id"],
             {"type": "domain", "value": "multi-snapshot.example.com"},
         )
@@ -7009,7 +7061,7 @@ class TestProjectOverviewContract:
                     "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                     (
                         snapshot_id,
-                        "tok_overview_multi_snapshot",
+                        anonymous_session_id("tok_overview_multi_snapshot"),
                         target["id"],
                         provider,
                         "Censys multi snapshot",
@@ -7031,7 +7083,9 @@ class TestProjectOverviewContract:
                 )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_multi_snapshot", project["id"])
+        overview = project_workspace.get_project_intel_overview(
+            anonymous_session_id("tok_overview_multi_snapshot"), project["id"]
+        )
 
         assert overview is not None
         target_row = overview["targets"][0]
@@ -7051,11 +7105,11 @@ class TestProjectOverviewContract:
 
         self._project_db(monkeypatch, tmp_path)
         monkeypatch.setattr(overview_service, "OVERVIEW_TARGET_LIMIT", 2)
-        project = project_workspace.create_project("tok_overview_logs", {"name": "Overview Logs"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_logs"), {"name": "Overview Logs"})
         assert project is not None
         for index in range(overview_service.OVERVIEW_TARGET_LIMIT + 1):
             created = project_workspace.add_project_target(
-                "tok_overview_logs",
+                anonymous_session_id("tok_overview_logs"),
                 project["id"],
                 {"type": "domain", "value": f"target-{index}.example.com"},
             )
@@ -7065,13 +7119,13 @@ class TestProjectOverviewContract:
             mock.patch.object(overview_service.log, "debug") as debug_log,
             mock.patch.object(overview_service.log, "warning") as warning_log,
         ):
-            overview = project_workspace.get_project_intel_overview("tok_overview_logs", project["id"])
+            overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_logs"), project["id"])
 
         assert overview is not None
         assert overview["rollups"]["target_count"] == overview_service.OVERVIEW_TARGET_LIMIT
         started = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_BUILD_STARTED",))
         assert started.kwargs["extra"] == {
-            "session": get_log_session_id("tok_overview_logs"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_logs")),
             "team_id": "",
             "project_id": project["id"],
             "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
@@ -7081,7 +7135,7 @@ class TestProjectOverviewContract:
             call for call in warning_log.call_args_list if call.args == ("PROJECT_OVERVIEW_TARGET_LIMIT_REACHED",)
         )
         assert limit_reached.kwargs["extra"] == {
-            "session": get_log_session_id("tok_overview_logs"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_logs")),
             "team_id": "",
             "project_id": project["id"],
             "target_limit": overview_service.OVERVIEW_TARGET_LIMIT,
@@ -7089,7 +7143,7 @@ class TestProjectOverviewContract:
         }
         built = next(call for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_PAYLOAD_BUILT",))
         assert built.kwargs["extra"] == {
-            "session": get_log_session_id("tok_overview_logs"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_logs")),
             "team_id": "",
             "project_id": project["id"],
             "target_count": overview_service.OVERVIEW_TARGET_LIMIT,
@@ -7110,16 +7164,16 @@ class TestProjectOverviewContract:
         from services.projects import overview as overview_service
 
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_degraded", {"name": "Overview Degraded"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_degraded"), {"name": "Overview Degraded"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_degraded",
+            anonymous_session_id("tok_overview_degraded"),
             project["id"],
             {"type": "domain", "value": "degraded.example.com"},
         )
         assert target is not None
         url_target = project_workspace.add_project_target(
-            "tok_overview_degraded",
+            anonymous_session_id("tok_overview_degraded"),
             project["id"],
             {"type": "url", "value": "https://url-target.example.com/path?secret=hidden"},
         )
@@ -7132,7 +7186,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                 (
                     "snap-overview-degraded-ok",
-                    "tok_overview_degraded",
+                    anonymous_session_id("tok_overview_degraded"),
                     target["id"],
                     "badshape",
                     "Bad shape summary",
@@ -7155,7 +7209,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 'error', ?, ?, ?, ?)",
                 (
                     "snap-overview-degraded-error",
-                    "tok_overview_degraded",
+                    anonymous_session_id("tok_overview_degraded"),
                     target["id"],
                     "nonfatal",
                     "Nonfatal summary",
@@ -7169,7 +7223,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, 0, '', '')",
                 (
                     "run-overview-degraded-port",
-                    "tok_overview_degraded",
+                    anonymous_session_id("tok_overview_degraded"),
                     "nmap degraded.example.com",
                     now,
                     now,
@@ -7177,7 +7231,7 @@ class TestProjectOverviewContract:
             )
             materialize_run_entities(
                 conn,
-                "tok_overview_degraded",
+                anonymous_session_id("tok_overview_degraded"),
                 "run-overview-degraded-port",
                 [
                     {
@@ -7226,13 +7280,13 @@ class TestProjectOverviewContract:
             mock.patch.object(overview_service.log, "warning") as warning_log,
             mock.patch.object(overview_service.log, "debug") as debug_log,
         ):
-            overview = project_workspace.get_project_intel_overview("tok_overview_degraded", project["id"])
+            overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_degraded"), project["id"])
 
         assert overview is not None
         assert overview["recent_changes"][0]["target_ids"] == [target["id"]]
         warning_events = {call.args[0]: call.kwargs["extra"] for call in warning_log.call_args_list}
         assert warning_events["PROJECT_OVERVIEW_RECENT_CHANGE_TARGETS_DROPPED"] == {
-            "session": get_log_session_id("tok_overview_degraded"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
             "team_id": "",
             "project_id": project["id"],
             "fire_id": "fire-overview-dropped",
@@ -7240,7 +7294,7 @@ class TestProjectOverviewContract:
             "matched_target_count": 1,
         }
         assert warning_events["PROJECT_OVERVIEW_CERT_DATE_PARSE_FAILED"] == {
-            "session": get_log_session_id("tok_overview_degraded"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
             "team_id": "",
             "project_id": project["id"],
             "entity_id": target["id"],
@@ -7254,7 +7308,7 @@ class TestProjectOverviewContract:
         ]
         assert skipped_warnings == [
             {
-                "session": get_log_session_id("tok_overview_degraded"),
+                "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
                 "team_id": "",
                 "project_id": project["id"],
                 "entity_id": target["id"],
@@ -7269,7 +7323,7 @@ class TestProjectOverviewContract:
         ]
         assert skipped_debug == [
             {
-                "session": get_log_session_id("tok_overview_degraded"),
+                "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
                 "team_id": "",
                 "project_id": project["id"],
                 "entity_id": target["id"],
@@ -7284,7 +7338,7 @@ class TestProjectOverviewContract:
         ]
         assert app_port_skips == [
             {
-                "session": get_log_session_id("tok_overview_degraded"),
+                "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
                 "team_id": "",
                 "project_id": project["id"],
                 "port_entity_id": mock.ANY,
@@ -7300,7 +7354,7 @@ class TestProjectOverviewContract:
         ]
         assert url_host_skips == [
             {
-                "session": get_log_session_id("tok_overview_degraded"),
+                "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
                 "team_id": "",
                 "project_id": project["id"],
                 "target_id": url_target["id"],
@@ -7313,7 +7367,7 @@ class TestProjectOverviewContract:
             call.kwargs["extra"] for call in debug_log.call_args_list if call.args == ("PROJECT_OVERVIEW_APP_PORT_SCAN_SUMMARY",)
         )
         assert app_port_summary == {
-            "session": get_log_session_id("tok_overview_degraded"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
             "team_id": "",
             "project_id": project["id"],
             "lookup_host_count": 2,
@@ -7331,7 +7385,7 @@ class TestProjectOverviewContract:
             if call.args == ("PROJECT_OVERVIEW_URL_HOST_RESOLUTION_SUMMARY",)
         )
         assert url_summary == {
-            "session": get_log_session_id("tok_overview_degraded"),
+            "session": get_log_session_id(anonymous_session_id("tok_overview_degraded")),
             "team_id": "",
             "project_id": project["id"],
             "url_target_count": 1,
@@ -7363,32 +7417,31 @@ class TestProjectOverviewContract:
                 }
             ),
         )
-        project = project_workspace.create_project("tok_overview_recent", {"name": "Overview Recent"})
+        with database.db_connect() as conn:
+            owner = persisted_principal(conn, "overview-recent")
+            conn.commit()
+        project = project_workspace.create_project(owner.personal_workspace_id, {"name": "Overview Recent"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_recent",
+            owner.personal_workspace_id,
             project["id"],
             {"type": "domain", "value": "api.example.com"},
         )
         assert target is not None
         quiet_target = project_workspace.add_project_target(
-            "tok_overview_recent",
+            owner.personal_workspace_id,
             project["id"],
             {"type": "domain", "value": "quiet.example.com"},
         )
         assert quiet_target is not None
         with database.db_connect() as conn:
             conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_overview_recent", "2026-05-20T10:00:00+00:00", ""),
-            )
-            conn.execute(
                 "INSERT INTO runs "
                 "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "run_overview_recent",
-                    "tok_overview_recent",
+                    owner.personal_workspace_id,
                     "nmap -sV api.example.com",
                     "2026-05-20T10:00:00+00:00",
                     "2026-05-20T10:00:01+00:00",
@@ -7398,7 +7451,7 @@ class TestProjectOverviewContract:
                 ),
             )
             watcher = watcher_service.create_watcher(
-                "tok_overview_recent",
+                owner.personal_workspace_id,
                 command_text="nmap -sV api.example.com",
                 project_id=project["id"],
                 cadence_preset="hourly",
@@ -7437,7 +7490,7 @@ class TestProjectOverviewContract:
             conn.commit()
 
         monkeypatch.setattr(database, "DB_PATH", db_path)
-        overview = project_workspace.get_project_intel_overview("tok_overview_recent", project["id"])
+        overview = project_workspace.get_project_intel_overview(owner.personal_workspace_id, project["id"])
 
         assert overview is not None
         rows_by_id = {row["entity_id"]: row for row in overview["targets"]}
@@ -7455,13 +7508,13 @@ class TestProjectOverviewContract:
         with database.db_connect() as conn:
             project_profile = entity_detail(
                 conn,
-                "tok_overview_recent",
+                owner.personal_workspace_id,
                 target["id"],
                 project_id=project["id"],
             )
             owner_profile = entity_detail(
                 conn,
-                "tok_overview_recent",
+                owner.personal_workspace_id,
                 target["id"],
             )
 
@@ -7491,10 +7544,10 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_prefers_crtsh_latest_expiry_over_historical_rows(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_crtsh", {"name": "Overview crt.sh"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_crtsh"), {"name": "Overview crt.sh"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_crtsh",
+            anonymous_session_id("tok_overview_crtsh"),
             project["id"],
             {"type": "domain", "value": "kali.darklab.sh"},
         )
@@ -7509,7 +7562,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                 (
                     "snap-overview-crtsh",
-                    "tok_overview_crtsh",
+                    anonymous_session_id("tok_overview_crtsh"),
                     target["id"],
                     "crtsh",
                     "crt.sh summary",
@@ -7536,7 +7589,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_crtsh", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_crtsh"), project["id"])
 
         assert overview is not None
         target_row = overview["targets"][0]
@@ -7546,10 +7599,10 @@ class TestProjectOverviewContract:
 
     def test_project_intel_overview_parses_rfc_certificate_dates(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_cert_rfc", {"name": "Overview Cert RFC"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_cert_rfc"), {"name": "Overview Cert RFC"})
         assert project is not None
         target = project_workspace.add_project_target(
-            "tok_overview_cert_rfc",
+            anonymous_session_id("tok_overview_cert_rfc"),
             project["id"],
             {"type": "domain", "value": "rfc.example.com"},
         )
@@ -7563,7 +7616,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, 'ok', ?, ?, ?, ?)",
                 (
                     "snap-overview-rfc-cert",
-                    "tok_overview_cert_rfc",
+                    anonymous_session_id("tok_overview_cert_rfc"),
                     target["id"],
                     "tls_certificate",
                     "TLS certificate summary",
@@ -7585,7 +7638,7 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_cert_rfc", project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_cert_rfc"), project["id"])
 
         assert overview is not None
         target_row = overview["targets"][0]
@@ -7595,24 +7648,24 @@ class TestProjectOverviewContract:
 
     def test_get_project_intel_overview_respects_scope_and_suppression(self, monkeypatch, tmp_path):
         self._project_db(monkeypatch, tmp_path)
-        project = project_workspace.create_project("tok_overview_scope", {"name": "Overview Scope"})
+        project = project_workspace.create_project(anonymous_session_id("tok_overview_scope"), {"name": "Overview Scope"})
         assert project is not None
         visible = project_workspace.add_project_target(
-            "tok_overview_scope",
+            anonymous_session_id("tok_overview_scope"),
             project["id"],
             {"type": "domain", "value": "visible.example"},
         )
         assert visible is not None
         suppressed = project_workspace.add_project_target(
-            "tok_overview_scope",
+            anonymous_session_id("tok_overview_scope"),
             project["id"],
             {"type": "domain", "value": "suppressed.example"},
         )
         assert suppressed is not None
-        foreign_project = project_workspace.create_project("tok_overview_other", {"name": "Other Scope"})
+        foreign_project = project_workspace.create_project(anonymous_session_id("tok_overview_other"), {"name": "Other Scope"})
         assert foreign_project is not None
         foreign = project_workspace.add_project_target(
-            "tok_overview_other",
+            anonymous_session_id("tok_overview_other"),
             foreign_project["id"],
             {"type": "domain", "value": "foreign.example"},
         )
@@ -7626,7 +7679,7 @@ class TestProjectOverviewContract:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "finding-foreign-overview",
-                    "tok_overview_other",
+                    anonymous_session_id("tok_overview_other"),
                     foreign["id"],
                     foreign["id"],
                     "subject-foreign",
@@ -7639,8 +7692,10 @@ class TestProjectOverviewContract:
             )
             conn.commit()
 
-        overview = project_workspace.get_project_intel_overview("tok_overview_scope", project["id"])
-        foreign_lookup = project_workspace.get_project_intel_overview("tok_overview_scope", foreign_project["id"])
+        overview = project_workspace.get_project_intel_overview(anonymous_session_id("tok_overview_scope"), project["id"])
+        foreign_lookup = project_workspace.get_project_intel_overview(
+            anonymous_session_id("tok_overview_scope"), foreign_project["id"]
+        )
 
         assert overview is not None
         assert [row["entity_id"] for row in overview["targets"]] == [visible["id"]]
@@ -8346,8 +8401,20 @@ class TestPostgresMigrations:
             r"([A-Za-z_][A-Za-z0-9_]*)\s+TO\s+([A-Za-z_][A-Za-z0-9_]*)",
             re.I,
         )
+        drop_column_re = re.compile(
+            rf"ALTER TABLE {re.escape(table_name)} DROP COLUMN(?: IF EXISTS)?\s+"
+            r"([A-Za-z_][A-Za-z0-9_]*)",
+            re.I,
+        )
+        drop_table_re = re.compile(
+            rf"DROP TABLE(?: IF EXISTS)?\s+{re.escape(table_name)}(?:\s|;|$)",
+            re.I,
+        )
         columns = set()
         for statement in statements:
+            if drop_table_re.search(statement):
+                columns.clear()
+                continue
             if create_re.search(statement):
                 body = statement[statement.find("(") + 1 : statement.rfind(")")]
                 for raw_line in body.splitlines():
@@ -8377,13 +8444,21 @@ class TestPostgresMigrations:
             if rename_match:
                 columns.discard(rename_match.group(1))
                 columns.add(rename_match.group(2))
+            drop_column_match = drop_column_re.search(statement)
+            if drop_column_match:
+                columns.discard(drop_column_match.group(1))
         return columns
 
     @staticmethod
     def _postgres_shared_index_names(statements):
         indexes = set()
         index_re = re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)", re.I)
+        drop_re = re.compile(r"DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?(\w+)", re.I)
         for statement in statements:
+            drop_match = drop_re.search(statement)
+            if drop_match:
+                indexes.discard(drop_match.group(1))
+                continue
             match = index_re.search(statement)
             if not match:
                 continue
@@ -8487,6 +8562,7 @@ class TestPostgresMigrations:
             "0079",
             "0080",
             "0081",
+            "0082",
         ]
         for table_name in (
             "runs",
@@ -9899,7 +9975,7 @@ class TestPostgresMigrations:
         assert [(row["version"], row["name"]) for row in rows] == [
             (migration.version, migration.name) for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0081"
+        assert rows[-1]["version"] == "0082"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10374,6 +10450,7 @@ class TestPostgresMigrations:
             "0079",
             "0080",
             "0081",
+            "0082",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10419,7 +10496,8 @@ class TestPostgresMigrations:
         assert "0079" in conn.applied_versions
         assert "0080" in conn.applied_versions
         assert "0081" in conn.applied_versions
-        assert conn.commit_count == 43
+        assert "0082" in conn.applied_versions
+        assert conn.commit_count == 44
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 
@@ -10719,6 +10797,7 @@ class TestPostgresMigrations:
         import services.cve_risk.maintenance as cve_risk_maintenance
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr("services.auth.schema_guard.validate_startup_schema", mock.Mock())
         monkeypatch.setattr(database, "_populate_output_search_text", mock.Mock(return_value=0))
         monkeypatch.setattr(database, "_rebuild_runs_fts", mock.Mock(side_effect=AssertionError("no rebuild expected")))
         monkeypatch.setattr(database, "_backfill_watcher_monitoring_fields", mock.Mock())
@@ -10784,6 +10863,7 @@ class TestPostgresMigrations:
         monkeypatch.setattr(database, "_prune_retention", prune_retention)
         monkeypatch.setattr(database, "ensure_run_output_dir", mock.Mock())
         monkeypatch.setattr(database, "_run_schema_migrations", migration_runner)
+        monkeypatch.setattr("services.auth.schema_guard.validate_startup_schema", mock.Mock())
         monkeypatch.setattr(database, "_db_init_lock", mock.Mock(side_effect=AssertionError("sqlite lock used")))
 
         database.db_init()
@@ -10797,11 +10877,37 @@ class TestPostgresMigrations:
 
 
 class TestTeamModeFoundation:
+    @staticmethod
+    def _authentication_result(identity):
+        from services.auth.resolver import (
+            AuthenticatedContext,
+            AuthenticationResult,
+            AuthenticationState,
+        )
+
+        return AuthenticationResult(
+            state=AuthenticationState.VALID,
+            credential_supplied=True,
+            context=AuthenticatedContext(
+                principal_id=identity.principal_id,
+                personal_workspace_id=identity.personal_workspace_id,
+                workspace_storage_key=identity.storage_key,
+                credential_id="crd_" + "a" * 32,
+                credential_type="portable",
+                authentication_method="portable_header",
+            ),
+        )
+
     def _team_db(self):
+        from core.migrations.v0078_principal_credential_persistence import MIGRATION as PRINCIPAL_MIGRATION
+        from core.migrations.v0082_remove_legacy_session_identity import MIGRATION
+
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         database._create_schema(conn)
         database._create_indexes(conn)
+        for statement in PRINCIPAL_MIGRATION.statements_for(database_backend.DatabaseBackend.SQLITE):
+            conn.execute(statement)
         for statement in (
             "ALTER TABLE teams ADD COLUMN created_by_principal_id TEXT",
             "ALTER TABLE teams ADD COLUMN created_by_credential_id TEXT",
@@ -10810,6 +10916,8 @@ class TestTeamModeFoundation:
             "CREATE UNIQUE INDEX idx_team_members_principal "
             "ON team_members (team_id, principal_id) WHERE principal_id IS NOT NULL",
         ):
+            conn.execute(statement)
+        for statement in MIGRATION.statements_for(database_backend.DatabaseBackend.SQLITE):
             conn.execute(statement)
         return conn
 
@@ -10867,7 +10975,7 @@ class TestTeamModeFoundation:
         )
 
         anonymous_id = str(uuid.uuid4())
-        personal_id = "tok_" + "a" * 32
+        personal_id = "wsp_" + "a" * 32
         anonymous = anonymous_owner_context(anonymous_id)
         personal = personal_owner_context(personal_id)
         team = team_owner_context("team_abc", actor_member_id="tmem_123", actor_session_id=personal_id)
@@ -10902,19 +11010,32 @@ class TestTeamModeFoundation:
         from services.teams import request_scope, storage
 
         conn = self._team_db()
+        auth_patcher = None
         try:
-            team = storage.create_team(conn, name="Scoped Operators", creator_session_token="tok_scope_owner")
+            owner = persisted_principal(conn, "scope-owner")
+            other = persisted_principal(conn, "scope-other")
+            team = storage.create_team(
+                conn,
+                name="Scoped Operators",
+                creator_principal_id=owner.principal_id,
+            )
             conn.commit()
+            auth_patcher = mock.patch.object(
+                request_scope,
+                "get_authentication_result",
+                return_value=self._authentication_result(owner),
+            )
+            authentication = auth_patcher.start()
 
             with _test_app().test_request_context("/history"), mock.patch.object(database, "db_connect", return_value=conn):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
-                    scope = request_scope.current_request_scope("tok_scope_owner", request)
+                    scope = request_scope.current_request_scope(owner.personal_workspace_id, request)
             assert scope.is_team is False
             assert mock_debug.call_args.args[0] == "TEAM_SCOPE_RESOLVED"
             personal_extra = mock_debug.call_args.kwargs["extra"]
             assert personal_extra["scope"] == "personal"
             assert personal_extra["source"] == "none"
-            assert personal_extra["session"].startswith("tok_sco")
+            assert personal_extra["session"] == owner.personal_workspace_id
 
             with (
                 _test_app().test_request_context(
@@ -10925,7 +11046,7 @@ class TestTeamModeFoundation:
                 mock.patch.object(database, "db_connect", return_value=conn),
             ):
                 with mock.patch.object(request_scope.log, "debug") as mock_debug:
-                    team_scope = request_scope.current_request_scope("tok_scope_owner", request)
+                    team_scope = request_scope.current_request_scope(owner.personal_workspace_id, request)
             assert team_scope.is_team is True
             assert team_scope.team_id == team["id"]
             team_extra = mock_debug.call_args.kwargs["extra"]
@@ -10935,7 +11056,7 @@ class TestTeamModeFoundation:
             assert team_extra["actor_role"] == "owner"
             assert team_extra["route"] == "/api/v1/history"
             assert team_extra["method"] == "GET"
-            assert team_extra["session"] != "tok_scope_owner"
+            assert team_extra["session"] == owner.personal_workspace_id
 
             with (
                 _test_app().test_request_context(
@@ -10944,16 +11065,19 @@ class TestTeamModeFoundation:
                 ),
                 mock.patch.object(database, "db_connect", return_value=conn),
             ):
+                authentication.return_value = self._authentication_result(other)
                 with mock.patch.object(request_scope.log, "warning") as mock_warning:
                     with pytest.raises(request_scope.RequestScopeError):
-                        request_scope.current_request_scope("tok_scope_other", request)
+                        request_scope.current_request_scope(other.personal_workspace_id, request)
             assert mock_warning.call_args.args[0] == "TEAM_SCOPE_REJECTED"
             rejected_extra = mock_warning.call_args.kwargs["extra"]
             assert rejected_extra["reason"] == "team_forbidden"
             assert rejected_extra["source"] == "header"
             assert rejected_extra["team_id"] == team["id"]
-            assert rejected_extra["session"] != "tok_scope_other"
+            assert rejected_extra["session"] == other.personal_workspace_id
         finally:
+            if auth_patcher is not None:
+                auth_patcher.stop()
             conn.close()
 
     def test_request_scope_can_resolve_archived_teams_as_read_only_when_requested(self):
@@ -10961,30 +11085,48 @@ class TestTeamModeFoundation:
         from services.teams import request_scope, storage
 
         conn = self._team_db()
+        auth_patcher = None
         try:
-            team = storage.create_team(conn, name="Archived Files", creator_session_token="tok_archived_owner")
+            owner = persisted_principal(conn, "archived-owner")
+            team = storage.create_team(
+                conn,
+                name="Archived Files",
+                creator_principal_id=owner.principal_id,
+            )
             storage.update_team_status(conn, team["id"], status="archived")
             conn.commit()
+            auth_patcher = mock.patch.object(
+                request_scope,
+                "get_authentication_result",
+                return_value=self._authentication_result(owner),
+            )
+            auth_patcher.start()
 
             with (
                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}),
                 mock.patch.object(database, "db_connect", return_value=conn),
             ):
                 with pytest.raises(request_scope.RequestScopeError) as blocked:
-                    request_scope.current_request_scope("tok_archived_owner", request)
+                    request_scope.current_request_scope(owner.personal_workspace_id, request)
             assert blocked.value.code == "team_archived"
 
             with (
                 _test_app().test_request_context("/workspace/files", headers={"X-Team-ID": team["id"]}),
                 mock.patch.object(database, "db_connect", return_value=conn),
             ):
-                scope = request_scope.current_request_scope("tok_archived_owner", request, allow_archived=True)
+                scope = request_scope.current_request_scope(
+                    owner.personal_workspace_id,
+                    request,
+                    allow_archived=True,
+                )
 
             assert scope.is_team is True
             assert scope.is_archived is True
             assert scope.read_only is True
             assert scope.team_id == team["id"]
         finally:
+            if auth_patcher is not None:
+                auth_patcher.stop()
             conn.close()
 
     def test_team_storage_smoke_creates_member_invite_and_recovery_code(self):
@@ -10992,16 +11134,19 @@ class TestTeamModeFoundation:
 
         conn = self._team_db()
         try:
+            owner = persisted_principal(conn, "team-owner")
+            operator = persisted_principal(conn, "team-operator")
+            other_owner = persisted_principal(conn, "other-team-owner")
             team, recovery = storage.create_team_with_recovery_code(
                 conn,
                 name="Darklab Operators",
-                creator_session_token="tok_owner",
+                creator_principal_id=owner.principal_id,
                 display_name="Owner",
             )
             member = storage.add_team_member(
                 conn,
                 team_id=team["id"],
-                session_token="tok_operator",
+                principal_id=operator.principal_id,
                 role="operator",
                 display_name="Operator",
                 invited_by_member_id=team["creator_member_id"],
@@ -11022,9 +11167,13 @@ class TestTeamModeFoundation:
             assert recovery["team_id"] == team["id"]
             assert recovery["code"].startswith("trec_")
             assert storage.active_owner_count(conn, team["id"]) == 1
-            assert storage.list_teams_for_token(conn, "tok_owner")[0]["id"] == team["id"]
+            assert storage.list_teams_for_principal(conn, owner.principal_id)[0]["id"] == team["id"]
 
-            other_team = storage.create_team(conn, name="Other Operators", creator_session_token="tok_other")
+            other_team = storage.create_team(
+                conn,
+                name="Other Operators",
+                creator_principal_id=other_owner.principal_id,
+            )
             with pytest.raises(sqlite3.IntegrityError):
                 storage.create_team_invite(
                     conn,
@@ -11049,9 +11198,11 @@ class TestTeamModeFoundation:
 
         conn = self._team_db()
         try:
-            storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_one")
+            first = persisted_principal(conn, "team-one")
+            second = persisted_principal(conn, "team-two")
+            storage.create_team(conn, name="Darklab Operators", creator_principal_id=first.principal_id)
             with pytest.raises(TeamSlugUnavailable):
-                storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_two")
+                storage.create_team(conn, name="Darklab Operators", creator_principal_id=second.principal_id)
         finally:
             conn.close()
 
@@ -11061,7 +11212,12 @@ class TestTeamModeFoundation:
 
         conn = self._team_db()
         try:
-            team = storage.create_team(conn, name="Darklab Operators", creator_session_token="tok_owner")
+            owner = persisted_principal(conn, "last-team-owner")
+            team = storage.create_team(
+                conn,
+                name="Darklab Operators",
+                creator_principal_id=owner.principal_id,
+            )
             with pytest.raises(TeamOwnerRequired):
                 storage.soft_remove_team_member(conn, team["creator_member_id"])
             assert storage.active_owner_count(conn, team["id"]) == 1
@@ -11089,14 +11245,18 @@ class TestSchedulerFoundation:
             ),
         )
         database.db_init()
-        return database.db_connect()
+        conn = database.db_connect()
+        identity = persisted_principal(conn, "scheduler")
+        assert identity.personal_workspace_id == _SCHEDULER_WORKSPACE_ID
+        conn.commit()
+        return conn
 
     def _schedule(self, **overrides):
         from services.scheduler.models import OWNER_KIND_USER, OVERLAP_POLICY_SKIP, SCHEDULE_KIND_COMMAND, Schedule
 
         base = {
             "id": "sch_test",
-            "session_token": "tok_scheduler",
+            "session_token": _SCHEDULER_WORKSPACE_ID,
             "team_id": "",
             "owner_kind": OWNER_KIND_USER,
             "owner_id": "",
@@ -11186,14 +11346,14 @@ class TestSchedulerFoundation:
                 )
 
             user_schedule = service.create_schedule(
-                "tok_scheduler",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 label="Hourly ping",
                 conn=conn,
             )
             watcher_schedule = service.create_schedule(
-                "tok_scheduler",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="curl https://darklab.sh",
                 cadence_preset="daily",
                 owner_kind="watcher",
@@ -11201,7 +11361,7 @@ class TestSchedulerFoundation:
                 conn=conn,
             )
             team_schedule = service.create_schedule(
-                "tok_scheduler",
+                _SCHEDULER_WORKSPACE_ID,
                 team_id="team_scheduler",
                 command_text="echo team",
                 cadence_preset="hourly",
@@ -11218,15 +11378,15 @@ class TestSchedulerFoundation:
                 )
             conn.commit()
 
-            visible = service.list_for_session("tok_scheduler", conn=conn)
-            all_rows = service.list_for_session("tok_scheduler", include_watchers=True, conn=conn)
+            visible = service.list_for_session(_SCHEDULER_WORKSPACE_ID, conn=conn)
+            all_rows = service.list_for_session(_SCHEDULER_WORKSPACE_ID, include_watchers=True, conn=conn)
 
         assert [schedule.id for schedule in visible] == [user_schedule.id]
         assert {schedule.id for schedule in all_rows} == {user_schedule.id, watcher_schedule.id}
         assert refreshed.last_run_id == "run_team_schedule"
         after_fire_extra = debug_log.call_args.kwargs["extra"]
         assert after_fire_extra["team_id"] == "team_scheduler"
-        assert after_fire_extra["session"] == "tok_sche********"
+        assert after_fire_extra["session"] == get_log_session_id(_SCHEDULER_WORKSPACE_ID)
         assert after_fire_extra["owner_id"] == "wtr_team"
 
     def test_scheduler_recovery_coalesces_recent_missed_fire(self, monkeypatch, tmp_path):
@@ -11240,12 +11400,8 @@ class TestSchedulerFoundation:
             lambda _schedule, **_kwargs: "run_scheduled",
         )
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_scheduler", now.isoformat(), ""),
-            )
             schedule = service.create_schedule(
-                "tok_scheduler",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11264,16 +11420,21 @@ class TestSchedulerFoundation:
         assert refreshed is not None
         assert refreshed.next_run_at > now.isoformat()
 
-    def test_scheduler_fire_disables_revoked_token_schedule(self, monkeypatch, tmp_path):
+    def test_scheduler_fire_disables_disabled_principal_schedule(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch, service
 
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
             schedule = service.create_schedule(
-                "tok_revoked_schedule",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
+            )
+            conn.execute(
+                "UPDATE principals SET status = 'disabled', disabled_reason = ?, disabled_at = ? "
+                "WHERE id = (SELECT principal_id FROM personal_workspaces WHERE id = ?)",
+                ("operator disabled principal", fired_at, _SCHEDULER_WORKSPACE_ID),
             )
             status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
             fire_row = conn.execute(
@@ -11285,11 +11446,11 @@ class TestSchedulerFoundation:
         assert status == "skipped_revoked"
         assert dict(fire_row) == {
             "status": "skipped_revoked",
-            "reason": "legacy_session_revoked",
+            "reason": "principal_disabled",
         }
         assert refreshed is not None
         assert refreshed.enabled is False
-        assert refreshed.paused_reason == "legacy_session_revoked"
+        assert refreshed.paused_reason == "principal_disabled"
 
     def test_scheduler_fire_skips_when_previous_run_active(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch, service
@@ -11297,12 +11458,8 @@ class TestSchedulerFoundation:
         fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
         monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session, **_kwargs: [{"run_id": "run_active"}])
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_overlap_schedule", fired_at, ""),
-            )
             schedule = service.create_schedule(
-                "tok_overlap_schedule",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11336,12 +11493,8 @@ class TestSchedulerFoundation:
 
         monkeypatch.setattr(dispatch, "_launch_user_schedule_run", _launch)
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_claim_schedule", fired_at, ""),
-            )
             schedule = service.create_schedule(
-                "tok_claim_schedule",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11377,12 +11530,8 @@ class TestSchedulerFoundation:
         monkeypatch.setattr(dispatch, "_launch_user_schedule_run", _launch)
         monkeypatch.setattr(dispatch, "enqueue_notification", lambda *args, **kwargs: enqueued.append((args, kwargs)) or [])
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_failed_schedule", fired_at, ""),
-            )
             schedule = service.create_schedule(
-                "tok_failed_schedule",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="ping -c 1 darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11406,7 +11555,7 @@ class TestSchedulerFoundation:
         assert args[0] == "scheduled_run_failed"
         assert args[1]["schedule_id"] == schedule.id
         assert args[1]["summary_fields"] == {"error": "broker unavailable"}
-        assert args[2] == "tok_failed_schedule"
+        assert args[2] == _SCHEDULER_WORKSPACE_ID
         assert kwargs["conn"] is conn
 
     def test_scheduler_launch_path_rejects_unavailable_broker_and_interactive_pty(self, monkeypatch):
@@ -11450,12 +11599,12 @@ class TestSchedulerFoundation:
 
         monkeypatch.setattr(run_blueprint, "_brokered_synthetic_run", _synthetic)
 
-        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="session-token copy"))
+        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="credential list"))
 
         assert run_id == "run_builtin_exact"
         assert synthetic_calls[0][0][:5] == (
-            "safe:session-token copy",
-            "tok_scheduler",
+            "safe:credential list",
+            _SCHEDULER_WORKSPACE_ID,
             "scheduler",
             [{"type": "output", "text": "ok"}],
             0,
@@ -11639,30 +11788,26 @@ class TestSchedulerFoundation:
         from services.scheduler import service
 
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_due_schedules", "2026-05-20T10:00:00+00:00", ""),
-            )
             first = service.create_schedule(
-                "tok_due_schedules",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo first",
                 cadence_preset="hourly",
                 conn=conn,
             )
             second = service.create_schedule(
-                "tok_due_schedules",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo second",
                 cadence_preset="hourly",
                 conn=conn,
             )
             disabled = service.create_schedule(
-                "tok_due_schedules",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo disabled",
                 cadence_preset="hourly",
                 conn=conn,
             )
             third = service.create_schedule(
-                "tok_due_schedules",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo third",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11684,17 +11829,15 @@ class TestSchedulerFoundation:
 
         now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_recovery_edges", now.isoformat(), ""),
-            )
             invalid = service.create_schedule(
-                "tok_recovery_edges",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo invalid",
                 cadence_preset="hourly",
                 conn=conn,
             )
-            stale = service.create_schedule("tok_recovery_edges", command_text="echo stale", cadence_preset="hourly", conn=conn)
+            stale = service.create_schedule(
+                _SCHEDULER_WORKSPACE_ID, command_text="echo stale", cadence_preset="hourly", conn=conn
+            )
             conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("0000-not-a-time", invalid.id))
             conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ((now - timedelta(hours=2)).isoformat(), stale.id))
 
@@ -11730,12 +11873,8 @@ class TestSchedulerFoundation:
 
         fired_ids = []
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
-            conn.execute(
-                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                ("tok_worker_once", "2026-05-20T10:00:00+00:00", ""),
-            )
             due = service.create_schedule(
-                "tok_worker_once",
+                _SCHEDULER_WORKSPACE_ID,
                 command_text="echo worker",
                 cadence_preset="hourly",
                 conn=conn,
@@ -11878,13 +12017,16 @@ class TestWatchersFoundation:
         monkeypatch.setattr(database, "CFG", cfg)
         monkeypatch.setattr(app_config, "CFG", cfg)
         database.db_init()
-        return database.db_connect()
+        conn = database.db_connect()
+        identity = persisted_principal(conn, "watchers")
+        assert identity.personal_workspace_id == _WATCHER_WORKSPACE_ID
+        assert identity.principal_id == _WATCHER_PRINCIPAL_ID
+        persisted_principal(conn, "other-watchers")
+        conn.commit()
+        return conn
 
-    def _register_token(self, conn, token: str = "tok_watchers"):
-        conn.execute(
-            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-            (token, "2026-05-20T10:00:00+00:00", ""),
-        )
+    def _register_principal(self, conn, label: str = "watchers"):
+        return persisted_principal(conn, label)
 
     def _insert_run(
         self,
@@ -11892,7 +12034,7 @@ class TestWatchersFoundation:
         run_id: str,
         lines: list[str],
         *,
-        session_id: str = "tok_watchers",
+        session_id: str = _WATCHER_WORKSPACE_ID,
         team_id: str = "",
         exit_code: int = 0,
         finished: str | None = "2026-05-20T10:00:01+00:00",
@@ -11921,7 +12063,7 @@ class TestWatchersFoundation:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f"ntc_{trigger}",
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "webhook",
                 f"watcher {trigger}",
                 "{}",
@@ -11933,7 +12075,7 @@ class TestWatchersFoundation:
             ),
         )
 
-    def _insert_project(self, conn, project_id: str, *, session_id: str = "tok_watchers", team_id: str = ""):
+    def _insert_project(self, conn, project_id: str, *, session_id: str = _WATCHER_WORKSPACE_ID, team_id: str = ""):
         conn.execute(
             "INSERT INTO projects "
             "(id, personal_workspace_id, team_id, name, slug, description, status, color, created, updated) "
@@ -11977,20 +12119,20 @@ class TestWatchersFoundation:
                     "INSERT INTO notification_channels "
                     "(id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
                     "muted, created, updated) "
-                    "VALUES (?, 'tok_watchers', ?, 'webhook', ?, '{}', '{}', '[]', 0, "
+                    "VALUES (?, 'wsp_49377bbd9612bebe09c42e0fba2493c8', ?, 'webhook', ?, '{}', '{}', '[]', 0, "
                     "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')",
                     (channel_id, team_id, channel_id),
                 )
-            personal_default = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            personal_default = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest", conn=conn)
             with pytest.raises(ProjectWorkspaceError, match="same owner scope"):
                 digests.save_digest_settings(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     "prj_digest",
                     {"enabled": True, "channel_ids": ["ntc_team"]},
                     conn=conn,
                 )
             personal = digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest",
                 {
                     "enabled": True,
@@ -12001,7 +12143,7 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             team = digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_team",
                 {
                     "enabled": True,
@@ -12012,13 +12154,13 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             team_seen_by_other_member = digests.get_digest_settings(
-                "tok_digest_team_operator",
+                _OTHER_WATCHER_WORKSPACE_ID,
                 "prj_digest_team",
                 team_id="team_digest",
                 conn=conn,
             )
             team_updated_by_other_member = digests.save_digest_settings(
-                "tok_digest_team_operator",
+                _OTHER_WATCHER_WORKSPACE_ID,
                 "prj_digest_team",
                 {
                     "enabled": True,
@@ -12043,23 +12185,23 @@ class TestWatchersFoundation:
                 "'2026-05-20T10:45:00+00:00', '', 'fired', 'digest skipped: no changes')",
                 (personal_schedule["id"],),
             )
-            personal_with_fire = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            personal_with_fire = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest", conn=conn)
             evaluated = digests.mark_digest_evaluated(
                 conn,
                 project_id="prj_digest",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 evaluated_at="2026-05-20T11:00:00+00:00",
             )
             sent = digests.mark_digest_sent(
                 conn,
                 project_id="prj_digest",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 sent_at="2026-05-20T11:01:00+00:00",
             )
 
         assert personal_default == {
             "project_id": "prj_digest",
-            "personal_workspace_id": "tok_watchers",
+            "personal_workspace_id": _WATCHER_WORKSPACE_ID,
             "team_id": "",
             "enabled": False,
             "cadence_preset": "daily",
@@ -12090,14 +12232,14 @@ class TestWatchersFoundation:
         assert personal_with_fire["schedule_last_fire_at"] == "2026-05-20T10:45:00+00:00"
         assert team["team_id"] == "team_digest"
         assert team["channel_ids"] == ["ntc_team"]
-        assert team["personal_workspace_id"] == "tok_watchers"
+        assert team["personal_workspace_id"] == _WATCHER_WORKSPACE_ID
         assert team_seen_by_other_member is not None
         assert team_seen_by_other_member["enabled"] is True
-        assert team_seen_by_other_member["personal_workspace_id"] == "tok_watchers"
-        assert team_updated_by_other_member["personal_workspace_id"] == "tok_watchers"
+        assert team_seen_by_other_member["personal_workspace_id"] == _WATCHER_WORKSPACE_ID
+        assert team_updated_by_other_member["personal_workspace_id"] == _WATCHER_WORKSPACE_ID
         assert team_updated_by_other_member["cadence_preset"] == "daily"
         assert [(row["personal_workspace_id"], row["cadence_preset"]) for row in team_schedule_rows] == [
-            ("tok_watchers", "daily")
+            (_WATCHER_WORKSPACE_ID, "daily")
         ]
         assert evaluated is not None
         assert evaluated["last_evaluated_at"] == "2026-05-20T11:00:00+00:00"
@@ -12146,29 +12288,30 @@ class TestWatchersFoundation:
                 return ChannelResult.success()
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_digest")
             self._insert_project(conn, "prj_digest_all_retry")
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_digest', 'tok_watchers', 'webhook', 'Digest', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_digest', 'wsp_49377bbd9612bebe09c42e0fba2493c8', 'webhook', 'Digest', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_digest_retry', 'tok_watchers', 'webhook', 'Digest retry', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_digest_retry', 'wsp_49377bbd9612bebe09c42e0fba2493c8', "
+                "'webhook', 'Digest retry', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_all_retry', 'tok_watchers', 'webhook', 'All retry', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_all_retry', 'wsp_49377bbd9612bebe09c42e0fba2493c8', 'webhook', 'All retry', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 project_id="prj_digest",
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
@@ -12187,7 +12330,7 @@ class TestWatchersFoundation:
                 ("2026-05-20T10:30:00+00:00", watcher.id),
             )
             all_retry_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 project_id="prj_digest_all_retry",
                 command_text="nmap -sV retry.darklab.sh",
                 baseline_run_id="run_retry_baseline",
@@ -12206,13 +12349,13 @@ class TestWatchersFoundation:
                 ("2026-05-20T10:30:00+00:00", all_retry_watcher.id),
             )
             settings = digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest",
                 {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_digest", "ntc_digest_retry"]},
                 conn=conn,
             )
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_all_retry",
                 {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_all_retry"]},
                 conn=conn,
@@ -12225,7 +12368,7 @@ class TestWatchersFoundation:
             all_retry_schedule = conn.execute(
                 "SELECT * FROM schedules WHERE owner_kind = 'project_digest' AND owner_id = 'prj_digest_all_retry'"
             ).fetchone()
-            visible_schedules = schedule_service.list_for_session("tok_watchers", include_watchers=True, conn=conn)
+            visible_schedules = schedule_service.list_for_session(_WATCHER_WORKSPACE_ID, include_watchers=True, conn=conn)
             status = scheduler_dispatch.fire_schedule(
                 conn,
                 schedule_service.row_to_schedule(digest_schedule),
@@ -12242,7 +12385,7 @@ class TestWatchersFoundation:
             queued_count = conn.execute(
                 "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
             ).fetchone()["count"]
-            refreshed = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            refreshed = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest", conn=conn)
 
             monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
             digest_event_ids = [
@@ -12253,7 +12396,7 @@ class TestWatchersFoundation:
                 ).fetchall()
             ]
             delivered = notification_dispatcher.dispatch_due_events(conn=conn, event_ids=digest_event_ids)
-            delivered_settings = digests.get_digest_settings("tok_watchers", "prj_digest", conn=conn)
+            delivered_settings = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest", conn=conn)
             mixed_statuses = {
                 row["channel_id"]: (row["status"], row["last_error"])
                 for row in conn.execute(
@@ -12273,7 +12416,7 @@ class TestWatchersFoundation:
                 conn=conn,
                 event_ids=[all_retry_event["id"]],
             )
-            all_retry_settings = digests.get_digest_settings("tok_watchers", "prj_digest_all_retry", conn=conn)
+            all_retry_settings = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest_all_retry", conn=conn)
 
         payload = json.loads(queued_event["payload_json"])
         assert refreshed is not None
@@ -12289,7 +12432,7 @@ class TestWatchersFoundation:
         assert queued_count == 2
         assert payload["digest_identity"] == {
             "project_id": "prj_digest",
-            "personal_workspace_id": "tok_watchers",
+            "personal_workspace_id": _WATCHER_WORKSPACE_ID,
             "team_id": "",
             "window_start": "2026-05-20T10:00:00+00:00",
             "window_end": "2026-05-20T11:00:00+00:00",
@@ -12326,29 +12469,30 @@ class TestWatchersFoundation:
                 return ChannelResult.success()
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_digest_quiet")
             self._insert_project(conn, "prj_digest_all_clear")
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_quiet', 'tok_watchers', 'webhook', 'Quiet digest', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_quiet', 'wsp_49377bbd9612bebe09c42e0fba2493c8', 'webhook', 'Quiet digest', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_all_clear', 'tok_watchers', 'webhook', 'All-clear digest', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_all_clear', 'wsp_49377bbd9612bebe09c42e0fba2493c8', "
+                "'webhook', 'All-clear digest', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_quiet",
                 {"enabled": True, "cadence_preset": "daily", "channel_ids": ["ntc_quiet"]},
                 conn=conn,
             )
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_all_clear",
                 {
                     "enabled": True,
@@ -12375,7 +12519,7 @@ class TestWatchersFoundation:
             event_count = conn.execute(
                 "SELECT COUNT(*) AS count FROM notification_events WHERE trigger = 'project_digest'"
             ).fetchone()["count"]
-            settings = digests.get_digest_settings("tok_watchers", "prj_digest_quiet", conn=conn)
+            settings = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest_quiet", conn=conn)
             all_clear_status = scheduler_dispatch.fire_schedule(
                 conn,
                 schedule_service.row_to_schedule(all_clear_schedule),
@@ -12385,13 +12529,13 @@ class TestWatchersFoundation:
                 "SELECT id, payload_json, status FROM notification_events "
                 "WHERE trigger = 'project_digest' AND channel_id = 'ntc_all_clear'"
             ).fetchone()
-            all_clear_before_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+            all_clear_before_delivery = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest_all_clear", conn=conn)
             monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
             all_clear_delivered = notification_dispatcher.dispatch_due_events(
                 conn=conn,
                 event_ids=[all_clear_event["id"]],
             )
-            all_clear_after_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_all_clear", conn=conn)
+            all_clear_after_delivery = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest_all_clear", conn=conn)
 
         assert status == "fired"
         assert event_count == 0
@@ -12437,10 +12581,10 @@ class TestWatchersFoundation:
                 return ChannelResult.success()
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_digest_monotonic")
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_monotonic",
                 {"enabled": False, "cadence_preset": "hourly", "channel_ids": []},
                 conn=conn,
@@ -12448,43 +12592,44 @@ class TestWatchersFoundation:
             first_evaluated = digests.mark_digest_evaluated(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 evaluated_at="2026-05-20T11:00:00Z",
             )
             stale_evaluated = digests.mark_digest_evaluated(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 evaluated_at="2026-05-20T10:00:00+00:00",
             )
             newer_evaluated = digests.mark_digest_evaluated(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 evaluated_at="2026-05-20T12:00:00+00:00",
             )
             first = digests.mark_digest_sent(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 sent_at="2026-05-20T11:00:00+00:00",
             )
             stale = digests.mark_digest_sent(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 sent_at="2026-05-20T10:00:00+00:00",
             )
             newer = digests.mark_digest_sent(
                 conn,
                 project_id="prj_digest_monotonic",
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 sent_at="2026-05-20T12:00:00+00:00",
             )
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_digest_monotonic', 'tok_watchers', 'webhook', 'Digest monotonic', '{}', '{}', "
+                "VALUES ('ntc_digest_monotonic', 'wsp_49377bbd9612bebe09c42e0fba2493c8', "
+                "'webhook', 'Digest monotonic', '{}', '{}', "
                 "'[]', 0, '2026-05-20T09:00:00+00:00', '2026-05-20T09:00:00+00:00')"
             )
             for event_id, window_start, window_end, created in (
@@ -12505,7 +12650,8 @@ class TestWatchersFoundation:
                     "INSERT INTO notification_events "
                     "(id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
                     "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                    "VALUES (?, 'tok_watchers', '', 'ntc_digest_monotonic', 'project_digest', ?, 'pending', "
+                    "VALUES (?, 'wsp_49377bbd9612bebe09c42e0fba2493c8', '', "
+                    "'ntc_digest_monotonic', 'project_digest', ?, 'pending', "
                     "0, '', '', '', '', ?, '')",
                     (
                         event_id,
@@ -12513,7 +12659,7 @@ class TestWatchersFoundation:
                             {
                                 "digest_identity": {
                                     "project_id": "prj_digest_monotonic",
-                                    "personal_workspace_id": "tok_watchers",
+                                    "personal_workspace_id": _WATCHER_WORKSPACE_ID,
                                     "team_id": "",
                                     "window_start": window_start,
                                     "window_end": window_end,
@@ -12527,7 +12673,7 @@ class TestWatchersFoundation:
                 "INSERT INTO notification_events "
                 "(id, personal_workspace_id, team_id, channel_id, trigger, payload_json, status, attempts, "
                 "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
-                "VALUES ('nte_digest_missing_identity', 'tok_watchers', '', 'ntc_digest_monotonic', "
+                "VALUES ('nte_digest_missing_identity', 'wsp_49377bbd9612bebe09c42e0fba2493c8', '', 'ntc_digest_monotonic', "
                 "'project_digest', '{}', 'pending', 0, '', '', '', '', '2026-05-20T12:30:00+00:00', '')"
             )
             monkeypatch.setattr(notification_dispatcher, "channel_class_for_kind", lambda _kind: DigestChannel)
@@ -12545,13 +12691,13 @@ class TestWatchersFoundation:
                     conn=conn,
                     event_ids=["nte_digest_missing_identity"],
                 )
-                after_newer_delivery = digests.get_digest_settings("tok_watchers", "prj_digest_monotonic", conn=conn)
+                after_newer_delivery = digests.get_digest_settings(_WATCHER_WORKSPACE_ID, "prj_digest_monotonic", conn=conn)
                 older_delivered = notification_dispatcher.dispatch_due_events(
                     conn=conn,
                     event_ids=["nte_digest_older_window"],
                 )
             after_out_of_order_delivery = digests.get_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_monotonic",
                 conn=conn,
             )
@@ -12591,34 +12737,35 @@ class TestWatchersFoundation:
             conn.execute("UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived'")
             with pytest.raises(ProjectWorkspaceError, match="archived projects"):
                 digests.save_digest_settings(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     "prj_digest_archived",
                     {"enabled": True, "channel_ids": ["ntc_one"]},
                     conn=conn,
                 )
 
-            team = team_storage.create_team(conn, name="Digest Team", creator_session_token="tok_watchers")
+            team = team_storage.create_team(conn, name="Digest Team", creator_principal_id=_WATCHER_PRINCIPAL_ID)
             team_storage.update_team_status(conn, team["id"], status="archived")
             self._insert_project(conn, "prj_digest_team_archived", team_id=team["id"])
             with pytest.raises(ProjectWorkspaceError, match="archived teams"):
                 digests.save_digest_settings(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     "prj_digest_team_archived",
                     {"enabled": True, "channel_ids": ["ntc_team"]},
                     team_id=team["id"],
                     conn=conn,
                 )
 
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_digest_archived_after_enable")
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_archived_after_enable', 'tok_watchers', 'webhook', 'Archived digest', '{}', '{}', "
+                "VALUES ('ntc_archived_after_enable', 'wsp_49377bbd9612bebe09c42e0fba2493c8', "
+                "'webhook', 'Archived digest', '{}', '{}', "
                 "'[]', 0, '2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 project_id="prj_digest_archived_after_enable",
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_archive_baseline",
@@ -12637,7 +12784,7 @@ class TestWatchersFoundation:
                 ("2026-05-20T10:30:00+00:00", watcher.id),
             )
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_archived_after_enable",
                 {"enabled": True, "cadence_preset": "hourly", "channel_ids": ["ntc_archived_after_enable"]},
                 conn=conn,
@@ -12645,12 +12792,12 @@ class TestWatchersFoundation:
             conn.execute("UPDATE projects SET status = 'archived' WHERE id = 'prj_digest_archived_after_enable'")
             archived_result = digests.evaluate_due_digest(
                 conn,
-                session_id="tok_watchers",
+                session_id=_WATCHER_WORKSPACE_ID,
                 project_id="prj_digest_archived_after_enable",
                 fired_at="2026-05-20T11:00:00+00:00",
             )
             archived_settings = digests.get_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_archived_after_enable",
                 conn=conn,
             )
@@ -12662,11 +12809,11 @@ class TestWatchersFoundation:
             conn.execute(
                 "INSERT INTO notification_channels "
                 "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES ('ntc_delete', 'tok_watchers', 'webhook', 'Delete digest', '{}', '{}', '[]', 0, "
+                "VALUES ('ntc_delete', 'wsp_49377bbd9612bebe09c42e0fba2493c8', 'webhook', 'Delete digest', '{}', '{}', '[]', 0, "
                 "'2026-05-20T10:00:00+00:00', '2026-05-20T10:00:00+00:00')"
             )
             digests.save_digest_settings(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_digest_delete",
                 {"enabled": True, "channel_ids": ["ntc_delete"]},
                 conn=conn,
@@ -12682,7 +12829,7 @@ class TestWatchersFoundation:
                 "'2026-05-20T11:00:00+00:00', '', 'fired', '')",
                 (schedule_row["id"],),
             )
-            assert crud.delete_project("tok_watchers", "prj_digest_delete", conn=conn) is True
+            assert crud.delete_project(_WATCHER_WORKSPACE_ID, "prj_digest_delete", conn=conn) is True
             remaining_settings = conn.execute(
                 "SELECT COUNT(*) AS count FROM project_digest_settings WHERE project_id = 'prj_digest_delete'"
             ).fetchone()["count"]
@@ -12708,13 +12855,13 @@ class TestWatchersFoundation:
 
         assert digests.digest_event_identity(
             project_id="prj_digest",
-            session_id="tok_watchers",
+            session_id=_WATCHER_WORKSPACE_ID,
             team_id="team_digest",
             window_start="2026-05-20T10:00:00+00:00",
             window_end="2026-05-20T11:00:00+00:00",
         ) == {
             "project_id": "prj_digest",
-            "personal_workspace_id": "tok_watchers",
+            "personal_workspace_id": _WATCHER_WORKSPACE_ID,
             "team_id": "team_digest",
             "window_start": "2026-05-20T10:00:00+00:00",
             "window_end": "2026-05-20T11:00:00+00:00",
@@ -12725,10 +12872,10 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
 
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -12742,10 +12889,10 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
-            visible_schedules = schedule_service.list_for_session("tok_watchers", conn=conn)
-            visible_watchers = watcher_service.list_for_session("tok_watchers", conn=conn)
+            visible_schedules = schedule_service.list_for_session(_WATCHER_WORKSPACE_ID, conn=conn)
+            visible_watchers = watcher_service.list_for_session(_WATCHER_WORKSPACE_ID, conn=conn)
             team_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 team_id="team_watchers",
                 command_text="nmap -sV team.darklab.sh",
                 baseline_run_id="run_team_baseline",
@@ -12753,7 +12900,7 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             team_schedule = schedule_service.create_schedule(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 team_id="team_watchers",
                 command_text="echo team schedule",
                 cadence_preset="daily",
@@ -12799,7 +12946,7 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_run(conn, "run_baseline", ["80/tcp open http"])
             self._insert_project(conn, "prj_personal")
             self._insert_project(conn, "prj_team", team_id="team_watchers")
@@ -12807,14 +12954,14 @@ class TestWatchersFoundation:
             self._link_project_run(conn, "prj_team", "run_baseline")
 
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
                 conn=conn,
             )
             team_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 team_id="team_watchers",
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
@@ -12824,7 +12971,7 @@ class TestWatchersFoundation:
 
             with pytest.raises(watcher_service.WatcherError, match="same scope"):
                 watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="nmap -sV darklab.sh",
                     baseline_run_id="run_baseline",
                     project_id="prj_team",
@@ -12841,10 +12988,10 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_personal")
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 project_id="prj_personal",
@@ -12853,7 +13000,7 @@ class TestWatchersFoundation:
             )
 
             with mock.patch.object(project_crud.log, "info") as info_log:
-                assert project_crud.delete_project("tok_watchers", "prj_personal", conn=conn) is True
+                assert project_crud.delete_project(_WATCHER_WORKSPACE_ID, "prj_personal", conn=conn) is True
             refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
 
         assert refreshed is not None
@@ -12861,7 +13008,7 @@ class TestWatchersFoundation:
         assert info_log.call_args.args == ("PROJECT_WATCHER_MEMBERSHIP_CLEARED",)
         assert info_log.call_args.kwargs["extra"] == {
             "project_id": "prj_personal",
-            "session": get_log_session_id("tok_watchers"),
+            "session": get_log_session_id(_WATCHER_WORKSPACE_ID),
             "team_id": "",
             "watcher_count": 1,
         }
@@ -12871,11 +13018,11 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_monitor")
             self._insert_run(conn, "run_current", ["443/tcp open https"])
             changed = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_missing",
                 project_id="prj_monitor",
@@ -12913,7 +13060,7 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             quiet = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="httpx https://darklab.sh",
                 project_id="prj_monitor",
                 cadence_preset="daily",
@@ -12942,7 +13089,7 @@ class TestWatchersFoundation:
                 mock.patch.object(project_monitoring.log, "debug") as debug_log,
                 mock.patch.object(project_monitoring.log, "warning") as warning_log,
             ):
-                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+                payload = project_monitoring.get_project_monitoring(_WATCHER_WORKSPACE_ID, "prj_monitor", fire_limit=4)
 
         assert payload is not None
         assert payload["counts"] == {
@@ -12998,11 +13145,11 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_monitor")
             self._insert_run(conn, "run_base", ["80/tcp open http"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_base",
                 project_id="prj_monitor",
@@ -13034,7 +13181,7 @@ class TestWatchersFoundation:
             conn.commit()
 
             with mock.patch.object(project_monitoring.log, "warning") as warning_log:
-                payload = project_monitoring.get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=4)
+                payload = project_monitoring.get_project_monitoring(_WATCHER_WORKSPACE_ID, "prj_monitor", fire_limit=4)
 
         assert payload is not None
         monitor = payload["monitors"][0]
@@ -13060,14 +13207,14 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_monitor")
             self._insert_run(conn, "run_base", ["80/tcp open http"])
             self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
             self._insert_run(conn, "run_recent_same_1", ["80/tcp open http"])
             self._insert_run(conn, "run_recent_same_2", ["80/tcp open http"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_base",
                 project_id="prj_monitor",
@@ -13116,7 +13263,7 @@ class TestWatchersFoundation:
             conn.execute("UPDATE watcher_fires SET created = ? WHERE id = ?", ("2026-05-20T10:03:00+00:00", recent_two.id))
             conn.commit()
 
-            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=2)
+            payload = get_project_monitoring(_WATCHER_WORKSPACE_ID, "prj_monitor", fire_limit=2)
 
         assert payload is not None
         monitor = payload["monitors"][0]
@@ -13132,12 +13279,12 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_monitor")
             self._insert_run(conn, "run_base", ["80/tcp open http"])
             self._insert_run(conn, "run_old_change", ["80/tcp open http", "443/tcp open https"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_base",
                 project_id="prj_monitor",
@@ -13182,7 +13329,7 @@ class TestWatchersFoundation:
                 )
             conn.commit()
 
-            payload = get_project_monitoring("tok_watchers", "prj_monitor", fire_limit=25)
+            payload = get_project_monitoring(_WATCHER_WORKSPACE_ID, "prj_monitor", fire_limit=25)
 
         assert payload is not None
         assert old_fire.id not in {fire["id"] for fire in payload["timeline"]}
@@ -13196,7 +13343,7 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_project(conn, "prj_monitor")
             self._insert_run(conn, "run_base", ["80/tcp open http"])
             self._insert_run(conn, "run_old_change", ["80/tcp open http", "22/tcp open ssh"])
@@ -13204,7 +13351,7 @@ class TestWatchersFoundation:
             self._insert_run(conn, "run_window_recovered", ["80/tcp open http"])
             self._insert_run(conn, "run_window_failed", ["scanner failed"], exit_code=1)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_base",
                 project_id="prj_monitor",
@@ -13339,19 +13486,19 @@ class TestWatchersFoundation:
             conn.commit()
 
             payload = get_project_monitoring_summary(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_monitor",
                 window_start="2026-05-20T09:00:00+00:00",
                 window_end="2026-05-20T10:00:00+00:00",
             )
             recovered_payload = get_project_monitoring_summary(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_monitor",
                 window_start="2026-05-20T09:03:00+00:00",
                 window_end="2026-05-20T09:04:00+00:00",
             )
             no_change_payload = get_project_monitoring_summary(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 "prj_monitor",
                 window_start="2026-05-20T09:09:00+00:00",
                 window_end="2026-05-20T09:10:00+00:00",
@@ -13538,7 +13685,7 @@ class TestWatchersFoundation:
                 "VALUES (?, ?, ?, '', ?, ?, ?, ?, '{}', 'ok', '{}', '{}', ?, ?)",
                 (
                     watcher_id,
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     team_id,
                     watcher_id,
                     "nmap -sV darklab.sh",
@@ -13564,7 +13711,7 @@ class TestWatchersFoundation:
             )
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             for run_id in ("run_same", "run_ambiguous", "run_unlinked", "run_cross", "run_team"):
                 self._insert_run(conn, run_id, ["80/tcp open http"])
             for project_id in ("prj_same", "prj_ambiguous_a", "prj_ambiguous_b", "prj_cross"):
@@ -13618,9 +13765,9 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="curl https://darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="daily",
@@ -13641,7 +13788,7 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path, max_per_session=1) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
 
             with pytest.raises(ValueError):
                 watcher_service.create_watcher(
@@ -13653,7 +13800,7 @@ class TestWatchersFoundation:
                 )
             with pytest.raises(watcher_service.WatcherError, match="unsupported watcher option"):
                 watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="echo nope",
                     baseline_run_id="run_baseline",
                     cadence_preset="hourly",
@@ -13662,7 +13809,7 @@ class TestWatchersFoundation:
                 )
             with pytest.raises(watcher_service.WatcherError, match="must be true or false"):
                 watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="echo nope",
                     baseline_run_id="run_baseline",
                     cadence_preset="hourly",
@@ -13671,7 +13818,7 @@ class TestWatchersFoundation:
                 )
             with pytest.raises(watcher_service.WatcherError, match="unsupported watcher policy field"):
                 watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="echo nope",
                     baseline_run_id="run_baseline",
                     cadence_preset="hourly",
@@ -13680,7 +13827,7 @@ class TestWatchersFoundation:
                 )
 
             first = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="echo first",
                 baseline_run_id="run_first",
                 cadence_preset="hourly",
@@ -13688,7 +13835,7 @@ class TestWatchersFoundation:
             )
             with pytest.raises(watcher_service.WatcherError, match="watcher quota"):
                 watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="echo second",
                     baseline_run_id="run_second",
                     cadence_preset="hourly",
@@ -13701,16 +13848,16 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             first = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="httpx -u darklab.sh",
                 baseline_run_id="run_one",
                 cadence_preset="hourly",
                 conn=conn,
             )
             second = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="httpx -u darklab.sh",
                 baseline_run_id="run_two",
                 cadence_preset="hourly",
@@ -13720,7 +13867,7 @@ class TestWatchersFoundation:
                 "UPDATE watchers SET state = ?, consecutive_changed = ? WHERE id = ?",
                 ("changed", 2, first.id),
             )
-            refreshed = {watcher.id: watcher for watcher in watcher_service.list_for_session("tok_watchers", conn=conn)}
+            refreshed = {watcher.id: watcher for watcher in watcher_service.list_for_session(_WATCHER_WORKSPACE_ID, conn=conn)}
 
         assert first.schedule_id != second.schedule_id
         assert first.baseline_run_id != second.baseline_run_id
@@ -13733,9 +13880,9 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="katana -u https://darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -13775,8 +13922,8 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
-            self._register_token(conn, "tok_other_watchers")
+            self._register_principal(conn)
+            self._register_principal(conn, "other-watchers")
             self._insert_run(conn, "run_base", ["80/tcp open http"])
             self._insert_run(conn, "run_valid", ["80/tcp open http", "443/tcp open https"])
             self._insert_run(conn, "run_unrelated", ["80/tcp open http", "8443/tcp open https"])
@@ -13785,10 +13932,10 @@ class TestWatchersFoundation:
                 conn,
                 "run_foreign",
                 ["22/tcp open ssh"],
-                session_id="tok_other_watchers",
+                session_id=_OTHER_WATCHER_WORKSPACE_ID,
             )
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_base",
                 cadence_preset="hourly",
@@ -13821,9 +13968,9 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="curl https://darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -13876,17 +14023,17 @@ class TestWatchersFoundation:
         assert schedule.cadence_preset == "daily"
         assert schedule.enabled is True
         prepared = next(call for call in debug_log.call_args_list if call.args == ("WATCHER_UPDATE_PREPARED",))
-        assert prepared.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert prepared.kwargs["extra"]["session"] == get_log_session_id(_WATCHER_WORKSPACE_ID)
         assert prepared.kwargs["extra"]["next_command_changed"] is True
         assert prepared.kwargs["extra"]["ignore_line_pattern_count"] == 1
         updated_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_UPDATED",))
-        assert updated_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert updated_log.kwargs["extra"]["session"] == get_log_session_id(_WATCHER_WORKSPACE_ID)
         assert updated_log.kwargs["extra"]["changed_fields"] == "label,command_text,options,policy,cadence_preset"
         assert updated_log.kwargs["extra"]["policy_changed"] is True
         assert updated_log.kwargs["extra"]["options_changed"] is True
         assert updated_log.kwargs["extra"]["schedule_changed"] is True
         accepted_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_ACCEPTED",))
-        assert accepted_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert accepted_log.kwargs["extra"]["session"] == get_log_session_id(_WATCHER_WORKSPACE_ID)
         assert accepted_log.kwargs["extra"]["baseline_run_id"] == "run_latest"
 
     def test_watcher_schedule_fire_launches_run_and_records_pending_fire(self, monkeypatch, tmp_path):
@@ -13898,16 +14045,16 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             team = team_storage.create_team(
                 conn,
                 name="Watcher Scope Team",
-                creator_session_token="tok_watchers",
+                creator_principal_id=_WATCHER_PRINCIPAL_ID,
             )
             self._insert_project(conn, "prj_personal_watcher")
             self._insert_project(conn, "prj_team_watcher", team_id=team["id"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 project_id="prj_personal_watcher",
@@ -13915,7 +14062,7 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             team_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 team_id=team["id"],
                 command_text="nmap -sV team.darklab.sh",
                 baseline_run_id="run_team_baseline",
@@ -13924,7 +14071,7 @@ class TestWatchersFoundation:
                 conn=conn,
             )
             unassigned_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV unassigned.darklab.sh",
                 baseline_run_id="run_unassigned_baseline",
                 cadence_preset="hourly",
@@ -14008,7 +14155,7 @@ class TestWatchersFoundation:
             for call in info_log.call_args_list
             if call.args == ("WATCHER_FIRED",) and call.kwargs["extra"]["watcher_id"] == watcher.id
         )
-        assert fired_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert fired_log.kwargs["extra"]["session"] == get_log_session_id(_WATCHER_WORKSPACE_ID)
         assert fired_log.kwargs["extra"]["run_id"] == "run_fire"
         assert fired_log.kwargs["extra"]["project_id"] == "prj_personal_watcher"
         assert schedule_refs["run_fire"]["schedule_id"] == watcher.schedule_id
@@ -14030,10 +14177,10 @@ class TestWatchersFoundation:
         next_run_ids = iter(["run_baseline", "run_changed"])
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 cadence_preset="hourly",
                 conn=conn,
@@ -14099,7 +14246,7 @@ class TestWatchersFoundation:
         assert accepted_fire.fire_kind == "baseline_accepted"
         assert accepted_fire.state_reason == "baseline_accepted"
         baseline_log = next(call for call in info_log.call_args_list if call.args == ("WATCHER_BASELINE_CAPTURED",))
-        assert baseline_log.kwargs["extra"]["session"] == get_log_session_id("tok_watchers")
+        assert baseline_log.kwargs["extra"]["session"] == get_log_session_id(_WATCHER_WORKSPACE_ID)
         assert baseline_log.kwargs["extra"]["baseline_run_id"] == "run_baseline"
         assert baseline_log.kwargs["extra"]["fire_kind"] == "baseline_created"
         assert baseline_log.kwargs["extra"]["fire_id"]
@@ -14122,13 +14269,13 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
             self._insert_run(conn, "run_threshold_base", ["80/tcp open http"])
             self._insert_run(conn, "run_threshold_first", ["80/tcp open http", "443/tcp open https"])
             self._insert_run(conn, "run_threshold_second", ["80/tcp open http", "8443/tcp open https-alt"])
             threshold_watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV threshold.darklab.sh",
                 baseline_run_id="run_threshold_base",
                 cadence_preset="hourly",
@@ -14195,7 +14342,7 @@ class TestWatchersFoundation:
                     ),
                 )
                 text_watcher = watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="curl https://darklab.sh",
                     baseline_run_id="run_text_base",
                     cadence_preset="daily",
@@ -14208,7 +14355,7 @@ class TestWatchersFoundation:
                 self._insert_run(conn, "run_ports_base", ["80/tcp open http"])
                 self._insert_run(conn, "run_ports_current", ["80/tcp open http", "443/tcp open https"])
                 port_watcher = watcher_service.create_watcher(
-                    "tok_watchers",
+                    _WATCHER_WORKSPACE_ID,
                     command_text="nmap -sV ports.darklab.sh",
                     baseline_run_id="run_ports_base",
                     cadence_preset="hourly",
@@ -14272,7 +14419,7 @@ class TestWatchersFoundation:
 
         baseline_run = {
             "id": "run_base",
-            "session_id": "tok_watchers",
+            "session_id": _WATCHER_WORKSPACE_ID,
             "output_preview": json.dumps(
                 [
                     {
@@ -14288,7 +14435,7 @@ class TestWatchersFoundation:
         }
         current_run = {
             "id": "run_current",
-            "session_id": "tok_watchers",
+            "session_id": _WATCHER_WORKSPACE_ID,
             "output_preview": json.dumps(
                 [
                     {
@@ -14325,12 +14472,12 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
             self._insert_run(conn, "run_baseline", ["80/tcp open http"])
             self._insert_run(conn, "run_current", ["80/tcp open http", "443/tcp open https"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -14363,13 +14510,13 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_RECOVERED)
             self._insert_run(conn, "run_baseline", ["open port 80"])
             self._insert_run(conn, "run_same", ["open port 80"])
             self._insert_run(conn, "run_same_again", ["open port 80"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -14410,12 +14557,12 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_ERROR)
             self._insert_run(conn, "run_baseline", ["open port 80"])
             self._insert_run(conn, "run_failed", ["scanner failed"], exit_code=2)
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -14447,10 +14594,10 @@ class TestWatchersFoundation:
         from services.watchers import service as watcher_service
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
-            self._register_token(conn)
+            self._register_principal(conn)
             self._insert_run(conn, "run_baseline", ["open port 80"])
             watcher = watcher_service.create_watcher(
-                "tok_watchers",
+                _WATCHER_WORKSPACE_ID,
                 command_text="nmap -sV darklab.sh",
                 baseline_run_id="run_baseline",
                 cadence_preset="hourly",
@@ -14480,14 +14627,7 @@ class TestNotificationsPhase0:
         database.db_init()
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        conn.execute(
-            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-            (
-                "tok_notifications",
-                datetime.now(timezone.utc).isoformat(),
-                None,
-            ),
-        )
+        persisted_principal(conn, "notifications")
         conn.commit()
         return conn
 
@@ -14499,7 +14639,7 @@ class TestNotificationsPhase0:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 channel_id,
-                "tok_notifications",
+                _NOTIFICATION_WORKSPACE_ID,
                 "webhook",
                 channel_id,
                 "{}",
@@ -14532,7 +14672,7 @@ class TestNotificationsPhase0:
             event_ids = dispatcher.enqueue(
                 TRIGGER_RUN_COMPLETE,
                 {"run_id": "run-fanout"},
-                "tok_notifications",
+                _NOTIFICATION_WORKSPACE_ID,
                 conn=conn,
                 dispatch_sync=True,
             )
@@ -14561,7 +14701,7 @@ class TestNotificationsPhase0:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "nte_claim",
-                    "tok_notifications",
+                    _NOTIFICATION_WORKSPACE_ID,
                     "ntc_claim",
                     TRIGGER_TEST,
                     json.dumps({"trigger": TRIGGER_TEST}),
@@ -14606,7 +14746,7 @@ class TestNotificationsPhase0:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "nte_dnd",
-                    "tok_notifications",
+                    _NOTIFICATION_WORKSPACE_ID,
                     "ntc_dnd",
                     TRIGGER_TEST,
                     json.dumps({"trigger": TRIGGER_TEST}),
@@ -14666,7 +14806,7 @@ class TestNotificationsPhase0:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event_id,
-                        "tok_notifications",
+                        _NOTIFICATION_WORKSPACE_ID,
                         "ntc_rate",
                         TRIGGER_TEST,
                         json.dumps({"trigger": TRIGGER_TEST}),
@@ -14726,7 +14866,7 @@ class TestNotificationsPhase0:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event_id,
-                        "tok_notifications",
+                        _NOTIFICATION_WORKSPACE_ID,
                         "ntc_retry_rate",
                         TRIGGER_TEST,
                         json.dumps({"trigger": TRIGGER_TEST}),
@@ -14787,7 +14927,7 @@ class TestNotificationsPhase0:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     "nte_old_retry",
-                    "tok_notifications",
+                    _NOTIFICATION_WORKSPACE_ID,
                     "ntc_old_retry",
                     TRIGGER_TEST,
                     json.dumps({"trigger": TRIGGER_TEST}),
@@ -14849,7 +14989,7 @@ class TestNotificationsPhase0:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event_id,
-                        "tok_notifications",
+                        _NOTIFICATION_WORKSPACE_ID,
                         "ntc_failure_modes",
                         TRIGGER_TEST,
                         json.dumps({"trigger": TRIGGER_TEST, "mode": mode}),
@@ -14912,7 +15052,7 @@ class TestNotificationsPhase0:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event_id,
-                        "tok_notifications",
+                        _NOTIFICATION_WORKSPACE_ID,
                         "ntc_prune",
                         TRIGGER_TEST,
                         json.dumps({"trigger": TRIGGER_TEST}),
@@ -14951,9 +15091,10 @@ class TestNotificationsPhase0:
     def test_notification_channels_require_a_durable_personal_owner(self):
         from services.notifications.models import require_durable_personal_owner
 
-        assert require_durable_personal_owner("tok_notifications") == "tok_notifications"
         workspace_id = "wsp_" + "a" * 32
         assert require_durable_personal_owner(workspace_id) == workspace_id
+        with pytest.raises(ValueError, match="durable personal workspace"):
+            require_durable_personal_owner(anonymous_session_id("anonymous-notifications"))
         with pytest.raises(ValueError, match="durable personal workspace"):
             require_durable_personal_owner("sess-anonymous")
 
@@ -14974,7 +15115,7 @@ class TestNotificationsPhase0:
         conn = self._notification_db(monkeypatch, tmp_path)
         conn.close()
         channel = create_notification_channel(
-            "tok_notifications",
+            _NOTIFICATION_WORKSPACE_ID,
             {
                 "kind": "webhook",
                 "label": "Ops Hook",
@@ -14984,21 +15125,21 @@ class TestNotificationsPhase0:
         )
         channel_id = channel["id"]
 
-        lines, exit_code = builtin_commands.execute_builtin_command("notify list", "tok_notifications")
+        lines, exit_code = builtin_commands.execute_builtin_command("notify list", _NOTIFICATION_WORKSPACE_ID)
         text = "\n".join(str(line.get("text", "")) for line in lines)
 
         assert exit_code == 0
         assert channel_id in text
         assert "Ops Hook" in text
 
-        info_lines, _ = builtin_commands.execute_builtin_command(f"notify info {channel_id}", "tok_notifications")
+        info_lines, _ = builtin_commands.execute_builtin_command(f"notify info {channel_id}", _NOTIFICATION_WORKSPACE_ID)
         info_text = "\n".join(str(line.get("text", "")) for line in info_lines)
         assert "configured: url" in info_text
 
-        muted_lines, _ = builtin_commands.execute_builtin_command(f"notify mute {channel_id}", "tok_notifications")
+        muted_lines, _ = builtin_commands.execute_builtin_command(f"notify mute {channel_id}", _NOTIFICATION_WORKSPACE_ID)
         assert "muted" in "\n".join(str(line.get("text", "")) for line in muted_lines)
 
-        test_lines, _ = builtin_commands.execute_builtin_command(f"notify test {channel_id}", "tok_notifications")
+        test_lines, _ = builtin_commands.execute_builtin_command(f"notify test {channel_id}", _NOTIFICATION_WORKSPACE_ID)
         test_text = "\n".join(str(line.get("text", "")) for line in test_lines)
         assert "queued 1 test event" in test_text
         assert "sent" in test_text
@@ -15006,16 +15147,16 @@ class TestNotificationsPhase0:
 
         event_lines, _ = builtin_commands.execute_builtin_command(
             f"notify events --channel {channel_id} --status sent",
-            "tok_notifications",
+            _NOTIFICATION_WORKSPACE_ID,
         )
         event_text = "\n".join(str(line.get("text", "")) for line in event_lines)
         assert "Notification events" in event_text
         assert channel_id in event_text
 
-        unmuted_lines, _ = builtin_commands.execute_builtin_command(f"notify unmute {channel_id}", "tok_notifications")
+        unmuted_lines, _ = builtin_commands.execute_builtin_command(f"notify unmute {channel_id}", _NOTIFICATION_WORKSPACE_ID)
         assert "unmuted" in "\n".join(str(line.get("text", "")) for line in unmuted_lines)
 
-        deleted_lines, _ = builtin_commands.execute_builtin_command(f"notify delete {channel_id}", "tok_notifications")
+        deleted_lines, _ = builtin_commands.execute_builtin_command(f"notify delete {channel_id}", _NOTIFICATION_WORKSPACE_ID)
         assert "deleted" in "\n".join(str(line.get("text", "")) for line in deleted_lines)
         with database.db_connect() as audit_conn:
             audit_rows = audit_conn.execute(
@@ -15049,7 +15190,7 @@ class TestNotificationsPhase0:
 
         lines, exit_code = builtin_commands.execute_builtin_command(
             "notify create webhook --label Hook",
-            "tok_notifications",
+            _NOTIFICATION_WORKSPACE_ID,
         )
         text = "\n".join(str(line.get("text", "")) for line in lines)
 
@@ -15059,18 +15200,26 @@ class TestNotificationsPhase0:
 
     def test_team_builtin_creates_invites_joins_and_rotates_recovery(self, monkeypatch, tmp_path):
         from services.commands import builtins_team
+        from services.teams.scope import OwnerContext
 
         conn = self._notification_db(monkeypatch, tmp_path)
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            for token in ("tok_team_builtin_owner", "tok_team_builtin_operator"):
-                conn.execute(
-                    "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
-                    (token, now, ""),
-                )
+            persisted_principal(conn, "team-builtin-owner")
+            persisted_principal(conn, "team-builtin-operator")
             conn.commit()
         finally:
             conn.close()
+
+        owner_context = OwnerContext(
+            scope="personal",
+            owner_id=_TEAM_BUILTIN_OWNER_WORKSPACE_ID,
+            actor_principal_id=_TEAM_BUILTIN_OWNER_PRINCIPAL_ID,
+        )
+        operator_context = OwnerContext(
+            scope="personal",
+            owner_id=_TEAM_BUILTIN_OPERATOR_WORKSPACE_ID,
+            actor_principal_id=_TEAM_BUILTIN_OPERATOR_PRINCIPAL_ID,
+        )
 
         with (
             mock.patch.object(builtins_team.log, "info") as mock_info,
@@ -15078,18 +15227,23 @@ class TestNotificationsPhase0:
         ):
             create_lines, create_exit = builtin_commands.execute_builtin_command(
                 "team create Builtin Operators --display-name Owner",
-                "tok_team_builtin_owner",
+                _TEAM_BUILTIN_OWNER_WORKSPACE_ID,
+                owner_context=owner_context,
             )
             create_text = "\n".join(str(line.get("text", "")) for line in create_lines)
             match = re.search(r"\((team_[a-f0-9]+)\)", create_text)
             assert create_exit == 0
-            assert match
+            assert match, create_text
             team_id = match.group(1)
             assert "recovery code: trec_" in create_text
             create_recovery_match = re.search(r"recovery code: (trec_[A-Za-z0-9_-]+)", create_text)
             assert create_recovery_match
 
-            list_lines, _ = builtin_commands.execute_builtin_command("team list", "tok_team_builtin_owner")
+            list_lines, _ = builtin_commands.execute_builtin_command(
+                "team list",
+                _TEAM_BUILTIN_OWNER_WORKSPACE_ID,
+                owner_context=owner_context,
+            )
             list_text = "\n".join(str(line.get("text", "")) for line in list_lines)
             assert team_id in list_text
             list_header = next(line for line in list_lines if line.get("cls") == "builtin-table-header")
@@ -15099,9 +15253,10 @@ class TestNotificationsPhase0:
 
             invite_lines, _ = builtin_commands.execute_builtin_command(
                 "team invite create --role operator --label Shell",
-                "tok_team_builtin_owner",
+                _TEAM_BUILTIN_OWNER_WORKSPACE_ID,
                 team_id=team_id,
                 team_role="owner",
+                owner_context=owner_context,
             )
             invite_text = "\n".join(str(line.get("text", "")) for line in invite_lines)
             code_match = re.search(r"code: (tinv_[A-Za-z0-9_-]+)", invite_text)
@@ -15109,31 +15264,35 @@ class TestNotificationsPhase0:
 
             join_lines, _ = builtin_commands.execute_builtin_command(
                 f"team join {code_match.group(1)} --display-name Operator",
-                "tok_team_builtin_operator",
+                _TEAM_BUILTIN_OPERATOR_WORKSPACE_ID,
+                owner_context=operator_context,
             )
             assert "joined Builtin Operators" in "\n".join(str(line.get("text", "")) for line in join_lines)
 
             denied_invite_lines, _ = builtin_commands.execute_builtin_command(
                 "team invite create --role viewer",
-                "tok_team_builtin_operator",
+                _TEAM_BUILTIN_OPERATOR_WORKSPACE_ID,
                 team_id=team_id,
                 team_role="operator",
+                owner_context=operator_context,
             )
             assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_invite_lines)
 
             denied_recovery_lines, _ = builtin_commands.execute_builtin_command(
                 "team recovery rotate",
-                "tok_team_builtin_operator",
+                _TEAM_BUILTIN_OPERATOR_WORKSPACE_ID,
                 team_id=team_id,
                 team_role="operator",
+                owner_context=operator_context,
             )
             assert "lacks team capability" in "\n".join(str(line.get("text", "")) for line in denied_recovery_lines)
 
             members_lines, _ = builtin_commands.execute_builtin_command(
                 "team members",
-                "tok_team_builtin_owner",
+                _TEAM_BUILTIN_OWNER_WORKSPACE_ID,
                 team_id=team_id,
                 team_role="owner",
+                owner_context=owner_context,
             )
             members_text = "\n".join(str(line.get("text", "")) for line in members_lines)
             assert "Operator" in members_text
@@ -15146,9 +15305,10 @@ class TestNotificationsPhase0:
 
             recovery_lines, _ = builtin_commands.execute_builtin_command(
                 "team recovery rotate",
-                "tok_team_builtin_owner",
+                _TEAM_BUILTIN_OWNER_WORKSPACE_ID,
                 team_id=team_id,
                 team_role="owner",
+                owner_context=owner_context,
             )
             recovery_text = "\n".join(str(line.get("text", "")) for line in recovery_lines)
             assert "recovery code: trec_" in recovery_text
@@ -15886,7 +16046,7 @@ class TestIntelServices:
 
         with mock.patch.object(audit.log, "info") as info:
             audit.emit_intel_lookup(
-                "tok_sensitive_session",
+                anonymous_session_id("tok_sensitive_session"),
                 "Shodan",
                 "IP",
                 run_id="run-1",
@@ -15901,7 +16061,7 @@ class TestIntelServices:
         (message,) = info.call_args.args
         payload = info.call_args.kwargs["extra"]
         assert message == "INTEL_LOOKUP"
-        assert payload["session"] == "tok_sens********"
+        assert payload["session"] == get_log_session_id(anonymous_session_id("tok_sensitive_session"))
         assert payload["provider"] == "shodan"
         assert payload["entity_type"] == "ip"
         assert payload["run_id"] == "run-1"
@@ -15916,23 +16076,24 @@ class TestIntelServices:
 
         redis = process._FakeRedisClient()
         redis.set(cache.cache_key("fofa", "domain", "secret.example"), "{not-json")
-        redis.set(cache.quota_cache_key("tok_cache_decode", "fofa"), "{not-json")
-        redis.set("intel:rate:tok_cache_decode:fofa", "{not-json")
+        identity = anonymous_session_id("tok_cache_decode")
+        redis.set(cache.quota_cache_key(identity, "fofa"), "{not-json")
+        redis.set(rate_limiter._bucket_key(identity, "fofa"), "{not-json")
 
         with mock.patch.object(cache.log, "warning") as cache_warning:
             assert cache.get_cached_response("fofa", "domain", "secret.example", redis_client=redis) is None
-            assert cache.get_quota_exhausted("tok_cache_decode", "fofa", redis_client=redis) is None
+            assert cache.get_quota_exhausted(identity, "fofa", redis_client=redis) is None
 
         cache_events = {call.args[0]: call.kwargs["extra"] for call in cache_warning.call_args_list}
         assert cache_events["INTEL_CACHE_DECODE_FAILED"]["provider"] == "fofa"
         assert cache_events["INTEL_CACHE_DECODE_FAILED"]["entity_type"] == "domain"
         assert "secret.example" not in json.dumps(cache_events)
-        assert cache_events["INTEL_QUOTA_CACHE_DECODE_FAILED"]["session"] == "tok_cach********"
+        assert cache_events["INTEL_QUOTA_CACHE_DECODE_FAILED"]["session"] == get_log_session_id(identity)
 
         with mock.patch.object(rate_limiter.log, "warning") as rate_warning:
             assert (
                 rate_limiter.check_rate_limit(
-                    "tok_cache_decode",
+                    identity,
                     "fofa",
                     cfg={"intel_rate_limit_fofa_bucket": 1, "intel_rate_limit_fofa_refill_seconds": 10},
                     redis_client=redis,
@@ -15944,7 +16105,7 @@ class TestIntelServices:
         rate_warning.assert_called_once()
         assert rate_warning.call_args.args == ("INTEL_RATE_BUCKET_DECODE_FAILED",)
         assert rate_warning.call_args.kwargs["extra"]["provider"] == "fofa"
-        assert rate_warning.call_args.kwargs["extra"]["session"] == "tok_cach********"
+        assert rate_warning.call_args.kwargs["extra"]["session"] == get_log_session_id(identity)
 
     def test_json_api_client_uses_system_ca_bundle_for_https(self, monkeypatch):
         from services.intel import clients
@@ -17335,6 +17496,7 @@ class TestIntelServices:
         from services.intel.base import IntelResult
         from services.intel.lookup import IntelLookupResult, ProviderLookup
 
+        database.db_init()
         session_id = anonymous_session_id("intel-snapshot-session")
         run_id = "run-intel-snapshot-" + uuid.uuid4().hex
         with database.db_connect() as conn:
@@ -17394,7 +17556,8 @@ class TestIntelServices:
         from services.intel.base import IntelResult
         from services.intel.lookup import IntelLookupResult, ProviderLookup
 
-        session_id = "intel-lookup-only-session-" + uuid.uuid4().hex
+        database.db_init()
+        session_id = anonymous_session_id("intel-lookup-only-session")
         payload = {
             "providers": {"crtsh": {"certificate_count": 1}},
             "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
@@ -17453,7 +17616,7 @@ class TestDataAccessLayerServiceCoverage:
         from services.teams.scope import personal_owner_context
 
         self._service_db(monkeypatch, tmp_path, "history-service.db")
-        session_id = "tok_history_service"
+        session_id = anonymous_session_id("tok_history_service")
         now = "2026-06-02T12:00:00+00:00"
         with database.db_connect() as conn:
             conn.execute(
@@ -17558,7 +17721,7 @@ class TestDataAccessLayerServiceCoverage:
         )
 
         self._service_db(monkeypatch, tmp_path, "workspace-metadata-service.db")
-        session_id = "tok_workspace_service"
+        session_id = anonymous_session_id("tok_workspace_service")
         team_id = "team_workspace_service"
         now = "2026-06-02T12:00:00+00:00"
         scope = RequestScope(
@@ -17663,308 +17826,6 @@ class TestDataAccessLayerServiceCoverage:
         }
         assert {"journal_mode", "page_stats"}.issubset(debug_probes)
 
-    def test_session_migration_service_moves_counts_and_cleans_source_rows(self, monkeypatch, tmp_path):
-        from services.session import storage as session_storage
-
-        self._service_db(monkeypatch, tmp_path, "session-migration-service.db")
-        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(b"s" * 32).decode("ascii"))
-        secrets_vault.reset_master_key_cache_for_tests()
-        source_session = "tok_source_service"
-        destination_session = "tok_destination_service"
-        now = "2026-06-02T12:00:00+00:00"
-        secrets_storage.upsert_secret(source_session, "vt_api_key", "secret-value")
-        with database.db_connect() as conn:
-            conn.execute(
-                "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code, output_preview) "
-                "VALUES (?, ?, 'host darklab.sh', ?, ?, 0, '[]')",
-                ("run-session-service", source_session, now, now),
-            )
-            conn.execute(
-                "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, ?, '[]')",
-                ("snap-session-service", source_session, "session snapshot", now),
-            )
-            conn.execute(
-                "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, 'host darklab.sh')",
-                (source_session,),
-            )
-            conn.execute(
-                "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) VALUES (?, ?, ?)",
-                (source_session, json.dumps({"pref_theme_name": "darklab_obsidian.yaml"}), now),
-            )
-            conn.execute(
-                "INSERT INTO session_variables (personal_workspace_id, name, value, updated) VALUES (?, 'HOST', 'darklab.sh', ?)",
-                (source_session, now),
-            )
-            conn.execute(
-                "INSERT INTO user_workflows "
-                "(id, personal_workspace_id, title, description, inputs, steps, created, updated) "
-                "VALUES (?, ?, 'Workflow', '', '[]', '[]', ?, ?)",
-                ("wf-session-service", source_session, now, now),
-            )
-            conn.execute(
-                "INSERT INTO recent_values (personal_workspace_id, kind, value, last_used, use_count) "
-                "VALUES (?, 'domain', 'darklab.sh', ?, 2)",
-                (source_session, now),
-            )
-            conn.execute(
-                "INSERT INTO projects (id, personal_workspace_id, name, slug, description, status, created, updated) "
-                "VALUES (?, ?, 'Migrated Project', 'migrated-project', '', 'active', ?, ?)",
-                ("prj_session_service", source_session, now, now),
-            )
-            conn.execute(
-                "INSERT INTO project_http_profiles "
-                "(id, personal_workspace_id, project_id, name, name_key, role_key, base_url, "
-                "created_by_session_id, updated_by_session_id, created_at, updated_at) "
-                "VALUES ('htp_session_service', ?, 'prj_session_service', "
-                "'Anonymous', 'anonymous', 'anonymous', 'https://darklab.sh', ?, ?, ?, ?)",
-                (source_session, source_session, source_session, now, now),
-            )
-            conn.execute(
-                "INSERT INTO project_links "
-                "(id, project_id, entity_type, entity_id, source, created) "
-                "VALUES ('pln_session_service', 'prj_session_service', 'run', "
-                "'run-session-service', 'manual', ?)",
-                (now,),
-            )
-            conn.execute(
-                "INSERT INTO findings "
-                "(id, personal_workspace_id, run_id, first_run_id, last_run_id, signature_hash, title, "
-                "manual_created_by_session_id, manual_updated_by_session_id, created) "
-                "VALUES ('fnd_session_service', ?, 'run-session-service', 'run-session-service', "
-                "'run-session-service', 'sig-session-service', 'Migrated evidence finding', ?, ?, ?)",
-                (source_session, source_session, source_session, now),
-            )
-            conn.execute(
-                "INSERT INTO finding_evidence_links "
-                "(id, personal_workspace_id, project_id, finding_id, evidence_type, evidence_id, run_id, "
-                "created_by_session_id, created_at) VALUES "
-                "('fel_session_service', ?, 'prj_session_service', 'fnd_session_service', "
-                "'run', 'run-session-service', 'run-session-service', ?, ?)",
-                (source_session, source_session, now),
-            )
-            conn.execute(
-                "INSERT INTO finding_triage_details "
-                "(id, personal_workspace_id, finding_id, verification_status, "
-                "verification_updated_by_session_id, verification_updated_at, created, updated) "
-                "VALUES ('ftri_session_service', ?, 'fnd_session_service', 'verified', ?, ?, ?, ?)",
-                (source_session, source_session, now, now, now),
-            )
-            conn.execute(
-                "INSERT INTO notification_channels "
-                "(id, personal_workspace_id, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
-                "VALUES (?, ?, 'webhook', 'Webhook', '{}', '{}', '[]', 0, ?, ?)",
-                ("ntc_session_service", source_session, now, now),
-            )
-            disposition_sql = (
-                "INSERT INTO finding_remediation_dispositions "
-                "(personal_workspace_id, team_id, affected_subject, identity_kind, identity_value, "
-                "rule_identity, review_state, remediation, created_at, updated_at, "
-                "remediation_updated_at) "
-                "VALUES (?, '', 'subject:session-migration', 'rule', "
-                "'RULE:session-migration', 'session-migration', ?, ?, ?, ?, ?)"
-            )
-            conn.execute(
-                disposition_sql,
-                (
-                    source_session,
-                    "reviewed",
-                    "Use migrated guidance.",
-                    "2026-06-01T00:00:00+00:00",
-                    "2026-06-02T00:00:00+00:00",
-                    "2026-06-04T00:00:00+00:00",
-                ),
-            )
-            conn.execute(
-                disposition_sql,
-                (
-                    destination_session,
-                    "important",
-                    "Older destination guidance.",
-                    "2026-05-31T00:00:00+00:00",
-                    "2026-06-03T00:00:00+00:00",
-                    "2026-06-01T00:00:00+00:00",
-                ),
-            )
-            conn.executemany(
-                "INSERT INTO finding_remediation_merge_members "
-                "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, "
-                "identity_value, vulnerability_id, rule_identity, created_by_session_id, "
-                "created_at) VALUES (?, '', 'rmg_session_migration', ?, 'vulnerability', "
-                "'CVE-2026-12345', 'CVE-2026-12345', ?, ?, ?)",
-                (
-                    (
-                        source_session,
-                        "entity:session-migration-one",
-                        "observation:session-migration-one",
-                        source_session,
-                        now,
-                    ),
-                    (
-                        source_session,
-                        "entity:session-migration-two",
-                        "observation:session-migration-two",
-                        source_session,
-                        now,
-                    ),
-                ),
-            )
-            conn.executemany(
-                "INSERT INTO finding_remediation_merge_members "
-                "(personal_workspace_id, team_id, merge_id, affected_subject, identity_kind, "
-                "identity_value, vulnerability_id, rule_identity, created_by_session_id, "
-                "created_at) VALUES (?, '', 'rmg_destination_existing', ?, "
-                "'vulnerability', 'CVE-2026-12345', 'CVE-2026-12345', ?, ?, ?)",
-                (
-                    (
-                        destination_session,
-                        "entity:session-migration-one",
-                        "observation:session-migration-one",
-                        destination_session,
-                        now,
-                    ),
-                    (
-                        destination_session,
-                        "entity:destination-existing",
-                        "observation:destination-existing",
-                        destination_session,
-                        now,
-                    ),
-                ),
-            )
-            conn.commit()
-
-        counts = session_storage.migrate_session_records(
-            source_session,
-            destination_session,
-            audit_fields={"session_id": source_session, "actor_session_id": source_session, "team_id": ""},
-            audit_details={"source": "test"},
-            audit_target_id=destination_session,
-        )
-
-        assert counts["migrated_runs"] == 1
-        assert counts["migrated_snapshots"] == 1
-        assert counts["migrated_stars"] == 1
-        assert counts["migrated_preferences"] == 1
-        assert counts["migrated_variables"] == 1
-        assert counts["migrated_workflows"] == 1
-        assert counts["migrated_projects"] == 1
-        assert counts["migrated_finding_remediation_dispositions"] == 1
-        assert counts["migrated_finding_remediation_guidance"] == 1
-        assert counts["migrated_finding_remediation_merge_members"] == 2
-        assert counts["migrated_finding_evidence_links"] == 1
-        assert counts["migrated_finding_triage_details"] == 1
-        assert counts["migrated_project_http_profiles"] == 1
-        assert counts["migrated_zap_connector_jobs"] == 0
-        assert counts["migrated_oast_correlations"] == 0
-        assert counts["migrated_schemathesis_run_evidence"] == 0
-        assert counts["migrated_notification_channels"] == 1
-        assert counts["migrated_recent_values"] == 1
-        assert counts["migrated_secrets"] == 1
-        with database.db_connect() as conn:
-            migrated_disposition = conn.execute(
-                "SELECT personal_workspace_id, review_state, remediation, remediation_updated_at "
-                "FROM finding_remediation_dispositions "
-                "WHERE affected_subject = 'subject:session-migration'",
-            ).fetchone()
-            source_counts = {
-                "runs": conn.execute(
-                    "SELECT COUNT(*) AS count FROM runs WHERE personal_workspace_id = ?", (source_session,)
-                ).fetchone()["count"],
-                "snapshots": conn.execute(
-                    "SELECT COUNT(*) AS count FROM snapshots WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "stars": conn.execute(
-                    "SELECT COUNT(*) AS count FROM starred_commands WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "preferences": conn.execute(
-                    "SELECT COUNT(*) AS count FROM session_preferences WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "variables": conn.execute(
-                    "SELECT COUNT(*) AS count FROM session_variables WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "workflows": conn.execute(
-                    "SELECT COUNT(*) AS count FROM user_workflows WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "recent": conn.execute(
-                    "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "remediation_merge_members": conn.execute(
-                    "SELECT COUNT(*) AS count FROM finding_remediation_merge_members WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "finding_evidence_links": conn.execute(
-                    "SELECT COUNT(*) AS count FROM finding_evidence_links WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "finding_triage_details": conn.execute(
-                    "SELECT COUNT(*) AS count FROM finding_triage_details WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-                "project_http_profiles": conn.execute(
-                    "SELECT COUNT(*) AS count FROM project_http_profiles WHERE personal_workspace_id = ?",
-                    (source_session,),
-                ).fetchone()["count"],
-            }
-            migrated_merge_rows = conn.execute(
-                "SELECT personal_workspace_id, merge_id, created_by_session_id "
-                "FROM finding_remediation_merge_members WHERE personal_workspace_id = ? "
-                "ORDER BY affected_subject",
-                (destination_session,),
-            ).fetchall()
-            destination_project = conn.execute(
-                "SELECT personal_workspace_id FROM projects WHERE id = 'prj_session_service'",
-            ).fetchone()
-            migrated_evidence = conn.execute(
-                "SELECT personal_workspace_id, created_by_session_id FROM finding_evidence_links "
-                "WHERE id = 'fel_session_service'",
-            ).fetchone()
-            migrated_finding = conn.execute(
-                "SELECT personal_workspace_id, manual_created_by_session_id, manual_updated_by_session_id "
-                "FROM findings WHERE id = 'fnd_session_service'",
-            ).fetchone()
-            migrated_triage = conn.execute(
-                "SELECT personal_workspace_id, verification_updated_by_session_id "
-                "FROM finding_triage_details WHERE id = 'ftri_session_service'",
-            ).fetchone()
-            migrated_http_profile = conn.execute(
-                "SELECT personal_workspace_id, created_by_session_id, updated_by_session_id "
-                "FROM project_http_profiles WHERE id = 'htp_session_service'",
-            ).fetchone()
-            audit_row = conn.execute(
-                "SELECT details FROM audit_events WHERE target_id = ?",
-                (destination_session,),
-            ).fetchone()
-
-        assert set(source_counts.values()) == {0}
-        assert destination_project["personal_workspace_id"] == destination_session
-        assert migrated_evidence["personal_workspace_id"] == destination_session
-        assert migrated_evidence["created_by_session_id"] == destination_session
-        assert migrated_finding["personal_workspace_id"] == destination_session
-        assert migrated_finding["manual_created_by_session_id"] == destination_session
-        assert migrated_finding["manual_updated_by_session_id"] == destination_session
-        assert tuple(migrated_triage) == (destination_session, destination_session)
-        assert tuple(migrated_http_profile) == (
-            destination_session,
-            destination_session,
-            destination_session,
-        )
-        assert migrated_disposition["personal_workspace_id"] == destination_session
-        assert migrated_disposition["review_state"] == "important"
-        assert migrated_disposition["remediation"] == "Use migrated guidance."
-        assert migrated_disposition["remediation_updated_at"] == "2026-06-04T00:00:00+00:00"
-        assert len(migrated_merge_rows) == 3
-        assert {row["merge_id"] for row in migrated_merge_rows} == {"rmg_destination_existing"}
-        assert {row["created_by_session_id"] for row in migrated_merge_rows} == {destination_session}
-        assert secrets_storage.get_secret_value_for_env(destination_session, "VT_API_KEY") == "secret-value"
-        assert audit_row is not None
-        assert json.loads(audit_row["details"])["migration_counts"]["migrated_recent_values"] == 1
-
     def test_manual_finding_update_reports_an_atomic_revision_race(self, monkeypatch):
         from services.projects import manual_findings
 
@@ -18010,7 +17871,7 @@ class TestDataAccessLayerServiceCoverage:
 
         result = manual_findings.update_manual_finding_on_conn(
             conn,
-            "tok_manual",
+            anonymous_session_id("tok_manual"),
             "prj_manual",
             "fnd_manual",
             {"expected_revision": 1, "title": "Updated title"},
@@ -18042,7 +17903,7 @@ class TestSessionWorkspace:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_enabled=False)
             try:
-                ensure_session_workspace("tok_session-1", cfg)
+                ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
                 assert False, "expected disabled workspace to reject operations"
             except WorkspaceDisabled:
                 pass
@@ -18050,10 +17911,10 @@ class TestSessionWorkspace:
     def test_session_workspace_uses_hashed_session_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            path = ensure_session_workspace("tok_secret_value", cfg)
+            path = ensure_session_workspace(anonymous_session_id("tok_secret_value"), cfg)
 
-            assert path.name == session_workspace_name("tok_secret_value")
-            assert "tok_secret_value" not in str(path)
+            assert path.name == session_workspace_name(anonymous_session_id("tok_secret_value"))
+            assert anonymous_session_id("tok_secret_value") not in str(path)
             assert path.exists()
             mode = path.stat().st_mode & 0o7777
             assert WORKSPACE_DIR_MODE == 0o3730
@@ -18061,21 +17922,25 @@ class TestSessionWorkspace:
             assert not mode & 0o004
 
     def test_owner_workspace_names_separate_personal_and_team_roots(self):
-        from services.teams.scope import personal_owner_context, team_owner_context
+        from services.teams.scope import OwnerContext, team_owner_context
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            personal = personal_owner_context("tok_" + "b" * 32)
+            personal = OwnerContext(
+                scope="personal",
+                owner_id="wsp_" + "b" * 32,
+                workspace_storage_key="ws_" + "e" * 32,
+            )
             team = team_owner_context(
                 "team_workspace_owner",
-                actor_session_id="tok_workspace_owner",
+                actor_principal_id="prn_" + "c" * 32,
                 actor_member_id="tmem_workspace_owner",
             )
 
             personal_path = workspace_module.ensure_owner_workspace(personal, cfg)
             team_path = workspace_module.ensure_owner_workspace(team, cfg)
 
-            assert personal_path.name == session_workspace_name(personal.owner_id)
+            assert personal_path.name == personal.workspace_storage_key
             assert team_path.name.startswith("team_")
             assert personal_path != team_path
             assert personal.owner_id not in str(personal_path)
@@ -18086,32 +17951,25 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            team = team_owner_context("team_workspace_shared", actor_session_id="tok_member_a")
+            team = team_owner_context(
+                "team_workspace_shared",
+                actor_principal_id="prn_" + "d" * 32,
+            )
 
-            write_workspace_text_file("tok_member_a", "targets.txt", "personal\n", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_member_a"), "targets.txt", "personal\n", cfg)
             workspace_module.write_owner_workspace_text_file(team, "targets.txt", "team\n", cfg)
 
-            assert read_workspace_text_file("tok_member_a", "targets.txt", cfg) == "personal\n"
+            assert read_workspace_text_file(anonymous_session_id("tok_member_a"), "targets.txt", cfg) == "personal\n"
             assert workspace_module.read_owner_workspace_text_file(team, "targets.txt", cfg) == "team\n"
-            assert workspace_usage("tok_member_a", cfg).bytes_used == len("personal\n")
+            assert workspace_usage(anonymous_session_id("tok_member_a"), cfg).bytes_used == len("personal\n")
             assert workspace_module.owner_workspace_usage(team, cfg).bytes_used == len("team\n")
-
-    def test_session_workspace_migration_rejects_team_ids(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = self._cfg(tmp)
-
-            with pytest.raises(InvalidWorkspacePath):
-                workspace_module.migrate_session_workspace("team_from", "tok_to", cfg)
-
-            with pytest.raises(InvalidWorkspacePath):
-                workspace_module.migrate_session_workspace("tok_from", "team_to", cfg)
 
     def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
             with mock.patch("services.workspace.files.os.chmod", side_effect=OSError("chmod blocked")):
                 with mock.patch.object(workspace_module.log, "warning") as warning:
-                    path = ensure_session_workspace("tok_session-1", cfg)
+                    path = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
 
             assert path.exists()
             warning.assert_called_once()
@@ -18124,86 +17982,86 @@ class TestSessionWorkspace:
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
 
-            written = write_workspace_text_file("tok_session-1", "targets.txt", "darklab.sh\n", cfg)
+            written = write_workspace_text_file(anonymous_session_id("tok_session-1"), "targets.txt", "darklab.sh\n", cfg)
             assert written == {"path": "targets.txt", "size": 11}
-            written_path = resolve_workspace_path("tok_session-1", "targets.txt", cfg)
+            written_path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "targets.txt", cfg)
             assert (written_path.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
             assert not written_path.stat().st_mode & 0o007
-            assert read_workspace_text_file("tok_session-1", "targets.txt", cfg) == "darklab.sh\n"
-            assert list_workspace_files("tok_session-1", cfg)[0]["path"] == "targets.txt"
-            assert workspace_usage("tok_session-1", cfg).bytes_used == 11
+            assert read_workspace_text_file(anonymous_session_id("tok_session-1"), "targets.txt", cfg) == "darklab.sh\n"
+            assert list_workspace_files(anonymous_session_id("tok_session-1"), cfg)[0]["path"] == "targets.txt"
+            assert workspace_usage(anonymous_session_id("tok_session-1"), cfg).bytes_used == 11
 
-            delete_workspace_file("tok_session-1", "targets.txt", cfg)
-            assert list_workspace_files("tok_session-1", cfg) == []
+            delete_workspace_file(anonymous_session_id("tok_session-1"), "targets.txt", cfg)
+            assert list_workspace_files(anonymous_session_id("tok_session-1"), cfg) == []
 
     def test_copy_and_touch_workspace_files_without_overwriting(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "source.txt", "copied\n", cfg)
-            create_workspace_directory("tok_session-1", "archive", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "source.txt", "copied\n", cfg)
+            create_workspace_directory(anonymous_session_id("tok_session-1"), "archive", cfg)
 
             copied = workspace_file_mutations.copy_workspace_file(
-                "tok_session-1",
+                anonymous_session_id("tok_session-1"),
                 "source.txt",
                 "archive",
                 cfg,
             )
             created = workspace_file_mutations.touch_workspace_file(
-                "tok_session-1",
+                anonymous_session_id("tok_session-1"),
                 "empty.txt",
                 cfg,
             )
             touched = workspace_file_mutations.touch_workspace_file(
-                "tok_session-1",
+                anonymous_session_id("tok_session-1"),
                 "source.txt",
                 cfg,
             )
             assert copied.source == "source.txt"
             assert copied.destination == "archive/source.txt"
             assert copied.size == len("copied\n")
-            assert read_workspace_text_file("tok_session-1", "source.txt", cfg) == "copied\n"
-            assert read_workspace_text_file("tok_session-1", "archive/source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file(anonymous_session_id("tok_session-1"), "source.txt", cfg) == "copied\n"
+            assert read_workspace_text_file(anonymous_session_id("tok_session-1"), "archive/source.txt", cfg) == "copied\n"
             assert created == {"path": "empty.txt", "size": 0, "created": True}
             assert touched == {"path": "source.txt", "size": len("copied\n"), "created": False}
             appended = workspace_file_mutations.append_workspace_text_file(
-                "tok_session-1",
+                anonymous_session_id("tok_session-1"),
                 "source.txt",
                 "again\n",
                 cfg,
             )
             appended_new = workspace_file_mutations.append_workspace_text_file(
-                "tok_session-1",
+                anonymous_session_id("tok_session-1"),
                 "appended-new.txt",
                 "new\n",
                 cfg,
             )
             assert appended == {"path": "source.txt", "size": len("copied\nagain\n")}
             assert appended_new == {"path": "appended-new.txt", "size": len("new\n")}
-            assert read_workspace_text_file("tok_session-1", "source.txt", cfg) == "copied\nagain\n"
-            assert read_workspace_text_file("tok_session-1", "appended-new.txt", cfg) == "new\n"
+            assert read_workspace_text_file(anonymous_session_id("tok_session-1"), "source.txt", cfg) == "copied\nagain\n"
+            assert read_workspace_text_file(anonymous_session_id("tok_session-1"), "appended-new.txt", cfg) == "new\n"
 
             with pytest.raises(InvalidWorkspacePath, match="destination already exists"):
                 workspace_file_mutations.copy_workspace_file(
-                    "tok_session-1",
+                    anonymous_session_id("tok_session-1"),
                     "source.txt",
                     "archive/source.txt",
                     cfg,
                 )
             with pytest.raises(InvalidWorkspacePath):
                 workspace_file_mutations.copy_workspace_file(
-                    "tok_session-1",
+                    anonymous_session_id("tok_session-1"),
                     "../source.txt",
                     "escape.txt",
                     cfg,
                 )
             with pytest.raises(InvalidWorkspacePath):
-                workspace_file_mutations.touch_workspace_file("tok_session-1", "../escape.txt", cfg)
+                workspace_file_mutations.touch_workspace_file(anonymous_session_id("tok_session-1"), "../escape.txt", cfg)
 
     def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "output.txt", "old\n", cfg)
-            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "output.txt", "old\n", cfg)
+            path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "output.txt", cfg)
 
             prepare_workspace_file_for_command(path, mode="write")
 
@@ -18213,8 +18071,8 @@ class TestSessionWorkspace:
     def test_prepare_workspace_file_for_command_prefers_scanner_owned_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "output.txt", "", cfg)
-            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "output.txt", "", cfg)
+            path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "output.txt", cfg)
 
             with (
                 mock.patch("services.workspace.files._scanner_uid", return_value=995),
@@ -18230,8 +18088,8 @@ class TestSessionWorkspace:
     def test_prepare_workspace_file_for_command_recreates_app_owned_outputs_as_scanner(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "output.txt", "", cfg)
-            path = resolve_workspace_path("tok_session-1", "output.txt", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "output.txt", "", cfg)
+            path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "output.txt", cfg)
 
             with (
                 mock.patch("services.workspace.files._scanner_uid", return_value=995),
@@ -18307,7 +18165,7 @@ class TestSessionWorkspace:
     def test_list_repairs_command_created_workspace_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            root = ensure_session_workspace("tok_session-1", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
             command_dir = root / "subfinder"
             command_dir.mkdir()
             command_file = command_dir / "provider-config.yaml"
@@ -18316,9 +18174,15 @@ class TestSessionWorkspace:
             os.chmod(command_file, 0o600)
 
             with mock.patch("services.workspace.files._scanner_uid", return_value=command_dir.stat().st_uid):
-                assert list_workspace_files("tok_session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
-                assert list_workspace_directories("tok_session-1", cfg)[0]["path"] == "subfinder"
-                assert read_workspace_text_file("tok_session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
+                assert (
+                    list_workspace_files(anonymous_session_id("tok_session-1"), cfg)[0]["path"]
+                    == "subfinder/provider-config.yaml"
+                )
+                assert list_workspace_directories(anonymous_session_id("tok_session-1"), cfg)[0]["path"] == "subfinder"
+                assert (
+                    read_workspace_text_file(anonymous_session_id("tok_session-1"), "subfinder/provider-config.yaml", cfg)
+                    == "sources: []\n"
+                )
                 assert command_dir.stat().st_mode & 0o070 == 0o070
                 assert not command_dir.stat().st_mode & 0o007
                 assert (command_file.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
@@ -18326,17 +18190,17 @@ class TestSessionWorkspace:
     def test_read_workspace_permission_denied_is_not_raw_os_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "provider-config.yaml", "sources: []\n", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "provider-config.yaml", "sources: []\n", cfg)
 
             with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 with pytest.raises(WorkspacePermissionDenied):
-                    read_workspace_text_file("tok_session-1", "provider-config.yaml", cfg)
+                    read_workspace_text_file(anonymous_session_id("tok_session-1"), "provider-config.yaml", cfg)
 
     def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
-            path = resolve_workspace_path("tok_session-1", "nmap-dot/amass.dot", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "nmap-dot/amass.dot", "digraph {}\n", cfg)
+            path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "nmap-dot/amass.dot", cfg)
 
             with (
                 mock.patch("services.workspace.files.Path.unlink", side_effect=PermissionError),
@@ -18344,7 +18208,7 @@ class TestSessionWorkspace:
                 mock.patch("services.workspace.files._scanner_user_exists", return_value=True),
                 mock.patch("services.workspace.files.subprocess.run") as run,
             ):
-                delete_workspace_file("tok_session-1", "nmap-dot/amass.dot", cfg)
+                delete_workspace_file(anonymous_session_id("tok_session-1"), "nmap-dot/amass.dot", cfg)
 
             run.assert_called_once_with(
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
@@ -18357,47 +18221,49 @@ class TestSessionWorkspace:
     def test_workspace_path_info_and_delete_remove_folders_recursively(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            create_workspace_directory("tok_session-1", "reports/empty", cfg)
-            write_workspace_text_file("tok_session-1", "reports/one.txt", "1", cfg)
-            write_workspace_text_file("tok_session-1", "reports/nested/two.txt", "2", cfg)
+            create_workspace_directory(anonymous_session_id("tok_session-1"), "reports/empty", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "reports/one.txt", "1", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "reports/nested/two.txt", "2", cfg)
 
-            assert workspace_path_info("tok_session-1", "reports", cfg) == {
+            assert workspace_path_info(anonymous_session_id("tok_session-1"), "reports", cfg) == {
                 "path": "reports",
                 "kind": "directory",
                 "file_count": 2,
             }
 
             with mock.patch("services.workspace.files.app_metrics.record_workspace_evictions") as evictions:
-                result = delete_workspace_path("tok_session-1", "reports", cfg)
+                result = delete_workspace_path(anonymous_session_id("tok_session-1"), "reports", cfg)
 
             assert result.kind == "directory"
             assert result.file_count == 2
             assert result.path == "reports"
-            assert list_workspace_files("tok_session-1", cfg) == []
-            assert list_workspace_directories("tok_session-1", cfg) == []
+            assert list_workspace_files(anonymous_session_id("tok_session-1"), cfg) == []
+            assert list_workspace_directories(anonymous_session_id("tok_session-1"), cfg) == []
             evictions.assert_called_once_with(2, "manual")
 
     def test_create_and_list_empty_directories_without_file_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
 
-            created = create_workspace_directory("tok_session-1", "reports/empty", cfg)
+            created = create_workspace_directory(anonymous_session_id("tok_session-1"), "reports/empty", cfg)
 
             assert created == {"path": "reports/empty"}
-            assert {item["path"] for item in list_workspace_directories("tok_session-1", cfg)} == {
+            assert {item["path"] for item in list_workspace_directories(anonymous_session_id("tok_session-1"), cfg)} == {
                 "reports",
                 "reports/empty",
             }
-            assert list_workspace_files("tok_session-1", cfg) == []
-            assert workspace_usage("tok_session-1", cfg).file_count == 0
+            assert list_workspace_files(anonymous_session_id("tok_session-1"), cfg) == []
+            assert workspace_usage(anonymous_session_id("tok_session-1"), cfg).file_count == 0
 
     def test_move_cleans_partial_destination_before_scanner_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            write_workspace_text_file("tok_session-1", "source.txt", "moved\n", cfg)
-            create_workspace_directory("tok_session-1", "archive", cfg)
-            source = resolve_workspace_path("tok_session-1", "source.txt", cfg)
-            destination = resolve_workspace_path("tok_session-1", "archive/source.txt", cfg, ensure_parent=True)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "source.txt", "moved\n", cfg)
+            create_workspace_directory(anonymous_session_id("tok_session-1"), "archive", cfg)
+            source = resolve_workspace_path(anonymous_session_id("tok_session-1"), "source.txt", cfg)
+            destination = resolve_workspace_path(
+                anonymous_session_id("tok_session-1"), "archive/source.txt", cfg, ensure_parent=True
+            )
 
             def fake_shutil_move(source_arg, destination_arg):
                 assert Path(source_arg) == source
@@ -18417,7 +18283,7 @@ class TestSessionWorkspace:
                 mock.patch("services.workspace.files._scanner_user_exists", return_value=True),
                 mock.patch("services.workspace.files.subprocess.run", side_effect=fake_scanner_move),
             ):
-                moved = workspace_module.move_workspace_path("tok_session-1", "source.txt", "archive", cfg)
+                moved = workspace_module.move_workspace_path(anonymous_session_id("tok_session-1"), "source.txt", "archive", cfg)
 
             assert moved.source == "source.txt"
             assert moved.destination == "archive/source.txt"
@@ -18427,13 +18293,13 @@ class TestSessionWorkspace:
     def test_workspace_glob_pattern_matches_one_path_segment(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            create_workspace_directory("tok_session-1", "darklab", cfg)
-            create_workspace_directory("tok_session-1", "reports/darklab-nested", cfg)
-            write_workspace_text_file("tok_session-1", "darklab-a.txt", "1", cfg)
-            write_workspace_text_file("tok_session-1", "darklab-b.txt", "2", cfg)
-            write_workspace_text_file("tok_session-1", "reports/darklab-c.txt", "3", cfg)
+            create_workspace_directory(anonymous_session_id("tok_session-1"), "darklab", cfg)
+            create_workspace_directory(anonymous_session_id("tok_session-1"), "reports/darklab-nested", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "darklab-a.txt", "1", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "darklab-b.txt", "2", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "reports/darklab-c.txt", "3", cfg)
 
-            matches = expand_workspace_path_pattern("tok_session-1", "darklab-*", cfg)
+            matches = expand_workspace_path_pattern(anonymous_session_id("tok_session-1"), "darklab-*", cfg)
 
             assert [(item.path, item.kind) for item in matches] == [
                 ("darklab-a.txt", "file"),
@@ -18445,7 +18311,7 @@ class TestSessionWorkspace:
             cfg = self._cfg(tmp)
             for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", "safe\\.txt"]:
                 try:
-                    resolve_workspace_path("tok_session-1", bad_path, cfg, ensure_parent=True)
+                    resolve_workspace_path(anonymous_session_id("tok_session-1"), bad_path, cfg, ensure_parent=True)
                     assert False, f"expected invalid path rejection for {bad_path}"
                 except InvalidWorkspacePath:
                     pass
@@ -18453,7 +18319,7 @@ class TestSessionWorkspace:
     def test_allows_hidden_files_that_are_listed_by_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            hidden = resolve_workspace_path("tok_session-1", ".config/amass.txt", cfg, ensure_parent=True)
+            hidden = resolve_workspace_path(anonymous_session_id("tok_session-1"), ".config/amass.txt", cfg, ensure_parent=True)
 
             assert hidden.name == "amass.txt"
             assert hidden.parent.name == ".config"
@@ -18461,13 +18327,13 @@ class TestSessionWorkspace:
     def test_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            root = ensure_session_workspace("tok_session-1", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
             outside = Path(tmp) / "outside"
             outside.mkdir()
             (root / "link").symlink_to(outside, target_is_directory=True)
 
             try:
-                resolve_workspace_path("tok_session-1", "link/file.txt", cfg)
+                resolve_workspace_path(anonymous_session_id("tok_session-1"), "link/file.txt", cfg)
                 assert False, "expected symlink path rejection"
             except InvalidWorkspacePath:
                 pass
@@ -18497,13 +18363,15 @@ class TestSessionWorkspace:
                 return path
 
             operations = [
-                lambda: read_workspace_text_file("tok_session-1", "target.txt", cfg),
-                lambda: workspace_module.open_workspace_file_for_download("tok_session-1", "target.txt", cfg),
-                lambda: write_workspace_text_file("tok_session-1", "target.txt", "replacement\n", cfg),
-                lambda: delete_workspace_file("tok_session-1", "target.txt", cfg),
-                lambda: workspace_path_info("tok_session-1", "target.txt", cfg),
+                lambda: read_workspace_text_file(anonymous_session_id("tok_session-1"), "target.txt", cfg),
+                lambda: workspace_module.open_workspace_file_for_download(
+                    anonymous_session_id("tok_session-1"), "target.txt", cfg
+                ),
+                lambda: write_workspace_text_file(anonymous_session_id("tok_session-1"), "target.txt", "replacement\n", cfg),
+                lambda: delete_workspace_file(anonymous_session_id("tok_session-1"), "target.txt", cfg),
+                lambda: workspace_path_info(anonymous_session_id("tok_session-1"), "target.txt", cfg),
             ]
-            workspace_root = ensure_session_workspace("tok_session-1", cfg)
+            workspace_root = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
             for operation in operations:
                 target = workspace_root / "target.txt"
                 if target.exists() or target.is_symlink():
@@ -18529,15 +18397,15 @@ class TestSessionWorkspace:
                 workspace_max_files=1,
             )
             try:
-                write_workspace_text_file("tok_session-1", "too-big.txt", "x", cfg)
+                write_workspace_text_file(anonymous_session_id("tok_session-1"), "too-big.txt", "x", cfg)
                 assert False, "expected max file size rejection"
             except WorkspaceQuotaExceeded:
                 pass
-            empty_path = resolve_workspace_path("tok_session-1", "append.txt", cfg, ensure_parent=True)
+            empty_path = resolve_workspace_path(anonymous_session_id("tok_session-1"), "append.txt", cfg, ensure_parent=True)
             empty_path.write_bytes(b"")
             with pytest.raises(WorkspaceQuotaExceeded):
                 workspace_file_mutations.append_workspace_text_file(
-                    "tok_session-1",
+                    anonymous_session_id("tok_session-1"),
                     "append.txt",
                     "x",
                     cfg,
@@ -18546,9 +18414,9 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_max_files=1)
-            write_workspace_text_file("tok_session-1", "one.txt", "1", cfg)
+            write_workspace_text_file(anonymous_session_id("tok_session-1"), "one.txt", "1", cfg)
             try:
-                write_workspace_text_file("tok_session-1", "two.txt", "2", cfg)
+                write_workspace_text_file(anonymous_session_id("tok_session-1"), "two.txt", "2", cfg)
                 assert False, "expected max file count rejection"
             except WorkspaceQuotaExceeded:
                 pass
@@ -18558,9 +18426,9 @@ class TestSessionWorkspace:
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            old_root = ensure_session_workspace("tok_old-session", cfg)
-            blocked_root = ensure_session_workspace("tok_blocked-session", cfg)
-            fresh_root = ensure_session_workspace("tok_fresh-session", cfg)
+            old_root = ensure_session_workspace(anonymous_session_id("tok_old-session"), cfg)
+            blocked_root = ensure_session_workspace(anonymous_session_id("tok_blocked-session"), cfg)
+            fresh_root = ensure_session_workspace(anonymous_session_id("tok_fresh-session"), cfg)
             team_root = workspace_module.ensure_owner_workspace(team_owner_context("team-cleanup"), cfg)
             unrelated = Path(tmp) / "manual"
             unrelated.mkdir()
@@ -18595,7 +18463,7 @@ class TestSessionWorkspace:
     def test_cleanup_repairs_scanner_owned_child_directories_before_remove(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("tok_scanner-output-session", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_scanner-output-session"), cfg)
             scanner_child = root / "nuclei"
             scanner_child.mkdir()
             (scanner_child / "result.txt").write_text("finding\n", encoding="utf-8")
@@ -18615,7 +18483,7 @@ class TestSessionWorkspace:
     def test_cleanup_repairs_after_scanner_rm_fallback_fails(self, monkeypatch, caplog):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("tok_scanner-rm-fallback-session", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_scanner-rm-fallback-session"), cfg)
             scanner_child = root / "tools" / "cdncheck"
             scanner_child.parent.mkdir()
             scanner_child.write_text("scanner-owned output\n", encoding="utf-8")
@@ -18663,7 +18531,7 @@ class TestSessionWorkspace:
     def test_cleanup_removes_empty_unreadable_child_directory_after_repair_failure(self, monkeypatch):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("tok_stale-output-session", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_stale-output-session"), cfg)
             stale_child = root / "nuclei"
             stale_child.mkdir()
             os.utime(root, (1000, 1000))
@@ -18696,7 +18564,7 @@ class TestSessionWorkspace:
     def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("tok_session-1", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
             file_path = root / "fresh-output.txt"
             file_path.write_text("fresh\n", encoding="utf-8")
             old_ts = 1000
@@ -18712,10 +18580,10 @@ class TestSessionWorkspace:
     def test_touch_session_workspace_extends_cleanup_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            root = ensure_session_workspace("tok_session-1", cfg)
+            root = ensure_session_workspace(anonymous_session_id("tok_session-1"), cfg)
             os.utime(root, (1000, 1000))
 
-            touch_session_workspace("tok_session-1", cfg)
+            touch_session_workspace(anonymous_session_id("tok_session-1"), cfg)
 
             removed = cleanup_inactive_workspaces(cfg, now=4601)
 
@@ -18725,12 +18593,12 @@ class TestSessionWorkspace:
     def test_cleanup_can_skip_current_session_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
-            current_root = ensure_session_workspace("tok_current-session", cfg)
-            old_root = ensure_session_workspace("tok_old-session", cfg)
+            current_root = ensure_session_workspace(anonymous_session_id("tok_current-session"), cfg)
+            old_root = ensure_session_workspace(anonymous_session_id("tok_old-session"), cfg)
             os.utime(current_root, (1000, 1000))
             os.utime(old_root, (1000, 1000))
 
-            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id="tok_current-session")
+            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id=anonymous_session_id("tok_current-session"))
 
             assert removed == 1
             assert current_root.exists()
@@ -20278,9 +20146,16 @@ class TestDerivedCommandRegistry:
         ]
         assert shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value"] == "<ip-or-cidr>"
         assert shodan_scan_context["subcommands"]["submit"]["arg_hints"]["__positional__"][0]["value_type"] == "target"
-        assert [
-            item["value"] for item in context["credential"]["arg_hints"]["__positional__"]
-        ] == ["status", "list", "create", "use", "expiry", "rotate", "revoke", "recover"]
+        assert [item["value"] for item in context["credential"]["arg_hints"]["__positional__"]] == [
+            "status",
+            "list",
+            "create",
+            "use",
+            "expiry",
+            "rotate",
+            "revoke",
+            "recover",
+        ]
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
             "list",
             "create",
@@ -20677,7 +20552,7 @@ class TestDerivedCommandRegistry:
                 "workspace_max_files": 80,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            session_id = "tok_registry-workspace-flags"
+            session_id = anonymous_session_id("tok_registry-workspace-flags")
             for path, text in {
                 "urls.txt": "https://ip.darklab.sh\n",
                 "tls-targets.txt": "ip.darklab.sh\n",
@@ -21010,7 +20885,7 @@ class TestDerivedCommandRegistry:
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            session_id = "tok_quote-sensitive-paths"
+            session_id = anonymous_session_id("tok_quote-sensitive-paths")
             write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
 
             with (
@@ -21058,7 +20933,7 @@ class TestDerivedCommandRegistry:
             with _patched_command_validation_helpers():
                 result = commands.validate_command(
                     "amass subs -d darklab.sh -names",
-                    session_id="tok_amass-quote-sensitive-paths",
+                    session_id=anonymous_session_id("tok_amass-quote-sensitive-paths"),
                     cfg=cfg,
                 )
 
@@ -21066,7 +20941,9 @@ class TestDerivedCommandRegistry:
             assert result.exec_command.startswith("env ")
             assert ";$(subshell)&`tick`" in result.exec_command
             tokens = commands.split_command_argv(result.exec_command)
-            amass_dir = resolve_workspace_path("tok_amass-quote-sensitive-paths", "tools/amass", cfg, ensure_parent=True)
+            amass_dir = resolve_workspace_path(
+                anonymous_session_id("tok_amass-quote-sensitive-paths"), "tools/amass", cfg, ensure_parent=True
+            )
             assert tokens[:3] == [
                 "env",
                 f"XDG_CONFIG_HOME={amass_dir.parent}",
@@ -28357,7 +28234,7 @@ class TestSeedHistoryFixtures:
             mock.patch.object(seed_history, "db_connect", _fake_db_connect),
         ):
             seeded_commands = seed_history.seed_runs(
-                "tok_deadbeefdeadbeefdeadbeefdeadbeef",
+                anonymous_session_id("tok_deadbeefdeadbeefdeadbeefdeadbeef"),
                 40,
                 7,
                 random.Random(4242),
@@ -28598,7 +28475,7 @@ class TestAuditEvents:
         try:
             event_id = record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_secret_value",
+                session_id=anonymous_session_id("tok_secret_value"),
                 team_id="team-1",
                 actor_member_id="tmem_1",
                 actor_role="operator",
@@ -28611,8 +28488,9 @@ class TestAuditEvents:
                 created="2026-06-06T12:00:00+00:00",
             )
             payload = list_events(AuditEventFilters(actor_member_id="tmem_1"), conn=conn)
-            hash_payload = list_events(AuditEventFilters(actor=token_hash("tok_secret_value")), conn=conn)
-            label_payload = list_events(AuditEventFilters(actor="tok_secr"), conn=conn)
+            hash_payload = list_events(AuditEventFilters(actor=token_hash(anonymous_session_id("tok_secret_value"))), conn=conn)
+            identity = anonymous_session_id("tok_secret_value")
+            label_payload = list_events(AuditEventFilters(actor=identity), conn=conn)
         finally:
             conn.close()
             tmp.cleanup()
@@ -28622,9 +28500,9 @@ class TestAuditEvents:
         assert len(hash_payload["events"]) == 1
         assert len(label_payload["events"]) == 1
         event = payload["events"][0]
-        assert event["owner_session_hash"] == token_hash("tok_secret_value")
-        assert event["actor_session_hash"] == token_hash("tok_secret_value")
-        assert event["actor_session_label"] == "tok_secr********"
+        assert event["owner_session_hash"] == token_hash(anonymous_session_id("tok_secret_value"))
+        assert event["actor_session_hash"] == token_hash(anonymous_session_id("tok_secret_value"))
+        assert event["actor_session_label"] == get_log_session_id(anonymous_session_id("tok_secret_value"))
         assert event["actor_role"] == "operator"
         assert event["actor_display_name"] == "Casey"
         assert event["target_type"] == "finding"
@@ -28641,7 +28519,7 @@ class TestAuditEvents:
             with pytest.raises(AuditRecordError):
                 record_event(
                     AuditEventType.SECRET_CREATE,
-                    session_id="tok_secret_value",
+                    session_id=anonymous_session_id("tok_secret_value"),
                     target_id="OPENAI_API_KEY",
                     details={"secret_value": "nope"},
                     conn=conn,
@@ -28653,7 +28531,7 @@ class TestAuditEvents:
                 with pytest.raises(AuditRecordError):
                     record_event(
                         AuditEventType.SECRET_CREATE,
-                        session_id="tok_secret_value",
+                        session_id=anonymous_session_id("tok_secret_value"),
                         target_id="OPENAI_API_KEY",
                         project_id="proj_1",
                         correlation_id="corr_1",
@@ -28678,7 +28556,7 @@ class TestAuditEvents:
         assert extra["job_id"] == "job_1"
         assert extra["recording_mode"] == "fail_closed"
         assert extra["details"] == {"secret_name": "OPENAI_API_KEY", "source": "test"}
-        assert "tok_secret_value" not in json.dumps(extra)
+        assert anonymous_session_id("tok_secret_value") not in json.dumps(extra)
 
     def test_disabled_audit_log_noops_without_writes(self):
         from services.audit.models import AuditEventType
@@ -28688,7 +28566,7 @@ class TestAuditEvents:
         try:
             event_id = record_event(
                 AuditEventType.SECRET_CREATE,
-                session_id="tok_secret_value",
+                session_id=anonymous_session_id("tok_secret_value"),
                 target_id="OPENAI_API_KEY",
                 conn=conn,
                 cfg={"audit_log_enabled": False},
@@ -28710,7 +28588,7 @@ class TestAuditEvents:
         try:
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_secret_value",
+                session_id=anonymous_session_id("tok_secret_value"),
                 target_id="old",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -28719,7 +28597,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_secret_value",
+                session_id=anonymous_session_id("tok_secret_value"),
                 target_id="new",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -28762,7 +28640,7 @@ class TestAuditEvents:
         assert event_spec(AuditEventType.REPORT_BUILD).recording_mode == RecordingMode.BEST_EFFORT
         assert event_spec(AuditEventType.SECRET_CREATE).recording_mode == RecordingMode.FAIL_CLOSED
         assert event_spec(AuditEventType.FINDING_REVIEW_CHANGE).recording_mode == RecordingMode.BEST_EFFORT
-        assert event_spec(AuditEventType.SESSION_TOKEN_REVOKE).target_type == AuditTargetType.SESSION_TOKEN
+        assert event_spec(AuditEventType.CREDENTIAL_REVOKE).target_type == AuditTargetType.CREDENTIAL
         for team_event in (
             AuditEventType.TEAM_CREATE,
             AuditEventType.TEAM_JOIN,
@@ -28974,7 +28852,7 @@ class TestAuditEvents:
             record_watcher_event(
                 AuditEventType.WATCHER_RUN_NOW,
                 watcher,
-                audit_fields={"session_id": "tok_1"},
+                audit_fields={"session_id": anonymous_session_id("tok_1")},
                 source="test",
                 details=success_details,
             )
@@ -28992,7 +28870,7 @@ class TestAuditEvents:
             conn.execute("INSERT INTO product_actions (id, value) VALUES (?, ?)", ("action-1", "delete"))
             event_id = record_event(
                 AuditEventType.PROJECT_DELETE,
-                session_id="tok_delete",
+                session_id=anonymous_session_id("tok_delete"),
                 target_id="project-rollback",
                 details={"deleted_count": 1, "source": "test"},
                 conn=conn,
@@ -29019,7 +28897,7 @@ class TestAuditEvents:
             with mock.patch("services.audit.recorder.log.warning") as warning:
                 event_id = record_event(
                     AuditEventType.FINDING_REVIEW_CHANGE,
-                    session_id="tok_best_effort",
+                    session_id=anonymous_session_id("tok_best_effort"),
                     target_id="finding-best-effort",
                     details={"review_state": "triaged", "raw_payload": "secret body"},
                     conn=conn,
@@ -29071,7 +28949,7 @@ class TestAuditEvents:
         with mock.patch("services.audit.recorder.log.warning") as warning:
             event_id = record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_best_effort",
+                session_id=anonymous_session_id("tok_best_effort"),
                 target_id="finding-best-effort",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -29098,7 +28976,7 @@ class TestAuditEvents:
         try:
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_owner",
+                session_id=anonymous_session_id("tok_owner"),
                 target_id="finding-owner-old",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -29107,7 +28985,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_other",
+                session_id=anonymous_session_id("tok_other"),
                 target_id="finding-other",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -29116,7 +28994,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_owner",
+                session_id=anonymous_session_id("tok_owner"),
                 target_id="finding-owner-new",
                 details={"review_state": "confirmed"},
                 conn=conn,
@@ -29125,18 +29003,20 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_owner",
+                session_id=anonymous_session_id("tok_owner"),
                 target_id="finding-owner-next-day",
                 details={"review_state": "confirmed"},
                 conn=conn,
                 cfg={"audit_log_enabled": True},
                 created="2026-06-07T00:00:00+00:00",
             )
-            first_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1)
-            second_page = list_events(AuditEventFilters(session_id="tok_owner"), conn=conn, limit=1, offset=1)
+            first_page = list_events(AuditEventFilters(session_id=anonymous_session_id("tok_owner")), conn=conn, limit=1)
+            second_page = list_events(
+                AuditEventFilters(session_id=anonymous_session_id("tok_owner")), conn=conn, limit=1, offset=1
+            )
             same_day = list_events(
                 AuditEventFilters(
-                    session_id="tok_owner",
+                    session_id=anonymous_session_id("tok_owner"),
                     target_type="finding",
                     date_from="2026-06-06",
                     date_to="2026-06-06",
@@ -29165,11 +29045,11 @@ class TestAuditEvents:
 
         tmp, conn = self._audit_conn()
         try:
-            self._seed_project(conn, "proj_personal_activity", "tok_owner")
-            self._seed_project(conn, "proj_team_activity", "tok_owner", team_id="team_same_actor")
+            self._seed_project(conn, "proj_personal_activity", anonymous_session_id("tok_owner"))
+            self._seed_project(conn, "proj_team_activity", anonymous_session_id("tok_owner"), team_id="team_same_actor")
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_owner",
+                session_id=anonymous_session_id("tok_owner"),
                 target_id="finding-personal",
                 project_id="proj_personal_activity",
                 details={
@@ -29199,7 +29079,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_owner",
+                session_id=anonymous_session_id("tok_owner"),
                 team_id="team_same_actor",
                 actor_member_id="tmem_same_actor",
                 actor_role="operator",
@@ -29213,8 +29093,8 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_other_owner",
-                actor_session_id="tok_owner",
+                session_id=anonymous_session_id("tok_other_owner"),
+                actor_session_id=anonymous_session_id("tok_owner"),
                 target_id="finding-actor-only",
                 project_id="proj_foreign",
                 details={"review_state": "confirmed"},
@@ -29223,22 +29103,25 @@ class TestAuditEvents:
                 created="2026-06-06T12:00:02+00:00",
             )
             payload = list_scoped_events(
-                "tok_owner",
+                anonymous_session_id("tok_owner"),
                 SimpleNamespace(is_team=False),
                 conn=conn,
                 limit=10,
             )
             hidden_label_payload = list_scoped_events(
-                "tok_owner",
+                anonymous_session_id("tok_owner"),
                 SimpleNamespace(is_team=False),
-                AuditEventFilters(actor="tok_owne"),
+                AuditEventFilters(actor=anonymous_session_id("tok_owne")),
                 conn=conn,
                 limit=10,
             )
             hidden_hash_payload = list_scoped_events(
-                "tok_owner",
+                anonymous_session_id("tok_owner"),
                 SimpleNamespace(is_team=False),
-                AuditEventFilters(actor=token_hash("tok_owner"), actor_session_hash=token_hash("tok_owner")),
+                AuditEventFilters(
+                    actor=token_hash(anonymous_session_id("tok_owner")),
+                    actor_session_hash=token_hash(anonymous_session_id("tok_owner")),
+                ),
                 conn=conn,
                 limit=10,
             )
@@ -29285,11 +29168,11 @@ class TestAuditEvents:
 
         tmp, conn = self._audit_conn()
         try:
-            self._seed_project(conn, "proj_team_visible", "tok_team_owner", team_id="team_visible")
-            self._seed_project(conn, "proj_team_foreign", "tok_team_owner", team_id="team_foreign")
+            self._seed_project(conn, "proj_team_visible", anonymous_session_id("tok_team_owner"), team_id="team_visible")
+            self._seed_project(conn, "proj_team_foreign", anonymous_session_id("tok_team_owner"), team_id="team_foreign")
             record_event(
                 AuditEventType.PROJECT_LINK,
-                session_id="tok_team_owner",
+                session_id=anonymous_session_id("tok_team_owner"),
                 team_id="team_visible",
                 actor_member_id="tmem_viewer",
                 actor_role="viewer",
@@ -29303,7 +29186,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.PROJECT_LINK,
-                session_id="tok_team_owner",
+                session_id=anonymous_session_id("tok_team_owner"),
                 team_id="team_foreign",
                 target_id="proj_team_foreign",
                 project_id="proj_team_foreign",
@@ -29318,7 +29201,7 @@ class TestAuditEvents:
                 member={"role": "viewer", "id": "tmem_viewer"},
             )
             payload = list_scoped_events(
-                "tok_viewer",
+                anonymous_session_id("tok_viewer"),
                 viewer_scope,
                 conn=conn,
                 project_id="proj_team_visible",
@@ -29326,13 +29209,13 @@ class TestAuditEvents:
             )
             with pytest.raises(AuditScopeError) as foreign:
                 list_scoped_events(
-                    "tok_viewer",
+                    anonymous_session_id("tok_viewer"),
                     viewer_scope,
                     conn=conn,
                     project_id="proj_team_foreign",
                 )
             with pytest.raises(AuditScopeError) as broad:
-                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+                list_scoped_events(anonymous_session_id("tok_viewer"), viewer_scope, conn=conn, include_team_activity=True)
         finally:
             conn.close()
             tmp.cleanup()
@@ -29356,7 +29239,7 @@ class TestAuditEvents:
         try:
             record_event(
                 AuditEventType.TEAM_CREATE,
-                session_id="tok_team_owner",
+                session_id=anonymous_session_id("tok_team_owner"),
                 team_id="team_activity",
                 actor_member_id="tmem_owner",
                 actor_role="owner",
@@ -29369,7 +29252,7 @@ class TestAuditEvents:
             )
             record_event(
                 AuditEventType.TEAM_CREATE,
-                session_id="tok_other_owner",
+                session_id=anonymous_session_id("tok_other_owner"),
                 team_id="team_other_activity",
                 target_id="team_other_activity",
                 details={"source": "test", "role": "owner"},
@@ -29380,9 +29263,9 @@ class TestAuditEvents:
             viewer_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "viewer"})
             admin_scope = SimpleNamespace(is_team=True, team_id="team_activity", member={"role": "admin"})
             with pytest.raises(AuditScopeError) as viewer_error:
-                list_scoped_events("tok_viewer", viewer_scope, conn=conn, include_team_activity=True)
+                list_scoped_events(anonymous_session_id("tok_viewer"), viewer_scope, conn=conn, include_team_activity=True)
             payload = list_scoped_events(
-                "tok_admin",
+                anonymous_session_id("tok_admin"),
                 admin_scope,
                 conn=conn,
                 include_team_activity=True,
@@ -29406,7 +29289,7 @@ class TestAuditEvents:
         try:
             record_event(
                 AuditEventType.FINDING_REVIEW_CHANGE,
-                session_id="tok_retention",
+                session_id=anonymous_session_id("tok_retention"),
                 target_id="old",
                 details={"review_state": "triaged"},
                 conn=conn,
@@ -32899,8 +32782,8 @@ SQL syntax error near q</response>
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
             for run_id, session_id in (
-                ("run-atlas-team-owner", "tok_team_owner"),
-                ("run-atlas-team-operator", "tok_team_operator"),
+                ("run-atlas-team-owner", anonymous_session_id("tok_team_owner")),
+                ("run-atlas-team-operator", anonymous_session_id("tok_team_operator")),
             ):
                 conn.execute(
                     "INSERT INTO runs (id, personal_workspace_id, team_id, command, started, output_preview) "
@@ -32923,7 +32806,7 @@ SQL syntax error near q</response>
             conn.close()
 
         assert len(entity_rows) == 1
-        assert entity_rows[0]["personal_workspace_id"] == "tok_team_owner"
+        assert entity_rows[0]["personal_workspace_id"] == anonymous_session_id("tok_team_owner")
         assert entity_rows[0]["team_id"] == "team_atlas"
         assert entity_rows[0]["type"] == "domain"
         assert entity_rows[0]["canonical_value"] == "darklab.sh"
@@ -32948,8 +32831,8 @@ SQL syntax error near q</response>
                 }
             ]
             for run_id, session_id in (
-                ("run-finding-team-owner", "tok_team_owner"),
-                ("run-finding-team-operator", "tok_team_operator"),
+                ("run-finding-team-owner", anonymous_session_id("tok_team_owner")),
+                ("run-finding-team-operator", anonymous_session_id("tok_team_operator")),
             ):
                 conn.execute(
                     "INSERT INTO runs (id, personal_workspace_id, team_id, run_kind, command, started, finished, exit_code) "
@@ -32975,7 +32858,7 @@ SQL syntax error near q</response>
         assert entity_rows[0]["team_id"] == "team_findings"
         assert entity_rows[0]["canonical_value"] == "darklab.sh"
         assert len(finding_rows) == 1
-        assert finding_rows[0]["personal_workspace_id"] == "tok_team_owner"
+        assert finding_rows[0]["personal_workspace_id"] == anonymous_session_id("tok_team_owner")
         assert finding_rows[0]["team_id"] == "team_findings"
         assert finding_rows[0]["entity_id"] == entity_rows[0]["id"]
         assert finding_rows[0]["occurrence_count"] == 2
@@ -34741,7 +34624,7 @@ class TestBuiltinConfigAccess:
                 "workspace_quota_mb": 12,
             }
         )
-        session_id = "tok_" + "c" * 32
+        session_id = anonymous_session_id("builtin-shared-config")
 
         def fake_faq(app_name, _readme):
             return [{"question": f"{app_name} question", "answer": "shared config answer"}]
@@ -34837,23 +34720,23 @@ class TestBuiltinStatus:
             conn = sqlite3.connect(db_path)
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-                ("run-1", "tok_statusdemo", "ping darklab.sh"),
+                ("run-1", anonymous_session_id("tok_statusdemo"), "ping darklab.sh"),
             )
             conn.execute(
                 "INSERT INTO runs (id, personal_workspace_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-                ("run-2", "tok_statusdemo", "curl darklab.sh"),
+                ("run-2", anonymous_session_id("tok_statusdemo"), "curl darklab.sh"),
             )
             conn.execute(
                 "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
-                ("snap-1", "tok_statusdemo", "demo snapshot", "[]"),
+                ("snap-1", anonymous_session_id("tok_statusdemo"), "demo snapshot", "[]"),
             )
             conn.execute(
                 "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
-                ("tok_statusdemo", "ping darklab.sh"),
+                (anonymous_session_id("tok_statusdemo"), "ping darklab.sh"),
             )
             conn.execute(
                 "INSERT INTO session_preferences (personal_workspace_id, preferences, updated) VALUES (?, ?, datetime('now'))",
-                ("tok_statusdemo", '{"theme":"matrix"}'),
+                (anonymous_session_id("tok_statusdemo"), '{"theme":"matrix"}'),
             )
             conn.commit()
             conn.close()
@@ -34861,12 +34744,12 @@ class TestBuiltinStatus:
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
                     with mock.patch("services.commands.builtins.process_state.redis_client", None):
-                        lines = builtin_commands._run_builtin_status("tok_statusdemo")
+                        lines = builtin_commands._run_builtin_status(anonymous_session_id("tok_statusdemo"))
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"workspace\s+anonymous", text)
         assert re.search(r"access\s+anonymous", text)
-        assert "tok_statusdemo" not in text
+        assert anonymous_session_id("tok_statusdemo") not in text
         assert re.search(r"database\s+online", text)
         assert re.search(r"redis\s+n/a", text)
         assert re.search(r"runs in workspace\s+2", text)
@@ -34888,7 +34771,7 @@ class TestBuiltinStats:
             runs = [
                 (
                     "run-1",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "nmap -sV ip.darklab.sh",
                     "2026-01-01 00:00:00",
                     "2026-01-01 00:00:10",
@@ -34896,7 +34779,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-2",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "nmap -p 443 ip.darklab.sh",
                     "2026-01-01 00:01:00",
                     "2026-01-01 00:01:20",
@@ -34904,7 +34787,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-3",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "dig darklab.sh",
                     "2026-01-01 00:02:00",
                     "2026-01-01 00:02:02",
@@ -34912,7 +34795,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-4",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "curl https://darklab.sh",
                     "2026-01-01 00:03:00",
                     None,
@@ -34920,7 +34803,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-5",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "status",
                     "2026-01-01 00:03:30",
                     "2026-01-01 00:03:31",
@@ -34928,7 +34811,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-6",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "sslscan ip.darklab.sh",
                     "2026-01-01 00:04:00",
                     "2026-01-01 00:05:23",
@@ -34936,7 +34819,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "run-7",
-                    "tok_statsdemo",
+                    anonymous_session_id("tok_statsdemo"),
                     "ping ip.darklab.sh",
                     "2026-01-01 00:05:30",
                     "2026-01-01 00:05:45",
@@ -34944,7 +34827,7 @@ class TestBuiltinStats:
                 ),
                 (
                     "other-session-run",
-                    "tok_other",
+                    anonymous_session_id("tok_other"),
                     "whois darklab.sh",
                     "2026-01-01 00:06:00",
                     "2026-01-01 00:06:01",
@@ -34957,24 +34840,24 @@ class TestBuiltinStats:
             )
             conn.execute(
                 "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
-                ("snap-1", "tok_statsdemo", "demo snapshot", "[]"),
+                ("snap-1", anonymous_session_id("tok_statsdemo"), "demo snapshot", "[]"),
             )
             conn.execute(
                 "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, ?)",
-                ("tok_statsdemo", "nmap -sV ip.darklab.sh"),
+                (anonymous_session_id("tok_statsdemo"), "nmap -sV ip.darklab.sh"),
             )
             conn.commit()
             conn.close()
 
             with mock.patch("core.database.DB_PATH", db_path):
                 with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    lines = builtin_commands._run_builtin_stats("tok_statsdemo")
+                    lines = builtin_commands._run_builtin_stats(anonymous_session_id("tok_statsdemo"))
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         class_by_text = {str(line["text"]): str(line.get("cls") or "") for line in lines}
         assert re.search(r"workspace\s+anonymous", text)
         assert re.search(r"access\s+anonymous", text)
-        assert "tok_statsdemo" not in text
+        assert anonymous_session_id("tok_statsdemo") not in text
         assert re.search(r"runs\s+7", text)
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
@@ -35005,7 +34888,7 @@ class TestBuiltinStats:
                 "INSERT INTO runs (id, personal_workspace_id, command, started, finished, exit_code) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     "run-1",
-                    "tok_builtinonly",
+                    anonymous_session_id("tok_builtinonly"),
                     "status",
                     "2026-01-01 00:00:00",
                     "2026-01-01 00:00:01",
@@ -35016,7 +34899,7 @@ class TestBuiltinStats:
             conn.close()
 
             with mock.patch("core.database.DB_PATH", db_path):
-                lines = builtin_commands._run_builtin_stats("tok_builtinonly")
+                lines = builtin_commands._run_builtin_stats(anonymous_session_id("tok_builtinonly"))
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"runs\s+1", text)
@@ -35114,45 +34997,6 @@ class TestSecretsVault:
 
         assert table is not None
         assert index is not None
-
-    def test_storage_normalizes_names_and_migrates_without_decrypting(self, monkeypatch, tmp_path):
-        self._patch_master_key(monkeypatch, tmp_path)
-        db_path = os.path.join(tmp_path, "secrets.db")
-        with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                database.db_init()
-            metadata, created = secrets_storage.upsert_secret(
-                "old-session",
-                "vt_api_key",
-                "secret-value",
-                ["vt_api_key", "VIRUSTOTAL_TOKEN", "vt_api_key"],
-            )
-            with database.db_connect() as conn:
-                migrated = secrets_storage.migrate_session_secrets(conn, "old-session", "new-session")
-                conn.commit()
-
-            assert created is True
-            assert metadata["name"] == "VT_API_KEY"
-            assert metadata["consumer_envs"] == ["VT_API_KEY", "VIRUSTOTAL_TOKEN"]
-            assert migrated == 1
-            assert secrets_storage.list_secret_metadata("old-session") == []
-            assert secrets_storage.get_secret_value_for_env("new-session", "virustotal_token") == "secret-value"
-
-    def test_storage_migration_keeps_source_secret_when_destination_name_collides(self, monkeypatch, tmp_path):
-        self._patch_master_key(monkeypatch, tmp_path)
-        db_path = os.path.join(tmp_path, "secrets.db")
-        with mock.patch("core.database.DB_PATH", db_path):
-            with mock.patch("core.database.CFG", build_test_config({"permalink_retention_days": 0})):
-                database.db_init()
-            secrets_storage.upsert_secret("old-session", "vt_api_key", "source-secret")
-            secrets_storage.upsert_secret("new-session", "vt_api_key", "destination-secret")
-            with database.db_connect() as conn:
-                migrated = secrets_storage.migrate_session_secrets(conn, "old-session", "new-session")
-                conn.commit()
-
-            assert migrated == 0
-            assert secrets_storage.get_secret_value_for_env("old-session", "VT_API_KEY") == "source-secret"
-            assert secrets_storage.get_secret_value_for_env("new-session", "VT_API_KEY") == "destination-secret"
 
     def test_storage_legacy_duplicate_consumer_env_uses_most_recent_update(self, monkeypatch, tmp_path):
         self._patch_master_key(monkeypatch, tmp_path)

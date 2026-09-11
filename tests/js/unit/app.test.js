@@ -240,25 +240,26 @@ function builtInAutocompleteBase() {
       ...emptyBuiltIn('built-in: alias for runs'),
       flags: [hint('-v'), hint('--verbose'), hint('--json')],
     },
-    'session-token': {
-      ...emptyBuiltIn('built-in: show or manage persistent session tokens'),
-      expects_value: ['set', 'revoke'],
+    credential: {
+      ...emptyBuiltIn('built-in: inspect or manage access credentials'),
       arg_hints: {
-        generate: [],
-        copy: [],
-        clear: [],
-        rotate: [],
+        status: [],
         list: [],
-        set: [hint('<token>', 'Paste a tok_... token or UUID from another device')],
-        revoke: [hint('<token>', 'tok_ token to permanently invalidate on the server')],
+        create: [],
+        use: [],
+        expiry: [],
+        rotate: [],
+        revoke: [],
+        recover: [],
         __positional__: [
-          hint('generate', 'Generate a new session token and save it to this browser'),
-          hint('set <token>', 'Activate an existing session token from another device', 'set '),
-          hint('copy', 'Copy the active session token to the clipboard'),
-          hint('clear', 'Confirm before removing the active session token'),
-          hint('rotate', 'Generate a new token and migrate all history to it'),
-          hint('list', 'Show the active session token and its creation date'),
-          hint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+          hint('status', 'Show the current principal and authentication method'),
+          hint('list', 'List safe credential metadata'),
+          hint('create', 'Open Access to create a credential'),
+          hint('use', 'Open Access to use a credential'),
+          hint('expiry', 'Open Access to change credential expiry'),
+          hint('rotate', 'Open Access to rotate a credential'),
+          hint('revoke', 'Open Access to revoke a credential'),
+          hint('recover', 'Open Access recovery guidance'),
         ],
       },
     },
@@ -1410,7 +1411,7 @@ describe('app helpers', () => {
       apiFetch,
       bindMobileSheet,
       reloadSessionHistory,
-      sessionId: 'tok_options_tab',
+      sessionId: 'crd_00000000000000000000000000000001',
     })
 
     activateOptionsTab('secrets')
@@ -1536,7 +1537,7 @@ describe('app helpers', () => {
     await vi.waitFor(() => {
       expect(document.getElementById('team-scope-announcer').textContent).toBe('Active scope changed to Personal.')
     })
-    expect(storage.getItem('active_team_id:tok_options_tab')).toBeNull()
+    expect(storage.getItem('active_team_id:crd_00000000000000000000000000000001')).toBeNull()
     expect(reloadSessionHistory).toHaveBeenCalledTimes(2)
     document.getElementById('team-scope-trigger').click()
     document.querySelector('[data-team-scope-menu-option="team_options_1"]').click()
@@ -1545,10 +1546,10 @@ describe('app helpers', () => {
     await DarklabTeamScope.refreshTeamScopes()
 
     const dispatchScopeStorage = (value) => {
-      if (value) storage.setItem('active_team_id:tok_options_tab', value)
-      else storage.removeItem('active_team_id:tok_options_tab')
+      if (value) storage.setItem('active_team_id:crd_00000000000000000000000000000001', value)
+      else storage.removeItem('active_team_id:crd_00000000000000000000000000000001')
       const event = new Event('storage')
-      Object.defineProperty(event, 'key', { value: 'active_team_id:tok_options_tab' })
+      Object.defineProperty(event, 'key', { value: 'active_team_id:crd_00000000000000000000000000000001' })
       Object.defineProperty(event, 'newValue', { value })
       window.dispatchEvent(event)
     }
@@ -1594,7 +1595,7 @@ describe('app helpers', () => {
     expect(storageLog.level).toBe('debug')
     const storagePayload = JSON.parse(storageLog.message)
     expect(storagePayload.operation).toBe('read')
-    expect(storagePayload.key_suffix).not.toContain('tok_options_tab')
+    expect(storagePayload.key_suffix).not.toContain('crd_00000000000000000000000000000001')
     expect(storagePayload.message).toBe('blocked storage read')
 
     activateOptionsTab('preferences')
@@ -1624,8 +1625,8 @@ describe('app helpers', () => {
     })
     await loadAppFns({
       apiFetch: offlineApiFetch,
-      sessionId: 'tok_options_offline',
-      localStorageEntries: { 'active_team_id:tok_options_offline': 'team_cached_1' },
+      sessionId: 'crd_00000000000000000000000000000002',
+      localStorageEntries: { 'active_team_id:crd_00000000000000000000000000000002': 'team_cached_1' },
     })
     document.dispatchEvent(new Event('DOMContentLoaded'))
     await vi.waitFor(() => {
@@ -1689,7 +1690,7 @@ describe('app helpers', () => {
     })
     const { activateOptionsTab } = await loadAppFns({
       apiFetch,
-      sessionId: 'tok_options_team_reactivate',
+      sessionId: 'crd_00000000000000000000000000000003',
       showConfirm,
       showToast,
     })
@@ -3639,8 +3640,7 @@ describe('app helpers', () => {
     )
     expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context.jobs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
-    expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
-    expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
+    expect(context.credential.arg_hints.__positional__.map(item => item.value)).toContain('use')
     expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
       'list <folder>',
       'ls <folder>',
@@ -3841,7 +3841,7 @@ describe('app helpers', () => {
     const runtimeRoots = [
       'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'diff', 'env', 'exit', 'faq', 'fortune', 'free',
       'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
-      'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
+      'credential', 'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'shortcuts', 'sort', 'stats', 'status',
       'tail', 'theme', 'tour', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 

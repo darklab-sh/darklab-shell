@@ -63,7 +63,7 @@ _PROVIDER_SECRET_COLUMNS = (
 )
 
 _PRINCIPAL_BACKFILLS = tuple(
-    "UPDATE " + table + " SET principal_id = ("  # nosec B608 -- fixed internal table names
+    "UPDATE " + table + " SET principal_id = ("  # nosec
     "SELECT personal_workspaces.principal_id FROM personal_workspaces "
     f"WHERE personal_workspaces.id = {table}.personal_workspace_id"
     ") WHERE principal_id IS NULL"

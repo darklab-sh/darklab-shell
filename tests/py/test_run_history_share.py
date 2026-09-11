@@ -28,7 +28,7 @@ import app as shell_app_module
 import config as app_config
 from conftest import build_test_config
 from conftest import reusable_test_app
-from identity_helpers import anonymous_session_id, register_durable_session_token
+from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 import blueprints.run as run_routes
 import core.database as shell_db
 import services.secrets.storage as secrets_storage
@@ -142,7 +142,8 @@ class _BrokerRunResponse:
 def _post_run(client, *, json=None, headers=None, **kwargs):
     """Drive command execution through the brokered /runs start + stream flow."""
     headers = dict(headers or {})
-    headers.setdefault("X-Session-ID", anonymous_session_id("broker-test-session"))
+    if "X-Darklab-Credential" not in headers:
+        headers.setdefault("X-Darklab-Anonymous-ID", anonymous_session_id("broker-test-session"))
     with mock.patch("blueprints.run.broker_available", return_value=True):
         start_resp = client.post("/runs", json=json, headers=headers, **kwargs)
     if start_resp.status_code != 202:
@@ -184,7 +185,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-disabled")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-disabled"))},
             )
 
         assert resp.status_code == 403
@@ -200,7 +201,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-workers")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-workers"))},
             )
 
         assert resp.status_code == 503
@@ -239,7 +240,7 @@ class TestInteractivePtyRuns:
                 "/pty/runs",
                 json={"command": "mtr --interactive darklab.sh", "rows": 30, "cols": 120},
                 headers={
-                    "X-Session-ID": anonymous_session_id("sess-pty-start"),
+                    **browser_identity_headers(anonymous_session_id("sess-pty-start")),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -310,7 +311,7 @@ class TestInteractivePtyRuns:
                     "command": "ffuf --interactive -w targets.txt -u https://example.test/FUZZ",
                     "workspace_cwd": "darklab",
                 },
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-cwd")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-cwd"))},
             )
 
         assert resp.status_code == 202
@@ -363,7 +364,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "watcher --live"},
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-custom")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-custom"))},
             )
 
         assert resp.status_code == 202
@@ -433,7 +434,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive example.com"},
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-active")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-active"))},
             )
 
         assert resp.status_code == 202
@@ -472,7 +473,7 @@ class TestInteractivePtyRuns:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive example.com"},
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-active")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-active"))},
             )
 
         assert resp.status_code == 429
@@ -491,7 +492,7 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": anonymous_session_id("sess-pty-owner"),
+                    **browser_identity_headers(anonymous_session_id("sess-pty-owner")),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -514,7 +515,7 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-other/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": anonymous_session_id("sess-pty-owner"),
+                    **browser_identity_headers(anonymous_session_id("sess-pty-owner")),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -540,7 +541,7 @@ class TestInteractivePtyRuns:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
                 headers={
-                    "X-Session-ID": anonymous_session_id("sess-pty-owner"),
+                    **browser_identity_headers(anonymous_session_id("sess-pty-owner")),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -577,7 +578,7 @@ class TestInteractivePtyRuns:
         ) as snapshot:
             resp = client.get(
                 "/pty/runs/pty-run-snapshot/snapshot",
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-snapshot")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-snapshot"))},
             )
 
         assert resp.status_code == 200
@@ -606,7 +607,7 @@ class TestInteractivePtyRuns:
         ):
             resp = client.get(
                 "/pty/runs/pty-run-other-worker/snapshot",
-                headers={"X-Session-ID": anonymous_session_id("sess-pty-snapshot-limit")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-pty-snapshot-limit"))},
             )
 
         assert resp.status_code == 503
@@ -626,7 +627,7 @@ class TestInteractivePtyRuns:
             with mock.patch("blueprints.run.pty_run_snapshot", return_value=(False, message, None)):
                 resp = client.get(
                     "/pty/runs/pty-run-status/snapshot",
-                    headers={"X-Session-ID": anonymous_session_id("sess-pty-snapshot-status")},
+                    headers={**browser_identity_headers(anonymous_session_id("sess-pty-snapshot-status"))},
                 )
 
             assert resp.status_code == expected_status
@@ -655,7 +656,7 @@ class TestInteractivePtyRuns:
                 "/kill",
                 json={"run_id": "pty-run-kill", "tab_id": "tab-1"},
                 headers={
-                    "X-Session-ID": anonymous_session_id("sess-pty-kill"),
+                    **browser_identity_headers(anonymous_session_id("sess-pty-kill")),
                     "X-Client-ID": "client-1",
                 },
             )
@@ -1066,10 +1067,10 @@ class TestRunStreaming:
 
     def test_completed_external_run_queues_run_complete_notification(self):
         client = get_client()
-        session_id = "tok_run_complete_notification"
+        session_id = principal_owner(str("tok_run_complete_notification"))
         channel_id = "ntc_run_complete_notification"
         now = datetime.now(timezone.utc).isoformat()
-        register_durable_session_token(session_id)
+        browser_identity_headers(session_id)
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO notification_channels "
@@ -1102,7 +1103,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "echo notify"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -1142,7 +1143,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "host darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-signal-sse")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-signal-sse"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -1160,19 +1161,19 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Signal Case"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target = json.loads(target_resp.data)["target"]
         client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
 
@@ -1193,20 +1194,20 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "host darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             resp.get_data(as_text=True)
 
         assert resp.status_code == 200
 
-        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        hist = client.get("/history", headers={**browser_identity_headers(session_id)})
         run_id = json.loads(hist.data)["runs"][0]["id"]
         with db_connect() as conn:
             finding = conn.execute(
                 "SELECT id, run_id, target_id, scope, title, raw_line, line_number, review_state FROM findings WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
-        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": session_id})
+        restored = client.get(f"/history/{run_id}?json&preview=1", headers={**browser_identity_headers(session_id)})
         data = json.loads(restored.data)
         entry = data["output_entries"][0]
 
@@ -1220,7 +1221,7 @@ class TestRunStreaming:
         assert finding["review_state"] == "new"
         findings_resp = client.get(
             f"/entities/run/{run_id}/findings",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         findings_data = json.loads(findings_resp.data)
         assert findings_resp.status_code == 200
@@ -1228,14 +1229,14 @@ class TestRunStreaming:
         review_resp = client.put(
             f"/findings/{finding['id']}/review",
             json={"review_state": "reviewed"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert review_resp.status_code == 200
         assert json.loads(review_resp.data)["finding"]["review_state"] == "reviewed"
         hidden_review = client.put(
             f"/findings/{finding['id']}/review",
             json={"review_state": "important"},
-            headers={"X-Session-ID": anonymous_session_id("other-session")},
+            headers={**browser_identity_headers(anonymous_session_id("other-session"))},
         )
         assert hidden_review.status_code == 404
         assert data["findings"][0]["id"] == finding["id"]
@@ -1254,18 +1255,18 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "ANSI Findings"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "url", "value": "https://ip.darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         ansi_line = (
             "[\x1b[92mhttp-missing-security-headers\x1b[0m] [\x1b[94mhttp\x1b[0m] [\x1b[34minfo\x1b[0m] https://ip.darklab.sh\n"
@@ -1284,12 +1285,12 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nuclei -u https://ip.darklab.sh -t http/"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        hist = client.get("/history", headers={**browser_identity_headers(session_id)})
         run_id = json.loads(hist.data)["runs"][0]["id"]
         with db_connect() as conn:
             finding = conn.execute(
@@ -1308,19 +1309,19 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Nmap File Targets"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         target = json.loads(target_resp.data)["target"]
         client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         fake_proc = _FakeProc(
             lines=[
@@ -1341,7 +1342,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -iL targets.txt"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -1364,13 +1365,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "CIDR Targets"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "cidr", "value": "10.0.0.0/24"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(target_resp.data)
         assert target_resp.status_code == 400
@@ -1382,19 +1383,19 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Port Set Targets"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         domain_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "domain", "value": "darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert domain_resp.status_code == 201
         ports_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "port_set", "value": "80,443,6788"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(ports_resp.data)
         assert ports_resp.status_code == 400
@@ -1406,13 +1407,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Auto Targets"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         fake_proc = _FakeProc(
             lines=[
@@ -1433,7 +1434,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -p 80 darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             first_body = resp.get_data(as_text=True)
 
@@ -1441,7 +1442,7 @@ class TestRunStreaming:
         assert "[project] discovered 1 target" in first_body
         targets_resp = client.get(
             f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         targets = json.loads(targets_resp.data)["targets"]
         by_value = {item["value"]: item for item in targets}
@@ -1468,7 +1469,7 @@ class TestRunStreaming:
             dns_resp = _post_run(
                 client,
                 json={"command": "dig @1.1.1.1 dns.darklab.sh A +comments"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             dns_resp.get_data(as_text=True)
         assert dns_resp.status_code == 200
@@ -1491,7 +1492,7 @@ class TestRunStreaming:
             negative_dns_resp = _post_run(
                 client,
                 json={"command": "dig @1.1.1.1 does-not-exist.darklab.sh A +comments"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             negative_dns_resp.get_data(as_text=True)
         assert negative_dns_resp.status_code == 200
@@ -1514,7 +1515,7 @@ class TestRunStreaming:
             negative_nslookup_resp = _post_run(
                 client,
                 json={"command": "nslookup missing-nslookup.darklab.sh 1.1.1.1"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             negative_nslookup_resp.get_data(as_text=True)
         assert negative_nslookup_resp.status_code == 200
@@ -1522,7 +1523,7 @@ class TestRunStreaming:
         dns_targets = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["targets"]
         dns_target_values = {item["value"] for item in dns_targets}
@@ -1536,7 +1537,7 @@ class TestRunStreaming:
 
         findings_resp = client.get(
             f"/projects/{project['id']}/findings?target_id={by_value['darklab.sh']['id']}",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         findings = json.loads(findings_resp.data)["findings"]
         assert [item["raw_line"] for item in findings] == ["80/tcp open http"]
@@ -1545,7 +1546,7 @@ class TestRunStreaming:
         confirmed_resp = client.put(
             f"/projects/{project['id']}/targets/{by_value['darklab.sh']['id']}",
             json={"review_state": "confirmed"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert confirmed_resp.status_code == 200
         assert json.loads(confirmed_resp.data)["target"]["review_state"] == "confirmed"
@@ -1562,7 +1563,7 @@ class TestRunStreaming:
             rerun = _post_run(
                 client,
                 json={"command": "nmap -p 80 darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             rerun_body = rerun.get_data(as_text=True)
         assert rerun.status_code == 200
@@ -1570,7 +1571,7 @@ class TestRunStreaming:
         rerun_targets = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["targets"]
         assert next(item for item in rerun_targets if item["value"] == "darklab.sh")["review_state"] == "confirmed"
@@ -1595,14 +1596,14 @@ class TestRunStreaming:
                 file_run = _post_run(
                     client,
                     json={"command": "nmap -iL targets.txt"},
-                    headers={"X-Session-ID": session_id},
+                    headers={**browser_identity_headers(session_id)},
                 )
                 file_run.get_data(as_text=True)
         assert file_run.status_code == 200
         refreshed_targets = json.loads(
             client.get(
                 f"/projects/{project['id']}/targets",
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             ).data
         )["targets"]
         file_target = next(item for item in refreshed_targets if item["value"] == "ip.darklab.sh")
@@ -1617,13 +1618,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Target Quota Skip"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         fake_proc = _FakeProc(
             lines=[
@@ -1649,7 +1650,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -p 80 darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -1737,10 +1738,12 @@ class TestRunStreaming:
                 ],
             ),
         ):
-            resp = _post_run(client, json={"command": "echo saved"}, headers={"X-Session-ID": anonymous_session_id("sess-save")})
+            resp = _post_run(
+                client, json={"command": "echo saved"}, headers={**browser_identity_headers(anonymous_session_id("sess-save"))}
+            )
             _ = resp.get_data(as_text=True)
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-save")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-save"))})
         data = json.loads(hist.data)
         cmds = [r["command"] for r in data["runs"]]
         assert "echo saved" in cmds
@@ -1751,13 +1754,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Run Context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         active_resp = client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert active_resp.status_code == 200
 
@@ -1775,7 +1778,9 @@ class TestRunStreaming:
                 ],
             ),
         ):
-            resp = _post_run(client, json={"command": "echo https://darklab.sh/admin"}, headers={"X-Session-ID": session_id})
+            resp = _post_run(
+                client, json={"command": "echo https://darklab.sh/admin"}, headers={**browser_identity_headers(session_id)}
+            )
             _ = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1808,13 +1813,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "WHOIS Context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         active_resp = client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert active_resp.status_code == 200
 
@@ -1832,7 +1837,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "whois 164.111.15.52"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             streamed = resp.get_data(as_text=True)
 
@@ -1871,13 +1876,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Run Entity Link Failure"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         active_resp = client.post(
             "/projects/active",
             json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert active_resp.status_code == 200
 
@@ -1914,7 +1919,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -p 80 darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -1953,7 +1958,7 @@ class TestRunStreaming:
 
         preview_resp = client.get(
             f"/history/{run_id}?json&preview=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         preview = json.loads(preview_resp.data)
         assert preview_resp.status_code == 200
@@ -1961,7 +1966,7 @@ class TestRunStreaming:
         assert preview["atlas_finding_count"] >= 1
         assert any(entry["text"] == "80/tcp open http" for entry in preview["output_entries"])
 
-        history_resp = client.get("/history", headers={"X-Session-ID": session_id})
+        history_resp = client.get("/history", headers={**browser_identity_headers(session_id)})
         history = json.loads(history_resp.data)
         history_run = next(item for item in history["runs"] if item["id"] == run_id)
         assert history_run["atlas_entity_count"] >= 1
@@ -1973,7 +1978,7 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Manual Run Context"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project = json.loads(project_resp.data)["project"]
         client.post(
@@ -1984,7 +1989,7 @@ class TestRunStreaming:
                     "pref_project_auto_link_external_runs": "off",
                 }
             },
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         fake_proc = _FakeProc(lines=["project line\n", ""])
@@ -2001,7 +2006,7 @@ class TestRunStreaming:
                 ],
             ),
         ):
-            resp = _post_run(client, json={"command": "echo project"}, headers={"X-Session-ID": session_id})
+            resp = _post_run(client, json={"command": "echo project"}, headers={**browser_identity_headers(session_id)})
             _ = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2036,7 +2041,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | grep ttl"},
-                headers={"X-Session-ID": anonymous_session_id("sess-grep")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-grep"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2045,13 +2050,13 @@ class TestRunStreaming:
         assert "ttl=55\\n" in body
         assert "time=12ms\\n" not in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-grep")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-grep"))})
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "ping darklab.sh | grep ttl"
         run_id = data["runs"][0]["id"]
         preview_resp = client.get(
             f"/history/{run_id}?json&preview=1",
-            headers={"X-Session-ID": anonymous_session_id("sess-grep")},
+            headers={**browser_identity_headers(anonymous_session_id("sess-grep"))},
         )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
@@ -2105,7 +2110,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | head -n 2"},
-                headers={"X-Session-ID": anonymous_session_id("sess-head")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-head"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2114,12 +2119,12 @@ class TestRunStreaming:
         assert "two\\n" in body
         assert "three\\n" not in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-head")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-head"))})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
         preview_resp = client.get(
             f"/history/{run_id}?json&preview=1",
-            headers={"X-Session-ID": anonymous_session_id("sess-head")},
+            headers={**browser_identity_headers(anonymous_session_id("sess-head"))},
         )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
@@ -2147,7 +2152,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | tail -n 2"},
-                headers={"X-Session-ID": anonymous_session_id("sess-tail")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-tail"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2156,12 +2161,12 @@ class TestRunStreaming:
         assert "two\\n" in body
         assert "three\\n" in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-tail")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-tail"))})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
         preview_resp = client.get(
             f"/history/{run_id}?json&preview=1",
-            headers={"X-Session-ID": anonymous_session_id("sess-tail")},
+            headers={**browser_identity_headers(anonymous_session_id("sess-tail"))},
         )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
@@ -2189,7 +2194,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | wc -l"},
-                headers={"X-Session-ID": anonymous_session_id("sess-wc")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-wc"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2199,10 +2204,12 @@ class TestRunStreaming:
         assert "three\\n" not in body
         assert '"text": "3"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-wc")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-wc"))})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": anonymous_session_id("sess-wc")})
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1", headers={**browser_identity_headers(anonymous_session_id("sess-wc"))}
+        )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["3"]
@@ -2229,7 +2236,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "ping darklab.sh | grep ttl | wc -l"},
-                headers={"X-Session-ID": anonymous_session_id("sess-chain")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-chain"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2239,12 +2246,12 @@ class TestRunStreaming:
         assert "time=12ms\\n" not in body
         assert '"text": "2"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-chain")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-chain"))})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
         preview_resp = client.get(
             f"/history/{run_id}?json&preview=1",
-            headers={"X-Session-ID": anonymous_session_id("sess-chain")},
+            headers={**browser_identity_headers(anonymous_session_id("sess-chain"))},
         )
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
@@ -2407,7 +2414,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "commands"},
-                headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-built-in-commands"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2421,14 +2428,16 @@ class TestRunStreaming:
         assert "dig   - Queries DNS records.\\n" in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-built-in-commands"))})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
     def test_builtin_clear_emits_clear_event_and_persists_history(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "clear"}, headers={"X-Session-ID": anonymous_session_id("sess-clear")})
+        resp = _post_run(
+            client, json={"command": "clear"}, headers={**browser_identity_headers(anonymous_session_id("sess-clear"))}
+        )
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2436,14 +2445,14 @@ class TestRunStreaming:
         assert '"type": "clear"' in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-clear")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-clear"))})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["clear"]
 
     def test_builtin_env_returns_web_environment(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "env"}, headers={"X-Session-ID": anonymous_session_id("sess-env")})
+        resp = _post_run(client, json={"command": "env"}, headers={**browser_identity_headers(anonymous_session_id("sess-env"))})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -2497,7 +2506,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "commands"},
-                headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-built-in-commands"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -2512,7 +2521,7 @@ class TestRunStreaming:
         assert "dig +short\\n" not in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-built-in-commands")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-built-in-commands"))})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
@@ -2582,17 +2591,17 @@ class TestRunStreaming:
             listed = _post_run(
                 client,
                 json={"command": "wordlist list dns"},
-                headers={"X-Session-ID": anonymous_session_id("sess-wordlist")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-wordlist"))},
             )
             searched = _post_run(
                 client,
                 json={"command": "wordlist search subdomains"},
-                headers={"X-Session-ID": anonymous_session_id("sess-wordlist")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-wordlist"))},
             )
             path = _post_run(
                 client,
                 json={"command": "wordlist path subdomains-top1million-5000.txt"},
-                headers={"X-Session-ID": anonymous_session_id("sess-wordlist")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-wordlist"))},
             )
 
         assert "Curated dns wordlists:\\n" in listed.get_data(as_text=True)
@@ -2613,7 +2622,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "wordlist"},
-                headers={"X-Session-ID": anonymous_session_id("sess-wordlist-missing")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-wordlist-missing"))},
             )
 
         body = resp.get_data(as_text=True)
@@ -2637,42 +2646,42 @@ class TestRunStreaming:
             created = client.post(
                 "/workspace/files",
                 json={"path": "targets.txt", "text": "darklab.sh\nip.darklab.sh\n"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             created_report = client.post(
                 "/workspace/files",
                 json={"path": "reports/amass.txt", "text": "one.darklab.sh\n"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             created_nested_report = client.post(
                 "/workspace/files",
                 json={"path": "reports/nested/httpx.txt", "text": "https://ip.darklab.sh\n"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             created_empty_folder = client.post(
                 "/workspace/directories",
                 json={"path": "empty-folder"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             list_resp = _post_run(
                 client,
                 json={"command": "file list"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             list_long_resp = _post_run(
                 client,
                 json={"command": "file ls -l"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             list_recursive_resp = _post_run(
                 client,
                 json={"command": "file ls -Rl"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             show_resp = _post_run(
                 client,
                 json={"command": "file show targets.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
         assert created.status_code == 200
@@ -2733,63 +2742,63 @@ class TestRunStreaming:
             created = client.post(
                 "/workspace/files",
                 json={"path": "urls.txt", "text": "https://ip.darklab.sh\n"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             ls_resp = _post_run(
                 client,
                 json={"command": "ls"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             cat_resp = _post_run(
                 client,
                 json={"command": "cat urls.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             cp_resp = _post_run(
                 client,
                 json={"command": "cp urls.txt urls-copy.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             touch_resp = _post_run(
                 client,
                 json={"command": "touch empty.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             redirect_resp = _post_run(
                 client,
                 json={"command": "cat urls.txt > redirected.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             append_resp = _post_run(
                 client,
                 json={"command": "cat urls.txt >> redirected.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             tee_resp = _post_run(
                 client,
                 json={"command": "cat urls.txt | tee tee.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             help_resp = _post_run(
                 client,
                 json={"command": "file help"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             copied = client.get(
                 "/workspace/files/read?path=urls-copy.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             touched = client.get(
                 "/workspace/files/read?path=empty.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             redirected = client.get(
                 "/workspace/files/read?path=redirected.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             tee_file = client.get(
                 "/workspace/files/read?path=tee.txt",
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
         assert created.status_code == 200
@@ -2850,18 +2859,18 @@ class TestRunStreaming:
                 created = client.post(
                     "/workspace/files",
                     json={"path": path, "text": text},
-                    headers={"X-Session-ID": session},
+                    headers={**browser_identity_headers(session)},
                 )
                 assert created.status_code == 200
             unified = _post_run(
                 client,
                 json={"command": "file diff -u old.txt new.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             brief = _post_run(
                 client,
                 json={"command": "diff --brief old.txt new.txt"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
         assert unified.status_code == 200
@@ -2910,12 +2919,12 @@ class TestRunStreaming:
         latest = _post_run(
             client,
             json={"command": "diff -u --last", "tab_id": tab_id},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
         explicit = _post_run(
             client,
             json={"command": f"diff --brief run:{run_ids[0]} run:{run_ids[1]}"},
-            headers={"X-Session-ID": session},
+            headers={**browser_identity_headers(session)},
         )
 
         assert latest.status_code == 200
@@ -2952,12 +2961,12 @@ class TestRunStreaming:
             show_resp = _post_run(
                 client,
                 json={"command": "file show amass/asset.db"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
             cat_resp = _post_run(
                 client,
                 json={"command": "cat amass/asset.db"},
-                headers={"X-Session-ID": session},
+                headers={**browser_identity_headers(session)},
             )
 
         assert show_resp.status_code == 200
@@ -3086,19 +3095,19 @@ class TestRunStreaming:
             limits_resp = _post_run(
                 client,
                 json={"command": "limits"},
-                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-limits"))},
             )
             limits_body = limits_resp.get_data(as_text=True)
             status_resp = _post_run(
                 client,
                 json={"command": "status"},
-                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-limits"))},
             )
             status_body = status_resp.get_data(as_text=True)
             stats_resp = _post_run(
                 client,
                 json={"command": "stats"},
-                headers={"X-Session-ID": anonymous_session_id("sess-limits")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-limits"))},
             )
             stats_body = stats_resp.get_data(as_text=True)
 
@@ -3168,7 +3177,9 @@ class TestRunStreaming:
             )
             conn.commit()
 
-        resp = _post_run(client, json={"command": "last"}, headers={"X-Session-ID": anonymous_session_id("sess-last")})
+        resp = _post_run(
+            client, json={"command": "last"}, headers={**browser_identity_headers(anonymous_session_id("sess-last"))}
+        )
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3181,7 +3192,9 @@ class TestRunStreaming:
 
         client = get_client()
 
-        who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": anonymous_session_id("sess-who")})
+        who_resp = _post_run(
+            client, json={"command": "who"}, headers={**browser_identity_headers(anonymous_session_id("sess-who"))}
+        )
         who_body = who_resp.get_data(as_text=True)
         tty_resp = _post_run(client, json={"command": "tty"})
         tty_body = tty_resp.get_data(as_text=True)
@@ -3458,7 +3471,9 @@ class TestRunStreaming:
                 },
             ],
         ):
-            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": anonymous_session_id("sess-jobs")})
+            resp = _post_run(
+                client, json={"command": "jobs"}, headers={**browser_identity_headers(anonymous_session_id("sess-jobs"))}
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3476,7 +3491,9 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
-            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": anonymous_session_id("sess-jobs")})
+            resp = _post_run(
+                client, json={"command": "jobs"}, headers={**browser_identity_headers(anonymous_session_id("sess-jobs"))}
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3508,19 +3525,19 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "runs"},
-                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-runs"))},
             )
             body = resp.get_data(as_text=True)
             verbose_resp = _post_run(
                 client,
                 json={"command": "runs -v"},
-                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-runs"))},
             )
             verbose_body = verbose_resp.get_data(as_text=True)
             json_resp = _post_run(
                 client,
                 json={"command": "runs --json"},
-                headers={"X-Session-ID": anonymous_session_id("sess-runs")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-runs"))},
             )
             json_body = json_resp.get_data(as_text=True)
 
@@ -3559,7 +3576,9 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
-            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": anonymous_session_id("sess-runs")})
+            resp = _post_run(
+                client, json={"command": "runs"}, headers={**browser_identity_headers(anonymous_session_id("sess-runs"))}
+            )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3690,7 +3709,9 @@ class TestRunStreaming:
             )
             conn.commit()
 
-        resp = _post_run(client, json={"command": "history"}, headers={"X-Session-ID": anonymous_session_id("sess-history")})
+        resp = _post_run(
+            client, json={"command": "history"}, headers={**browser_identity_headers(anonymous_session_id("sess-history"))}
+        )
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3722,7 +3743,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "history"},
-                headers={"X-Session-ID": anonymous_session_id("sess-history-limit")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-history-limit"))},
             )
         body = resp.get_data(as_text=True)
 
@@ -3741,10 +3762,10 @@ class TestRunStreaming:
         resp = _post_run(
             client,
             json={"command": f"secret set SHODAN_API_KEY {secret_value}"},
-            headers={"X-Session-ID": anonymous_session_id("sess-secret-sanitized")},
+            headers={**browser_identity_headers(anonymous_session_id("sess-secret-sanitized"))},
         )
         body = resp.get_data(as_text=True)
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-secret-sanitized")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-secret-sanitized"))})
         data = json.loads(hist.data)
 
         assert resp.status_code == 200
@@ -3843,7 +3864,9 @@ class TestRunStreaming:
     def test_builtin_ps_lists_active_session_processes(self):
         client = get_client()
 
-        resp = _post_run(client, json={"command": "ps aux"}, headers={"X-Session-ID": anonymous_session_id("sess-ps")})
+        resp = _post_run(
+            client, json={"command": "ps aux"}, headers={**browser_identity_headers(anonymous_session_id("sess-ps"))}
+        )
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -3864,7 +3887,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -sV darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-missing")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-missing"))},
             )
             body = resp.get_data(as_text=True)
 
@@ -3874,7 +3897,7 @@ class TestRunStreaming:
         assert '"type": "exit"' in body
         popen.assert_not_called()
 
-        hist = client.get("/history", headers={"X-Session-ID": anonymous_session_id("sess-missing")})
+        hist = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("sess-missing"))})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["nmap -sV darklab.sh"]
 
@@ -3940,13 +3963,13 @@ class TestRunStreaming:
         project_resp = client.post(
             "/projects",
             json={"name": "Workspace Artifacts"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         project_id = json.loads(project_resp.data)["project"]["id"]
         client.post(
             "/projects/active",
             json={"project_id": project_id},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         patched_cfg = build_test_config(cfg)
@@ -3963,7 +3986,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -iL targets.txt -oN scan.txt"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -3978,7 +4001,7 @@ class TestRunStreaming:
         assert "[workspace] reading targets.txt" in body
         assert "[workspace] writing scan.txt" in body
         assert "scan complete\\n" in body
-        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        hist = client.get("/history", headers={**browser_identity_headers(session_id)})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
         assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
@@ -4059,7 +4082,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "katana -u https://ip.darklab.sh -d 1"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -4109,7 +4132,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -4167,7 +4190,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -4222,7 +4245,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "vt ip 8.8.8.8"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
@@ -4278,7 +4301,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "vt ip 8.8.8.8"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -4312,7 +4335,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "vt ip 8.8.8.8"},
-                headers={"X-Session-ID": anonymous_session_id("sess-missing-vt-secret")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-missing-vt-secret"))},
             )
 
         assert resp.status_code == 403
@@ -4369,7 +4392,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 200
@@ -4399,7 +4422,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": ""},
+                headers={**browser_identity_headers("")},
             )
 
         assert resp.status_code == 401
@@ -4434,7 +4457,7 @@ class TestRunStreaming:
             help_resp = _post_run(
                 client,
                 json={"command": "shodan --help"},
-                headers={"X-Session-ID": anonymous_session_id("sess-missing-secret")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-missing-secret"))},
             )
 
         assert help_resp.status_code == 200
@@ -4448,7 +4471,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-missing-secret")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-missing-secret"))},
             )
 
         assert resp.status_code == 403
@@ -4484,7 +4507,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "shodan host ip.darklab.sh"},
-                headers={"X-Session-ID": anonymous_session_id("sess-optional-secret")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-optional-secret"))},
             )
 
         assert resp.status_code == 200
@@ -4496,7 +4519,7 @@ class TestRunStreaming:
         set_resp = _post_run(
             client,
             json={"command": "var set HOST ip.darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         assert set_resp.status_code == 200
 
@@ -4513,14 +4536,14 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -sV $HOST"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "[vars] expanded $HOST: nmap -sV ip.darklab.sh" in body
         assert popen.call_args.args[0][-1] == "nmap -sV ip.darklab.sh"
-        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        hist = client.get("/history", headers={**browser_identity_headers(session_id)})
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "nmap -sV $HOST"
 
@@ -4530,7 +4553,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "nmap -sV $HOST"},
-                headers={"X-Session-ID": anonymous_session_id("sess-undefined-var")},
+                headers={**browser_identity_headers(anonymous_session_id("sess-undefined-var"))},
             )
 
         assert resp.status_code == 403
@@ -4543,7 +4566,7 @@ class TestRunStreaming:
         _post_run(
             client,
             json={"command": "var set HOST blocked.darklab.sh"},
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
 
         def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
@@ -4563,7 +4586,7 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "curl https://$HOST"},
-                headers={"X-Session-ID": session_id},
+                headers={**browser_identity_headers(session_id)},
             )
 
         assert resp.status_code == 403
@@ -4626,7 +4649,7 @@ class TestRunOutputArtifacts:
 
         resp = client.get(
             "/history?q=canonical-only.example&include_total=1",
-            headers={"X-Session-ID": session_id},
+            headers={**browser_identity_headers(session_id)},
         )
         data = json.loads(resp.data)
 
@@ -4727,7 +4750,7 @@ class TestRunOutputArtifacts:
             conn.commit()
         assert os.path.exists(artifact_path)
 
-        resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session_id})
+        resp = client.delete(f"/history/{run_id}", headers={**browser_identity_headers(session_id)})
 
         assert resp.status_code == 200
         assert not os.path.exists(artifact_path)
@@ -4800,7 +4823,7 @@ class TestRunOutputArtifacts:
         assert os.path.exists(artifact_a)
         assert os.path.exists(artifact_b)
 
-        resp = client.delete("/history", headers={"X-Session-ID": anonymous_session_id("sess-clear-artifact")})
+        resp = client.delete("/history", headers={**browser_identity_headers(anonymous_session_id("sess-clear-artifact"))})
 
         assert resp.status_code == 200
         assert not os.path.exists(artifact_a)
@@ -4863,7 +4886,7 @@ class TestHistoryIsolation:
                 )
                 conn.commit()
 
-            resp = client.get("/history", headers={"X-Session-ID": anonymous_session_id("session-a")})
+            resp = client.get("/history", headers={**browser_identity_headers(anonymous_session_id("session-a"))})
             data = json.loads(resp.data)
             commands = [r["command"] for r in data["runs"]]
 
@@ -4888,7 +4911,9 @@ class TestHistoryIsolation:
                 conn.commit()
 
             # Wrong session should not delete
-            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("other-session")})
+            resp = client.delete(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("other-session"))}
+            )
             assert resp.status_code == 200
 
             with db_connect() as conn:
@@ -4896,7 +4921,9 @@ class TestHistoryIsolation:
             assert row is not None
 
             # Correct session should delete
-            resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": anonymous_session_id("owner-session")})
+            resp = client.delete(
+                f"/history/{run_id}", headers={**browser_identity_headers(anonymous_session_id("owner-session"))}
+            )
             assert resp.status_code == 200
 
             with db_connect() as conn:
@@ -4937,7 +4964,7 @@ class TestHistoryIsolation:
 
             owner_resp = client.get(
                 f"/history/{run_id}?json&preview=1",
-                headers={"X-Session-ID": anonymous_session_id("owner-session")},
+                headers={**browser_identity_headers(anonymous_session_id("owner-session"))},
             )
             owner_data = json.loads(owner_resp.data)
             assert [entry["text"] for entry in owner_data["output_entries"]] == [
@@ -4948,7 +4975,7 @@ class TestHistoryIsolation:
 
             public_resp = client.get(
                 f"/history/{run_id}?json&preview=1",
-                headers={"X-Session-ID": anonymous_session_id("other-session")},
+                headers={**browser_identity_headers(anonymous_session_id("other-session"))},
             )
             public_data = json.loads(public_resp.data)
             assert [entry["text"] for entry in public_data["output_entries"]] == [
@@ -5002,7 +5029,9 @@ class TestHistoryIsolation:
                 )
                 conn.commit()
 
-            owner_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": anonymous_session_id("owner-session")})
+            owner_resp = client.get(
+                f"/history/{run_id}?json", headers={**browser_identity_headers(anonymous_session_id("owner-session"))}
+            )
             owner_data = json.loads(owner_resp.data)
             assert [entry["text"] for entry in owner_data["output_entries"]] == [
                 "Shodan",
@@ -5012,7 +5041,7 @@ class TestHistoryIsolation:
 
             public_json_resp = client.get(
                 f"/history/{run_id}?json",
-                headers={"X-Session-ID": anonymous_session_id("other-session")},
+                headers={**browser_identity_headers(anonymous_session_id("other-session"))},
             )
             public_json = json.loads(public_json_resp.data)
             assert public_json_resp.status_code == 200
@@ -5024,7 +5053,7 @@ class TestHistoryIsolation:
 
             public_html = client.get(
                 f"/history/{run_id}",
-                headers={"X-Session-ID": anonymous_session_id("other-session")},
+                headers={**browser_identity_headers(anonymous_session_id("other-session"))},
             ).get_data(as_text=True)
             assert "Intel data omitted from share" in public_html
             assert "ports: 53, 443" not in public_html
@@ -5064,7 +5093,7 @@ class TestShareRoundTrip:
         resp = client.post(
             "/share",
             json={**payload, "apply_redaction": False},
-            headers={"X-Session-ID": anonymous_session_id("share-session")},
+            headers={**browser_identity_headers(anonymous_session_id("share-session"))},
         )
         assert resp.status_code == 200
         created = json.loads(resp.data)
@@ -5091,7 +5120,7 @@ class TestShareRoundTrip:
             ],
         }
 
-        resp = client.post("/share", json=payload, headers={"X-Session-ID": anonymous_session_id("share-session")})
+        resp = client.post("/share", json=payload, headers={**browser_identity_headers(anonymous_session_id("share-session"))})
         assert resp.status_code == 200
         created = json.loads(resp.data)
 

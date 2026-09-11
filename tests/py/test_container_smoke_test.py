@@ -1049,7 +1049,7 @@ def _json_request(
     timeout: int = 30,
 ) -> tuple[int, dict[str, object]]:
     data = None
-    headers = {"X-Session-ID": session_id}
+    headers = {"X-Darklab-Anonymous-ID": session_id}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -1139,7 +1139,7 @@ def _post_kill(base_url: str, session_id: str, run_id: str) -> None:
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "X-Session-ID": session_id,
+            "X-Darklab-Anonymous-ID": session_id,
         },
         method="POST",
     )
@@ -1161,7 +1161,7 @@ def _wait_for_run_to_stop(base_url: str, session_id: str, run_id: str, timeout: 
     deadline = time.time() + timeout
     req = urllib.request.Request(
         f"{base_url}/history/active",
-        headers={"X-Session-ID": session_id},
+        headers={"X-Darklab-Anonymous-ID": session_id},
         method="GET",
     )
     last_error: Exception | None = None
@@ -1226,7 +1226,7 @@ def _post_run(
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "X-Session-ID": session_id,
+            "X-Darklab-Anonymous-ID": session_id,
         },
         method="POST",
     )
@@ -1237,7 +1237,7 @@ def _post_run(
         stream_url = f"{base_url}{stream_url}"
     req = urllib.request.Request(
         stream_url,
-        headers={"X-Session-ID": session_id},
+        headers={"X-Darklab-Anonymous-ID": session_id},
         method="GET",
     )
     events: list[dict[str, object]] = []
@@ -1313,7 +1313,7 @@ def _post_pty_run(
         stream_url = f"{base_url}{stream_url}"
     req = urllib.request.Request(
         stream_url,
-        headers={"X-Session-ID": session_id},
+        headers={"X-Darklab-Anonymous-ID": session_id},
         method="GET",
     )
 

@@ -80,7 +80,7 @@ let DarklabTeamScope = null;
 
   function storageSessionId() {
     const credentialId = importedSessionCore?.credentialPublicId?.(localStorageValue('access_credential')) || '';
-    return credentialId || localStorageValue('anonymous_id') || localStorageValue('session_id') || 'anonymous';
+    return credentialId || localStorageValue('anonymous_id') || 'anonymous';
   }
 
   function storageKey() {

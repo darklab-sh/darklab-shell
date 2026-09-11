@@ -13,7 +13,7 @@ from .ownership_queries import (
     composite_owner_predicate,
     personal_only_owner_predicate,
     team_capable_owner_predicate,
-    token_keyed_owner_predicate,
+    workspace_keyed_owner_predicate,
 )
 from .scope import OwnerContext, anonymous_owner_context, owner_context_for_scope, personal_owner_context, team_owner_context
 
@@ -35,5 +35,5 @@ __all__ = [
     "role_can",
     "team_capable_owner_predicate",
     "team_owner_context",
-    "token_keyed_owner_predicate",
+    "workspace_keyed_owner_predicate",
 ]

@@ -35,7 +35,7 @@ import {
   openCaptureRunComparison,
 } from './ui_capture_shared.js'
 import {
-  CAPTURE_SESSION_TOKEN,
+  CAPTURE_ANONYMOUS_ID,
   MOBILE_VISUAL_CONTRACT,
 } from '../../../.tooling/playwright.visual.contracts.js'
 
@@ -700,13 +700,13 @@ test('demo-mobile', async ({ page }) => {
   test.setTimeout(DEMO_TIMEOUT_MS)
   const captureFrames = process.env.DEMO_DISABLE_FRAME_CAPTURE !== '1'
 
-  await page.addInitScript((token) => {
+  await page.addInitScript((anonymousId) => {
     try {
-      localStorage.setItem('session_token', token)
+      localStorage.setItem('anonymous_id', anonymousId)
     } catch (_) {
       // Ignore storage failures in non-standard contexts.
     }
-  }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+  }, process.env.DEMO_ANONYMOUS_ID || CAPTURE_ANONYMOUS_ID)
   await installCommonCaptureMocks(page)
 
   // ── Optional screenshot-frame fallback ────────────────────────────────────
@@ -784,7 +784,7 @@ test('demo-mobile', async ({ page }) => {
   await assertVisualFlowGuardrails(page, {
     mode: 'mobile',
     requireSeededHistory: true,
-    expectedSessionToken: process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN,
+    expectedAnonymousId: process.env.DEMO_ANONYMOUS_ID || CAPTURE_ANONYMOUS_ID,
     expectedViewport: captureFrames
       ? null
       : { ...MOBILE_VISUAL_CONTRACT.viewport, width: MOBILE_OBS_VIEWPORT_WIDTH },

@@ -363,7 +363,7 @@ def test_verifier_roots_rotate_rewrap_and_reject_referenced_deletion(principal_d
         delete_retired_verifier_root(principal_db, 1)
 
 
-def test_schema_guard_is_prepared_but_inactive(principal_db):
+def test_schema_guard_can_be_scoped_for_pre_cutover_fixture_inspection(principal_db):
     principal_db.execute("CREATE TABLE session_tokens (token TEXT PRIMARY KEY)")
     assert_post_cutover_schema(principal_db, DatabaseBackend.SQLITE)
     with pytest.raises(PostCutoverSchemaMismatch, match="session_tokens"):

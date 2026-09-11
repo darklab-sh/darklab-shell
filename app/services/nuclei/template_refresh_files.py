@@ -103,7 +103,7 @@ def install_staged_template_cache(
     if regular_stat(config_parent, directory=True) is None:
         raise ValueError("managed template config directory is unsafe")
     # scanner owns the cache; appuser needs group traversal to read its manifest.
-    os.chmod(stage_dir, 0o750)  # nosec B103
+    os.chmod(stage_dir, 0o750)  # nosec
     checksum = stage_dir / ".checksum"
     if regular_stat(checksum) is None:
         raise ValueError("staged template manifest is unavailable")

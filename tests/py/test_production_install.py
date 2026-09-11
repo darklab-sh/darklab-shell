@@ -1460,11 +1460,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
         "COPY scripts/operations/backup_system.py "
+        "scripts/operations/cutover_principal_identity.py "
         "scripts/operations/manage_principal_access.py "
         "scripts/operations/migrate_sqlite_to_postgres.py "
         "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
+    assert "!scripts/operations/cutover_principal_identity.py" in dockerignore
     assert "!scripts/operations/manage_principal_access.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
@@ -3042,7 +3044,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "SCHEDULER_WORKER_STARTED" in postgres_verifier
     assert '"http://127.0.0.1:${smoke_port}/health"' in postgres_verifier
     assert '"http://127.0.0.1:${smoke_port}/session/preferences"' in postgres_verifier
-    assert 'session_id="00000000-0000-4000-8000-000000000001"' in postgres_verifier
+    assert 'anonymous_id="00000000-0000-4000-8000-000000000001"' in postgres_verifier
+    assert 'X-Darklab-Anonymous-ID: $anonymous_id' in postgres_verifier
     assert 'session_id="release-postgres-${suffix}"' not in postgres_verifier
     assert "backup_output=$(deploy backup)" in postgres_verifier
     assert 'deploy restore "$backup_path"' in postgres_verifier

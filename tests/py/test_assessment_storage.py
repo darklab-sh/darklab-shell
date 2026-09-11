@@ -673,7 +673,7 @@ def test_project_assessment_browser_routes_cover_lifecycle_and_audit(project_fac
     project_id = str(project["id"])
     _add_target(session_id, project_id, "domain", "routes.example")
     client = make_test_app().test_client()
-    headers = {"X-Session-ID": session_id}
+    headers = {"X-Darklab-Anonymous-ID": session_id}
 
     unauthorized = client.post(
         f"/projects/{project_id}/assessments",
@@ -782,7 +782,7 @@ def test_assessment_delete_rolls_back_when_fail_closed_audit_fails(
     with pytest.raises(RuntimeError, match="audit unavailable"):
         client.delete(
             f"/projects/{project_id}/assessments/{assessment_id}",
-            headers={"X-Session-ID": session_id},
+            headers={"X-Darklab-Anonymous-ID": session_id},
         )
     restored = get_assessment_read_model(session_id, project_id, assessment_id)
     assert restored is not None

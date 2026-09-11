@@ -652,7 +652,7 @@ def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch
     logger = mock.Mock()
     monkeypatch.setattr("services.assessments.probe_observability.log", logger)
     context = ProbeLogContext(
-        "api_v1", "request-probe-123", "tok_probe-secret", "team_probe"
+        "api_v1", "request-probe-123", "crd_1234567890abcdef", "team_probe"
     )
 
     @observe_probe("launch")
@@ -669,7 +669,7 @@ def test_probe_logs_and_audit_rows_share_bounded_request_correlation(monkeypatch
         **fields,
         "source": "api_v1",
         "request_id": "request-probe-123",
-        "session": "tok_prob********",
+        "session": "crd_12345678********",
         "team_id": "team_probe",
         "policy_level": "standard",
         "run_id": "run_probe_context",

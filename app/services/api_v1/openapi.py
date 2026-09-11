@@ -1987,7 +1987,7 @@ OPENAPI_SPEC: dict = {
                             "description": "Artifact download",
                             "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
                         },
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "403": _error_response("Artifact unavailable"),
                         "404": _error_response("Run or artifact not found"),
                         "429": _error_response("Rate limit exceeded"),
@@ -2140,7 +2140,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "201": _json_response("Schedule created", _ref("ScheduleResponse")),
                         "400": _error_response("Invalid schedule or command"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "409": _error_response("Schedule quota exceeded"),
                         "429": _error_response("Rate limit exceeded"),
                     },
@@ -2163,7 +2163,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Schedule updated", _ref("ScheduleResponse")),
                         "400": _error_response("Invalid schedule or command"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Schedule not found"),
                         "409": _error_response("Schedule quota exceeded"),
                         "429": _error_response("Rate limit exceeded"),
@@ -2212,7 +2212,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "201": _json_response("Watcher created", _ref("WatcherResponse")),
                         "400": _error_response("Invalid watcher or command"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Baseline run not found"),
                         "409": _error_response("Watcher quota exceeded"),
                         "429": _error_response("Rate limit exceeded"),
@@ -2236,7 +2236,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Watcher updated", _ref("WatcherResponse")),
                         "400": _error_response("Invalid watcher or command"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Watcher not found"),
                         "409": _error_response("Watcher quota exceeded"),
                         "429": _error_response("Rate limit exceeded"),
@@ -2298,7 +2298,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "201": _json_response("Notification channel created", _ref("NotificationChannelResponse")),
                         "400": _error_response("Invalid notification channel"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "429": _error_response("Rate limit exceeded"),
                         "503": _error_response("Vault unavailable"),
                     },
@@ -2325,7 +2325,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Notification channel updated", _ref("NotificationChannelResponse")),
                         "400": _error_response("Invalid notification channel"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Notification channel not found"),
                         "429": _error_response("Rate limit exceeded"),
                         "503": _error_response("Vault unavailable"),
@@ -2347,7 +2347,7 @@ OPENAPI_SPEC: dict = {
                             "Test notification queued and delivered when possible",
                             _ref("NotificationTestResponse"),
                         ),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Notification channel not found"),
                         "429": _error_response("Rate limit exceeded"),
                         "503": _error_response("Vault unavailable"),
@@ -2403,7 +2403,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "202": _json_response("Run started", _ref("RunStarted")),
                         "400": _error_response("Invalid or missing command"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "409": _error_response("Unsupported run mode or archived project"),
                         "429": _error_response("Rate limit exceeded"),
                         "503": _error_response("Broker unavailable"),
@@ -2455,7 +2455,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Cached summary assist", _ref("AIAssistResponse")),
                         "202": _json_response("Queued or in-progress summary assist", _ref("AIAssistResponse")),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "403": _error_response("AI disabled or team role denied"),
                         "404": _error_response("Run not found"),
                         "409": _error_response("Run still active"),
@@ -2475,7 +2475,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Cached next-command assist", _ref("AIAssistResponse")),
                         "202": _json_response("Queued or in-progress next-command assist", _ref("AIAssistResponse")),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "403": _error_response("AI disabled or team role denied"),
                         "404": _error_response("Run not found"),
                         "409": _error_response("Run still active"),
@@ -2491,7 +2491,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "201": _json_response("Run linked to project", _ref("ProjectRunLinkResponse")),
                         "400": _error_response("Invalid project link"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Run or project not found"),
                         "409": _error_response("Archived project or quota exceeded"),
                         "429": _error_response("Rate limit exceeded"),
@@ -2502,7 +2502,7 @@ OPENAPI_SPEC: dict = {
                     "responses": {
                         "200": _json_response("Run unlinked from project", _ref("OkResponse")),
                         "400": _error_response("Invalid project link"),
-                        "401": _error_response("Missing, invalid, or revoked token"),
+                        "401": _error_response("Missing, invalid, expired, or revoked PAT"),
                         "404": _error_response("Run, project, or project link not found"),
                         "409": _error_response("Archived project"),
                         "429": _error_response("Rate limit exceeded"),
