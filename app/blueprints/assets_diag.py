@@ -413,6 +413,7 @@ def diag():
     result["app"] = {"version": APP_VERSION, "name": CFG.get("app_name", "")}
     # ── Operational config ───────────────────────────────────────────────────
     result["config"] = {
+        **assets_routes._browser_access_diag_config(CFG),
         "rate_limit_enabled":         CFG.get("rate_limit_enabled"),
         "http_rate_limit_per_minute": CFG.get("http_rate_limit_per_minute"),
         "http_rate_limit_per_second": CFG.get("http_rate_limit_per_second"),

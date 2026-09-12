@@ -790,6 +790,7 @@ class OastConnectorConfig(_ConfigModel):
 
 
 _FORGIVING_BOOL_KEYS = {
+    "restricted_public_shares_enabled",
     "workspace_enabled",
     "interactive_pty_enabled",
     "assessment_intrusive_actions_enabled",
@@ -804,6 +805,7 @@ _FORGIVING_BOOL_KEYS = {
     "ai_feature_run_suggestions",
 }
 _FORGIVING_BOOL_DEFAULTS = {
+    "restricted_public_shares_enabled": False,
     "workspace_enabled": False,
     "interactive_pty_enabled": False,
     "assessment_intrusive_actions_enabled": False,
@@ -1155,6 +1157,44 @@ def _format_validation_error(exc: ValidationError, provenance: dict[str, str], r
 
 
 def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str]) -> None:
+    access_profile = str(defaults.get("access_profile") or "open").strip().lower()
+    if access_profile in {"oidc_required", "mixed"}:
+        _record_config_load_failure(
+            phase="access_profile_validation",
+            source=_config_source(provenance, "access_profile"),
+            key="access_profile",
+            error="reserved profile",
+        )
+        raise ConfigLoadError(
+            f"access_profile {access_profile!r} is reserved and isn't available yet"
+        )
+    if access_profile not in {"open", "token_required"}:
+        _record_config_load_failure(
+            phase="access_profile_validation",
+            source=_config_source(provenance, "access_profile"),
+            key="access_profile",
+            error="unsupported profile",
+        )
+        raise ConfigLoadError("access_profile must be open or token_required")
+    defaults["access_profile"] = access_profile
+    for key, minimum, maximum in (
+        ("browser_session_idle_minutes", 1, 1440),
+        ("browser_session_absolute_hours", 1, 8760),
+    ):
+        parsed = _parse_int_value(defaults.get(key))
+        if parsed is None or not minimum <= parsed <= maximum:
+            _record_config_load_failure(
+                phase="access_profile_validation",
+                source=_config_source(provenance, key),
+                key=key,
+                error="invalid duration",
+            )
+            raise ConfigLoadError(f"{key} must be an integer from {minimum} through {maximum}")
+        defaults[key] = parsed
+    if defaults["browser_session_idle_minutes"] * 60 > defaults["browser_session_absolute_hours"] * 3600:
+        raise ConfigLoadError(
+            "browser_session_idle_minutes cannot be longer than browser_session_absolute_hours"
+        )
     defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
         defaults.get("ai_base_url_allowed_cidrs"),
         provenance,
@@ -1310,6 +1350,10 @@ def load_config(conf_dir=None, local_conf_dir=None):
     defaults = {
         "app_name":                   "darklab_shell",
         "app_public_base_url":        "",
+        "access_profile":             "open",
+        "restricted_public_shares_enabled": False,
+        "browser_session_idle_minutes": 30,
+        "browser_session_absolute_hours": 12,
         "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
@@ -1771,6 +1815,17 @@ def load_config(conf_dir=None, local_conf_dir=None):
             },
         )
     applied_env_names: list[str] = []
+    access_env_keys = {
+        "ACCESS_PROFILE": "access_profile",
+        "RESTRICTED_PUBLIC_SHARES_ENABLED": "restricted_public_shares_enabled",
+        "BROWSER_SESSION_IDLE_MINUTES": "browser_session_idle_minutes",
+        "BROWSER_SESSION_ABSOLUTE_HOURS": "browser_session_absolute_hours",
+    }
+    for env_name, cfg_key in access_env_keys.items():
+        raw = str(os.environ.get(env_name) or "").strip()
+        if raw:
+            _set_config_value(defaults, provenance, cfg_key, raw, env_name)
+            applied_env_names.append(env_name)
     env_workspace_enabled = str(os.environ.get("WORKSPACE_ENABLED") or "").strip()
     if env_workspace_enabled:
         _set_config_value(

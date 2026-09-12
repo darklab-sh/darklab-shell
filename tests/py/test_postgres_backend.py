@@ -582,6 +582,11 @@ def test_principal_credential_persistence_matches_postgres_contract(
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.auth import storage as principal_storage
+    from services.auth.browser_sessions import (
+        create_browser_session,
+        resolve_browser_session,
+        rotate_signing_key,
+    )
     from services.auth.contracts import WorkspaceAlreadyAttached
     from services.auth.workspace_storage import anonymous_workspace_storage_key
     from services.secrets.vault import reset_master_key_cache_for_tests
@@ -624,11 +629,36 @@ def test_principal_credential_persistence_matches_postgres_contract(
         settings=settings,
         conn=conn,
     )
+    browser_session = create_browser_session(
+        principal_id=bundle.principal.id,
+        credential_id=bundle.credential.metadata.id,
+        absolute_seconds=3600,
+        conn=conn,
+    )
+    assert resolve_browser_session(
+        browser_session.cookie_value,
+        idle_seconds=1800,
+        touch=False,
+        conn=conn,
+    ).valid is True
+    assert rotate_signing_key(conn=conn) == 2
+    assert resolve_browser_session(
+        browser_session.cookie_value,
+        idle_seconds=1800,
+        touch=False,
+        conn=conn,
+    ).valid is True
     replacement = principal_storage.rotate_credential(
         bundle.principal.id,
         bundle.credential.metadata.id,
         conn=conn,
     )
+    assert resolve_browser_session(
+        browser_session.cookie_value,
+        idle_seconds=1800,
+        touch=False,
+        conn=conn,
+    ).error_code == "revoked_browser_session"
     raw_conn.commit()
 
     assert bundle.workspace.storage_key == preserved_key
@@ -1399,6 +1429,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0080",
         "0081",
         "0082",
+        "0083",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -7360,7 +7391,7 @@ def test_postgres_fresh_schema_preflight_leaves_ledger_creation_to_locked_runner
 
 
 def _build_migration_sqlite_fixture(root: Path) -> Path:
-    from core.migrations import v0078_principal_credential_persistence
+    from core.migrations import v0078_principal_credential_persistence, v0083_browser_sessions
 
     db_path = root / "history.db"
     pointer = _write_body_pointer(root, "snapshot body for darklab.sh", "body-store/snapshots/snap-1.txt.gz")
@@ -7453,6 +7484,8 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
         for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(
             DatabaseBackend.SQLITE
         ):
+            conn.execute(statement)
+        for statement in v0083_browser_sessions.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
         for table_name, old_column, new_column in (
             ("runs", "session_id", "personal_workspace_id"),
@@ -7573,6 +7606,28 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
             "NULL, ?, ?, NULL, NULL, NULL, '')",
             (credential_id, credential_id[:12], principal_id, b"d" * 32, created, created),
         )
+        conn.execute(
+            "INSERT INTO browser_session_signing_keys "
+            "(version, state, wrapped_key, wrap_nonce, wrap_algorithm, created_at) "
+            "VALUES (1, 'active', ?, ?, 'aes-gcm-v1', ?)",
+            (b"k" * 48, b"n" * 12, created),
+        )
+        conn.execute(
+            "INSERT INTO browser_sessions "
+            "(id, principal_id, credential_id, signing_key_version, csrf_digest, created_at, "
+            "authenticated_at, last_seen_at, absolute_expires_at) "
+            "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)",
+            (
+                "bws_" + "5" * 32,
+                principal_id,
+                credential_id,
+                b"c" * 32,
+                created,
+                created,
+                created,
+                "2026-09-06T13:00:00+00:00",
+            ),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -7686,6 +7741,8 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert report.copied_rows["personal_workspaces"] == 1
     assert report.copied_rows["credential_verifier_roots"] == 1
     assert report.copied_rows["credentials"] == 1
+    assert report.copied_rows["browser_session_signing_keys"] == 1
+    assert report.copied_rows["browser_sessions"] == 1
     assert report.verified_files == 2
     assert "runs_fts" in report.skipped_tables
     assert "schema_migrations" in report.skipped_tables
@@ -7700,6 +7757,9 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert conn.execute(
         "SELECT octet_length(verifier_digest) AS digest_bytes FROM credentials"
     ).fetchone()["digest_bytes"] == 32
+    assert conn.execute(
+        "SELECT credential_id FROM browser_sessions"
+    ).fetchone()["credential_id"] == "crd_" + "3" * 32
     assert conn.execute("SELECT preferences FROM session_preferences").fetchone()["preferences"] == {
         "theme": "dark",
         "atlas": {"enabled": True},

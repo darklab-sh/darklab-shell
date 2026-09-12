@@ -12,6 +12,8 @@ Configuration loading starts before runtime bootstrap can build the final logger
 
 Structured events use the `session` field for request correlation. It contains a validated anonymous UUID or personal-workspace id, never a submitted credential secret. Credential attribution uses the safe credential id and type when an event needs it.
 
+Restricted browser-session lifecycle records keep the principal id, parent credential id, fixed source or reason, and bounded revoke count. They never include a portable credential, cookie value, CSRF token, session id, signing-key bytes, or submitted sign-in value.
+
 Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Assessment reports retain their stable event plus bounded Project, assessment, check, correlation, job, and profile keys; expected 4xx and degraded-network failures use WARNING, while unexpected 5xx and client-code failures use ERROR. Targets, HTTP-profile names or headers, callback URLs, commands, response bodies, and finding text aren't accepted. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
 
 Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
@@ -272,9 +274,10 @@ The current event inventory is:
 | INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
-| INFO | `SESSION_TOKEN_GENERATED` | `session_token_generate` | ip, session, session_kind |
-| INFO | `SESSION_TOKEN_REVOKED` | `session_token_revoke` | ip, session, session_kind, revoked_current |
-| INFO | `SESSION_MIGRATED` | `session_migrate` | ip, session, from_session_kind, to_session_kind, migrated_runs, migrated_snapshots, migrated_stars, migrated_preferences |
+| INFO | `BROWSER_SESSION_CREATED` | restricted sign-in and credential redemption | principal_id, credential_id, source |
+| INFO | `BROWSER_SESSION_ROTATED` | successful Team privilege-change response | principal_id, credential_id, reason |
+| INFO | `BROWSER_SESSION_REVOKED` | browser logout | principal_id, credential_id, reason |
+| INFO | `BROWSER_SESSIONS_REVOKED` | browser principal-wide session revocation | principal_id, credential_id, count, reason |
 | INFO | `SESSION_PREFERENCES_SAVED` | `session_preferences_save` | ip, session, session_kind, key_count |
 | INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
 | INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |
@@ -503,8 +506,6 @@ The current event inventory is:
 | WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, client_details with bounded error_name, stage, status, run_id, route |
 | WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, client_details with bounded error_name, status, left_run_id, right_run_id, route, compare_request_error |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
-| WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
-| WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | HTTP rate-limit handlers | ip, request_id, path, limit_policy, scope |

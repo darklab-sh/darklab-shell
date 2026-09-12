@@ -11,7 +11,11 @@ import uuid
 import pytest
 
 from core.database_backend import DatabaseBackend
-from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
+from core.migrations import (
+    v0078_principal_credential_persistence,
+    v0079_credential_scopes,
+    v0083_browser_sessions,
+)
 from services.auth import storage
 from services.auth.contracts import (
     IdentityStorageError,
@@ -46,6 +50,8 @@ def principal_db(tmp_path, monkeypatch):
     for statement in v0078_principal_credential_persistence.MIGRATION.statements_for(DatabaseBackend.SQLITE):
         conn.execute(statement)
     for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+        conn.execute(statement)
+    for statement in v0083_browser_sessions.MIGRATION.statements_for(DatabaseBackend.SQLITE):
         conn.execute(statement)
     yield conn
     conn.close()

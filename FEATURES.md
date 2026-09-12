@@ -1425,7 +1425,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The modal has five tabs: **Preferences** for display, run, and compare controls; **Access** for keeping an anonymous workspace and managing credentials; **Secrets** for provider readiness and stored API keys; **Teams** for shared scopes, members, invites, and recovery codes; and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your workspace preferences.
 - The **Access** tab explains whether the workspace is anonymous or kept. **Keep this workspace** creates the first credential without asking for a username, email address, or password. **Use an existing credential** opens a paste-safe password field for another device.
 - New and replacement credentials are masked by default and shown only once. Reveal and Copy are deliberate actions, and closing the reveal removes the reusable value from the DOM. The saved list shows only labels, safe prefixes, type, dates, expiry, state, and a passive **Current** badge.
-- Credential actions support add, rename, expiry, replacement-first rotation, and revocation. Revocation previews related schedules, watchers, and other future work, can pause eligible work, and warns before removing the current or last active credential. **Remove from browser** clears only the local credential and starts a fresh anonymous workspace; it does not revoke access on another device.
+- Credential actions support add, rename, expiry, replacement-first rotation, and revocation. Revocation previews related schedules, watchers, and other future work, can pause eligible work, and warns before removing the current or last active credential. In the open profile, **Remove from browser** clears only the local credential and starts a fresh anonymous workspace. In the restricted profile it signs out the current browser. Neither action revokes access on another device.
 - Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
@@ -1506,7 +1506,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
 - `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates SQLite to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, and removes managed files without deleting operator state. When `compose.operator.yaml` exists beside the installed stack, every lifecycle Compose invocation uses it automatically and upgrade instructions include it. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The migration reads locked-down app data through Docker and keeps host-side files owned by the installation user. Offline archives remain an explicit operator-verified path.
 
-**Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The app has no user authentication boundary, so the default all-interface listener must be limited to trusted networks with a host or upstream firewall. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
+**Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The default `open` profile permits anonymous use, so an all-interface listener still belongs on a trusted network. The `token_required` profile adds a browser access gate but requires HTTPS because its session cookies are Secure. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
 **Configuration:** see the [Quick Start](README.md#quick-start) and [Docker Compose Files](CONFIGURATION.md#docker-compose-files).
 
@@ -1535,7 +1535,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ## Workspace Access
 
-**Purpose:** start privately without an account, then keep the same personal workspace across browsers and devices with independently managed access credentials.
+**Purpose:** use an anonymous-first workspace on trusted networks, or require an operator-issued credential before a private deployment opens.
 
 **Behavior:**
 
@@ -1548,6 +1548,8 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - **Remove from browser** forgets the local credential and creates a fresh anonymous workspace in that browser. The kept workspace and credentials on other devices remain unchanged.
 - Access changes propagate to other tabs. History, autocomplete, preferences, Files, Teams, automation, and identity summaries refresh around the new workspace, while an invalid or revoked credential fails closed and must be removed or replaced deliberately.
 - The desktop HUD shows **ANON** or a safe `crd_…` hint. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
+- In the `token_required` profile, the application opens on a focused credential screen instead of creating an anonymous workspace. A successful sign-in replaces the portable value with an HttpOnly browser session and removes any old credential or anonymous identity from browser storage before the main application starts.
+- Restricted browser sessions expire after both an idle limit and an absolute limit. **Remove from browser** signs out that browser; the session-wide route and operator command can close every browser session for the principal. Revoking or rotating a portable credential also closes sessions that came from it.
 
 **Terminal commands:**
 
@@ -1555,9 +1557,9 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - `credential list` shows safe credential metadata.
 - `credential create`, `credential use`, `credential expiry`, `credential rotate`, `credential revoke`, and `credential recover` open **Options → Access** for the matching action. Extra values are rejected and removed before command history is saved.
 
-**Limits:** anyone holding a portable credential can open its principal's workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require local operator recovery. Anonymous workspaces stay tied to that browser until they are kept.
+**Limits:** anyone holding a portable credential can open its principal's workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require local operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until they are kept. Restricted access needs HTTPS; its Secure session cookie won't be sent over ordinary HTTP.
 
-**Configuration:** no user profile or email settings are needed. Operators can use the container-only principal access command described in [CONFIGURATION.md](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
+**Configuration:** no user profile or email settings are needed. `ACCESS_PROFILE=open` is the default. See [Restricted browser access](CONFIGURATION.md#restricted-browser-access) for bootstrap, session lifetime, public shares, signing-key rotation, and recovery. Operators can use the container-only principal access command described in [CONFIGURATION.md](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
 
 ---
 
@@ -1618,7 +1620,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - **Rate limiting + process tracking.** Redis-backed rate limiting prevents burst abuse across multiple Gunicorn workers, including noisy scans against random app paths that would otherwise crowd out normal browser and command requests. PID tracking in Redis keeps kill behavior correct when a kill request lands on a different worker than the one that started the process.
 - **Pseudonymous identity.** New browsers receive an anonymous UUID. People who choose **Keep this workspace** can use a portable credential on another device without adding a username or email address. The server resolves authenticated data through the principal's personal workspace, so rotating or revoking one credential doesn't move data.
 
-**Limits:** the open access profile allows credential-free anonymous use, so identity isn't a deployment-wide access gate. The command allowlist plus OS-level isolation remain the execution trust boundary, and browser state isn't trusted. Loopback blocking applies only to literal loopback addresses and not to private-range addresses that happen to be locally reachable.
+**Limits:** the open access profile allows credential-free anonymous use, so identity isn't a deployment-wide access gate there. Restricted access protects the application surface, but the command allowlist plus OS-level isolation remain the execution trust boundary, and browser state isn't trusted. Loopback blocking applies only to literal loopback addresses and not to private-range addresses that happen to be locally reachable.
 
 **Configuration:**
 
@@ -1738,7 +1740,7 @@ curl http://localhost:8888/metrics
 
 The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
-**Limits:** `/diag`, `/diag/audit`, and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` and `/diag/audit` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
+**Limits:** CIDR allowlists always gate `/diag`, `/diag/audit`, and `/metrics`. In `token_required`, `/diag` and `/diag/audit` also require a signed-in browser, while `/metrics` stays identity-free for monitoring systems and still requires an allowed source address. Empty `diagnostics_allowed_cidrs` disables all three surfaces. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and metric histogram buckets live in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md).
 

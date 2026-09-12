@@ -7,6 +7,8 @@ export function loadSession({
   storageData = {},
   fetchImpl,
   randomUUID = () => 'generated-session-id',
+  appConfig = {},
+  cookie = '',
 } = {}) {
   const storage = new MemoryStorage()
   for (const [key, value] of Object.entries(storageData)) {
@@ -30,6 +32,8 @@ export function loadSession({
       localStorage: storage,
       crypto: { randomUUID },
       fetch: fetchFn,
+      getAppConfig: () => appConfig,
+      document: { cookie },
     },
     `{
     activateAccessCredential,

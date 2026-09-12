@@ -148,6 +148,7 @@ def _frontend_config_payload():
         "evidence_package_max_artifacts": cfg["evidence_package_max_artifacts"],
         "max_tabs":              cfg["max_tabs"],
         "history_panel_limit":      cfg["history_panel_limit"],
+        "access_profile":          str(cfg.get("access_profile") or "open"),
         "command_timeout_seconds":  cfg["command_timeout_seconds"],
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),

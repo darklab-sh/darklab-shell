@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Add a restricted token deployment profile](#add-a-restricted-token-deployment-profile)
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -31,11 +30,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** The remaining planned work for v3.0.0 covers the restricted deployment profile and managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.0 delivery scope.** The remaining planned access work for v3.0.0 covers managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
 
 Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile and managed-sign-in work in reviewable slices with explicit transition tests.
 
-After the restricted deployment profile merges, exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
+Exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
@@ -89,39 +88,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-### Add a restricted token deployment profile
-
-Give private deployments a real authentication boundary while keeping anonymous access the default. This entry adds the access profile contract, the fail-closed request gate, and the browser session exchange that a restricted deployment needs.
-
-- [ ] Define the access profile and public-route contracts:
-  - Define explicit access profiles instead of an open-ended set of interacting booleans:
-    - `open` preserves the current anonymous UUID flow and optional portable credentials and remains the default for existing installations.
-    - `token_required` rejects anonymous use and accepts only operator-issued pseudonymous access credentials.
-    - `oidc_required` rejects anonymous use and requires a configured OpenID Connect provider, implemented by the managed sign-in entry below.
-    - `mixed` allows anonymous use while offering optional credential or managed sign-in for operators who want portability, recovery, or centrally managed access.
-  - Enumerate every route that is reachable today without an identity before defining the allowlist. Snapshot permalinks serve a full styled page with no identity check at all, so an allowlist written only from health, static, sign-in, and callback routes would silently change or break existing behavior.
-  - Define the small public-route allowlist for restricted profiles, including health/readiness checks, static assets, sign-in or credential redemption, and provider callbacks. All other routes must fail closed before they read or mutate owner-scoped data.
-  - Apply the recorded public-share contract: `open` and `mixed` keep capability links enabled by default; `token_required` and `oidc_required` disable creation and return `404` for reads unless the operator explicitly enables unauthenticated public shares.
-  - Return an explicit `401` for a missing, invalid, expired, or revoked credential in restricted profiles. Never downgrade a failed authentication attempt into an anonymous session.
-- [ ] Exchange portable credentials for shorter-lived browser sessions:
-  - Record the trade this makes. Requests currently authenticate with a browser-storage value sent in a request header, which no cross-site request can forge. A cookie session removes the script-readable credential and takes on CSRF exposure the header scheme does not have, so the CSRF work below is the cost of the exchange rather than unrelated hardening.
-  - Exchange a portable credential presented by the browser for a shorter-lived server-side session carried in a `Secure`, `HttpOnly`, appropriately `SameSite` cookie. Remove the portable secret from browser storage after a successful exchange.
-  - Add a persisted session signing key with defined storage, file permissions, sharing across worker processes, and rotation procedure. The app has no signing key today, and a regenerated or lost key signs every operator out at once.
-  - Add session-id rotation after authentication and privilege changes, idle and absolute expiry, logout, revoke-all-sessions, and CSRF protection for cookie-authenticated mutations.
-  - Make portable-credential revocation cascade to every browser session redeemed from it while keeping browser-session revocation local to that session. A linked managed sign-in may recover access only where the configured profile permits portable credentials.
-- [ ] Implement the restricted profile as the first non-default deployment option:
-  - Disable anonymous UUID access and unauthenticated credential issuance when this profile is active.
-  - Provide a focused credential-entry screen that redeems the credential into a browser session without exposing the rest of the application first.
-  - Support operator-controlled issuance through the lifecycle command before considering invite links or self-service enrollment. Avoid a bootstrap endpoint whose public availability would defeat the restricted profile.
-  - Record safe audit events for credential creation, redemption, failed authentication, rotation, expiry, and revocation, with bounded rate-limit signals for repeated failures.
-  - Confirm a fresh restricted deployment can be bootstrapped without editing the database and that losing one browser session does not destroy the principal's workspace or only recovery credential.
-- [ ] Qualify this entry before it ships:
-  - Add a mode matrix covering browser, API, CLI, personal scope, team scope, Files, projects, interactive PTY, long-lived run streams, schedules, watchers, notifications, secrets, backup/restore, SQLite, and Postgres behavior.
-  - Add regression coverage for invalid-credential fail-closed behavior, the public-route allowlist, cookie flags, CSRF, session fixation, and idle/absolute expiry.
-  - Add focused browser coverage for anonymous upgrade, restricted credential redemption, logout, expired and revoked sessions, credential management, and mobile sign-in surfaces in both source and bundled asset modes.
-  - Threat-model reverse-proxy and HTTPS requirements, XSS and CSRF exposure, database disclosure, credential theft, and account recovery. Record accepted boundaries in `DECISIONS.md`.
-  - Update `README.md`, `FEATURES.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `CONTRIBUTORS.md`, `DECISIONS.md`, `tests/README.md`, release drafts, and `CHANGELOG.md`. Keep current test counts and the test appendix synchronized.
 
 ### Add managed sign-in through OpenID Connect
 

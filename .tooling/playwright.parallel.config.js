@@ -17,6 +17,7 @@ const basePort = Math.max(
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => name.endsWith('.spec.js'))
+  .filter((name) => name !== 'restricted-access.spec.js')
   .sort()
 
 // Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
@@ -74,7 +75,7 @@ for (const spec of weightedSpecs) {
 
 const specGroups = buckets.sort((a, b) => a.index - b.index).map((bucket) => bucket.specs.sort())
 
-const projects = specGroups
+const openProjects = specGroups
   .map((specs, index) => {
     if (!specs.length) return null
     return {
@@ -89,6 +90,18 @@ const projects = specGroups
   })
   .filter(Boolean)
 
+const restrictedPort = basePort + projectCount
+const restrictedProject = {
+  name: 'chromium-restricted',
+  testMatch: ['restricted-access.spec.js'],
+  use: {
+    ...devices['Desktop Chrome'],
+    baseURL: `http://127.0.0.1:${restrictedPort}`,
+    trace: 'on-first-retry',
+  },
+}
+const projects = [...openProjects, restrictedProject]
+
 export default defineConfig({
   testDir,
   fullyParallel: false,
@@ -98,7 +111,10 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   reporter: [['list'], ['html', { open: 'never' }]],
   projects,
-  webServer: projects.map((project, index) =>
-    buildIsolatedWebServer(basePort + index, `w${index + 1}`),
-  ),
+  webServer: [
+    ...openProjects.map((project, index) =>
+      buildIsolatedWebServer(basePort + index, `w${index + 1}`),
+    ),
+    buildIsolatedWebServer(restrictedPort, 'restricted', 'token_required'),
+  ],
 })

@@ -15,7 +15,14 @@ from services.storage.transactions import run_read, run_transaction
 from services.workspace.models import WorkspaceSettings
 
 from . import storage
-from .contracts import CredentialMetadata, IssuedCredential, PrincipalBundle, PrincipalRecord, timestamp
+from .contracts import (
+    CredentialMetadata,
+    IdentityStorageError,
+    IssuedCredential,
+    PrincipalBundle,
+    PrincipalRecord,
+    timestamp,
+)
 from .resolver import AuthenticatedContext, AuthenticationResult
 
 
@@ -66,6 +73,54 @@ def create_principal(
             conn=conn,
             **_audit_fields(request_fields),
         )
+        return bundle
+
+    return run_transaction(operation, connect=connect)
+
+
+def operator_bootstrap(
+    *,
+    credential_label: str = "Initial operator access",
+    settings: WorkspaceSettings | None = None,
+    credential_sink: Callable[[str], None] | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> PrincipalBundle:
+    """Create the first restricted principal through the local operator boundary."""
+    def operation(conn: Any) -> PrincipalBundle:
+        if storage._database_backend(conn).value == "postgres":  # noqa: SLF001
+            conn.execute("LOCK TABLE principals IN EXCLUSIVE MODE")
+        else:
+            conn.execute("UPDATE principals SET updated_at = updated_at")
+        count_row = conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()
+        count = int(dict(count_row).get("count") or 0)
+        if count:
+            raise IdentityStorageError(
+                "restricted bootstrap is available only before the first principal exists"
+            )
+        bundle = storage.create_principal_with_credential(
+            credential_label=credential_label,
+            settings=settings,
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.PRINCIPAL_CREATE,
+            target_type=AuditTargetType.PRINCIPAL,
+            target_id=bundle.principal.id,
+            details={"source": "local_operator_bootstrap"},
+            conn=conn,
+        )
+        record_event(
+            AuditEventType.CREDENTIAL_CREATE,
+            target_type=AuditTargetType.CREDENTIAL,
+            target_id=bundle.credential.metadata.id,
+            details=_credential_details(
+                bundle.credential.metadata,
+                source="local_operator_bootstrap",
+            ),
+            conn=conn,
+        )
+        if credential_sink is not None:
+            credential_sink(bundle.credential.secret)
         return bundle
 
     return run_transaction(operation, connect=connect)
