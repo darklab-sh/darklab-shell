@@ -218,9 +218,96 @@ Public share permalinks are disabled by default in `token_required`: authenticat
 
 ### v3 identity cutover
 
-The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before upgrading a SQLite deployment, create a fresh managed backup and run the release image's cutover preflight. The tool verifies the backup, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before upgrading an existing SQLite or Postgres deployment, verify a backup of the current stopped-state data and run the cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
 
-Run the tool only in a one-off application container. Mount the verified backup read-only and use a private operator directory for any selected credential input or one-time output:
+For a development checkout using the bundled Postgres service, run the backup helper on the Docker host before stopping the stack. It uses `docker compose exec` for `pg_dump`, so Postgres must be running. Use the Python environment that has the app's requirements installed, and pass your actual `.env` and Compose paths if they differ. If you don't have an `.env`, omit that option and export the same `DATABASE_BACKEND` and `DATABASE_URL` used by the stack:
+
+```bash
+umask 077
+mkdir -p backups
+python3 scripts/operations/backup_system.py \
+  --env-file .env \
+  --compose-file compose.dev.yaml \
+  --postgres-dump-mode compose \
+  --output-dir backups
+```
+
+Check the reported warnings and archive manifest before relying on it. The archive contains the Postgres dump and `/data`; the host account must be able to read the app-owned data directory. Development workspaces may be temporary or mounted elsewhere. If you need to preserve workspace files, supply their actual `--workspace-source` or use `--include-ephemeral-workspaces` while the shell container is still running. Don't proceed with a data-preserving cutover if required workspace files are missing from the backup. Keep the archive private and rehearse its database restore separately; `darklab-deploy restore` intentionally accepts only managed backups.
+
+The development Compose stack has the checkout mounted at `/opt/darklab-source/app`, while `/app` is empty until the normal entrypoint stages it. The cutover tool reads that development source directly in a one-off container. Once Postgres is running and the backup exists, a development preflight looks like this:
+
+```bash
+docker compose -f compose.dev.yaml run --rm --no-deps \
+  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  --entrypoint python shell \
+  /opt/cutover-tools/cutover_principal_identity.py preflight \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --allow-development-backup \
+  --expected-legacy-credentials <reviewed-count> \
+  --confirm-no-external-users
+```
+
+If this is a development database with disposable test credentials, review their data before converting your operator workspace. Put the operator's old credential in an owner-only `cutover/selected-credential.txt` file and mount that directory read-only for this check:
+
+```bash
+mkdir -p cutover
+chmod 700 cutover
+chmod 600 cutover/selected-credential.txt
+docker compose -f compose.dev.yaml run --rm --no-deps \
+  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  -v "$PWD/cutover:/cutover:ro" \
+  --entrypoint python shell \
+  /opt/cutover-tools/cutover_principal_identity.py preflight \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --allow-development-backup \
+  --expected-legacy-credentials <reviewed-total> \
+  --confirm-no-external-users \
+  --selected-credential-file /cutover/selected-credential.txt
+```
+
+The `development_discard_review` counts separate the other credentials, their owned rows, Team snapshots, Team recent values, and Team memberships without printing credential values. The discard path accepts only personal History runs, snapshots, recent values, preferences, and starred commands by default. If a Team snapshot belongs to a disposable test credential, inspect its metadata and links first. Once you've confirmed it can go, add `--reviewed-team-snapshot-id <snapshot-id>` to both the selected preflight above and the conversion below, repeating the flag for every Team snapshot you reviewed. Team recent-value suggestions have no standalone ID; inspect their Team, member role, kind, and count without printing the saved values, then add `--expected-discard-team-recent-values <reviewed-count>` to both commands. Both exceptions require an active Team owned by the selected operator and an active membership for the test credential. The snapshot IDs must match exactly and have no Project links, labels, or notes. The tool still refuses other Team-scoped data, unknown owner tables, linked runs or snapshots, Team owners, and memberships referenced elsewhere. Keep the backup if any check stops the conversion; don't delete token rows or History rows manually.
+
+For a development conversion, stop every application writer but leave Postgres running. Put the selected credential in an owner-only file, then use the same source mount and backup with the conversion confirmations:
+
+```bash
+mkdir -p cutover
+chmod 700 cutover
+chmod 600 cutover/selected-credential.txt
+docker compose -f compose.dev.yaml stop shell
+docker compose -f compose.dev.yaml run --rm --no-deps \
+  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
+  -v "$PWD/backups:/cutover-backups:ro" \
+  -v "$PWD/cutover:/cutover" \
+  --entrypoint python shell \
+  /opt/cutover-tools/cutover_principal_identity.py convert \
+  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
+  --allow-development-backup \
+  --expected-legacy-credentials <reviewed-count> \
+  --confirm-no-external-users \
+  --confirm-application-stopped \
+  --selected-credential-file /cutover/selected-credential.txt \
+  --new-credential-file /cutover/new-access-credential.txt \
+  --confirm-selected-conversion convert-the-selected-operator
+```
+
+When the extra owners are confirmed disposable and the review succeeds, insert these flags between `--new-credential-file` and `--confirm-selected-conversion` in the development `convert` command. Use the counts printed immediately beforehand:
+
+```bash
+  --expected-discard-credentials <reviewed-other-credentials> \
+  --expected-discard-rows <reviewed-other-owned-rows> \
+  --expected-discard-team-members <reviewed-other-team-members> \
+  --reviewed-team-snapshot-id <reviewed-snapshot-id-if-any> \
+  --expected-discard-team-recent-values <reviewed-team-recent-values-if-any> \
+  --confirm-discard-other-legacy-data discard-other-development-owners \
+```
+
+Omit the Team-snapshot and Team-recent-value flags when those records aren't present. This option requires a checksum-verified development backup and Postgres. It removes only the reviewed test-owned database records and Team memberships in the same transaction as the selected-owner conversion and legacy-schema removal; the selected operator's Team recent values stay. A count change or unexpected reference rolls everything back. It leaves test workspace directories and old output files on disk so a failed database transaction can't lose files; keep them in the backup and clean them up separately only after the new credential works. Managed production backups cannot enable this discard option.
+
+If the old workspace is on a separate volume or bind mount, mount that same location in the one-off container as well. The development-backup opt-in is not needed for managed archives and must not be used as a substitute for a managed production backup.
+
+For managed installations, run the tool only in a one-off application container. For Postgres, the database service must be running even if the app can't start. Mount the verified backup read-only and use a private operator directory for any selected credential input or one-time output:
 
 ```bash
 mkdir -p cutover
@@ -235,7 +322,7 @@ docker compose run --rm --no-deps \
   --confirm-no-external-users
 ```
 
-The preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
+For SQLite, the preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
 
 ```bash
 docker compose stop
@@ -261,11 +348,22 @@ docker compose run --rm --no-deps --entrypoint python shell \
   --confirm-reset-rollback restore-staged-application-data
 ```
 
-The optional selected conversion is deliberately narrow: use it only for the one operator-owned workspace approved during rehearsal. Put that workspace's old credential in `cutover/selected-credential.txt`, set the file to `0600`, and choose a new output path that doesn't exist:
+The selected conversion is deliberately narrow: use it only for the one operator-owned workspace approved during rehearsal. It is the supported data-preserving path for Postgres and an optional path for SQLite. Put that workspace's old credential in `cutover/selected-credential.txt`, set the file to `0600`, and choose a new output path that doesn't exist.
+
+For SQLite, stop the complete Compose project. For Postgres, leave the `postgres` service running but stop every application process that can write to it:
+
+```bash
+# SQLite
+docker compose stop
+
+# Postgres
+docker compose stop shell zap-worker oast-worker
+```
+
+Then run the conversion:
 
 ```bash
 chmod 600 cutover/selected-credential.txt
-docker compose stop
 docker compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   -v "$PWD/cutover:/cutover" \
@@ -280,9 +378,9 @@ docker compose run --rm --no-deps \
   --confirm-selected-conversion convert-the-selected-operator
 ```
 
-The conversion keeps the existing workspace directory name, updates database ownership in one transaction, preserves `runs.rowid` and History search results, and writes the replacement credential once to the owner-only output file. A non-empty shared-anonymous directory or any data owned by a different old credential stops conversion for an explicit operator decision. If the transaction fails, the old database and workspace remain in place and the output file is removed.
+The conversion keeps the existing workspace directory name, updates database ownership in one transaction, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
 
-This cutover helper supports SQLite only because it must use the same FTS5 runtime as the application image. Postgres deployments use a fresh v3 schema. The supported SQLite-to-Postgres migration can then copy the principal schema and validates the persisted workspace storage keys without moving workspace files.
+If conversion fails, the transaction rolls back, the old database and workspace remain in place, and the incomplete output file is removed. Keep the verified backup and don't restart the application until the command succeeds and the replacement credential is stored securely. After a successful conversion, the old credentials are invalid and normal startup can apply later migrations. SQLite reset and reset rollback aren't available for Postgres; production installations use managed backup and restore for recovery, while development checkouts restore their separately rehearsed Postgres dump and files.
 
 ---
 
@@ -1543,7 +1641,7 @@ This option is only for a Postgres backup restored into a fresh install that's s
 
 `./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, the candidate base stack doesn't work with the installed `compose.operator.yaml`, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands; the printed Compose commands include the operator override when it exists. Changing an image tag never reverses a database migration.
 
-The underlying `scripts/operations/backup_system.py` helper remains available to contributors building development fixtures or custom test environments. It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
+The underlying `scripts/operations/backup_system.py` helper is also available to development checkouts and custom test environments, including the [v3 identity cutover](#v3-identity-cutover). It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
 
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 

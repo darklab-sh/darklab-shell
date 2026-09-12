@@ -173,6 +173,7 @@ def _build_verified_backup(
     *,
     backend: str = "sqlite",
     operator_env: str | None = None,
+    repository_free: bool = True,
 ) -> Path:
     backup_root = tmp_path / "darklab-backup-test"
     backup_root.mkdir(parents=True)
@@ -197,7 +198,7 @@ def _build_verified_backup(
     (backup_root / "manifest.json").write_text(
         json.dumps({
             "format": "darklab_shell.backup.v1",
-            "repository_free": True,
+            "repository_free": repository_free,
             "app_version": RELEASE_VERSION,
             "database": {"backend": backend},
         }) + "\n",
@@ -4475,6 +4476,18 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     )
     backup = _build_verified_backup(tmp_path, backend="postgres", operator_env=source_env)
     restore_helper = _load_script_module("restore_system")
+    assert restore_helper.verify_backup_archive(backup)["database_backend"] == "postgres"
+    development_backup = _build_verified_backup(
+        tmp_path / "development-backup", backend="postgres", repository_free=False
+    )
+    with pytest.raises(restore_helper.RestoreError, match="managed deployment lifecycle"):
+        restore_helper.verify_backup_archive(development_backup)
+    verified_development = restore_helper.verify_backup_archive(
+        development_backup, allow_development_backup=True
+    )
+    assert verified_development["database_backend"] == "postgres"
+    assert verified_development["repository_free"] is False
+    assert verified_development["workspaces_included"] is True
     restore_target = tmp_path / "restore-target"
     restore_data = restore_target / "data"
     restore_conf = restore_target / "conf"

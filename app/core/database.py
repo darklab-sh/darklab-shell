@@ -491,7 +491,7 @@ def _create_fts_schema(conn):
     create_sqlite_fts_schema(conn)
 
 
-def delete_run_artifacts(conn, run_ids):
+def delete_run_artifacts(conn, run_ids, *, delete_files=True):
     # The database row is the source of truth; once it is gone, best-effort file
     # cleanup can run without leaving dangling metadata behind.
     ids = [run_id for run_id in run_ids if run_id]
@@ -616,13 +616,14 @@ def delete_run_artifacts(conn, run_ids):
         )
     except SQLiteOperationalError:
         pass
-    for row in rows:
-        delete_artifact_file(row["rel_path"])
-    for row in search_text_rows:
-        delete_text_body(row["output_search_text"])
+    if delete_files:
+        for row in rows:
+            delete_artifact_file(row["rel_path"])
+        for row in search_text_rows:
+            delete_text_body(row["output_search_text"])
 
 
-def delete_snapshot_metadata(conn, snapshot_ids):
+def delete_snapshot_metadata(conn, snapshot_ids, *, delete_files=True):
     ids = [snapshot_id for snapshot_id in snapshot_ids if snapshot_id]
     if not ids:
         return
@@ -642,8 +643,9 @@ def delete_snapshot_metadata(conn, snapshot_ids):
         f"AND entity_id IN ({placeholders})",
         ids,
     )
-    for row in snapshot_rows:
-        delete_text_body(row["content"])
+    if delete_files:
+        for row in snapshot_rows:
+            delete_text_body(row["content"])
     conn.execute(
         "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "  # nosec
         f"AND entity_id IN ({placeholders})",
