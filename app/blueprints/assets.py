@@ -112,6 +112,12 @@ def _prune_diag_ai_test_clients(now: float) -> None:
 # invisible on the rendered page (the drift test
 # `test_every_config_key_belongs_to_a_group` enforces this).
 _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Browser access", (
+        "access_profile",
+        "restricted_public_shares_enabled",
+        "browser_session_idle_minutes",
+        "browser_session_absolute_hours",
+    )),
     ("Rate limiting", (
         "rate_limit_enabled",
         "http_rate_limit_per_minute",
@@ -174,6 +180,11 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ai_feature_run_suggestions",
     )),
 )
+
+
+def _browser_access_diag_config(config) -> dict[str, object]:
+    return {key: config.get(key) for key in _DIAG_CONFIG_GROUPS[0][1]}
+
 
 @assets_bp.route("/log", methods=["POST"])
 def client_log():

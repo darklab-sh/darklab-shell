@@ -49,7 +49,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Open `http://<server-address>:8888`, using the host's IP address or DNS name. The production stack listens on every host interface by default so remote hosts can connect. darklab_shell doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+Open `http://<server-address>:8888`, using the host's IP address or DNS name. The production stack listens on every host interface by default so remote hosts can connect. The default `open` profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can set `ACCESS_PROFILE=token_required` to require an operator-issued access credential before the workspace loads. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Want to inspect the installer, confirm its checksum, or verify the release's GitLab identity before running it? Follow [Review and Verify the Installer](#review-and-verify-the-installer) instead of streaming it. You don't need Git, a source checkout, Python, Node, or a local image build for either release-install path.
 
@@ -64,6 +64,7 @@ Fresh installations keep a few capabilities disabled until you choose to enable 
 | [Persistent Files](CONFIGURATION.md#workspace-storage-recipes) | Personal and team inputs, outputs, and evidence that survive container restarts | `WORKSPACE_ENABLED=true`, `WORKSPACE_BACKEND=volume`, and `WORKSPACE_ROOT=/workspaces` |
 | [Interactive PTY](CONFIGURATION.md#enable-interactive-pty) | Real terminal sessions for approved interactive tools | `INTERACTIVE_PTY_ENABLED=true` |
 | [Raw-packet scanning](CONFIGURATION.md#raw-packet-scanning) | Capability-backed SYN and other approved raw scanner modes | `RAW_PACKET_SCANNING_ENABLED=true` |
+| [Restricted access](CONFIGURATION.md#restricted-browser-access) | A credential sign-in gate for private HTTPS deployments | `ACCESS_PROFILE=token_required` |
 
 After changing one of these settings, run `docker compose up -d --force-recreate shell`. Interactive PTY uses Redis in normal multi-worker deployments, while raw-packet modes still activate only when their runtime readiness checks pass. Postgres, AI assists, and the private ZAP/OAST connector workers are optional deployment services covered in [Configuration](CONFIGURATION.md#environment-variables-and-env).
 
@@ -327,6 +328,7 @@ darklab_shell uses layered controls instead of trusting the browser alone:
 - The read-only container gives the app a private durable `/data` mount and tools a temporary `/tmp`; scanner commands cannot read app-owned data.
 - Optional CIDR restrictions combine command validation with scanner-user egress rules so DNS and tool-managed inputs stay inside the same boundary.
 - Files exposes only validated paths under the active personal or team workspace. Temporary Files storage is wiped on restart; persistent workspaces need the configured volume backend and correct host ownership.
+- The default `open` profile supports anonymous workspaces. Private HTTPS deployments can require an operator-issued credential and exchange it for a protected browser session with idle and absolute expiry.
 
 Use [ARCHITECTURE.md](ARCHITECTURE.md#security-model) for trust boundaries, subprocess isolation, signalling, and runtime contracts. Use [CONFIGURATION.md](CONFIGURATION.md) for CIDR policy, Files permissions, diagnostics allowlists, secrets, proxy trust, and production settings.
 

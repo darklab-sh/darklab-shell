@@ -2664,3 +2664,34 @@ body .faq-a code { background: var(--theme-inline-surface-bg); }
 body .allowed-chip { background: var(--theme-inline-surface-bg); }
 body .form-select { background-color: var(--theme-chrome-control-bg); }
 body .tab .tab-status.ok { background: var(--green); }
+/* Restricted-access sign-in is intentionally server-rendered without app JS. */
+.restricted-sign-in-page {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.restricted-sign-in {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.restricted-sign-in-card {
+  width: min(100%, 440px);
+  padding: 28px;
+  border: 1px solid var(--border-bright);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent);
+}
+
+.restricted-sign-in-card h1 { margin: 8px 0 12px; font-size: 1.35rem; }
+.restricted-sign-in-card p { color: var(--muted); line-height: 1.55; }
+.restricted-sign-in-card form { display: grid; gap: 12px; margin-top: 22px; }
+.restricted-sign-in-card .btn { min-height: 40px; }
+.restricted-sign-in-kicker { color: var(--green); font-size: .75rem; letter-spacing: .12em; }
+.restricted-sign-in-error { margin-top: 14px; color: var(--red); }
+.restricted-sign-in-help { margin-bottom: 0; font-size: .85rem; }

@@ -42,6 +42,7 @@ let refreshSequence = 0;
 let pendingAction = '';
 let editorReturnFocus = null;
 let redemptionReturnFocus = null;
+let currentCredentialId = '';
 
 function _markAccessPanelReady() {
   [
@@ -131,7 +132,7 @@ function _renderAnonymous({ invalid = false } = {}) {
 }
 
 function _renderAuthenticated() {
-  const currentId = importedGetBrowserIdentitySnapshot().credentialId;
+  const currentId = importedGetBrowserIdentitySnapshot().credentialId || currentCredentialId;
   const current = credentials.find(item => item.id === currentId);
   if (elements.discardInvalid) elements.discardInvalid.hidden = true;
   _setIdentityLayout(true);
@@ -152,7 +153,7 @@ async function refreshAccessPanel({ force = false } = {}) {
   _clearAffectedWorkReview();
   const sequence = ++refreshSequence;
   const identity = importedGetBrowserIdentitySnapshot();
-  if (identity.kind !== 'credential') {
+  if (!['credential', 'browser_session'].includes(identity.kind)) {
     _renderAnonymous();
     return { identity, credentials: [] };
   }
@@ -163,7 +164,8 @@ async function refreshAccessPanel({ force = false } = {}) {
   }
   if (force) _setMessage('Refreshing access…');
   try {
-    await _request('/auth/principal');
+    const principalPayload = await _request('/auth/principal');
+    currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
     const credentialsPayload = await _request('/auth/credentials');
     if (sequence !== refreshSequence) return null;
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
@@ -480,6 +482,12 @@ async function _removeLocalAccess({ invalid = false } = {}) {
     refocusOnResolve: false,
   });
   if (choice !== 'remove') return;
+  const identity = importedGetBrowserIdentitySnapshot();
+  if (identity.kind === 'browser_session') {
+    await _request('/auth/logout', { method: 'POST' });
+    window.location.assign('/auth/sign-in');
+    return;
+  }
   importedClearAccessCredential();
   _closeEditor({ restoreFocus: false });
   _closeRedemption({ restoreFocus: false });

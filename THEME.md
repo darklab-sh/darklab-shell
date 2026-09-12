@@ -107,7 +107,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 3. Inject into the templates
 
-The shell, permalink, diagnostics, and audit routes pass the selected theme and its runtime CSS vars into their templates. `base.html` includes `theme_vars_style.html`, which turns those values into a `<style>` block containing `:root { ... }` declarations, and applies the selected theme name to the page body. That means the browser never needs to guess at the current palette.
+The shell, restricted sign-in, permalink, diagnostics, and audit routes pass the selected theme and its runtime CSS vars into their templates. `base.html` includes `theme_vars_style.html`, which turns those values into a `<style>` block containing `:root { ... }` declarations, and applies the selected theme name to the page body. The standalone sign-in page includes the same generated styles and theme variables without loading the normal application JavaScript. That means the browser never needs to guess at the current palette.
 
 ### 4. Expose the values to JS
 

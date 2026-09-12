@@ -18,7 +18,12 @@ import pytest
 
 from core.database_backend import DatabaseBackend
 from core.database_access import get_db_connect
-from core.migrations import MIGRATIONS, v0078_principal_credential_persistence, v0079_credential_scopes
+from core.migrations import (
+    MIGRATIONS,
+    v0078_principal_credential_persistence,
+    v0079_credential_scopes,
+    v0083_browser_sessions,
+)
 from core.migrations.runner import run_migrations
 from services.auth import lifecycle, storage
 from services.auth.background_authorization import (
@@ -61,6 +66,7 @@ def _schema(conn) -> None:
     for migration in (
         v0078_principal_credential_persistence.MIGRATION,
         v0079_credential_scopes.MIGRATION,
+        v0083_browser_sessions.MIGRATION,
     ):
         for statement in migration.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)

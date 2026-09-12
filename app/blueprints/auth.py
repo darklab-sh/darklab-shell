@@ -5,17 +5,38 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
+import base64
+import hmac
+import logging
+import secrets
 
 import core.process as process_state
+from config import get_theme_entry
 from core.helpers import (
     AuthenticationRejected,
+    current_theme_name,
     get_authentication_result,
     get_client_ip,
     require_authenticated_context,
 )
+from flask import (
+    Blueprint,
+    current_app,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+)
 from services.audit.context import request_audit_fields
 from services.auth import lifecycle
+from services.auth.access_profile import active_config, is_restricted, safe_next_path
+from services.auth.browser_sessions import (
+    BROWSER_CSRF_COOKIE,
+    BROWSER_SESSION_COOKIE,
+    create_browser_session,
+    revoke_browser_session,
+    revoke_principal_browser_sessions,
+)
 from services.auth.contracts import (
     CredentialNotFound,
     IdentityStorageError,
@@ -30,8 +51,8 @@ from services.auth.resolver import (
     redeem_portable_credential,
 )
 
-
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+log = logging.getLogger("shell")
 
 # This list is intentionally small and test-audited. No GET route may return a
 # reusable secret.
@@ -41,6 +62,8 @@ SECRET_BEARING_ENDPOINTS = frozenset({
     "auth.create_credential",
     "auth.rotate_credential",
 })
+_SIGN_IN_NONCE_COOKIE = "darklab_sign_in_nonce"
+_SIGN_IN_NONCE_MAX_AGE = 600
 
 
 def _payload() -> dict:
@@ -55,6 +78,133 @@ def _payload() -> dict:
 def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _session_cookie_seconds() -> int:
+    return int(active_config().get("browser_session_absolute_hours", 12)) * 3600
+
+
+def _set_browser_session_cookies(response, issued) -> None:
+    response.set_cookie(
+        BROWSER_SESSION_COOKIE,
+        issued.cookie_value,
+        max_age=_session_cookie_seconds(),
+        secure=True,
+        httponly=True,
+        samesite="Strict",
+        path="/",
+    )
+    response.set_cookie(
+        BROWSER_CSRF_COOKIE,
+        issued.csrf_token,
+        max_age=_session_cookie_seconds(),
+        secure=True,
+        httponly=False,
+        samesite="Strict",
+        path="/",
+    )
+
+
+def _clear_browser_session_cookies(response) -> None:
+    for name, httponly in ((BROWSER_SESSION_COOKIE, True), (BROWSER_CSRF_COOKIE, False)):
+        response.delete_cookie(name, secure=True, httponly=httponly, samesite="Strict", path="/")
+
+
+def _issue_browser_session(
+    context: AuthenticatedContext,
+    *,
+    replace_session_id: str = "",
+) -> object:
+    return create_browser_session(
+        principal_id=context.principal_id,
+        credential_id=context.credential_id,
+        absolute_seconds=_session_cookie_seconds(),
+        replace_session_id=replace_session_id or context.browser_session_id,
+    )
+
+
+def _new_sign_in_nonce() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+
+
+def _valid_sign_in_nonce(form_value: str) -> bool:
+    cookie_value = str(request.cookies.get(_SIGN_IN_NONCE_COOKIE) or "")
+    return bool(cookie_value) and hmac.compare_digest(cookie_value, str(form_value or ""))
+
+
+@auth_bp.route("/sign-in", methods=["GET", "POST"])
+def sign_in():
+    if not is_restricted():
+        return redirect("/")
+    next_path = safe_next_path(request.values.get("next"))
+    error = ""
+    if request.method == "POST":
+        if not _valid_sign_in_nonce(str(request.form.get("sign_in_nonce") or "")):
+            error = "The sign-in page expired. Reload it and try again."
+        else:
+            secret = str(request.form.get("credential") or "")
+            result = redeem_portable_credential(secret)
+            if not result.failed and isinstance(result.context, AuthenticatedContext):
+                lifecycle.record_redemption(result.context, request_fields=_request_fields())
+                request_context = get_authentication_result().context
+                replace_id = (
+                    request_context.browser_session_id
+                    if isinstance(request_context, AuthenticatedContext) else ""
+                )
+                issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+                log.info(
+                    "BROWSER_SESSION_CREATED",
+                    extra={
+                        "principal_id": result.context.principal_id,
+                        "credential_id": result.context.credential_id,
+                        "source": "sign_in_form",
+                    },
+                )
+                response = _no_store(redirect(next_path))
+                _set_browser_session_cookies(response, issued)
+                response.delete_cookie(
+                    _SIGN_IN_NONCE_COOKIE,
+                    secure=True,
+                    httponly=True,
+                    samesite="Strict",
+                    path="/auth/sign-in",
+                )
+                return response
+            limited = check_failed_redemption(
+                get_client_ip(),
+                public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
+                redis_client=process_state.redis_client,
+                enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
+            )
+            if not limited.allowed:
+                error = "Too many sign-in attempts. Wait a moment and try again."
+            else:
+                lifecycle.record_authentication_failure(result, request_fields=_request_fields())
+                error = "That access credential isn't valid."
+    nonce = _new_sign_in_nonce()
+    current_theme = get_theme_entry(
+        current_theme_name(),
+        fallback=str(active_config().get("default_theme") or "darklab_obsidian.yaml"),
+    )
+    response = _no_store(current_app.make_response(render_template(
+        "restricted_sign_in.html",
+        app_name=active_config().get("app_name", "darklab_shell"),
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        next_path=next_path,
+        sign_in_nonce=nonce,
+        error=error,
+    )))
+    response.set_cookie(
+        _SIGN_IN_NONCE_COOKIE,
+        nonce,
+        max_age=_SIGN_IN_NONCE_MAX_AGE,
+        secure=True,
+        httponly=True,
+        samesite="Strict",
+        path="/auth/sign-in",
+    )
     return response
 
 
@@ -85,6 +235,11 @@ def _request_fields() -> dict:
 
 @auth_bp.post("/principals")
 def create_principal():
+    if is_restricted():
+        return jsonify({
+            "error": "anonymous_issuance_disabled",
+            "message": "Anonymous credential issuance is disabled in this access profile.",
+        }), 403
     result = get_authentication_result()
     if result.failed:
         raise AuthenticationRejected(result.error_code, result.message)
@@ -135,7 +290,24 @@ def redeem():
             return jsonify({"error": "credential_redemption_rate_limited", "retry_after": limited.retry_after}), 429
         return jsonify({"error": result.error_code or "invalid_credential", "message": result.message}), 401
     lifecycle.record_redemption(result.context, request_fields=_request_fields())
-    return _no_store(jsonify({"authentication": _context_payload(result.context)}))
+    response = _no_store(jsonify({"authentication": _context_payload(result.context)}))
+    if is_restricted():
+        request_context = get_authentication_result().context
+        replace_id = (
+            request_context.browser_session_id
+            if isinstance(request_context, AuthenticatedContext) else ""
+        )
+        issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+        _set_browser_session_cookies(response, issued)
+        log.info(
+            "BROWSER_SESSION_CREATED",
+            extra={
+                "principal_id": result.context.principal_id,
+                "credential_id": result.context.credential_id,
+                "source": "credential_redemption",
+            },
+        )
+    return response
 
 
 def _context_payload(context: AuthenticatedContext) -> dict:
@@ -145,6 +317,8 @@ def _context_payload(context: AuthenticatedContext) -> dict:
         "credential_id": context.credential_id,
         "credential_type": context.credential_type,
         "authentication_method": context.authentication_method,
+        "browser_session": context.authentication_method == "browser_cookie",
+        "browser_session_expires_at": context.browser_session_absolute_expires_at,
         "selected_team_id": context.selected_team_id or None,
         "role": context.role or None,
         "capabilities": sorted(context.capabilities),
@@ -181,6 +355,42 @@ def clear_local_access():
     response = current_app.response_class(status=204)
     response.headers["Clear-Site-Data"] = '"storage"'
     return _no_store(response)
+
+
+@auth_bp.post("/logout")
+def logout():
+    context = require_authenticated_context()
+    if context.browser_session_id:
+        revoke_browser_session(context.browser_session_id, reason="logout")
+        log.info(
+            "BROWSER_SESSION_REVOKED",
+            extra={
+                "principal_id": context.principal_id,
+                "credential_id": context.credential_id,
+                "reason": "logout",
+            },
+        )
+    response = current_app.response_class(status=204)
+    _clear_browser_session_cookies(response)
+    return _no_store(response)
+
+
+@auth_bp.post("/sessions/revoke-all")
+def revoke_all_sessions():
+    context = require_authenticated_context()
+    count = revoke_principal_browser_sessions(context.principal_id)
+    log.info(
+        "BROWSER_SESSIONS_REVOKED",
+        extra={
+            "principal_id": context.principal_id,
+            "credential_id": context.credential_id,
+            "count": count,
+            "reason": "revoke_all",
+        },
+    )
+    response = _no_store(jsonify({"revoked_sessions": count}))
+    _clear_browser_session_cookies(response)
+    return response
 
 
 @auth_bp.get("/credentials")

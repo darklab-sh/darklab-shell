@@ -461,8 +461,10 @@ def update_team_member(
     updates = []
     params: list[Any] = []
     owner_role_change = False
+    role_changed = False
     if role is not None:
         role = _validate_role(role)
+        role_changed = str(member["role"] or "") != role
         if member["role"] == "owner" and role != "owner":
             owner_role_change = True
             _lock_active_owner_rows(conn, member["team_id"])
@@ -494,12 +496,19 @@ def update_team_member(
         result = conn.execute(f"UPDATE team_members SET {', '.join(updates)} WHERE {where_sql}", params)  # nosec
         if owner_role_change and not result.rowcount:
             raise TeamOwnerRequired("A team must keep at least one active owner")
+        if role_changed:
+            conn.execute(
+                "UPDATE browser_sessions SET revoked_at = ?, "
+                "revocation_reason = 'team privilege changed' "
+                "WHERE principal_id = ? AND revoked_at IS NULL",
+                (now(), member["principal_id"]),
+            )
     return get_member(conn, member_id)
 
 
 def soft_remove_team_member(conn: Any, member_id: str, *, removed_at: str = "") -> bool:
     row = conn.execute(
-        "SELECT id, team_id, role, status FROM team_members WHERE id = ?",
+        "SELECT id, team_id, principal_id, role, status FROM team_members WHERE id = ?",
         (member_id,),
     ).fetchone()
     member = _row_to_dict(row)
@@ -524,6 +533,12 @@ def soft_remove_team_member(conn: Any, member_id: str, *, removed_at: str = "") 
         if refreshed is None or refreshed["status"] != "active":
             return False
         raise TeamOwnerRequired("A team must keep at least one active owner")
+    conn.execute(
+        "UPDATE browser_sessions SET revoked_at = ?, "
+        "revocation_reason = 'team membership removed' "
+        "WHERE principal_id = ? AND revoked_at IS NULL",
+        (removed_at or now(), member["principal_id"]),
+    )
     return True
 
 

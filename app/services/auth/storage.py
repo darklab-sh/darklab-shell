@@ -745,6 +745,11 @@ def revoke_credential(
                 "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",
                 (revoked_at, normalized_reason, revoked_at, credential_id, principal_id),
             )
+            active_conn.execute(
+                "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = 'parent credential revoked' "
+                "WHERE credential_id = ? AND revoked_at IS NULL",
+                (revoked_at, credential_id),
+            )
         return _credential_metadata_from_row(
             active_conn,
             _credential_row(active_conn, principal_id, credential_id),
@@ -809,6 +814,11 @@ def rotate_credential(
             "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",
             (now, normalized_reason, now, current.id, principal_id),
         )
+        active_conn.execute(
+            "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = 'parent credential rotated' "
+            "WHERE credential_id = ? AND revoked_at IS NULL",
+            (now, current.id),
+        )
         return replacement
 
     return _run_transaction(operation, conn=conn, connect=connect)
@@ -832,6 +842,11 @@ def disable_principal(
             "UPDATE principals SET status = 'disabled', disabled_reason = ?, "
             "disabled_at = ?, updated_at = ? WHERE id = ?",
             (normalized, now, now, principal_id),
+        )
+        active_conn.execute(
+            "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = 'principal disabled' "
+            "WHERE principal_id = ? AND revoked_at IS NULL",
+            (now, principal_id),
         )
         return _principal_record(_principal_row(active_conn, principal_id))
 

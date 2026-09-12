@@ -46,6 +46,7 @@ _IDENTIFIER_PATTERNS = {
     "workspace": re.compile(r"\Awsp_[0-9a-f]{32}\Z"),
     "portable": re.compile(r"\Acrd_[0-9a-f]{32}\Z"),
     "pat": re.compile(r"\Apat_[0-9a-f]{32}\Z"),
+    "browser_session": re.compile(r"\Abws_[0-9a-f]{32}\Z"),
 }
 
 
@@ -144,6 +145,7 @@ def new_identifier(kind: str) -> str:
         "workspace": "wsp_",
         "portable": "crd_",
         "pat": "pat_",
+        "browser_session": "bws_",
     }
     try:
         prefix = prefixes[kind]

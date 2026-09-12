@@ -3,6 +3,7 @@
 
 // ── Shared utility module ──
 import { DarklabSessionCore as importedSessionCore } from './core/session_core.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
 import { loadSessionPreferences as importedLoadSessionPreferences } from './features/preferences/preferences.js';
 import { loadSessionVariables as importedLoadSessionVariables } from './features/autocomplete/runtime_context.js';
 import { getActiveTeamId as importedGetActiveTeamId } from './features/team_scope.js';
@@ -58,6 +59,19 @@ function _generateUUID() {
   return _sessionCore().generateUUID(cryptoApi);
 }
 
+function _restrictedBrowserSessionEnabled() {
+  const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+  return config?.access_profile === 'token_required';
+}
+
+function _cookieValue(name) {
+  if (typeof document === 'undefined') return '';
+  const prefix = `${encodeURIComponent(name)}=`;
+  const item = String(document.cookie || '').split(';').map(value => value.trim())
+    .find(value => value.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+}
+
 var _sessionStorageApi = null;
 var _sessionUuid = '';
 var _browserIdentity = null;
@@ -80,8 +94,18 @@ function _ensureSessionIdentity() {
   if (_sessionStorageApi && CLIENT_ID && SESSION_ID) return;
   const core = _sessionCore();
   _sessionStorageApi = _sessionStorage();
-  _sessionUuid = core.getOrCreateStorageValue(_sessionStorageApi, 'anonymous_id', _generateUUID);
   CLIENT_ID = core.getOrCreateStorageValue(_sessionStorageApi, 'client_id', _generateUUID);
+  if (_restrictedBrowserSessionEnabled()) {
+    // A credential redeemed by the server must never survive in browser
+    // storage or enter normal application JavaScript.
+    _sessionStorageApi.removeItem('access_credential');
+    _sessionStorageApi.removeItem('anonymous_id');
+    _sessionUuid = '';
+    _browserIdentity = Object.freeze({ kind: 'browser_session', publicId: 'browser-session' });
+    SESSION_ID = _browserIdentity.publicId;
+    return;
+  }
+  _sessionUuid = core.getOrCreateStorageValue(_sessionStorageApi, 'anonymous_id', _generateUUID);
   _browserIdentity = core.resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
   SESSION_ID = _browserIdentity.publicId;
 }
@@ -176,7 +200,9 @@ function _emitIdentityChanged(reason) {
 
 function _applyIdentityChange(reason) {
   _ensureSessionIdentity();
-  _browserIdentity = _sessionCore().resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
+  _browserIdentity = _restrictedBrowserSessionEnabled()
+    ? Object.freeze({ kind: 'browser_session', publicId: 'browser-session' })
+    : _sessionCore().resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
   SESSION_ID = _browserIdentity.publicId;
   _sessionLogIdentityUpdated(reason);
   _sessionCallAsync('reloadSessionHistory', reason);
@@ -197,6 +223,11 @@ function _applyIdentityChange(reason) {
 
 function activateAccessCredential(secret) {
   _ensureSessionIdentity();
+  if (_restrictedBrowserSessionEnabled()) {
+    _sessionStorageApi.removeItem('access_credential');
+    _applyIdentityChange('browser-session-activated');
+    return;
+  }
   const normalized = String(secret || '').trim();
   if (!_sessionCore().credentialPublicId(normalized).startsWith('crd_')) {
     throw new Error('Invalid access credential format');
@@ -209,6 +240,10 @@ function clearAccessCredential({ freshAnonymous = true } = {}) {
   _ensureSessionIdentity();
   const hadCredential = _browserIdentity?.kind === 'credential';
   _sessionStorageApi.removeItem('access_credential');
+  if (_restrictedBrowserSessionEnabled()) {
+    _applyIdentityChange('browser-session-cleared');
+    return;
+  }
   if (freshAnonymous && hadCredential) {
     _sessionUuid = _generateUUID();
     _sessionStorageApi.setItem('anonymous_id', _sessionUuid);
@@ -234,7 +269,7 @@ function getBrowserIdentitySnapshot() {
     credentialId: _browserIdentity.kind === 'credential' && _browserIdentity.publicId !== 'credential-invalid'
       ? _browserIdentity.publicId
       : '',
-    validFormat: _browserIdentity.publicId !== 'credential-invalid',
+    validFormat: _browserIdentity.kind === 'browser_session' || _browserIdentity.publicId !== 'credential-invalid',
   });
 }
 
@@ -255,6 +290,15 @@ function apiFetch(url, options = {}) {
     : '';
   if (teamId) {
     requestOptions.headers = Object.assign({}, requestOptions.headers || {}, { 'X-Team-ID': teamId });
+  }
+  const method = String(requestOptions.method || 'GET').toUpperCase();
+  if (_restrictedBrowserSessionEnabled() && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+    const csrfToken = _cookieValue('darklab_csrf');
+    if (csrfToken) {
+      requestOptions.headers = Object.assign({}, requestOptions.headers || {}, {
+        'X-Darklab-CSRF': csrfToken,
+      });
+    }
   }
   return fetch(url, requestOptions);
 }
