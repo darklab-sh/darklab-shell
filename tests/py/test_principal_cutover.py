@@ -119,6 +119,7 @@ def test_preflight_reports_safe_counts_and_recommends_a_fresh_reset(
             "created_at": "2026-09-10T02:00:00+00:00",
             "repository_free": True,
             "checked_files": 4,
+            "database_backend": "sqlite",
         },
     )
     args = SimpleNamespace(
@@ -146,7 +147,11 @@ def test_selected_conversion_is_atomic_preserves_rowids_and_never_moves_the_work
     monkeypatch,
 ):
     module = _load_cutover_script()
-    monkeypatch.setattr(module, "verify_backup_archive", lambda _path: {"repository_free": True})
+    monkeypatch.setattr(
+        module,
+        "verify_backup_archive",
+        lambda _path: {"repository_free": True, "database_backend": "sqlite"},
+    )
     args = _conversion_args(
         tmp_path,
         cutover_environment.database,
@@ -160,6 +165,9 @@ def test_selected_conversion_is_atomic_preserves_rowids_and_never_moves_the_work
     assert secret.startswith("dlc_v1_crd_")
     assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
     assert payload["workspace"]["storage_key"] == cutover_environment.workspace_path.name
+    assert payload["database_backend"] == "sqlite"
+    assert payload["database_integrity"]["run_count"] == 1
+    assert payload["database_integrity"]["known_search_matches"] == 1
     assert payload["workspace_directory_moved"] is False
     assert cutover_environment.workspace_path.is_dir()
     assert cutover_environment.evidence.read_text(encoding="utf-8") == "do not move this workspace\n"
@@ -196,7 +204,11 @@ def test_selected_conversion_failure_rolls_back_schema_data_fts_and_secret_file(
     monkeypatch,
 ):
     module = _load_cutover_script()
-    monkeypatch.setattr(module, "verify_backup_archive", lambda _path: {"repository_free": True})
+    monkeypatch.setattr(
+        module,
+        "verify_backup_archive",
+        lambda _path: {"repository_free": True, "database_backend": "sqlite"},
+    )
     original_convert = module.convert_selected_owner
 
     def fail_after_conversion(*args, **kwargs):
@@ -260,7 +272,11 @@ def test_fresh_reset_can_be_rolled_back_before_new_state_is_created(
     monkeypatch,
 ):
     module = _load_cutover_script()
-    monkeypatch.setattr(module, "verify_backup_archive", lambda _path: {"repository_free": True})
+    monkeypatch.setattr(
+        module,
+        "verify_backup_archive",
+        lambda _path: {"repository_free": True, "database_backend": "sqlite"},
+    )
     reset_args = SimpleNamespace(
         backup=str(tmp_path / "verified-backup.tar.gz"),
         confirm_no_external_users=True,
@@ -306,14 +322,44 @@ def test_cutover_tool_refuses_host_execution_and_insecure_selected_files(
     tmp_path,
     monkeypatch,
 ):
+    development_app = tmp_path / "source-mounted-app"
+    monkeypatch.setenv("APP_SOURCE_DIR", str(development_app))
     module = _load_cutover_script()
+    assert module.APP_ROOT == development_app
     monkeypatch.setattr(module, "_inside_container", lambda: False)
     with pytest.raises(RuntimeError, match="inside the darklab_shell application container"):
         module._require_container()
 
     monkeypatch.setattr(module, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    with pytest.raises(RuntimeError, match="for SQLite deployments"):
-        module._require_sqlite_backend()
+    with pytest.raises(RuntimeError, match="only available for SQLite deployments"):
+        module._require_sqlite_backend(action="fresh reset")
+
+    monkeypatch.setattr(
+        module,
+        "verify_backup_archive",
+        lambda _path: {"repository_free": True, "database_backend": "sqlite"},
+    )
+    mismatch_args = SimpleNamespace(
+        backup=str(tmp_path / "verified-backup.tar.gz"),
+        confirm_no_external_users=True,
+    )
+    with pytest.raises(RuntimeError, match="does not match configured backend"):
+        module._verify_inputs(mismatch_args)
+
+    verified_paths = []
+
+    def verify_development_backup(path, *, allow_development_backup=False):
+        verified_paths.append((path, allow_development_backup))
+        return {"repository_free": False, "database_backend": "postgres"}
+
+    monkeypatch.setattr(module, "verify_backup_archive", verify_development_backup)
+    mismatch_args.allow_development_backup = True
+    assert module._verify_inputs(mismatch_args)["repository_free"] is False
+    assert verified_paths == [(Path(mismatch_args.backup), True)]
+    parsed = module._parser().parse_args(
+        ["preflight", "--backup", mismatch_args.backup, "--allow-development-backup"]
+    )
+    assert parsed.allow_development_backup is True
 
     selected = tmp_path / "selected-readable.txt"
     selected.write_text(LEGACY_CREDENTIAL + "\n", encoding="utf-8")

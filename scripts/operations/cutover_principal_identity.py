@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -17,21 +18,46 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_ROOT = ROOT / "app"
+APP_ROOT = Path(os.environ.get("APP_SOURCE_DIR") or ROOT / "app")
 TOOLS_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_ROOT))
 sys.path.insert(0, str(TOOLS_ROOT))
 
-from core.database import DB_BACKEND, DB_PATH  # noqa: E402
+from core.database import DB_BACKEND, DB_PATH, db_connect  # noqa: E402
 from core.database_backend import DatabaseBackend, connect_sqlite  # noqa: E402
-from services.auth.legacy_cutover import convert_selected_owner, legacy_inventory  # noqa: E402
+from core.migrations.runner import acquire_postgres_migration_lock  # noqa: E402
+from services.auth.legacy_cutover import (  # noqa: E402
+    convert_selected_owner,
+    discard_other_legacy_owners,
+    legacy_inventory,
+    plan_other_legacy_discard,
+)
 from services.workspace.settings import workspace_root as configured_workspace_root, workspace_settings  # noqa: E402
 from restore_system import verify_backup_archive  # noqa: E402
 
 
 CONFIRM_RESET = "erase-current-application-data"
 CONFIRM_CONVERSION = "convert-the-selected-operator"
+CONFIRM_DISCARD = "discard-other-development-owners"
 CONFIRM_ROLLBACK = "restore-staged-application-data"
+
+
+def _require_development_discard(args: argparse.Namespace, backup: dict[str, Any]) -> None:
+    if DB_BACKEND != DatabaseBackend.POSTGRES:
+        raise RuntimeError("development legacy discard supports Postgres only")
+    if not getattr(args, "allow_development_backup", False) or backup.get("repository_free") is not False:
+        raise RuntimeError("legacy discard requires an explicitly accepted development backup")
+
+
+def _check_discard_counts(args: argparse.Namespace, counts: dict[str, Any]) -> None:
+    expected = (
+        ("credentials", getattr(args, "expected_discard_credentials", None)),
+        ("owned_rows", getattr(args, "expected_discard_rows", None)),
+        ("team_members", getattr(args, "expected_discard_team_members", None)),
+    )
+    for key, value in expected:
+        if value is None or value < 0 or value != counts[key]:
+            raise RuntimeError(f"reviewed discard {key} count does not match; run preflight again")
 
 
 def _inside_container() -> bool:
@@ -45,11 +71,11 @@ def _require_container() -> None:
         )
 
 
-def _require_sqlite_backend() -> None:
+def _require_sqlite_backend(*, action: str) -> None:
     if DB_BACKEND != DatabaseBackend.SQLITE:
         raise RuntimeError(
-            "principal clean-cutover tooling is for SQLite deployments; "
-            "use a fresh Postgres schema instead"
+            f"{action} is only available for SQLite deployments; "
+            "Postgres deployments must use selected conversion or restore a verified backup"
         )
 
 
@@ -63,7 +89,20 @@ def _workspace_root(args: argparse.Namespace) -> Path:
 
 
 def _verify_inputs(args: argparse.Namespace) -> dict[str, Any]:
-    backup = verify_backup_archive(Path(args.backup))
+    if getattr(args, "allow_development_backup", False):
+        backup = verify_backup_archive(
+            Path(args.backup), allow_development_backup=True
+        )
+    else:
+        backup = verify_backup_archive(Path(args.backup))
+    backup_backend = str(backup.get("database_backend") or "").strip().lower()
+    if backup_backend not in {backend.value for backend in DatabaseBackend}:
+        raise RuntimeError("backup is missing a supported database backend")
+    if backup_backend != DB_BACKEND.value:
+        raise RuntimeError(
+            f"backup database backend {backup_backend!r} does not match configured backend "
+            f"{DB_BACKEND.value!r}"
+        )
     if not args.confirm_no_external_users:
         raise RuntimeError(
             "recheck the deployment assumption and pass --confirm-no-external-users"
@@ -78,12 +117,22 @@ def _require_stopped_application(args: argparse.Namespace) -> None:
         )
 
 
-def _inventory(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
-    backup = _verify_inputs(args)
+@contextmanager
+def _database_connection(args: argparse.Namespace):
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        with db_connect() as conn:
+            yield conn
+        return
     database = _database_path(args)
     if not database.is_file():
         raise RuntimeError("SQLite database was not found")
     with connect_sqlite(str(database)) as conn:
+        yield conn
+
+
+def _inventory(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
+    backup = _verify_inputs(args)
+    with _database_connection(args) as conn:
         inventory = legacy_inventory(conn, _workspace_root(args))
     expected = args.expected_legacy_credentials
     if expected is not None and inventory["legacy_credentials"] != expected:
@@ -132,6 +181,17 @@ def _convert(args: argparse.Namespace) -> dict[str, Any]:
             f"selected conversion requires --confirm-selected-conversion {CONFIRM_CONVERSION}"
         )
     backup, before = _inventory(args)
+    discard_requested = bool(getattr(args, "confirm_discard_other_legacy_data", ""))
+    reviewed_team_snapshot_ids = tuple(getattr(args, "reviewed_team_snapshot_id", ()) or ())
+    if reviewed_team_snapshot_ids and not discard_requested:
+        raise RuntimeError("reviewed Team snapshot IDs require the development discard confirmation")
+    expected_team_recent_values = getattr(args, "expected_discard_team_recent_values", None)
+    if expected_team_recent_values is not None and not discard_requested:
+        raise RuntimeError("reviewed Team recent values require the development discard confirmation")
+    if discard_requested:
+        if args.confirm_discard_other_legacy_data != CONFIRM_DISCARD:
+            raise RuntimeError(f"development discard requires --confirm-discard-other-legacy-data {CONFIRM_DISCARD}")
+        _require_development_discard(args, backup)
     selected = _read_selected_credential(args.selected_credential_file)
     workspace_root = _workspace_root(args)
     secret_candidate = Path(args.new_credential_file).expanduser().resolve(strict=False)
@@ -142,34 +202,52 @@ def _convert(args: argparse.Namespace) -> dict[str, Any]:
     else:
         raise RuntimeError("the new credential file must be outside the workspace root")
     descriptor, secret_path = _open_secret_file(args.new_credential_file)
-    database = _database_path(args)
-    conn = connect_sqlite(str(database))
+    committed = False
+    discard_counts = None
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        bundle, fts = convert_selected_owner(
-            conn,
-            selected_credential=selected,
-            workspace_root=workspace_root,
-            credential_label=args.label,
-        )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            descriptor = -1
-            handle.write(bundle.credential.secret + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        conn.commit()
+        with _database_connection(args) as conn:
+            if DB_BACKEND == DatabaseBackend.POSTGRES:
+                acquire_postgres_migration_lock(conn)
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+            try:
+                if discard_requested:
+                    discard_plan = plan_other_legacy_discard(
+                        conn,
+                        selected_credential=selected,
+                        reviewed_team_snapshot_ids=reviewed_team_snapshot_ids,
+                        expected_team_recent_values=expected_team_recent_values,
+                    )
+                    discard_counts = discard_plan.to_safe_dict()
+                    _check_discard_counts(args, discard_counts)
+                    discard_other_legacy_owners(conn, discard_plan)
+                bundle, evidence = convert_selected_owner(
+                    conn,
+                    selected_credential=selected,
+                    workspace_root=workspace_root,
+                    credential_label=args.label,
+                )
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    descriptor = -1
+                    handle.write(bundle.credential.secret + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                conn.commit()
+                committed = True
+            except BaseException:
+                if not committed:
+                    conn.rollback()
+                raise
     except BaseException:
-        conn.rollback()
         if descriptor >= 0:
             os.close(descriptor)
-        try:
-            secret_path.unlink()
-        except OSError:
-            pass
+        if not committed:
+            try:
+                secret_path.unlink()
+            except OSError:
+                pass
         raise
-    finally:
-        conn.close()
-    return {
+    result = {
         "action": "selected_conversion",
         "backup": backup,
         "before": before,
@@ -177,12 +255,17 @@ def _convert(args: argparse.Namespace) -> dict[str, Any]:
         "workspace": bundle.workspace.to_safe_dict(),
         "credential": bundle.credential.metadata.to_safe_dict(),
         "new_credential_file": str(secret_path),
-        "runs_fts": fts.to_safe_dict(),
+        "database_backend": DB_BACKEND.value,
+        "database_integrity": evidence.to_safe_dict(),
         "workspace_directory_moved": False,
     }
+    if discard_counts is not None:
+        result["discarded_other_legacy_data"] = discard_counts
+    return result
 
 
 def _fresh_reset(args: argparse.Namespace) -> dict[str, Any]:
+    _require_sqlite_backend(action="fresh reset")
     _require_stopped_application(args)
     if args.confirm_fresh_reset != CONFIRM_RESET:
         raise RuntimeError(f"fresh reset requires --confirm-fresh-reset {CONFIRM_RESET}")
@@ -254,6 +337,7 @@ def _validated_rollback_directory(path_value: str, *, kind: str) -> Path:
 
 
 def _rollback_reset(args: argparse.Namespace) -> dict[str, Any]:
+    _require_sqlite_backend(action="reset rollback")
     _require_stopped_application(args)
     if args.confirm_reset_rollback != CONFIRM_ROLLBACK:
         raise RuntimeError(
@@ -309,11 +393,19 @@ def _parser() -> argparse.ArgumentParser:
 
     def common(command: argparse.ArgumentParser) -> None:
         command.add_argument("--backup", required=True)
+        command.add_argument(
+            "--allow-development-backup",
+            action="store_true",
+            help="Explicitly accept a checksum-verified non-managed development backup.",
+        )
         command.add_argument("--confirm-no-external-users", action="store_true")
         command.add_argument("--expected-legacy-credentials", type=int)
 
     preflight = commands.add_parser("preflight", help="Verify the backup and print safe cutover counts.")
     common(preflight)
+    preflight.add_argument("--selected-credential-file")
+    preflight.add_argument("--reviewed-team-snapshot-id", action="append", default=[])
+    preflight.add_argument("--expected-discard-team-recent-values", type=int)
 
     reset = commands.add_parser("reset", help="Stage current data for rollback and start fresh.")
     common(reset)
@@ -327,6 +419,12 @@ def _parser() -> argparse.ArgumentParser:
     convert.add_argument("--new-credential-file", required=True)
     convert.add_argument("--confirm-selected-conversion", required=True)
     convert.add_argument("--label", default="Migrated operator access")
+    convert.add_argument("--confirm-discard-other-legacy-data", default="")
+    convert.add_argument("--expected-discard-credentials", type=int)
+    convert.add_argument("--expected-discard-rows", type=int)
+    convert.add_argument("--expected-discard-team-members", type=int)
+    convert.add_argument("--reviewed-team-snapshot-id", action="append", default=[])
+    convert.add_argument("--expected-discard-team-recent-values", type=int)
 
     rollback = commands.add_parser(
         "rollback-reset",
@@ -341,15 +439,36 @@ def _parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "preflight":
+        reviewed_team_snapshot_ids = tuple(getattr(args, "reviewed_team_snapshot_id", ()) or ())
+        if reviewed_team_snapshot_ids and not getattr(args, "selected_credential_file", None):
+            raise RuntimeError("reviewed Team snapshot IDs require --selected-credential-file")
+        expected_team_recent_values = getattr(args, "expected_discard_team_recent_values", None)
+        if expected_team_recent_values is not None and not getattr(args, "selected_credential_file", None):
+            raise RuntimeError("reviewed Team recent values require --selected-credential-file")
         backup, inventory = _inventory(args)
-        return {
+        result = {
             "action": "preflight",
             "backup": backup,
             "inventory": inventory,
             "deployment_assumption_confirmed": True,
-            "recommended_action": "fresh_reset",
+            "recommended_action": (
+                "selected_conversion"
+                if DB_BACKEND == DatabaseBackend.POSTGRES
+                else "fresh_reset"
+            ),
             "selected_conversion_requires_explicit_confirmation": True,
         }
+        if getattr(args, "selected_credential_file", None):
+            _require_development_discard(args, backup)
+            selected = _read_selected_credential(args.selected_credential_file)
+            with _database_connection(args) as conn:
+                result["development_discard_review"] = plan_other_legacy_discard(
+                    conn,
+                    selected_credential=selected,
+                    reviewed_team_snapshot_ids=reviewed_team_snapshot_ids,
+                    expected_team_recent_values=expected_team_recent_values,
+                ).to_safe_dict()
+        return result
     if args.command == "reset":
         return _fresh_reset(args)
     if args.command == "convert":
@@ -362,7 +481,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     try:
         _require_container()
-        _require_sqlite_backend()
         payload = run(_parser().parse_args(argv))
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
