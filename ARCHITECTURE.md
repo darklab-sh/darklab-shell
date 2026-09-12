@@ -613,10 +613,14 @@ These routes establish and manage pseudonymous principal credentials. Authentica
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
+| `GET` | `/auth/sign-in` | In `token_required`, renders the standalone credential form. Open deployments redirect to the shell. |
+| `POST` | `/auth/sign-in` | Validates the standalone form and replaces a valid portable credential with a protected browser session. |
 | `POST` | `/auth/principals` | Atomically attaches the caller's validated anonymous workspace to a new principal and returns the first portable credential once. |
-| `POST` | `/auth/credentials/redeem` | Validates a portable credential submitted in the JSON body and returns its safe authenticated context without retaining or echoing the secret. |
+| `POST` | `/auth/credentials/redeem` | Validates a portable credential submitted in the JSON body and returns its safe authenticated context without retaining or echoing the secret. Restricted deployments also set a protected browser session. |
 | `GET` | `/auth/principal` | Returns the current authenticated principal, workspace, credential type, and capabilities; PAT callers need `identity:read`. |
 | `POST` | `/auth/local-access/clear` | Returns a no-store response that tells the browser to clear its local identity and credential storage. |
+| `POST` | `/auth/logout` | Revokes the current browser session and clears its session and CSRF cookies. |
+| `POST` | `/auth/sessions/revoke-all` | Revokes every browser session for the current principal and clears the current browser cookies. |
 | `GET` | `/auth/credentials` | Lists safe credential metadata for a portable credential, or only the calling PAT's metadata when that PAT has `identity:read`. |
 | `POST` | `/auth/credentials` | Creates a portable credential or scoped, expiring PAT and returns its secret once; PAT callers cannot issue credentials. |
 | `PATCH` | `/auth/credentials/<credential_id>` | Changes one credential label or expiry through a portable credential. |
@@ -1957,7 +1961,7 @@ The restore wrapper compares `.env` before and after a successful restore, force
 
 Most logical relationships are owned by the app rather than relying on SQLite foreign-key enforcement. Lifecycle-owned trees may still declare portable foreign keys for Postgres and schema-shape parity, but app services perform the corresponding scoped validation and cleanup on both backends. Project deletion explicitly removes its assessment evidence, checks, and cycles. Evidence source ids deliberately remain typed references instead of foreign keys so a deleted run or artifact can leave an explainable tombstone. Anonymous browser sessions can appear as `personal_workspace_id` values without a matching `personal_workspaces` row until they are upgraded.
 
-Migrations `0078` through `0081` establish pseudonymous identities, personal-workspace ownership, and request-independent background authorization on both backends. `principals`, `personal_workspaces`, `credentials`, `credential_scopes`, and `credential_verifier_roots` keep the stable actor, workspace, access method, and PAT permissions separate. The storage service preserves an attached anonymous workspace's existing validated directory name, stores only keyed credential digests and safe metadata, encrypts versioned verifier roots through the existing vault key, and keeps credential rotation independent of ownership and filesystem paths. Migration `0080` renames product owner columns in place, including `runs.personal_workspace_id`, so SQLite `rowid` and the external-content FTS index remain intact. Migration `0081` adds principal and credential-attribution fields to durable definitions and background records without turning credential ids into foreign-key ownership. Authenticated requests resolve to the workspace owner, while workers rebuild authority from persisted principal and scope ids before executing.
+Migrations `0078` through `0083` establish pseudonymous identities, personal-workspace ownership, request-independent background authorization, the clean legacy cutover, and restricted browser sessions on both backends. `principals`, `personal_workspaces`, `credentials`, `credential_scopes`, and `credential_verifier_roots` keep the stable actor, workspace, access method, and PAT permissions separate. The storage service preserves an attached anonymous workspace's existing validated directory name, stores only keyed credential digests and safe metadata, encrypts versioned verifier roots through the existing vault key, and keeps credential rotation independent of ownership and filesystem paths. Migration `0080` renames product owner columns in place, including `runs.personal_workspace_id`, so SQLite `rowid` and the external-content FTS index remain intact. Migration `0081` adds principal and credential-attribution fields to durable definitions and background records without turning credential ids into foreign-key ownership; `0082` removes the retired identity schema; and `0083` adds the encrypted browser-session signing keyring and revocable session rows. Authenticated requests resolve to the workspace owner, while workers rebuild authority from persisted principal and scope ids before executing.
 
 The supported bridge for an older pre-ledger SQLite file is to start it once with `darklab_shell` 2.3.1 so the retired compatibility ladder reaches the current head, then move to the unified schema-ledger path. Older SQLite shapes that still do not match the head fail closed before any schema mutation.
 
@@ -1980,8 +1984,10 @@ erDiagram
   PRINCIPALS ||--|| PERSONAL_WORKSPACES : "owns"
   PRINCIPALS ||--o{ CREDENTIALS : "authenticates"
   CREDENTIALS ||--o{ CREDENTIAL_SCOPES : "grants"
+  PRINCIPALS ||--o{ BROWSER_SESSIONS : "uses"
+  CREDENTIALS ||--o{ BROWSER_SESSIONS : "redeems"
+  BROWSER_SESSION_SIGNING_KEYS ||--o{ BROWSER_SESSIONS : "signs"
   PERSONAL_WORKSPACES ||--|| PERSONAL_OWNER : "identifies"
-  SESSION_TOKENS ||--o| PERSONAL_OWNER : "legacy adapter"
   PERSONAL_OWNER ||--o| SESSION_PREFERENCES : "stores"
   PERSONAL_OWNER ||--o{ STARRED_COMMANDS : "stars"
   PERSONAL_OWNER ||--o{ SESSION_VARIABLES : "defines"
@@ -2317,6 +2323,8 @@ erDiagram
 - `credentials` — portable credential and PAT metadata keyed by a non-secret public id. Rows contain a keyed verifier digest, verifier-root version, type, bounded label, creation attribution, bounded last-used time, optional expiry, and revocation state; reusable credential secrets are never stored.
 - `credential_scopes` — immutable, allowlisted PAT capabilities keyed by credential id. Portable credentials have no scope rows, while every PAT has at least one recognized scope.
 - `credential_verifier_roots` — the versioned keyring used to derive credential verifier keys. Each 32-byte root is encrypted by the existing vault master key with version-bound associated data, and retired roots remain available while credentials still reference them.
+- `browser_session_signing_keys` — the encrypted, versioned HMAC keyring for restricted browser cookies. One active key signs new sessions; retired keys remain available while already-issued sessions expire or are revoked. The vault master key wraps every signing key so the database never stores plaintext signing material.
+- `browser_sessions` — short-lived restricted-browser authentication rows keyed by a random public session id. Each row binds one principal, its parent portable credential, a signing-key version, a CSRF digest, idle activity, an absolute deadline, and revocation metadata. It never stores the portable credential or the CSRF token.
 - `teams` — one row per team with a unique slug/name, status, creator references, timestamps, and archive/delete markers.
 - `team_members` — one row per principal membership in a team, storing role, display name, status, joined/removed timestamps, and safe joining-credential attribution. Authorization and uniqueness use `(team_id, principal_id)` while preserving owner, admin, operator, and viewer capabilities.
 - `team_invites` — one row per role-scoped invite code, stored by hash with expiry, use-count, revocation, creator, and label metadata.
@@ -2388,18 +2396,24 @@ Active process tracking (`run_id →  → pid`) was previously a third table (`a
 
 ### Authentication And Session Identity
 
-Every request first passes through one typed authentication resolver. It distinguishes a request with no credential from valid, malformed, unknown, expired, revoked, and disabled-principal outcomes. A canonical anonymous UUID creates a separate anonymous context; it is never represented by an empty owner or the shared literal `anonymous`. Portable credentials use `X-Darklab-Credential`, and scoped PATs use `Authorization: Bearer`. Sending conflicting identity headers or any supplied-but-invalid credential returns an explicit authentication failure before route code can resolve an owner, read personal data, or create workspace paths.
+Every request first passes through one typed authentication resolver. It distinguishes a request with no credential from valid, malformed, unknown, expired, revoked, and disabled-principal outcomes. A canonical anonymous UUID creates a separate anonymous context; it is never represented by an empty owner or the shared literal `anonymous`. Portable credentials use `X-Darklab-Credential`, scoped PATs use `Authorization: Bearer`, and restricted browsers use the signed HttpOnly session cookie. Sending conflicting identity transports or any supplied-but-invalid credential returns an explicit authentication failure before route code can resolve an owner, read personal data, or create workspace paths.
 
 A valid principal credential resolves to an immutable request context containing the principal id, personal-workspace id, credential id and type, authentication method, selected team fields, role, and capabilities. `OwnerContext` accepts that typed result or a validated anonymous UUID; it rejects missing identities and authentication failures. Credential last-used writes are bounded, and unsuccessful resolution is audited by failure class without retaining the submitted bearer value or a stable cross-deployment fingerprint.
 
 The additive principal-access surface issues high-entropy versioned portable credentials and scoped PATs, returns new secrets only in `POST` responses with no-store headers, and stores only keyed verifier digests. Lifecycle operations list safe metadata, label credentials, change expiry, rotate by creating the replacement before revocation, revoke independently, and prevent accidental loss of the final usable portable credential. Anonymous issuance and failed redemption use bounded per-IP counters; failed lookups also use the non-secret public credential id when one can be parsed safely.
 
-The browser identity boundary lives in `app/static/js/session.js` and has two explicit states:
+The browser identity boundary lives in `app/static/js/session.js`. Open deployments have two explicit states:
 
 1. **Anonymous workspace** — a canonical UUID generated on first use and persisted under `anonymous_id`. `_generateUUID()` tries `crypto.randomUUID()` first and falls back to `crypto.getRandomValues()` so an HTTP LAN deployment can still create a valid UUID.
 2. **Kept workspace** — a portable credential persisted under `access_credential`. Its reusable secret is available only to the request-header builder; `SESSION_ID`, UI state, cache keys, logs, and scope storage receive the parsed public `crd_...` id instead.
 
 `apiFetch()` strips caller-supplied identity headers, then sends exactly one of `X-Darklab-Anonymous-ID` or `X-Darklab-Credential` plus the browser's separate `X-Client-ID`. Clearing local access removes the portable credential and creates a fresh anonymous UUID, so a browser never falls back to the anonymous directory that was attached to the kept workspace. `storage` events propagate credential changes across tabs and dispatch `app:identity-changed`; History, preferences, variables, autocomplete, Files, Teams, Projects, automation hints, Secrets, the desktop HUD, and the mobile Access summary refresh from that event.
+
+`ACCESS_PROFILE=token_required` changes that browser boundary before normal application code loads. A small server-rendered `/auth/sign-in` page accepts an operator-issued portable credential, redeems it without echoing it, rotates any current session, and sets a signed `Secure`, `HttpOnly`, `SameSite=Strict` session cookie plus a readable same-site CSRF cookie. The normal frontend removes portable and anonymous identity values from local storage, sends no browser identity header, and adds `X-Darklab-CSRF` to unsafe requests. Session rows enforce configured idle and absolute deadlines. Sign-in, Team privilege changes, logout, revoke-all, parent-credential rotation or revocation, principal disable, and member removal rotate or revoke the affected sessions at their security boundary.
+
+Restricted requests pass through `access_profile.py` after authentication resolution but before workspace cleanup or route handlers. Its complete public allowlist is Flask static content, built and vendor assets, favicon, health, status, CIDR-gated metrics, the sign-in page, and credential redemption. Share reads are an optional explicit exception; when public restricted shares are off, creation returns `403` and reads return `404`. The root redirects missing credentials to sign-in, while other protected requests return `401`. Cookie-authenticated mutations fail with `403` unless the submitted CSRF header matches both the readable cookie and the stored session digest.
+
+The browser-session signing keyring is stored in the database so every worker and a restored deployment sees the same versions. Key bytes are encrypted with the vault master key and version-bound associated data. Rotation activates a new version for future sessions without silently invalidating existing sessions; a compromise response pairs key rotation with session revocation. Backups therefore keep the database and vault master key together.
 
 The **Access** tab is a lazy Options module split into `access_panel.js`, `credential_rows.js`, and `credential_reveal.js`. It owns anonymous attachment, credential redemption, safe lifecycle rows, replacement-first rotation, durable-work review, and local removal. A new secret stays in closure state, is masked by default, and is erased from both that state and the reveal host when the user closes it or when Options or identity state changes. List requests return safe metadata only. Sequence numbers prevent an older refresh from replacing newer credential state, and editors or confirmations restore focus to the action that opened them.
 
@@ -2442,7 +2456,7 @@ The formatter supports human-readable `text` output and newline-delimited GELF 1
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session.
+- `/diag` is the operator-facing structured view that surfaces runtime config, browser-access profile and session lifetimes, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session. Restricted deployments require browser authentication before the CIDR gate is evaluated.
 - `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, active Project assessment cycles, check transitions, derived evidence matches, action outcomes, parser outcomes, ZAP/OAST connector outcomes and durations, durable workflow execution and step outcomes/durations, workflow capture failures/cancellations/recovery, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, CVE risk feed and NVD advisory acquisition outcomes/record counts/age, changed-CVE work outcomes, risk escalations, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
@@ -2488,7 +2502,7 @@ Workspace-specific permission, bind-mount, and cleanup behavior are covered in *
 ### Trust Boundary Notes
 
 - command validation and rewrite behavior are part of the trust boundary, but the execution mechanics themselves now live in **Run Lifecycle** above because they are also central runtime behavior
-- session identity is isolation, not authentication; the actual session model lives in **State And Persistence**
+- open-profile anonymous identity isolates personal work but is not a deployment access gate; `token_required` adds its fail-closed browser-session gate as described in **State And Persistence**
 - cross-worker kill relies on Redis-backed PID lookup and a user-bound signal path, as described in **Run Lifecycle**
 
 ### nmap Scan Mode Model
@@ -2549,7 +2563,7 @@ This split exists to keep each risk at the cheapest useful layer:
 The browser test harness mirrors production constraints rather than abstracting them away:
 
 - the frontend uses committed CSS and ES module bundles; `Vitest` uses direct imports for converted modules while extraction helpers remain only where a focused legacy harness is still cheaper than rewriting the test
-- `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects; GitLab requires both the full bundled suite and the focused source-module suite as separate jobs so each asset boundary reports failures independently, rejects focused tests, and fails when a retry turns an initial failure into a flaky pass
+- `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the open-profile suite across 5 isolated projects plus one dedicated `token_required` project; GitLab requires both the full bundled suite and the focused source-module suite as separate jobs so each asset boundary reports failures independently, rejects focused tests, and fails when a retry turns an initial failure into a flaky pass
 - the standalone demo/capture Playwright configs share one visual-contract file so desktop/mobile viewport, density, touch, token, and seeded-history assumptions stay aligned across recording and screenshot flows
 - each parallel browser project gets its own Flask server port plus isolated internal `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
@@ -2562,6 +2576,7 @@ The browser test harness mirrors production constraints rather than abstracting 
 - Public DNS and HTTP smoke cases run in a separate scheduled tier with their normal retry policy. Each failed attempt writes bounded JSONL evidence before retrying, while JUnit and the complete duration log are retained regardless of the final job result.
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 - the Project Assessment qualification spec runs in bundle and source modes because cycle handoffs, assessment-plan preview/start/reload/cancel behavior, missing-credential recovery, destructive focus restoration, mobile action sheets, and archived team read-only behavior depend on the assembled browser shell rather than isolated module behavior
+- the restricted-access spec runs against an isolated bootstrapped deployment and covers cookie flags, script-readable storage cleanup, CSRF enforcement, credential rows, logout, session-wide revocation, safe failed sign-in, and mobile containment in both asset modes
 
 Keep suite purposes, live inventory commands, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
 

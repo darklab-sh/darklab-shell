@@ -42,7 +42,7 @@ def _legacy_database(path: Path, *, owner: str = LEGACY_CREDENTIAL) -> int:
     with connect_sqlite(str(path)) as conn:
         run_migrations(
             conn,
-            MIGRATIONS[:-1],
+            tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
             backend=DatabaseBackend.SQLITE,
         )
         conn.execute(

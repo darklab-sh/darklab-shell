@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
@@ -9,16 +8,22 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
-from typing import Any, Callable
-
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = ROOT / "app"
 sys.path.insert(0, str(APP_ROOT))
 
+from config import CFG  # noqa: E402
+from runtime_bootstrap import init_database  # noqa: E402
 from services.auth import lifecycle  # noqa: E402
+from services.auth.browser_sessions import (  # noqa: E402
+    revoke_principal_browser_sessions,
+    rotate_signing_key,
+)
 
 
 def _inside_container() -> bool:
@@ -72,6 +77,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manage pseudonymous principal access.")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    bootstrap = commands.add_parser(
+        "bootstrap",
+        help="Create the first principal for a fresh token-required deployment.",
+    )
+    bootstrap.add_argument("--label", default="Initial operator access")
+    bootstrap.add_argument("--secret-file", required=True)
+
     status = commands.add_parser("status", help="Show safe principal and credential metadata.")
     status.add_argument("principal_id")
 
@@ -114,10 +126,52 @@ def _parser() -> argparse.ArgumentParser:
 
     enable = commands.add_parser("enable", help="Enable a disabled principal.")
     enable.add_argument("principal_id")
+
+    revoke_sessions = commands.add_parser(
+        "revoke-all-sessions",
+        help="Sign every browser out for one principal.",
+    )
+    revoke_sessions.add_argument("principal_id")
+
+    commands.add_parser(
+        "rotate-session-signing-key",
+        help="Use a new signing key for future browser sessions.",
+    )
     return parser
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command == "bootstrap":
+        if str(CFG.get("access_profile") or "open") != "token_required":
+            raise RuntimeError("bootstrap requires access_profile: token_required")
+        init_database()
+        descriptor, path = _open_secret_file(args.secret_file)
+
+        def persist_credential(secret: str) -> None:
+            nonlocal descriptor
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                descriptor = -1
+                handle.write(secret + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+
+        try:
+            bundle = lifecycle.operator_bootstrap(
+                credential_label=args.label,
+                credential_sink=persist_credential,
+            )
+        except BaseException:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise
+        return {
+            **bundle.to_safe_dict(),
+            "secret_file": str(path),
+        }
     if args.command == "status":
         principal, credentials = lifecycle.operator_summary(args.principal_id)
         return {
@@ -175,6 +229,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             reason=getattr(args, "reason", ""),
         )
         return {"principal": principal.to_safe_dict()}
+    if args.command == "revoke-all-sessions":
+        return {"revoked_sessions": revoke_principal_browser_sessions(args.principal_id)}
+    if args.command == "rotate-session-signing-key":
+        return {"active_signing_key_version": rotate_signing_key()}
     raise RuntimeError("unknown access-management command")
 
 

@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "f0d42b4299a24350cdb837dcd44669ea18bcdae4236548e70e17cd183f06a3ad"
+_LOG_EVENT_INVENTORY_HASH = "aa6661a0ee8d63cf1c85e790d0d1fa3f041f1a790b310780b8338a1994ed4c58"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
@@ -81,6 +81,7 @@ _CHANGELOG_ARCHIVES = (
 )
 
 _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
+    "access_profile",
     "ai_api_key",
     "ai_api_key_secret_name",
     "ai_base_url",
@@ -96,7 +97,10 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
     "prometheus_multiproc_dir",
     "raw_packet_scanning_enabled",
     "assessment_intrusive_actions_enabled",
+    "browser_session_absolute_hours",
+    "browser_session_idle_minutes",
     "restricted_command_input_cidrs",
+    "restricted_public_shares_enabled",
     "workspace_backend",
     "workspace_enabled",
     "workspace_root",
@@ -873,7 +877,7 @@ class TestLoggingReference:
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 366
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 367
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

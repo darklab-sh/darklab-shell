@@ -77,6 +77,48 @@ describe('session.js', () => {
     })
   })
 
+  it('restricted mode removes reusable identity storage and relies on the browser session cookie', async () => {
+    const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
+    const { apiFetch, fetchCalls, getBrowserIdentitySnapshot, storage } = loadSession({
+      appConfig: { access_profile: 'token_required' },
+      storageData: {
+        anonymous_id: 'old-anonymous-id',
+        access_credential: secret,
+        client_id: 'restricted-client',
+      },
+    })
+
+    await apiFetch('/config')
+
+    expect(storage.getItem('anonymous_id')).toBeNull()
+    expect(storage.getItem('access_credential')).toBeNull()
+    expect(getBrowserIdentitySnapshot()).toEqual({
+      kind: 'browser_session',
+      anonymousId: '',
+      credentialId: '',
+      validFormat: true,
+    })
+    expect(fetchCalls[0][1].headers['X-Darklab-Anonymous-ID']).toBeUndefined()
+    expect(fetchCalls[0][1].headers['X-Darklab-Credential']).toBeUndefined()
+    expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('restricted-client')
+  })
+
+  it('restricted cookie mutations copy the CSRF cookie into a request header', async () => {
+    const { apiFetch, fetchCalls } = loadSession({
+      appConfig: { access_profile: 'token_required' },
+      cookie: 'darklab_csrf=csrf-token-value; preference=value',
+    })
+
+    await apiFetch('/projects', { method: 'POST', headers: { Accept: 'application/json' } })
+    await apiFetch('/projects')
+
+    expect(fetchCalls[0][1].headers).toEqual(expect.objectContaining({
+      Accept: 'application/json',
+      'X-Darklab-CSRF': 'csrf-token-value',
+    }))
+    expect(fetchCalls[1][1].headers['X-Darklab-CSRF']).toBeUndefined()
+  })
+
   it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
     const { logClientError, fetchCalls } = loadSession({
       storageData: { anonymous_id: 'session-log', client_id: 'client-log' },

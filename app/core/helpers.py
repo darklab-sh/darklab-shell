@@ -15,7 +15,7 @@ import logging
 import re
 from functools import lru_cache
 
-from flask import g, has_request_context, request
+from flask import current_app, g, has_app_context, has_request_context, request
 
 from config import THEME_REGISTRY_MAP, resolve_effective_cfg
 
@@ -167,7 +167,17 @@ def get_authentication_result():
     existing = getattr(g, _AUTH_RESULT_KEY, None)
     if existing is not None:
         return existing
-    result = resolve_authentication(request.headers)
+    active_cfg = current_app.config.get("DARKLAB_CONFIG", {}) if has_app_context() else {}
+    idle_seconds = int(active_cfg.get("browser_session_idle_minutes", 30)) * 60
+    result = resolve_authentication(
+        request.headers,
+        cookies=(
+            request.cookies
+            if str(active_cfg.get("access_profile") or "open") == "token_required"
+            else None
+        ),
+        browser_session_idle_seconds=idle_seconds,
+    )
     setattr(g, _AUTH_RESULT_KEY, result)
     return result
 

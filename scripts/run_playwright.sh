@@ -146,6 +146,17 @@ if [[ -z "${PW_E2E_SERVER_LOG_DIR:-}" ]]; then
 fi
 mkdir -p "$PW_E2E_SERVER_LOG_DIR"
 
+created_secret_dir=0
+if [[ -z "${PW_E2E_SECRET_DIR:-}" ]]; then
+  PW_E2E_SECRET_DIR="$(mktemp -d /tmp/darklab-shell-playwright-secrets.XXXXXX)"
+  export PW_E2E_SECRET_DIR
+  created_secret_dir=1
+fi
+
+if ((created_secret_dir)); then
+  trap 'rm -rf -- "$PW_E2E_SECRET_DIR"' EXIT
+fi
+
 print_server_diagnostics() {
   local log_dir="${PW_E2E_SERVER_LOG_DIR:-}"
   local tail_lines="${PW_E2E_SERVER_LOG_TAIL_LINES:-120}"

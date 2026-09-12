@@ -27,6 +27,7 @@ def create_app(
     active_config = {} if config is None else config
     flask_config = {str(key): value for key, value in active_config.items() if str(key).isupper()}
     app.config.update(flask_config)
+    app.config["DARKLAB_CONFIG"] = active_config
     if "RATELIMIT_ENABLED" not in flask_config:
         app.config["RATELIMIT_ENABLED"] = active_config.get("rate_limit_enabled", True)
     if limiter_storage_uri is not None:

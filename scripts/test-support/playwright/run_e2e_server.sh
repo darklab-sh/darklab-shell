@@ -6,7 +6,13 @@ set -euo pipefail
 
 PORT="${1:?port required}"
 SLOT="${2:?slot required}"
+ACCESS_PROFILE_VALUE="${3:-open}"
 CAPTURE_ANONYMOUS_ID="cafebabe-cafe-4abe-8afe-cafebabecafe"
+
+if [[ "$ACCESS_PROFILE_VALUE" != "open" && "$ACCESS_PROFILE_VALUE" != "token_required" ]]; then
+  echo "run_e2e_server.sh: access profile must be open or token_required" >&2
+  exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
@@ -88,9 +94,21 @@ fi
 export APP_DATA_DIR="$DATA_DIR"
 export APP_CONF_DIR="$SHIPPED_CONF_DIR"
 export APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR"
+export ACCESS_PROFILE="$ACCESS_PROFILE_VALUE"
 export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
 export FLASK_APP=wsgi.py
+
+if [[ "$ACCESS_PROFILE_VALUE" == "token_required" ]]; then
+  if [[ -z "${PW_E2E_SECRET_DIR:-}" ]]; then
+    echo "run_e2e_server.sh: PW_E2E_SECRET_DIR is required for restricted tests" >&2
+    exit 2
+  fi
+  mkdir -p "$PW_E2E_SECRET_DIR"
+  chmod 700 "$PW_E2E_SECRET_DIR"
+  "$PYTHON_BIN" "$REPO_ROOT/scripts/test-support/playwright/bootstrap_restricted_access.py" \
+    --secret-file "$PW_E2E_SECRET_DIR/${SLOT}.credential"
+fi
 
 server_cmd=(
   "$PYTHON_BIN" -m gunicorn

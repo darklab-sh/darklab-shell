@@ -166,9 +166,55 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py expiry
 docker compose exec -T shell python /app/tools/manage_principal_access.py revoke prn_example crd_example --reason "lost device" --pause-related-work
 docker compose exec -T shell python /app/tools/manage_principal_access.py disable prn_example --reason "incident review"
 docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py revoke-all-sessions prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
 ```
 
 `issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
+
+### Restricted browser access
+
+`ACCESS_PROFILE` chooses the deployment's browser access boundary:
+
+- `open` is the default. New browsers can start anonymously and may keep a workspace later with a portable credential.
+- `token_required` shows a standalone credential screen before the application. Anonymous workspaces and unauthenticated credential issuance are disabled.
+- `oidc_required` and `mixed` are reserved names and aren't accepted by this release.
+
+Restricted access is intended for HTTPS deployments. Its browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`, so it won't work as a normal sign-in boundary over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
+
+Set the profile and session lifetimes in the installation's `.env`, then recreate the app:
+
+```bash
+ACCESS_PROFILE=token_required
+RESTRICTED_PUBLIC_SHARES_ENABLED=false
+BROWSER_SESSION_IDLE_MINUTES=30
+BROWSER_SESSION_ABSOLUTE_HOURS=12
+
+docker compose up -d --force-recreate shell
+```
+
+A fresh restricted deployment has no public bootstrap endpoint. Create the first principal from inside the running application container and write the one-time credential to a new path under the private `/data` mount:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  bootstrap \
+  --label "Initial operator access" \
+  --secret-file /data/initial-operator.credential
+
+docker compose cp shell:/data/initial-operator.credential ./initial-operator.credential
+chmod 600 ./initial-operator.credential
+docker compose exec -T shell rm /data/initial-operator.credential
+```
+
+The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the copied credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
+
+After redemption, the browser holds a signed server-side session instead of the portable credential. The session ends at the configured idle or absolute deadline. Sign-out revokes the current session; `/auth/sessions/revoke-all` and the operator `revoke-all-sessions` command close every browser session for one principal. Revoking or rotating a portable credential also closes sessions redeemed from that credential, and disabling a principal closes all of its sessions. Team membership and role changes rotate the acting browser's session and revoke a removed member's sessions.
+
+The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
+
+Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
+
+Public share permalinks are disabled by default in `token_required`: authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
 ### v3 identity cutover
 
@@ -1036,6 +1082,10 @@ cp .env.example .env
 ```env
 # APP_PORT=8888
 # DEV_HOST_BIND_ADDRESS=127.0.0.1
+# ACCESS_PROFILE=open
+# RESTRICTED_PUBLIC_SHARES_ENABLED=false
+# BROWSER_SESSION_IDLE_MINUTES=30
+# BROWSER_SESSION_ABSOLUTE_HOURS=12
 # WORKSPACE_ENABLED=false
 # WORKSPACE_BACKEND=tmpfs
 # WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
@@ -1097,6 +1147,10 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `HOST_BIND_ADDRESS` | Production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
+| `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary. `open` keeps anonymous-first access; `token_required` requires credential redemption into a protected browser session. Reserved values fail closed |
+| `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows unauthenticated capability-link creation and reads in `token_required`. Defaults to `false` |
+| `BROWSER_SESSION_IDLE_MINUTES` | Docker Compose, Flask app | Inactivity deadline for restricted browser sessions. Defaults to `30` minutes |
+| `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit |
 | `DARKLAB_IMAGE` | Production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
 | `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
 | `WORKSPACE_ENABLED` | Docker Compose, Flask app | Enables or disables personal and team Files |
@@ -1292,7 +1346,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.9.2` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The app doesn't provide a user authentication boundary, so restrict port 8888 to trusted networks with the host or upstream firewall. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.9.2` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 

@@ -59,6 +59,13 @@ from services.audit.context import request_audit_fields
 from services.auth.lifecycle import record_authentication_failure
 from services.auth.rate_limit import check_failed_redemption
 from services.auth.resolver import public_lookup_id_from_headers
+from services.auth.access_profile import (
+    enforce_browser_csrf,
+    enforce_restricted_access,
+    is_public_endpoint,
+    is_restricted,
+    rotate_browser_session_after_privilege_change,
+)
 
 log = logging.getLogger("shell")
 
@@ -399,6 +406,8 @@ def _enforce_authentication_resolution():
     result = get_authentication_result()
     if not result.failed:
         return None
+    if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
+        return None
     limited = check_failed_redemption(
         get_client_ip(),
         public_lookup_id_from_headers(request.headers),
@@ -413,6 +422,14 @@ def _enforce_authentication_resolution():
             "retry_after": limited.retry_after,
         }), 429
     raise AuthenticationRejected(result.error_code, result.message)
+
+
+def _enforce_access_profile():
+    return enforce_restricted_access(get_authentication_result())
+
+
+def _enforce_csrf():
+    return enforce_browser_csrf(get_authentication_result())
 
 
 def _server_error_handler(e):
@@ -581,9 +598,12 @@ def create_app(config=None):
             _log_request,
             _enforce_dynamic_route_rate_limit,
             _enforce_authentication_resolution,
+            _enforce_access_profile,
+            _enforce_csrf,
             _run_periodic_workspace_cleanup,
         ),
         after_request_handlers=(
+            rotate_browser_session_after_privilege_change,
             _log_response,
         ),
     )

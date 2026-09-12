@@ -90,7 +90,7 @@ const DarklabSessionCore = (function (global) {
     });
     if (identity && identity.kind === 'credential') {
       headers['X-Darklab-Credential'] = String(identity.secret || '');
-    } else {
+    } else if (!identity || identity.kind !== 'browser_session') {
       headers['X-Darklab-Anonymous-ID'] = String(identity?.anonymousId || '');
     }
     headers['X-Client-ID'] = clientId;

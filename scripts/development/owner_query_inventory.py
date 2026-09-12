@@ -46,6 +46,22 @@ QUERY_HELPERS = (
 )
 NAMED_RELATIONAL_EXCEPTIONS = {
     (
+        "app/services/teams/storage.py",
+        "update_team_member",
+    ): (
+        "browser-session revocation follows the principal whose Team role changed",
+        "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = "
+        "'team privilege changed' WHERE principal_id = ? AND revoked_at IS NULL",
+    ),
+    (
+        "app/services/teams/storage.py",
+        "soft_remove_team_member",
+    ): (
+        "browser-session revocation follows the principal removed from the Team",
+        "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = "
+        "'team membership removed' WHERE principal_id = ? AND revoked_at IS NULL",
+    ),
+    (
         "app/services/history/queries.py",
         "history_base_clause",
     ): (

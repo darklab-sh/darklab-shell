@@ -110,6 +110,10 @@ services:
       - PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}
       - DATABASE_BACKEND=${DATABASE_BACKEND:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
+      - ACCESS_PROFILE=${ACCESS_PROFILE:-open}
+      - RESTRICTED_PUBLIC_SHARES_ENABLED=${RESTRICTED_PUBLIC_SHARES_ENABLED:-false}
+      - BROWSER_SESSION_IDLE_MINUTES=${BROWSER_SESSION_IDLE_MINUTES:-30}
+      - BROWSER_SESSION_ABSOLUTE_HOURS=${BROWSER_SESSION_ABSOLUTE_HOURS:-12}
       # Empty environment values are ignored by the app config loader. This
       # keeps database and AI fine-tuning in app/conf/config.local.yaml
       # effective unless a developer deliberately exports the variable.

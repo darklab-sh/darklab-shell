@@ -50,6 +50,7 @@ AuthenticationMethod = Literal[
     "anonymous_header",
     "portable_header",
     "pat_bearer",
+    "browser_cookie",
 ]
 
 
@@ -64,6 +65,8 @@ class AuthenticatedContext:
     credential_created_at: str = ""
     credential_last_used_at: str | None = None
     credential_expires_at: str | None = None
+    browser_session_id: str = ""
+    browser_session_absolute_expires_at: str | None = None
     selected_team_id: str = ""
     role: str = ""
     capabilities: frozenset[str] = field(default_factory=frozenset)
@@ -104,6 +107,11 @@ class _ParsedCredential:
     credential_id: str
     secret_bytes: bytes = field(repr=False)
     method: AuthenticationMethod = "portable_header"
+
+
+@dataclass(frozen=True)
+class _ParsedBrowserSession:
+    cookie_value: str = field(repr=False)
 
 
 _PORTABLE_SECRET_RE = re.compile(
@@ -169,8 +177,9 @@ def _bearer(headers: HeaderValues) -> tuple[str, AuthenticationResult | None]:
 
 def _parse_transport(
     headers: HeaderValues,
+    cookies: Mapping[str, Any] | None = None,
 ) -> tuple[
-    _ParsedCredential | AnonymousContext | None,
+    _ParsedCredential | _ParsedBrowserSession | AnonymousContext | None,
     AuthenticationResult | None,
 ]:
     portable = str(headers.get("X-Darklab-Credential") or "")
@@ -194,7 +203,10 @@ def _parse_transport(
                 "malformed_credential",
                 "The supplied identity or credential is malformed.",
             )
-    supplied = sum(bool(value) for value in (portable, anonymous, bearer))
+    from .browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
+
+    browser_cookie = str((cookies or {}).get(BROWSER_SESSION_COOKIE) or "")
+    supplied = sum(bool(value) for value in (portable, anonymous, bearer, browser_cookie))
     if supplied > 1:
         return None, _failure(
             AuthenticationState.MALFORMED_CREDENTIAL,
@@ -208,6 +220,8 @@ def _parse_transport(
             return _decode_secret(bearer, credential_type="pat", method="pat_bearer"), None
         if anonymous:
             return AnonymousContext(validate_anonymous_uuid(anonymous)), None
+        if browser_cookie:
+            return _ParsedBrowserSession(browser_cookie), None
     except InvalidIdentityValue:
         return None, _failure(
             AuthenticationState.MALFORMED_CREDENTIAL,
@@ -332,13 +346,15 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
 def resolve_authentication(
     headers: HeaderValues,
     *,
+    cookies: Mapping[str, Any] | None = None,
+    browser_session_idle_seconds: int = 1800,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
     now: datetime | None = None,
     touch_last_used: bool = True,
 ) -> AuthenticationResult:
     """Resolve one request without ever retaining or returning its raw secret."""
-    parsed, transport_error = _parse_transport(headers)
+    parsed, transport_error = _parse_transport(headers, cookies)
     if transport_error is not None:
         return transport_error
     if parsed is None:
@@ -349,6 +365,53 @@ def resolve_authentication(
     if active_now.tzinfo is None:
         active_now = active_now.replace(tzinfo=timezone.utc)
     active_now = active_now.astimezone(timezone.utc)
+
+    if isinstance(parsed, _ParsedBrowserSession):
+        from .browser_sessions import resolve_browser_session  # noqa: PLC0415
+
+        def browser_operation(active_conn: Any) -> AuthenticationResult:
+            resolution = resolve_browser_session(
+                parsed.cookie_value,
+                idle_seconds=browser_session_idle_seconds,
+                touch=touch_last_used,
+                now=active_now,
+                conn=active_conn,
+            )
+            if not resolution.valid or resolution.session is None:
+                state = (
+                    AuthenticationState.EXPIRED_CREDENTIAL
+                    if resolution.state == "expired"
+                    else AuthenticationState.REVOKED_CREDENTIAL
+                    if resolution.state == "revoked"
+                    else AuthenticationState.MALFORMED_CREDENTIAL
+                    if resolution.state == "malformed"
+                    else AuthenticationState.UNKNOWN_CREDENTIAL
+                )
+                return _failure(state, resolution.error_code, resolution.message)
+            session = resolution.session
+            return AuthenticationResult(
+                state=AuthenticationState.VALID,
+                context=AuthenticatedContext(
+                    principal_id=session.principal_id,
+                    personal_workspace_id=session.personal_workspace_id,
+                    workspace_storage_key=session.workspace_storage_key,
+                    credential_id=session.credential_id,
+                    credential_type="portable",
+                    authentication_method="browser_cookie",
+                    credential_created_at=session.credential_created_at,
+                    credential_last_used_at=session.credential_last_used_at,
+                    credential_expires_at=session.credential_expires_at,
+                    browser_session_id=session.id,
+                    browser_session_absolute_expires_at=session.absolute_expires_at,
+                    capabilities=frozenset(PAT_SCOPES),
+                ),
+                credential_supplied=True,
+            )
+
+        if conn is not None:
+            return browser_operation(conn)
+        browser_runner = run_transaction if touch_last_used else run_read
+        return browser_runner(browser_operation, connect=connect)
 
     def operation(active_conn: Any) -> AuthenticationResult:
         return _resolve_credential(active_conn, parsed, now=active_now, touch_last_used=touch_last_used)
