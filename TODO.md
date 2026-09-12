@@ -11,6 +11,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
+  - [Retire the one-time principal cutover tooling](#retire-the-one-time-principal-cutover-tooling)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -110,13 +111,22 @@ Let operators point a deployment at an existing identity provider without darkla
 
 ## Known Issues
 
-No known issues currently tracked.
+- **Options → Access shows the wrong action buttons.** A kept workspace can show **Keep this workspace**, **Use an existing credential**, and **Remove invalid credential** beside its valid current credential. This is a display issue; the server rejects an attempt to keep an already authenticated workspace again.
+  - **Cause:** The panel marks those controls as hidden, but its CSS display rules make them visible.
+  - **Fix:** Make hidden controls stay hidden in anonymous, invalid-credential, and kept-workspace states.
+  - **Tests:** Cover those states in browser tests with source and bundled assets.
 
 ---
 
 ## Technical Debt
 
-No open technical debt items are currently tracked.
+### Retire the one-time principal cutover tooling
+
+After the v3 release is cut and staging and production have migrated, verified their data and access, and taken post-cutover backups, remove as much of the pre-v3 identity cutover path as possible. There's little value in maintaining a complex one-off conversion tool and long operator runbook once the existing deployments have finished using them.
+
+- [ ] Audit uses of `scripts/operations/cutover_principal_identity.py` and `app/services/auth/legacy_cutover.py`, then remove the preflight, conversion, reset, and development-discard logic that no longer serves a live upgrade or recovery need.
+- [ ] Replace the detailed cutover instructions with a short note on recovering an older pre-cutover backup. Keep applied migration history and any fail-closed schema checks needed for fresh installs and restores; don't silently accept an old database with the new application.
+- [ ] Remove tests that exist only for the retired tool while keeping current-schema, authentication, backup, and restore coverage. Update the affected documentation and test inventories, record the shipped cleanup in `CHANGELOG.md`, and qualify both SQLite and Postgres before closing this item.
 
 ---
 

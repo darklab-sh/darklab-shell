@@ -35,6 +35,7 @@ from services.history.search import run_search_clause
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
+CUTOVER_SCRIPT = REPO_ROOT / "scripts" / "operations" / "cutover_principal_identity.py"
 
 
 def _quote_ident(identifier: str) -> str:
@@ -45,6 +46,16 @@ def _quote_ident(identifier: str) -> str:
 
 def _load_migration_module():
     spec = importlib.util.spec_from_file_location("migrate_sqlite_to_postgres_phase6", MIGRATION_SCRIPT)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_cutover_module():
+    spec = importlib.util.spec_from_file_location("postgres_cutover_principal_identity", CUTOVER_SCRIPT)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -94,6 +105,512 @@ def _postgres_plan_text(rows: list[Any]) -> str:
         else:
             lines.append(str(row[0]))
     return "\n".join(lines)
+
+
+@pytest.mark.postgres
+def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
+    postgres_schema,
+    tmp_path,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import applied_versions, run_migrations_with_advisory_lock
+    from services.auth.legacy_cutover import PostgresEvidence, convert_selected_owner
+    from services.auth.resolver import AuthenticationState, resolve_authentication
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.settings import session_workspace_name
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(
+        raw_conn,
+        tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
+    )
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    legacy_credential = "tok_postgres_cutover_operator"
+    created_at = "2026-09-10T01:00:00+00:00"
+    conn.execute(
+        "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+        (legacy_credential, created_at, created_at),
+    )
+    conn.execute(
+        "INSERT INTO runs "
+        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+        "exit_code, output_preview, output_search_text) "
+        "VALUES ('run-postgres-cutover', ?, '', 'external', "
+        "'printf postgres-cutover-marker', ?, ?, 0, '[]', 'postgres cutover marker')",
+        (legacy_credential, created_at, created_at),
+    )
+    legacy_credential_hash = hashlib.sha256(legacy_credential.encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO teams "
+        "(id, name, slug, status, created_by_member_id, created_by_session_token_hash, "
+        "created_at, updated_at) "
+        "VALUES ('team-postgres-cutover', 'Postgres cutover', 'postgres-cutover', "
+        "'active', 'member-postgres-cutover', ?, ?, ?)",
+        (legacy_credential_hash, created_at, created_at),
+    )
+    conn.execute(
+        "INSERT INTO team_members "
+        "(id, team_id, session_token, session_token_hash, role, status, joined_at) "
+        "VALUES ('member-postgres-cutover', 'team-postgres-cutover', ?, ?, "
+        "'owner', 'active', ?)",
+        (legacy_credential, legacy_credential_hash, created_at),
+    )
+    raw_conn.commit()
+
+    data_dir = tmp_path / "data"
+    workspace_root = tmp_path / "workspaces"
+    data_dir.mkdir()
+    workspace_root.mkdir()
+    (workspace_root / session_workspace_name(legacy_credential)).mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    try:
+        rolled_back_bundle, rolled_back_evidence = convert_selected_owner(
+            conn,
+            selected_credential=legacy_credential,
+            workspace_root=workspace_root,
+        )
+        assert isinstance(rolled_back_evidence, PostgresEvidence)
+        assert rolled_back_evidence.run_count == 1
+        assert rolled_back_evidence.search_match_count == 1
+        raw_conn.rollback()
+
+        assert "0082" not in applied_versions(conn)
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM session_tokens WHERE token = ?",
+            (legacy_credential,),
+        ).fetchone()["count"] == 1
+        assert conn.execute(
+            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["personal_workspace_id"] == legacy_credential
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM credentials WHERE principal_id = ?",
+            (rolled_back_bundle.principal.id,),
+        ).fetchone()["count"] == 0
+        rolled_back_member = conn.execute(
+            "SELECT principal_id, session_token_hash FROM team_members "
+            "WHERE id = 'member-postgres-cutover'"
+        ).fetchone()
+        assert rolled_back_member["principal_id"] is None
+        assert rolled_back_member["session_token_hash"] == legacy_credential_hash
+        raw_conn.rollback()
+
+        cutover = _load_cutover_module()
+
+        @contextmanager
+        def test_db_connect():
+            yield conn
+
+        selected_file = tmp_path / "selected-credential.txt"
+        selected_file.write_text(legacy_credential + "\n", encoding="utf-8")
+        selected_file.chmod(0o600)
+        new_credential_file = tmp_path / "new-credential.txt"
+        monkeypatch.setattr(cutover, "DB_BACKEND", DatabaseBackend.POSTGRES)
+        monkeypatch.setattr(cutover, "db_connect", test_db_connect)
+        monkeypatch.setattr(
+            cutover,
+            "verify_backup_archive",
+            lambda _path: {
+                "repository_free": True,
+                "database_backend": "postgres",
+            },
+        )
+        preflight = cutover.run(
+            SimpleNamespace(
+                command="preflight",
+                backup=str(tmp_path / "verified-backup.tar.gz"),
+                confirm_no_external_users=True,
+                expected_legacy_credentials=1,
+                database="",
+                workspace_root=str(workspace_root),
+            )
+        )
+        assert preflight["recommended_action"] == "selected_conversion"
+        assert preflight["inventory"]["database_backend"] == "postgres"
+        assert preflight["inventory"]["team_members_without_principal"] == 1
+        assert preflight["inventory"]["teams_without_creator_principal"] == 1
+        conversion_args = SimpleNamespace(
+            backup=str(tmp_path / "verified-backup.tar.gz"),
+            confirm_no_external_users=True,
+            confirm_application_stopped=True,
+            expected_legacy_credentials=1,
+            database="",
+            workspace_root=str(workspace_root),
+            selected_credential_file=str(selected_file),
+            new_credential_file=str(new_credential_file),
+            confirm_selected_conversion="convert-the-selected-operator",
+            label="Migrated operator access",
+        )
+        original_convert = cutover.convert_selected_owner
+
+        def fail_after_conversion(*args, **kwargs):
+            original_convert(*args, **kwargs)
+            raise RuntimeError("injected failure before commit")
+
+        monkeypatch.setattr(cutover, "convert_selected_owner", fail_after_conversion)
+        with pytest.raises(RuntimeError, match="injected failure before commit"):
+            cutover._convert(conversion_args)
+        assert not new_credential_file.exists()
+        assert "0082" not in applied_versions(conn)
+        assert conn.execute(
+            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["personal_workspace_id"] == legacy_credential
+        raw_conn.rollback()
+
+        monkeypatch.setattr(cutover, "convert_selected_owner", original_convert)
+        payload = cutover._convert(conversion_args)
+        secret = new_credential_file.read_text(encoding="utf-8").strip()
+
+        assert payload["database_backend"] == "postgres"
+        assert payload["database_integrity"] == {
+            "run_count": 1,
+            "known_search_checked": True,
+            "known_search_matches": 1,
+        }
+        assert "0082" in applied_versions(conn)
+        assert raw_conn.execute("SELECT to_regclass('session_tokens') AS name").fetchone()["name"] is None
+        run = conn.execute(
+            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()
+        assert run["personal_workspace_id"] == payload["workspace"]["id"]
+        member = conn.execute(
+            "SELECT principal_id, joined_by_credential_id FROM team_members "
+            "WHERE id = 'member-postgres-cutover'"
+        ).fetchone()
+        assert member["principal_id"] == payload["principal"]["id"]
+        assert member["joined_by_credential_id"] == payload["credential"]["id"]
+        team = conn.execute(
+            "SELECT created_by_principal_id, created_by_credential_id FROM teams "
+            "WHERE id = 'team-postgres-cutover'"
+        ).fetchone()
+        assert team["created_by_principal_id"] == payload["principal"]["id"]
+        assert team["created_by_credential_id"] == payload["credential"]["id"]
+        assert resolve_authentication(
+            {"X-Darklab-Credential": secret},
+            conn=conn,
+        ).state == AuthenticationState.VALID
+        assert resolve_authentication(
+            {"X-Darklab-Credential": legacy_credential},
+            conn=conn,
+        ).state == AuthenticationState.MALFORMED_CREDENTIAL
+        raw_conn.rollback()
+    finally:
+        reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+def test_postgres_development_cutover_discards_reviewed_test_owners_atomically(
+    postgres_schema,
+    tmp_path,
+    monkeypatch,
+):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import applied_versions, run_migrations_with_advisory_lock
+    from services.runs import output_store
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.settings import session_workspace_name
+
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(
+        raw_conn,
+        tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
+    )
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    selected, test_token = "tok_dev_selected", "tok_dev_disposable"
+    created = "2026-09-10T01:00:00+00:00"
+    for token in (selected, test_token):
+        conn.execute(
+            "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
+            (token, created),
+        )
+    for run_id, token in (("selected-run", selected), ("test-run", test_token)):
+        conn.execute(
+            "INSERT INTO runs (id, personal_workspace_id, command, started, output_search_text) "
+            "VALUES (?, ?, 'printf cutover', ?, 'cutover')",
+            (run_id, token, created),
+        )
+    conn.execute(
+        "INSERT INTO run_output_artifacts (run_id, rel_path, created) VALUES "
+        "('test-run', 'old-test-output.gz', ?)",
+        (created,),
+    )
+    conn.execute(
+        "INSERT INTO run_output_summary (run_id, family, value) "
+        "VALUES ('test-run', 'kind', 'test')"
+    )
+    conn.execute(
+        "INSERT INTO snapshots (id, personal_workspace_id, label, created, content) "
+        "VALUES ('test-snapshot', ?, 'test', ?, 'stale')",
+        (test_token, created),
+    )
+    conn.execute(
+        "INSERT INTO recent_values (personal_workspace_id, kind, value, last_used) "
+        "VALUES (?, 'target', 'test.invalid', ?)",
+        (test_token, created),
+    )
+    conn.execute(
+        "INSERT INTO session_preferences (personal_workspace_id, updated) VALUES (?, ?)",
+        (test_token, created),
+    )
+    conn.execute(
+        "INSERT INTO starred_commands (personal_workspace_id, command) VALUES (?, 'test command')",
+        (test_token,),
+    )
+    selected_hash = hashlib.sha256(selected.encode("utf-8")).hexdigest()
+    test_hash = hashlib.sha256(test_token.encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO teams (id, name, slug, created_by_member_id, "
+        "created_by_session_token_hash, created_at, updated_at) "
+        "VALUES ('dev-team', 'Dev team', 'dev-team', 'selected-member', ?, ?, ?)",
+        (selected_hash, created, created),
+    )
+    for member_id, token, token_hash, role in (
+        ("selected-member", selected, selected_hash, "owner"),
+        ("test-member", test_token, test_hash, "viewer"),
+    ):
+        conn.execute(
+            "INSERT INTO team_members "
+            "(id, team_id, session_token, session_token_hash, role, joined_at) "
+            "VALUES (?, 'dev-team', ?, ?, ?, ?)",
+            (member_id, token, token_hash, role, created),
+        )
+    conn.execute(
+        "INSERT INTO snapshots (id, personal_workspace_id, team_id, label, created, content) "
+        "VALUES ('test-team-snapshot', ?, 'dev-team', 'test Team share', ?, 'stale')",
+        (test_token, created),
+    )
+    for owner, value in (
+        (selected, "keep.example"),
+        (test_token, "old-one.example"),
+        (test_token, "old-two.example"),
+    ):
+        conn.execute(
+            "INSERT INTO recent_values (personal_workspace_id, team_id, kind, value, last_used) "
+            "VALUES (?, 'dev-team', 'domain', ?, ?)",
+            (owner, value, created),
+        )
+    raw_conn.commit()
+
+    data_dir, workspace_root = tmp_path / "data", tmp_path / "workspaces"
+    data_dir.mkdir()
+    workspace_root.mkdir()
+    artifact_dir = tmp_path / "run-output"
+    artifact_dir.mkdir()
+    artifact_file = artifact_dir / "old-test-output.gz"
+    artifact_file.write_bytes(b"archived output")
+    monkeypatch.setattr(output_store, "RUN_OUTPUT_DIR", str(artifact_dir))
+    selected_workspace = workspace_root / session_workspace_name(selected)
+    other_workspace = workspace_root / session_workspace_name(test_token)
+    selected_workspace.mkdir()
+    other_workspace.mkdir()
+    (selected_workspace / "keep.txt").write_text("selected", encoding="utf-8")
+    (other_workspace / "old.txt").write_text("archive", encoding="utf-8")
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    try:
+        cutover = _load_cutover_module()
+
+        @contextmanager
+        def test_db_connect():
+            yield conn
+
+        selected_file = tmp_path / "selected-credential.txt"
+        selected_file.write_text(selected + "\n", encoding="utf-8")
+        selected_file.chmod(0o600)
+        new_file = tmp_path / "new-credential.txt"
+        monkeypatch.setattr(cutover, "DB_BACKEND", DatabaseBackend.POSTGRES)
+        monkeypatch.setattr(cutover, "db_connect", test_db_connect)
+        monkeypatch.setattr(
+            cutover,
+            "verify_backup_archive",
+            lambda _path, **_kwargs: {"repository_free": False, "database_backend": "postgres"},
+        )
+        common = dict(
+            backup=str(tmp_path / "verified-backup.tar.gz"),
+            allow_development_backup=True,
+            confirm_no_external_users=True,
+            expected_legacy_credentials=2,
+            database="",
+            workspace_root=str(workspace_root),
+            selected_credential_file=str(selected_file),
+            reviewed_team_snapshot_id=["test-team-snapshot"],
+            expected_discard_team_recent_values=2,
+        )
+        conn.execute(
+            "INSERT INTO session_variables (personal_workspace_id, name, value, updated) "
+            "VALUES (?, 'unsupported', 'test', ?)",
+            (test_token, created),
+        )
+        with pytest.raises(RuntimeError, match="unsupported data in: session_variables"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("DELETE FROM session_variables WHERE personal_workspace_id = ?", (test_token,))
+
+        with pytest.raises(RuntimeError, match="recent_values include Team data"):
+            cutover.run(SimpleNamespace(command="preflight", **{**common, "expected_discard_team_recent_values": None}))
+        with pytest.raises(RuntimeError, match="recent_values include Team data"):
+            cutover.run(SimpleNamespace(command="preflight", **{**common, "expected_discard_team_recent_values": 1}))
+        conn.execute(
+            "UPDATE recent_values SET team_id = 'dev-team' WHERE personal_workspace_id = ? "
+            "AND team_id = ''",
+            (test_token,),
+        )
+        with pytest.raises(RuntimeError, match="recent_values include Team data"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute(
+            "UPDATE recent_values SET team_id = '' WHERE personal_workspace_id = ? "
+            "AND kind = 'target'",
+            (test_token,),
+        )
+
+        conn.execute("UPDATE team_members SET role = 'owner' WHERE id = 'test-member'")
+        with pytest.raises(RuntimeError, match="other legacy credential owns a Team"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("UPDATE team_members SET role = 'viewer' WHERE id = 'test-member'")
+
+        conn.execute("UPDATE teams SET created_by_member_id = 'test-member' WHERE id = 'dev-team'")
+        with pytest.raises(RuntimeError, match="referenced by teams.created_by_member_id"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("UPDATE teams SET created_by_member_id = 'selected-member' WHERE id = 'dev-team'")
+
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+            "VALUES ('test-run-link', 'selected-project', 'run', 'test-run', ?)",
+            (created,),
+        )
+        with pytest.raises(RuntimeError, match="other legacy run is referenced by project_links"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("DELETE FROM project_links WHERE id = 'test-run-link'")
+
+        with pytest.raises(RuntimeError, match="other legacy snapshots include Team data"):
+            cutover.run(SimpleNamespace(command="preflight", **{**common, "reviewed_team_snapshot_id": []}))
+        with pytest.raises(RuntimeError, match="other legacy snapshots include Team data"):
+            cutover.run(SimpleNamespace(command="preflight", **{**common, "reviewed_team_snapshot_id": ["wrong-id"]}))
+        with pytest.raises(RuntimeError, match="reviewed Team snapshot IDs must be nonempty and unique"):
+            cutover.run(
+                SimpleNamespace(
+                    command="preflight",
+                    **{**common, "reviewed_team_snapshot_id": ["test-team-snapshot"] * 2},
+                )
+            )
+        conn.execute("UPDATE team_members SET status = 'removed' WHERE id = 'test-member'")
+        with pytest.raises(RuntimeError, match="no active selected owner and test membership"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("UPDATE team_members SET status = 'active' WHERE id = 'test-member'")
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, created) "
+            "VALUES ('test-snapshot-link', 'selected-project', 'snapshot', 'test-team-snapshot', ?)",
+            (created,),
+        )
+        with pytest.raises(RuntimeError, match="other legacy snapshot is referenced by project_links"):
+            cutover.run(SimpleNamespace(command="preflight", **common))
+        conn.execute("DELETE FROM project_links WHERE id = 'test-snapshot-link'")
+
+        preflight = cutover.run(SimpleNamespace(command="preflight", **common))
+        assert preflight["development_discard_review"] == {
+            "credentials": 1,
+            "owned_rows": 8,
+            "owned_rows_by_table": {
+                **{table: 0 for table in preflight["development_discard_review"]["owned_rows_by_table"]},
+                "runs": 1,
+                "snapshots": 2,
+                "recent_values": 3,
+                "session_preferences": 1,
+                "starred_commands": 1,
+            },
+            "team_snapshots": 1,
+            "team_recent_values": 2,
+            "team_members": 1,
+        }
+        args = SimpleNamespace(
+            **common,
+            confirm_application_stopped=True,
+            new_credential_file=str(new_file),
+            confirm_selected_conversion="convert-the-selected-operator",
+            confirm_discard_other_legacy_data="discard-other-development-owners",
+            expected_discard_credentials=1,
+            expected_discard_rows=8,
+            expected_discard_team_members=1,
+            label="Migrated operator access",
+        )
+        args.confirm_discard_other_legacy_data = ""
+        with pytest.raises(RuntimeError, match="require the development discard confirmation"):
+            cutover._convert(args)
+        assert not new_file.exists()
+        args.confirm_discard_other_legacy_data = "discard-other-development-owners"
+        monkeypatch.setattr(
+            cutover,
+            "verify_backup_archive",
+            lambda _path, **_kwargs: {"repository_free": True, "database_backend": "postgres"},
+        )
+        with pytest.raises(RuntimeError, match="requires an explicitly accepted development backup"):
+            cutover._convert(args)
+        assert not new_file.exists()
+        monkeypatch.setattr(
+            cutover,
+            "verify_backup_archive",
+            lambda _path, **_kwargs: {"repository_free": False, "database_backend": "postgres"},
+        )
+        args.expected_discard_rows = 7
+        with pytest.raises(RuntimeError, match="reviewed discard owned_rows count"):
+            cutover._convert(args)
+        assert not new_file.exists()
+        args.expected_discard_rows = 8
+
+        original_convert = cutover.convert_selected_owner
+
+        def fail_after_discard(*_args, **_kwargs):
+            raise RuntimeError("injected failure after discard")
+
+        monkeypatch.setattr(cutover, "convert_selected_owner", fail_after_discard)
+        with pytest.raises(RuntimeError, match="injected failure after discard"):
+            cutover._convert(args)
+        assert not new_file.exists()
+        assert "0082" not in applied_versions(conn)
+        assert conn.execute("SELECT COUNT(*) AS count FROM runs WHERE id = 'test-run'").fetchone()["count"] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = ? AND team_id = 'dev-team'",
+            (test_token,),
+        ).fetchone()["count"] == 2
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM snapshots WHERE id = 'test-team-snapshot'"
+        ).fetchone()["count"] == 1
+        assert conn.execute("SELECT COUNT(*) AS count FROM team_members WHERE id = 'test-member'").fetchone()["count"] == 1
+        raw_conn.rollback()
+
+        monkeypatch.setattr(cutover, "convert_selected_owner", original_convert)
+        result = cutover._convert(args)
+        assert result["discarded_other_legacy_data"]["owned_rows"] == 8
+        assert result["discarded_other_legacy_data"]["team_snapshots"] == 1
+        assert result["discarded_other_legacy_data"]["team_recent_values"] == 2
+        assert "0082" in applied_versions(conn)
+        assert conn.execute("SELECT COUNT(*) AS count FROM runs WHERE id = 'test-run'").fetchone()["count"] == 0
+        assert conn.execute("SELECT COUNT(*) AS count FROM snapshots WHERE id = 'test-snapshot'").fetchone()["count"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = ? AND team_id = 'dev-team'",
+            (test_token,),
+        ).fetchone()["count"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM recent_values WHERE personal_workspace_id = ? AND team_id = 'dev-team'",
+            (result["workspace"]["id"],),
+        ).fetchone()["count"] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM snapshots WHERE id = 'test-team-snapshot'"
+        ).fetchone()["count"] == 0
+        assert conn.execute("SELECT COUNT(*) AS count FROM run_output_artifacts").fetchone()["count"] == 0
+        assert conn.execute("SELECT COUNT(*) AS count FROM run_output_summary").fetchone()["count"] == 0
+        assert conn.execute("SELECT COUNT(*) AS count FROM team_members WHERE id = 'test-member'").fetchone()["count"] == 0
+        assert conn.execute("SELECT COUNT(*) AS count FROM team_members WHERE id = 'selected-member'").fetchone()["count"] == 1
+        selected_run = conn.execute(
+            "SELECT personal_workspace_id FROM runs WHERE id = 'selected-run'"
+        ).fetchone()
+        assert selected_run["personal_workspace_id"] == result["workspace"]["id"]
+        assert (other_workspace / "old.txt").read_text(encoding="utf-8") == "archive"
+        assert (selected_workspace / "keep.txt").read_text(encoding="utf-8") == "selected"
+        assert artifact_file.read_bytes() == b"archived output"
+        raw_conn.rollback()
+    finally:
+        reset_master_key_cache_for_tests()
 
 
 def _create_smoke_schema(conn: Any, *, backend: str) -> None:

@@ -54,7 +54,12 @@ def _safe_archive_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
     return members
 
 
-def _extract_and_verify(archive_path: Path, destination: Path) -> tuple[Path, dict[str, Any]]:
+def _extract_and_verify(
+    archive_path: Path,
+    destination: Path,
+    *,
+    allow_development_backup: bool = False,
+) -> tuple[Path, dict[str, Any]]:
     with tarfile.open(archive_path, "r:gz") as archive:
         members = _safe_archive_members(archive)
         archive.extractall(destination, members=members, filter="data")
@@ -80,24 +85,50 @@ def _extract_and_verify(archive_path: Path, destination: Path) -> tuple[Path, di
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("format") != "darklab_shell.backup.v1":
         raise RestoreError("backup manifest format is not supported")
-    if manifest.get("repository_free") is not True:
+    if manifest.get("repository_free") is not True and not (
+        allow_development_backup and manifest.get("repository_free") is False
+    ):
         raise RestoreError("backup was not created by the managed deployment lifecycle")
     return root, manifest
 
 
-def verify_backup_archive(archive_path: Path) -> dict[str, Any]:
-    """Verify a managed backup without restoring it or exposing sensitive values."""
+def verify_backup_archive(
+    archive_path: Path, *, allow_development_backup: bool = False
+) -> dict[str, Any]:
+    """Verify a backup without restoring it or exposing sensitive values."""
     candidate = archive_path.expanduser().resolve()
     if not candidate.is_file():
         raise RestoreError("backup archive was not found")
     with tempfile.TemporaryDirectory(prefix="darklab-backup-verify-") as destination:
-        root, manifest = _extract_and_verify(candidate, Path(destination))
+        root, manifest = _extract_and_verify(
+            candidate,
+            Path(destination),
+            allow_development_backup=allow_development_backup,
+        )
+        database = manifest.get("database")
+        database_backend = (
+            str(database.get("backend") or "").strip().lower()
+            if isinstance(database, dict)
+            else ""
+        )
+        if manifest.get("repository_free") is False:
+            expected_database_file = {
+                "sqlite": "history.db",
+                "postgres": "postgres.dump",
+            }.get(database_backend)
+            if not expected_database_file or not (root / "database" / expected_database_file).is_file():
+                raise RestoreError("development backup is missing its database snapshot")
+            if not (root / "data").is_dir():
+                raise RestoreError("development backup is missing its data directory")
+        workspaces_included = (root / "workspaces").is_dir()
         checked_files = sum(1 for path in root.rglob("*") if path.is_file())
     return {
         "format": str(manifest.get("format") or ""),
         "created_at": str(manifest.get("created_at") or ""),
         "repository_free": bool(manifest.get("repository_free")),
         "checked_files": checked_files,
+        "database_backend": database_backend,
+        "workspaces_included": workspaces_included,
     }
 
 
