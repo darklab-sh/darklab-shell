@@ -8566,6 +8566,7 @@ class TestPostgresMigrations:
             "0081",
             "0082",
             "0083",
+            "0084",
         ]
         for table_name in (
             "runs",
@@ -9978,7 +9979,7 @@ class TestPostgresMigrations:
         assert [(row["version"], row["name"]) for row in rows] == [
             (migration.version, migration.name) for migration in MIGRATIONS
         ]
-        assert rows[-1]["version"] == "0083"
+        assert rows[-1]["version"] == "0084"
         assert run_count == 0
 
     def test_sqlite_fresh_unified_baseline_skips_legacy_ladder(self):
@@ -10455,6 +10456,7 @@ class TestPostgresMigrations:
             "0081",
             "0082",
             "0083",
+            "0084",
         ]
         assert applied_again == []
         assert "0039" in conn.applied_versions
@@ -10502,7 +10504,8 @@ class TestPostgresMigrations:
         assert "0081" in conn.applied_versions
         assert "0082" in conn.applied_versions
         assert "0083" in conn.applied_versions
-        assert conn.commit_count == 45
+        assert "0084" in conn.applied_versions
+        assert conn.commit_count == 46
         assert verify_calls == 1
         assert not any("CREATE TABLE IF NOT EXISTS runs" in call[0] for call in conn.calls)
 

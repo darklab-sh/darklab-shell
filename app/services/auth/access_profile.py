@@ -23,6 +23,8 @@ from .resolver import AuthenticatedContext
 
 OPEN = "open"
 TOKEN_REQUIRED = "token_required"
+OIDC_REQUIRED = "oidc_required"
+MIXED = "mixed"
 log = logging.getLogger("shell")
 
 # This is the complete restricted-mode allowlist. It contains only the sign-in
@@ -42,6 +44,8 @@ RESTRICTED_PUBLIC_ENDPOINTS = frozenset({
     "assets.vendor_fonts",
     "auth.sign_in",
     "auth.redeem",
+    "auth.oidc_start",
+    "auth.oidc_callback",
 })
 RESTRICTED_SHARE_ENDPOINT = "history.get_share"
 RESTRICTED_SHARE_CREATE_ENDPOINT = "history.save_share"
@@ -64,7 +68,7 @@ def active_profile() -> str:
 
 
 def is_restricted() -> bool:
-    return active_profile() == TOKEN_REQUIRED
+    return active_profile() in {TOKEN_REQUIRED, OIDC_REQUIRED, MIXED}
 
 
 def public_shares_enabled() -> bool:
@@ -101,6 +105,18 @@ def enforce_restricted_access(authentication_result):
     if is_public_endpoint(endpoint):
         return None
     if isinstance(authentication_result.context, AuthenticatedContext):
+        context = authentication_result.context
+        if active_profile() == TOKEN_REQUIRED and context.credential_type == "oidc":
+            if endpoint == "content.index" and request.method in {"GET", "HEAD"}:
+                return redirect(url_for("auth.sign_in", next=safe_next_path(request.full_path.rstrip("?"))))
+            return _unauthorized_response()
+        if active_profile() == OIDC_REQUIRED and not (
+            context.credential_type == "oidc"
+            or (context.credential_type == "pat" and request.path.startswith("/api/v1/"))
+        ):
+            if endpoint == "content.index" and request.method in {"GET", "HEAD"}:
+                return redirect(url_for("auth.sign_in", next=safe_next_path(request.full_path.rstrip("?"))))
+            return _unauthorized_response()
         if endpoint == RESTRICTED_SHARE_CREATE_ENDPOINT and not public_shares_enabled():
             return jsonify({
                 "error": "public_shares_disabled",
@@ -159,8 +175,10 @@ def rotate_browser_session_after_privilege_change(response):
     issued = create_browser_session(
         principal_id=context.principal_id,
         credential_id=context.credential_id,
+        oidc_identity_id=context.oidc_identity_id,
         absolute_seconds=absolute_seconds,
         replace_session_id=context.browser_session_id,
+        authenticated_at=context.browser_session_authenticated_at,
     )
     response.set_cookie(
         BROWSER_SESSION_COOKIE,

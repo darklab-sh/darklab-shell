@@ -155,8 +155,10 @@ def init_process_runtime(cfg: Mapping[str, Any] | None = None) -> object | None:
 
 def init_database() -> None:
     from core.database import db_init  # noqa: PLC0415
+    from services.auth.oidc import validate_startup_state  # noqa: PLC0415
 
     db_init()
+    validate_startup_state(resolve_effective_cfg())
 
 
 def _acquire_active_run_startup_cleanup_lock() -> tuple[bool, str]:

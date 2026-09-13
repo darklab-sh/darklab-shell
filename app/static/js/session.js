@@ -61,7 +61,7 @@ function _generateUUID() {
 
 function _restrictedBrowserSessionEnabled() {
   const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
-  return config?.access_profile === 'token_required';
+  return ['token_required', 'oidc_required', 'mixed'].includes(config?.access_profile);
 }
 
 function _cookieValue(name) {

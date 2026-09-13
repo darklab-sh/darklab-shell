@@ -124,6 +124,14 @@ services:
       RESTRICTED_PUBLIC_SHARES_ENABLED: ${RESTRICTED_PUBLIC_SHARES_ENABLED:-false}
       BROWSER_SESSION_IDLE_MINUTES: ${BROWSER_SESSION_IDLE_MINUTES:-30}
       BROWSER_SESSION_ABSOLUTE_HOURS: ${BROWSER_SESSION_ABSOLUTE_HOURS:-12}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_PROVISIONING: ${OIDC_PROVISIONING:-}
+      OIDC_ALLOWED_SUBJECTS: ${OIDC_ALLOWED_SUBJECTS:-}
+      OIDC_CA_BUNDLE: ${OIDC_CA_BUNDLE:-}
       # Empty environment values are ignored by the app config loader. This
       # keeps database and AI fine-tuning in conf/config.local.yaml effective
       # unless an operator deliberately exports the matching variable.

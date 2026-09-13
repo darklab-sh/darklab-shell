@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { showToast as importedShowToast } from '../../core/utils.js';
+import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
 import {
   activateAccessCredential as importedActivateAccessCredential,
   apiFetch as importedApiFetch,
@@ -35,6 +36,11 @@ const elements = {
   redemptionApply: document.getElementById('options-access-redemption-apply'),
   redemptionCancel: document.getElementById('options-access-redemption-cancel'),
   reveal: document.getElementById('options-access-reveal'),
+  oidcSection: document.getElementById('options-access-oidc-section'),
+  oidcStatus: document.getElementById('options-access-oidc-status'),
+  oidcLink: document.getElementById('options-access-oidc-link'),
+  oidcUnlink: document.getElementById('options-access-oidc-unlink'),
+  oidcReauth: document.getElementById('options-access-oidc-reauth'),
 };
 
 let credentials = [];
@@ -43,6 +49,7 @@ let pendingAction = '';
 let editorReturnFocus = null;
 let redemptionReturnFocus = null;
 let currentCredentialId = '';
+let currentAuthenticationType = '';
 
 function _markAccessPanelReady() {
   [
@@ -121,6 +128,7 @@ function _setIdentityLayout(authenticated) {
 function _renderAnonymous({ invalid = false } = {}) {
   credentials = [];
   _setIdentityLayout(false);
+  if (elements.oidcSection) elements.oidcSection.hidden = true;
   if (elements.credentials) elements.credentials.replaceChildren();
   if (elements.keep) elements.keep.hidden = invalid;
   if (elements.use) elements.use.hidden = invalid;
@@ -138,9 +146,9 @@ function _renderAuthenticated() {
   const current = credentials.find(item => item.id === currentId);
   if (elements.discardInvalid) elements.discardInvalid.hidden = true;
   _setIdentityLayout(true);
-  if (elements.summary) elements.summary.textContent = 'Kept workspace';
+  if (elements.summary) elements.summary.textContent = 'Authenticated workspace';
   if (elements.summaryDetail) {
-    const label = current?.label || current?.public_prefix || 'Current credential';
+    const label = currentAuthenticationType === 'oidc' ? 'Your identity provider' : (current?.label || current?.public_prefix || 'Current credential');
     elements.summaryDetail.textContent = `${label} is providing access on this browser.`;
   }
   if (elements.credentials) {
@@ -168,10 +176,12 @@ async function refreshAccessPanel({ force = false } = {}) {
   try {
     const principalPayload = await _request('/auth/principal');
     currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
+    currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
     const credentialsPayload = await _request('/auth/credentials');
     if (sequence !== refreshSequence) return null;
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
+    await _refreshOIDC(sequence);
     if (force) _setMessage('Access is up to date.', 'success');
     return { identity, credentials };
   } catch (error) {
@@ -179,6 +189,63 @@ async function refreshAccessPanel({ force = false } = {}) {
     _renderAnonymous({ invalid: true });
     _setMessage(error.message || 'Could not load access.', 'error');
     return null;
+  }
+}
+
+async function _refreshOIDC(sequence) {
+  if (!elements.oidcSection) return;
+  const profile = importedGetAppConfig?.()?.access_profile;
+  if (!['token_required', 'oidc_required', 'mixed'].includes(profile)) {
+    elements.oidcSection.hidden = true;
+    return;
+  }
+  try {
+    const data = await _request('/auth/oidc/identity');
+    if (sequence !== refreshSequence) return;
+    elements.oidcSection.hidden = false;
+    if (elements.oidcStatus) {
+      elements.oidcStatus.textContent = data.linked
+        ? 'This workspace can be opened through your identity provider.'
+        : 'This workspace is not linked to an identity provider yet.';
+    }
+    const credentialSession = currentAuthenticationType === 'portable';
+    if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !credentialSession;
+    if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !credentialSession;
+    if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || credentialSession;
+  } catch (error) {
+    if (sequence === refreshSequence) elements.oidcSection.hidden = true;
+  }
+}
+
+async function _linkOIDC() {
+  if (elements.oidcLink) elements.oidcLink.disabled = true;
+  try {
+    const data = await _request('/auth/oidc/link', { method: 'POST' });
+    const destination = new URL(data.authorization_url, window.location.href);
+    if (destination.protocol !== 'https:') throw new Error('The provider URL is invalid.');
+    window.location.assign(destination.href);
+  } catch (error) {
+    _setMessage(error.message || 'Could not start provider linking.', 'error');
+    if (elements.oidcLink) elements.oidcLink.disabled = false;
+  }
+}
+
+async function _unlinkOIDC() {
+  const choice = await importedShowConfirm({
+    body: 'Unlink this identity provider? Every browser session for this workspace will be signed out. Your active access credential remains available.',
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'unlink', label: 'Unlink provider', role: 'danger' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'unlink') return;
+  try {
+    await _request('/auth/oidc/unlink', { method: 'POST' });
+    window.location.assign('/auth/sign-in');
+  } catch (error) {
+    _setMessage(error.message || 'Could not unlink the identity provider.', 'error');
   }
 }
 
@@ -524,6 +591,8 @@ elements.add?.addEventListener('click', () => _showEditor('create', null, elemen
 elements.remove?.addEventListener('click', () => void _removeLocalAccess());
 elements.refresh?.addEventListener('click', () => void refreshAccessPanel({ force: true }));
 elements.redemptionApply?.addEventListener('click', () => void _redeemCredential());
+elements.oidcLink?.addEventListener('click', () => void _linkOIDC());
+elements.oidcUnlink?.addEventListener('click', () => void _unlinkOIDC());
 elements.redemptionCancel?.addEventListener('click', () => _closeRedemption());
 elements.redemptionInput?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

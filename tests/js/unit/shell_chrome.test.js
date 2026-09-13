@@ -100,6 +100,7 @@ function expectProjectPressablesBound(selectors) {
 function loadShellChrome({
   fetch,
   apiFetch,
+  browserIdentity = { kind: 'anonymous', credentialId: '' },
   preferences = {},
   openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
@@ -307,6 +308,7 @@ function loadShellChrome({
       removeItem: vi.fn(),
     },
     __darklabExtractPreferGlobalThis: true,
+    getBrowserIdentitySnapshot: () => browserIdentity,
     tabs: [],
     recentPreviewHistory: [],
     apiFetch,
@@ -858,6 +860,19 @@ describe('shell chrome rail sections', () => {
 })
 
 describe('shell chrome HUD status', () => {
+  it('labels a provider-backed browser session without exposing an identity claim', async () => {
+    const apiFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ authentication: { credential_type: 'oidc', credential_id: '' } }),
+    })
+    loadShellChrome({ apiFetch, browserIdentity: { kind: 'browser_session', credentialId: '' } })
+    await tick()
+
+    const session = document.getElementById('hud-session')
+    expect(session.textContent).toBe('OIDC')
+    expect(session.title).toBe('Identity provider session')
+  })
+
   it('marks Redis offline when the status poll cannot reach the server', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce({

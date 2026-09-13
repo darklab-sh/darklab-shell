@@ -1637,6 +1637,17 @@
             <div id="options-access-credentials" class="options-access-credentials" aria-live="polite"></div>
           </div>
         </div>
+        <div id="options-access-oidc-section" class="faq-item" hidden>
+          <div class="faq-q">Identity provider</div>
+          <div class="faq-a form-fieldset options-access-panel">
+            <div id="options-access-oidc-status" class="options-access-description" role="status"></div>
+            <div class="options-access-actions">
+              <button id="options-access-oidc-link" class="btn btn-secondary btn-compact" type="button" hidden>Link provider sign-in</button>
+              <button id="options-access-oidc-unlink" class="btn btn-secondary btn-warning btn-compact" type="button" hidden>Unlink provider sign-in</button>
+              <a id="options-access-oidc-reauth" class="btn btn-secondary btn-compact" href="/auth/sign-in?force=credential" hidden>Sign in again with a credential</a>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="options-panel-secrets" class="options-tab-panel" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
         <div class="faq-item">

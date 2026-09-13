@@ -286,6 +286,8 @@ check. For one area, pass the file directly to the approved helper:
 bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
 ```
 
+OIDC changes use the deterministic local provider in `tests/py/test_oidc_sign_in.py`; CI doesn't need Keycloak or internet access for authorization-code, signed-token, linking, and failure cases. The live browser journey in `tests/js/e2e/oidc-access.spec.js` uses a separate HTTPS test provider and runs with `bash scripts/run_playwright.sh --asset-bundle-mode bundle tests/js/e2e/oidc-access.spec.js`. The real Postgres identity/session check lives in `tests/py/test_postgres_backend.py` and runs through `bash scripts/run_postgres_tests.sh -- ...`.
+
 Ordinary isolated SQLite tests that only need an empty current schema should use
 `copy_pristine_sqlite_database()` from `tests/py/conftest.py`. Tests for
 migrations, schema reconciliation, startup, cutover, failure, or rollback must

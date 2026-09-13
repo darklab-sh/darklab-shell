@@ -15,6 +15,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Options → Access now calls signed-in workspaces “Authenticated workspace.”** The status is no longer confused with the **Keep this workspace** action for anonymous users.
+- **Private deployments can sign in through OpenID Connect, a portable credential, or both.**
+  - **Before:** Only the credential sign-in gate was active; the provider-only and combined access profiles were reserved.
+  - **After:** `oidc_required` and `mixed` use an HTTPS OIDC provider with authorization code, PKCE, one-time state and nonce, signed ID-token validation, and server-held browser sessions. Operators choose disabled, exact-subject allowlist, or automatic workspace provisioning. Existing credential users can link a provider after proving both identities, unlink only with a usable recovery credential, and revoke every browser session after a recent sign-in. Provider identities retain only issuer and subject; Team roles remain local and provider outages fail closed for new sign-ins.
+  - **Tests:** A deterministic local provider covers sign-in, bad claims and signature, state replay, callback origin, outage, provisioning, linking, unlinking, and session rotation. SQLite and isolated Postgres migration checks cover provider identity and browser-session storage. Playwright exercises provider success, refusal, linking, unlinking, and protected cookies against a local HTTPS provider in source and bundle modes; the existing restricted-profile checks keep open and credential-only behavior intact.
+  - **Maintenance:** Explicit callback arguments, CA and signing-key types, and asserted test cookies keep OIDC editor checks clean. OIDC imports certifi's public CA-bundle helper directly, with Requests and certifi declared as dependencies. The reviewed ownership-query inventory includes the new provider identity and browser-session queries.
+  - **Sign-in layout:** The identity provider action now has a clear gap below the sign-in details.
 - **Private deployments can now require an access credential before showing the workspace.**
   - **Before:** The open profile was the only active browser model. Portable credentials could keep a workspace across devices, but the application itself still loaded before a user proved access.
   - **After:** `ACCESS_PROFILE=token_required` puts a small server-rendered sign-in page in front of every workspace route, disables anonymous use and public credential issuance, and exchanges an operator-issued portable credential for a shorter-lived browser session. The reusable credential is never exposed to normal application JavaScript after redemption. Open mode keeps its existing anonymous-first behavior.
@@ -92,6 +99,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Keeping a workspace no longer fails when two browsers create their first credentials at once.**
+  - **Root cause:** Concurrent first-time SQLite upgrades could both try to create the verifier key, returning a server error. Browser-test retries then used up the shared anonymous-issuance limit and surfaced as a misleading 429.
+  - **Fix:** SQLite reserves the write transaction before checking the verifier key. The browser-test helper makes one request and reports its original failure instead of retrying it into a rate limit.
+  - **Tests:** A concurrent first-upgrade regression checks that both workspaces and credentials are created under one verifier key. Team-mode and Assessment browser flows pass together in source and bundle modes.
+- **OIDC browser checks no longer stall after provider linking.** The test waits for the provider redirect to load the application before checking the linked workspace, avoiding an unnecessary second navigation that could time out on CI.
 - **Restricted sign-in now shows the right access state in the HUD.** A valid browser session displays the same masked `crd_…••••` hint as open mode, and the mobile menu shows **Kept**, instead of incorrectly calling the workspace anonymous. The hint comes from safe authenticated metadata; the portable credential stays out of normal browser JavaScript.
 - **Options → Access now shows only the actions that fit the current workspace.** Anonymous browsers can keep or open a workspace, an invalid saved credential shows only its removal action, and kept workspaces show credential-management actions without the anonymous controls. The Credentials section, credential cards, and existing-credential form now have consistent spacing, so headings, card contents, and form buttons don't crowd nearby controls or borders. Browser tests cover these states and spacing in source and bundled assets.
 - **Markdown linting no longer pulls in a vulnerable TOML parser.** The existing markdownlint toolchain now resolves patched `smol-toml` 1.8.0 through a scoped dependency override.

@@ -80,12 +80,12 @@ class _BootstrapBundle:
         return {"principal": {"id": "prn_test"}}
 
 
-def test_access_profile_config_defaults_and_reserves_future_profiles():
+def test_access_profile_config_requires_provider_for_oidc_profiles():
     assert build_test_config()["access_profile"] == "open"
     assert build_test_config({"access_profile": "token_required"})["access_profile"] == "token_required"
-    for reserved in ("oidc_required", "mixed"):
-        with pytest.raises(RuntimeError, match="reserved"):
-            build_test_config({"access_profile": reserved})
+    for oidc_profile in ("oidc_required", "mixed"):
+        with pytest.raises(RuntimeError, match="OIDC provider configuration"):
+            build_test_config({"access_profile": oidc_profile})
     with pytest.raises(RuntimeError, match="access_profile"):
         build_test_config({"access_profile": "unknown"})
 
@@ -106,6 +106,8 @@ def test_restricted_public_route_allowlist_is_an_explicit_complete_inventory():
     assert actual == {
         ("auth.redeem", "/auth/credentials/redeem", ("POST",)),
         ("auth.sign_in", "/auth/sign-in", ("GET", "POST")),
+        ("auth.oidc_start", "/auth/oidc/start", ("GET",)),
+        ("auth.oidc_callback", "/auth/oidc/callback", ("GET",)),
         ("assets.favicon", "/favicon.ico", ("GET",)),
         ("assets.health", "/health", ("GET",)),
         ("assets.metrics", "/metrics", ("GET",)),

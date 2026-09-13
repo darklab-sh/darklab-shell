@@ -51,6 +51,10 @@ def create_principal(
     connect: Callable[[], Any] | None = None,
 ) -> PrincipalBundle:
     def operation(conn: Any) -> PrincipalBundle:
+        if storage._database_backend(conn).value == "sqlite":  # noqa: SLF001
+            # Reserve the write transaction before reading the verifier root.
+            # Two first-time upgrades must not both decide it needs creation.
+            conn.execute("BEGIN IMMEDIATE")
         bundle = storage.create_principal_with_credential(
             anonymous_id=anonymous_id,
             credential_label=credential_label,
@@ -176,7 +180,7 @@ def issue(
             label=label,
             expires_at=expires_at,
             scopes=scopes,
-            created_by_credential_id=context.credential_id,
+            created_by_credential_id=context.credential_id or None,
             conn=conn,
         )
         record_event(
@@ -232,6 +236,9 @@ def operator_recover(
     """Revoke existing credentials and return one replacement exactly once."""
     def operation(conn: Any) -> IssuedCredential:
         from .background_authorization import pause_durable_work_for_credential  # noqa: PLC0415
+        from .browser_sessions import revoke_principal_browser_sessions  # noqa: PLC0415
+
+        revoke_principal_browser_sessions(principal_id, reason="operator recovery", conn=conn)
 
         current = storage.list_credentials(principal_id, conn=conn)
         for credential in current:

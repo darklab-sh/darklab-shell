@@ -9,6 +9,8 @@ import base64
 import hmac
 import logging
 import secrets
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import core.process as process_state
 from config import get_theme_entry
@@ -29,7 +31,7 @@ from flask import (
 )
 from services.audit.context import request_audit_fields
 from services.auth import lifecycle
-from services.auth.access_profile import active_config, is_restricted, safe_next_path
+from services.auth.access_profile import active_config, active_profile, is_restricted, safe_next_path
 from services.auth.browser_sessions import (
     BROWSER_CSRF_COOKIE,
     BROWSER_SESSION_COOKIE,
@@ -44,6 +46,7 @@ from services.auth.contracts import (
     PrincipalDisabled,
 )
 from services.auth.rate_limit import check_anonymous_issuance, check_failed_redemption
+from services.auth import oidc
 from services.auth.resolver import (
     AnonymousContext,
     AuthenticatedContext,
@@ -64,6 +67,14 @@ SECRET_BEARING_ENDPOINTS = frozenset({
 })
 _SIGN_IN_NONCE_COOKIE = "darklab_sign_in_nonce"
 _SIGN_IN_NONCE_MAX_AGE = 600
+
+
+def _oidc_sign_in_enabled() -> bool:
+    return active_profile() in {"oidc_required", "mixed"} and oidc.configured(active_config())
+
+
+def _credential_sign_in_enabled() -> bool:
+    return active_profile() in {"token_required", "mixed"}
 
 
 def _payload() -> dict:
@@ -119,6 +130,7 @@ def _issue_browser_session(
     return create_browser_session(
         principal_id=context.principal_id,
         credential_id=context.credential_id,
+        oidc_identity_id=context.oidc_identity_id,
         absolute_seconds=_session_cookie_seconds(),
         replace_session_id=replace_session_id or context.browser_session_id,
     )
@@ -138,8 +150,10 @@ def sign_in():
     if not is_restricted():
         return redirect("/")
     next_path = safe_next_path(request.values.get("next"))
-    error = ""
+    error = "Provider sign-in couldn't be completed. Please try again." if request.args.get("oidc_error") else ""
     if request.method == "POST":
+        if not _credential_sign_in_enabled():
+            return current_app.response_class(status=404)
         if not _valid_sign_in_nonce(str(request.form.get("sign_in_nonce") or "")):
             error = "The sign-in page expired. Reload it and try again."
         else:
@@ -195,6 +209,8 @@ def sign_in():
         next_path=next_path,
         sign_in_nonce=nonce,
         error=error,
+        credential_sign_in_enabled=_credential_sign_in_enabled(),
+        oidc_sign_in_enabled=_oidc_sign_in_enabled(),
     )))
     response.set_cookie(
         _SIGN_IN_NONCE_COOKIE,
@@ -205,6 +221,153 @@ def sign_in():
         samesite="Strict",
         path="/auth/sign-in",
     )
+    return response
+
+
+def _set_oidc_state_cookie(response, state: str) -> None:
+    response.set_cookie(
+        oidc.OIDC_STATE_COOKIE, state, max_age=oidc.FLOW_SECONDS,
+        secure=True, httponly=True, samesite="Lax", path="/auth/oidc/callback",
+    )
+
+
+def _clear_oidc_state_cookie(response) -> None:
+    response.delete_cookie(
+        oidc.OIDC_STATE_COOKIE, secure=True, httponly=True,
+        samesite="Lax", path="/auth/oidc/callback",
+    )
+
+
+def _oidc_error_response(exc: BaseException):
+    log.warning("OIDC_AUTH_FAILED", extra={"reason": type(exc).__name__, "stage": request.endpoint or ""})
+    response = _no_store(redirect("/auth/sign-in?oidc_error=1"))
+    _clear_oidc_state_cookie(response)
+    return response
+
+
+@auth_bp.get("/oidc/start")
+def oidc_start():
+    if not _oidc_sign_in_enabled():
+        return current_app.response_class(status=404)
+    try:
+        request_context = get_authentication_result().context
+        url, state = oidc.start_flow(
+            active_config(), purpose="sign_in",
+            browser_session_id=(
+                request_context.browser_session_id
+                if isinstance(request_context, AuthenticatedContext) else ""
+            ),
+            next_path=safe_next_path(request.args.get("next")),
+        )
+    except IdentityStorageError as exc:
+        return _oidc_error_response(exc)
+    response = _no_store(redirect(url))
+    _set_oidc_state_cookie(response, state)
+    return response
+
+
+@auth_bp.get("/oidc/callback")
+def oidc_callback():
+    if not _oidc_sign_in_enabled() and not (is_restricted() and oidc.configured(active_config())):
+        return current_app.response_class(status=404)
+    expected = urlsplit(str(active_config().get("oidc_redirect_uri") or ""))
+    if request.host.lower() != expected.netloc.lower() or request.path != expected.path:
+        return _oidc_error_response(oidc.OIDCError("The callback origin did not match the configured redirect."))
+    try:
+        flow = oidc.consume_flow(
+            str(request.args.get("state") or ""),
+            str(request.cookies.get(oidc.OIDC_STATE_COOKIE) or ""),
+        )
+        if request.args.get("error"):
+            raise oidc.OIDCError("The provider declined the sign-in request.")
+        issuer, subject = oidc.exchange_code(active_config(), flow, str(request.args.get("code") or ""))
+        identity = oidc.complete_identity(active_config(), flow, issuer, subject)
+        credential_id = ""
+        oidc_identity_id = identity.id
+        authenticated_at: str | None = None
+        if flow.purpose == "link":
+            credential_id, authenticated_at = oidc.linked_credential_source(flow)
+            oidc_identity_id = ""
+        issued = create_browser_session(
+            principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
+            replace_session_id=flow.browser_session_id, credential_id=credential_id,
+            oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
+        )
+        if flow.purpose == "sign_in" and flow.browser_session_id:
+            revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
+    except IdentityStorageError as exc:
+        return _oidc_error_response(exc)
+    log.info("OIDC_BROWSER_SESSION_CREATED", extra={"principal_id": identity.principal_id, "purpose": flow.purpose})
+    response = _no_store(redirect(safe_next_path(flow.next_path)))
+    _set_browser_session_cookies(response, issued)
+    _clear_oidc_state_cookie(response)
+    return response
+
+
+def _recent_credential_session(context: AuthenticatedContext) -> bool:
+    return context.credential_type == "portable" and _recent_browser_session(context)
+
+
+def _recent_browser_session(context: AuthenticatedContext) -> bool:
+    if context.authentication_method != "browser_cookie":
+        return False
+    authenticated = context.browser_session_authenticated_at
+    if not authenticated:
+        return False
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(authenticated)).total_seconds()
+    return 0 <= age <= oidc.RECENT_AUTH_SECONDS
+
+
+@auth_bp.post("/oidc/link")
+def oidc_link():
+    if not is_restricted() or not oidc.configured(active_config()):
+        return current_app.response_class(status=404)
+    context = require_authenticated_context()
+    if not _recent_credential_session(context):
+        return jsonify({
+            "error": "recent_credential_required",
+            "message": "Sign in again with your credential before linking.",
+        }), 403
+    try:
+        url, state = oidc.start_flow(
+            active_config(), purpose="link", principal_id=context.principal_id,
+            browser_session_id=context.browser_session_id,
+        )
+    except oidc.OIDCError as exc:
+        log.warning("OIDC_LINK_START_FAILED", extra={"reason": type(exc).__name__})
+        return jsonify({"error": "oidc_unavailable", "message": "The identity provider is unavailable."}), 503
+    response = _no_store(jsonify({"authorization_url": url}))
+    _set_oidc_state_cookie(response, state)
+    return response
+
+
+@auth_bp.get("/oidc/identity")
+def oidc_identity():
+    if not is_restricted() or not oidc.configured(active_config()):
+        return current_app.response_class(status=404)
+    context = require_authenticated_context()
+    linked = oidc.find_identity(context.principal_id, str(active_config()["oidc_issuer"]))
+    return _no_store(jsonify({"linked": linked is not None, "issuer": active_config()["oidc_issuer"]}))
+
+
+@auth_bp.post("/oidc/unlink")
+def oidc_unlink():
+    if not is_restricted() or not oidc.configured(active_config()):
+        return current_app.response_class(status=404)
+    context = require_authenticated_context()
+    if not _recent_credential_session(context):
+        return jsonify({
+            "error": "recent_credential_required",
+            "message": "Sign in again with your credential before unlinking.",
+        }), 403
+    try:
+        changed = oidc.unlink_identity(context.principal_id, str(active_config()["oidc_issuer"]))
+    except oidc.OIDCError as exc:
+        return jsonify({"error": "oidc_unlink_blocked", "message": str(exc)}), 409
+    log.info("OIDC_IDENTITY_UNLINKED", extra={"principal_id": context.principal_id, "changed": changed})
+    response = _no_store(jsonify({"unlinked": changed, "sessions_revoked": changed}))
+    if changed:
+        _clear_browser_session_cookies(response)
     return response
 
 
@@ -275,6 +438,8 @@ def create_principal():
 
 @auth_bp.post("/credentials/redeem")
 def redeem():
+    if active_profile() == "oidc_required":
+        return jsonify({"error": "credential_sign_in_disabled", "message": "Use provider sign-in."}), 403
     secret = str(_payload().get("secret") or "")
     result = redeem_portable_credential(secret)
     if result.failed or not isinstance(result.context, AuthenticatedContext):
@@ -378,6 +543,11 @@ def logout():
 @auth_bp.post("/sessions/revoke-all")
 def revoke_all_sessions():
     context = require_authenticated_context()
+    if active_profile() in {"oidc_required", "mixed"} and not _recent_browser_session(context):
+        return jsonify({
+            "error": "recent_authentication_required",
+            "message": "Sign in again before revoking every browser session.",
+        }), 403
     count = revoke_principal_browser_sessions(context.principal_id)
     log.info(
         "BROWSER_SESSIONS_REVOKED",

@@ -16,8 +16,12 @@
     <section class="restricted-sign-in-card">
       <div class="restricted-sign-in-kicker">RESTRICTED ACCESS</div>
       <h1 id="restricted-sign-in-title">Sign in to {{ app_name }}</h1>
-      <p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>
+      {% if credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
       {% if error %}<div class="restricted-sign-in-error" role="alert">{{ error }}</div>{% endif %}
+      {% if oidc_sign_in_enabled %}
+      <a class="btn btn-primary restricted-sign-in-provider" href="{{ url_for('auth.oidc_start', next=next_path) }}">Continue with identity provider</a>
+      {% endif %}
+      {% if credential_sign_in_enabled %}
       <form method="post" action="{{ url_for('auth.sign_in') }}" autocomplete="off">
         <input type="hidden" name="next" value="{{ next_path }}">
         <input type="hidden" name="sign_in_nonce" value="{{ sign_in_nonce }}">
@@ -36,6 +40,7 @@
         <button type="submit" class="btn btn-primary">Sign in</button>
       </form>
       <p class="restricted-sign-in-help">If you don't have a credential, contact the shell operator.</p>
+      {% endif %}
     </section>
   </main>
 </body>
