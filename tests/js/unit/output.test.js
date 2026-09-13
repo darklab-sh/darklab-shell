@@ -925,6 +925,36 @@ describe('appendLine', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: oldHeight })
   })
 
+  it('observes token removal only while the menu is open and follows output scrolling', () => {
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe')
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+    const menuObservations = () => observe.mock.calls.filter(([, options]) => !options.attributes)
+    const { appendLine, _showOutputEntityMenu, _closeOutputEntityMenu } = loadOutputFns()
+    try {
+      appendLine('ip.darklab.sh', '', 'tab-1', {
+        entities: [{ type: 'domain', value: 'ip.darklab.sh', canonical_value: 'ip.darklab.sh', start: 0, end: 13 }],
+      })
+      expect(menuObservations()).toHaveLength(0)
+      const token = document.querySelector('.atlas-entity-token')
+      token.getBoundingClientRect = () => ({ left: 24, top: 100, bottom: 120 })
+      _showOutputEntityMenu(token)
+      expect(menuObservations()).toHaveLength(1)
+      const menu = document.querySelector('.atlas-output-entity-menu')
+      const focused = document.activeElement
+      expect(menu.style.top).toBe('126px')
+      token.getBoundingClientRect = () => ({ left: 24, top: 60, bottom: 80 })
+      document.getElementById('out').dispatchEvent(new Event('scroll'))
+      expect(document.querySelector('.atlas-output-entity-menu')).toBe(menu)
+      expect(menu.style.top).toBe('86px')
+      expect(document.activeElement).toBe(focused)
+      _closeOutputEntityMenu()
+      expect(disconnect).toHaveBeenCalledOnce()
+    } finally {
+      observe.mockRestore()
+      disconnect.mockRestore()
+    }
+  })
+
   it('closes the entity action menu for composer input, tab changes, page scrolling, and detached output', async () => {
     const { appendLine, _showOutputEntityMenu } = loadOutputFns()
     appendLine('scan ip.darklab.sh', '', 'tab-1', {
