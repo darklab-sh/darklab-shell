@@ -8,6 +8,10 @@ import { test, expect } from '@playwright/test'
 
 import { ensurePromptReady, keepBrowserWorkspace } from './helpers.js'
 
+// Each case signs in, checks every protected surface, writes personal and Team
+// data, and verifies recovery across navigations on the isolated CI servers.
+test.setTimeout(120_000)
+
 const protectedReads = [
   '/config', '/projects', '/atlas', '/history', '/workspace/files',
   '/watchers', '/schedules', '/workflows', '/session/secrets',

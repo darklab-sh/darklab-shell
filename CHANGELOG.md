@@ -103,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **The browser access-profile qualification has enough time to complete its full journey on CI.** Its per-test budget covers sign-in, protected reads, personal and Team writes, and session recovery; individual assertions keep their existing deadlines.
 - **Cross-site requests can't clear an open browser's saved workspace access.** The unused storage-clearing HTTP endpoint is removed. The existing Access-panel action still clears local access when the user chooses it.
 - **Sign-in return links stay on the same deployment.** Credential and provider sign-in reject external destinations, backslashes, control characters, and encoded path separators that can change how a browser interprets the redirect. Normal local paths, queries, and fragments remain supported.
 - **Revoked access now disconnects open run streams and stops interactive PTYs.**
