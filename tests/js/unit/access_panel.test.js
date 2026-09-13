@@ -311,7 +311,7 @@ describe('Access panel', () => {
       .mockResolvedValueOnce('revoke')
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
       if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID } })
-      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
+      if (url.endsWith('/rotate') && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
       if (url === '/auth/credentials') return response({ credentials: [credential()] })
       if (url.endsWith('/durable-work')) return response({ durable_work: { affected: [] } })
       if (url.endsWith('/revoke')) return response({ durable_work: { paused_count: 0 } })
@@ -330,6 +330,9 @@ describe('Access panel', () => {
 
     await vi.waitFor(() => expect(session.activateAccessCredential).toHaveBeenCalledWith(REPLACEMENT_SECRET))
     const urls = globalThis.__accessPanelTest.apiFetch.mock.calls.map(([url]) => url)
+    expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith(`/auth/credentials/${CURRENT_ID}/rotate`, expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ defer_revocation: true }),
+    }))
     expect(urls.indexOf('/auth/credentials')).toBeLessThan(urls.indexOf(`/auth/credentials/${CURRENT_ID}/revoke`))
   })
 
@@ -342,7 +345,7 @@ describe('Access panel', () => {
     globalThis.__accessPanelTest.showConfirm.mockResolvedValueOnce('revoke')
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
       if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
-      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
+      if (url.endsWith('/rotate') && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
       if (url === '/auth/credentials') return response({ credentials: [credential()] })
       if (url.endsWith('/durable-work')) return response({ durable_work: { affected: [] } })
       if (url.endsWith('/revoke')) return response({ durable_work: {} })
@@ -378,6 +381,46 @@ describe('Access panel', () => {
     expect(session.redirectToSignIn).not.toHaveBeenCalled()
     document.getElementById('options-access-remove-btn').click()
     await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+  })
+
+  it('creates an API token with chosen scopes and lifetime through Add credential', async () => {
+    const scopes = ['identity:read', 'history:read', 'runs:execute', 'projects:read']
+    const token = `dlp_v1_pat_${'e'.repeat(32)}_${'f'.repeat(43)}`
+    globalThis.__accessPanelTest.identity = {
+      kind: 'credential', anonymousId: '', credentialId: CURRENT_ID, validFormat: true,
+    }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID } })
+      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: token }, 201)
+      if (url === '/auth/credentials') return response({ credentials: [credential()], pat_policy: {
+        scopes, default_scopes: scopes.slice(0, 3), default_expiry_days: 90, min_expiry_days: 1, max_expiry_days: 365,
+      } })
+      return response({})
+    })
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.getElementById('options-access-add-btn').click()
+    const editor = document.getElementById('options-access-editor')
+    const type = editor.querySelector('select')
+    type.value = 'pat'
+    type.dispatchEvent(new Event('change'))
+    expect(editor.querySelector('input[type="datetime-local"]').closest('label').hidden).toBe(true)
+    expect([...editor.querySelectorAll('[name="pat_scope"]:checked')].map(node => node.value)).toEqual(scopes.slice(0, 3))
+    editor.querySelector('input[type="text"]').value = 'CLI work'
+    const days = editor.querySelector('input[type="number"]')
+    days.value = '366'
+    editor.querySelector('.btn-primary').click()
+    await vi.waitFor(() => expect(editor.textContent).toContain('between 1 and 365'))
+    expect(globalThis.__accessPanelTest.apiFetch.mock.calls.some(([url, opts]) => url === '/auth/credentials' && opts?.method === 'POST')).toBe(false)
+    days.value = '1'
+    editor.querySelector('[value="projects:read"]').checked = true
+    editor.querySelector('.btn-primary').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-reveal').hidden).toBe(false))
+    const [, options] = globalThis.__accessPanelTest.apiFetch.mock.calls.find(([url, opts]) => url === '/auth/credentials' && opts?.method === 'POST')
+    expect(JSON.parse(options.body)).toEqual({ type: 'pat', label: 'CLI work', expires_in_days: 1, scopes })
+    expect(session.activateAccessCredential).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-reveal').textContent).not.toContain(token)
   })
 
   it('shows safe provider-link actions only for a credential-backed browser session', async () => {

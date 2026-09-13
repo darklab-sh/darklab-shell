@@ -629,7 +629,7 @@ These routes establish and manage pseudonymous principal credentials. Authentica
 | `POST` | `/auth/credentials` | Creates a portable credential or scoped, expiring PAT and returns its secret once; PAT callers cannot issue credentials. |
 | `PATCH` | `/auth/credentials/<credential_id>` | Changes one credential label or expiry through a portable credential. |
 | `GET` | `/auth/credentials/<credential_id>/durable-work` | Lists future schedules, watchers, workflows, notification channels, and digest settings attributed to one credential. |
-| `POST` | `/auth/credentials/<credential_id>/rotate` | Issues and returns a replacement before revoking the old credential in the same transaction. |
+| `POST` | `/auth/credentials/<credential_id>/rotate` | Issues a replacement with the existing label, scopes, and expiry. By default it revokes the old credential atomically; `defer_revocation: true` prepares the replacement for the browser save-and-revoke flow. |
 | `POST` | `/auth/credentials/<credential_id>/revoke` | Revokes one credential while protecting the final usable portable credential from accidental lockout; a PAT may revoke only itself. |
 
 ### Session Routes
@@ -2405,6 +2405,8 @@ Active process tracking (`run_id →  → pid`) was previously a third table (`a
 ---
 
 ### Authentication And Session Identity
+
+Credential creation exposes the canonical PAT scope and lifetime policy through `GET /auth/credentials`. `POST /auth/credentials` accepts either an absolute `expires_at` or PAT-only `expires_in_days`, validated and calculated against the same server timestamp. `credential_creation.js` renders the browser/API type choice, permission checkboxes, and lifetime fields. Browser rotation calls the same lifecycle/storage implementation as atomic rotation, with deferred revocation recorded as credential creation; the old credential remains valid until the explicit revoke action. Omitted rotation metadata preserves the existing label, scopes, and expiry, including a PAT with less than one day left.
 
 In restricted profiles, `apiFetch` recognizes terminal browser-session authentication errors and sends the browser to sign-in once. The return destination carries only the local pathname, keeping query strings and fragments out of the sign-in URL. Access actions that revoke the current parent credential navigate after the replacement-save confirmation; logout failure remains visible and retryable.
 

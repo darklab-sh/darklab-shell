@@ -130,7 +130,7 @@ The shipped file is the best starting point for the current schema. Every custom
 
 ## Headless CLI Configuration
 
-The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side settings. These do not change server behavior.
+The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side settings. These do not change server behavior. Create its token in **Options → Access → Add credential → API token (PAT)** and save the one-time value; [API authentication](docs/api.md#auth) explains permissions, expiry, and rotation.
 
 Resolution order is:
 

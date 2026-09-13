@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.a3caf8427742.css",
-      "hash": "a3caf84277424b881875725481c4460ed21373ad2f0b92f6cb20dc6445bb8b83",
+      "path": "/static/build/app.26b28ed7eba0.css",
+      "hash": "26b28ed7eba0b3c1185b7e38c251429d5c995016b52e3441eff70655e1e7800c",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -21,7 +21,7 @@
       "source_hashes": {
         "/static/css/core/fonts.css": "914c2b233046e7c8db325a5b6ba796de9bf8ca106b0b5c120c1e4738ddbe4020",
         "/static/css/core/base.css": "905154591bdd0a119b99e830dacc4ed405a53ff5630677e53b31c9b01ce4fb7b",
-        "/static/css/shell.css": "ec42ff4e2c434beb892b04cf17f3fdbaf2c828c790ac1128adcfaa7c28fa6198",
+        "/static/css/shell.css": "b2cf5bc080f2e044917a5d9c4ce5503d15d55b3fc12da9965046a1c40b543c5a",
         "/static/css/primitives/components.css": "ca337727884ba26edc956d153ff26317fca1f064ef67a53a33b0ebdae5beca29",
         "/static/css/welcome.css": "a903960078807dddbd3b361e1ae546fde87411f0b29e035b1659dffe346f6ae3",
         "/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
@@ -394,8 +394,8 @@
       "hash": "c5bac9ec1de8739c1272771d9ad5333bfe7a2a534f1b0b697f6c25227390bf42"
     },
     "/static/js/features/preferences/access_panel.js": {
-      "path": "/static/build/static-access-panel.02b81736c1c7.js",
-      "hash": "05b0ae000108d0780610a81b18aecb6d3957443936b69ffcbfc523e1836ddcac"
+      "path": "/static/build/static-access-panel.62aecf151bd4.js",
+      "hash": "9719870205cf42cb5e2d97878dc62a0c01c2e2b8da5aae1cb6348dfe3451c147"
     },
     "/static/js/features/preferences/notification_channels.js": {
       "path": "/static/build/static-notification-channels.1a944fe92e03.js",
@@ -741,13 +741,17 @@
       "path": "/static/build/static-finding-record-context.d2bf5421310d.js",
       "hash": "d2bf5421310d68c6d4368fadc00bbfed45ce0fb2f74dafe51eb299c11f7dd239"
     },
+    "/static/js/features/preferences/credential_creation.js": {
+      "path": "/static/build/static-credential-creation.6759b22b9555.js",
+      "hash": "6759b22b95554837b75f435862d9c7d12511aa2198da79cd1d13f265c03c1667"
+    },
     "/static/js/features/preferences/credential_reveal.js": {
       "path": "/static/build/static-credential-reveal.b580274cc118.js",
       "hash": "b580274cc118c442d627b75af392de22000a3f77f4481a0b301a43aecbdb1003"
     },
     "/static/js/features/preferences/credential_rows.js": {
-      "path": "/static/build/static-credential-rows.24b1f6cb1760.js",
-      "hash": "24b1f6cb17600888d1c1f4105257004af390583d55d661c2f5dffe3207e309d9"
+      "path": "/static/build/static-credential-rows.d3b433dc2056.js",
+      "hash": "d3b433dc20565feb6bc18bf0a92fcb83ec2b9a12ba98c983142ef3bf02ed7b54"
     },
     "/static/js/features/workspace/workspace_viewer_formats.js": {
       "path": "/static/build/static-workspace-viewer-formats.6112b79f7617.js",

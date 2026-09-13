@@ -10,7 +10,7 @@ The bundled `darklab` CLI is a thin wrapper around this API. Install it from the
 python -m pip install ./tools/darklab_cli
 ```
 
-Then point it at a running instance:
+Create a token in **Options → Access → Add credential → API token (PAT)**, as described under [Auth](#auth), then point the CLI at the instance:
 
 ```bash
 export DARKLAB_API_URL=http://localhost:8888
@@ -55,6 +55,10 @@ names, and fixed choices such as output formats and notification channel kinds.
 ---
 
 ## Auth
+
+To create your first token, sign into the browser and open **Options → Access → Add credential**. In an open deployment, choose **Keep this workspace** first. Select **API token (PAT)**, give it a recognizable label, choose its permissions, and set an expiry of 1–365 days. The default permissions are `identity:read`, `history:read`, and `runs:execute`; add other permissions only for the API operations you need. Save the value from the one-time reveal, then use it as `DARKLAB_PAT` or the CLI's `pat` setting. A token cannot create more credentials.
+
+You can rotate or revoke tokens from the same Access panel. Rotation keeps the label, permissions, and existing expiry, shows the replacement once, and waits for you to save it before asking to revoke the old token. Update each integration that uses the token. Rotating a token does not extend its lifetime; use **Expiry** when you intend to change it.
 
 Use a scoped PAT in the standard bearer header. Browser credentials and anonymous browser identities aren't accepted by `/api/v1`.
 

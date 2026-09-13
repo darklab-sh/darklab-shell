@@ -40,6 +40,11 @@ from services.auth.browser_sessions import (
     revoke_principal_browser_sessions,
 )
 from services.auth.contracts import (
+    DEFAULT_PAT_SCOPES,
+    PAT_DEFAULT_EXPIRY_DAYS,
+    PAT_MAX_EXPIRY_DAYS,
+    PAT_MIN_EXPIRY_DAYS,
+    PAT_SCOPES,
     CredentialNotFound,
     IdentityStorageError,
     LastCredentialLockout,
@@ -574,7 +579,14 @@ def credentials():
             items = [item for item in lifecycle.list_safe_credentials(context) if item.id == context.credential_id]
         else:
             items = lifecycle.list_safe_credentials(context)
-        return jsonify({"credentials": [item.to_safe_dict() for item in items]})
+        return jsonify({
+            "credentials": [item.to_safe_dict() for item in items],
+            "pat_policy": {
+                "scopes": sorted(PAT_SCOPES), "default_scopes": sorted(DEFAULT_PAT_SCOPES),
+                "default_expiry_days": PAT_DEFAULT_EXPIRY_DAYS,
+                "min_expiry_days": PAT_MIN_EXPIRY_DAYS, "max_expiry_days": PAT_MAX_EXPIRY_DAYS,
+            },
+        })
     except (AuthenticationRejected, IdentityStorageError, PermissionError) as exc:
         if isinstance(exc, AuthenticationRejected):
             return jsonify({"error": exc.code, "message": exc.message}), 401
@@ -591,6 +603,7 @@ def create_credential():
             credential_type=str(data.get("type") or "portable"),
             label=str(data.get("label") or ""),
             expires_at=data.get("expires_at"),
+            expires_in_days=data.get("expires_in_days"),
             scopes=data.get("scopes"),
             request_fields=_request_fields(),
         )
@@ -653,6 +666,7 @@ def rotate_credential(credential_id: str):
             credential_id,
             label=data.get("label"),
             expires_at=data.get("expires_at"),
+            defer_revocation=data.get("defer_revocation", False),
             request_fields=_request_fields(),
         )
         return _secret_response(issued)

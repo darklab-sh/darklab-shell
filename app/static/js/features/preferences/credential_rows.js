@@ -58,6 +58,9 @@ function renderCredentialRows(host, credentials, { currentCredentialId = '', onA
       _node('span', '', `Last used ${formatCredentialDate(credential.last_used_at)}`),
       _node('span', '', credential.expires_at ? `Expires ${formatCredentialDate(credential.expires_at)}` : 'No expiry'),
     );
+    if (credential.credential_type === 'pat') {
+      facts.append(_node('span', '', `Permissions: ${(credential.scopes || []).join(', ')}`));
+    }
     main.append(heading, prefix, facts);
     row.append(main);
     if (state === 'Active') {

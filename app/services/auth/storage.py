@@ -542,6 +542,7 @@ def issue_credential(
     credential_type: str = "portable",
     label: str = "",
     expires_at: str | datetime | None = None,
+    expires_in_days: int | None = None,
     created_by_credential_id: str | None = None,
     scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
     now: datetime | None = None,
@@ -557,6 +558,12 @@ def issue_credential(
         active_now = active_now.replace(tzinfo=timezone.utc)
     active_now = active_now.astimezone(timezone.utc)
     normalized_scopes = _normalize_credential_scopes(kind, scopes)
+    if expires_in_days is not None:
+        if kind != "pat" or expires_at is not None:
+            raise InvalidCredentialScope("expires_in_days is only for PATs and cannot be combined with expires_at")
+        if type(expires_in_days) is not int or not PAT_MIN_EXPIRY_DAYS <= expires_in_days <= PAT_MAX_EXPIRY_DAYS:
+            raise InvalidCredentialScope(f"PAT expiry must be between {PAT_MIN_EXPIRY_DAYS} and {PAT_MAX_EXPIRY_DAYS} days")
+        expires_at = active_now + timedelta(days=expires_in_days)
     normalized_expiry = _normalize_credential_expiry(kind, expires_at, now=active_now)
 
     def operation(active_conn: Any) -> IssuedCredential:
@@ -765,9 +772,12 @@ def rotate_credential(
     label: str | None = None,
     expires_at: str | datetime | None = None,
     reason: str = "rotated",
+    defer_revocation: bool = False,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
+    if type(defer_revocation) is not bool:
+        raise IdentityStorageError("defer_revocation must be a boolean")
     normalized_reason = bounded_text(reason, field_name="revocation reason", maximum=MAX_REASON_LENGTH)
 
     def operation(active_conn: Any) -> IssuedCredential:
@@ -784,17 +794,12 @@ def rotate_credential(
             maximum=MAX_CREDENTIAL_LABEL_LENGTH,
         )
         active_now = datetime.now(timezone.utc)
-        if current.credential_type == "pat":
-            replacement_expiry = _normalize_credential_expiry(
-                "pat",
-                expires_at,
-                now=active_now,
-            )
+        if expires_at is None:
+            replacement_expiry = current.expires_at
         else:
-            replacement_expiry = current.expires_at if expires_at is None else parse_timestamp(
-                expires_at,
-                field_name="credential expiry",
-            )
+            replacement_expiry = _normalize_credential_expiry(current.credential_type, expires_at, now=active_now)
+        if replacement_expiry is not None and datetime.fromisoformat(replacement_expiry) <= active_now:
+            raise CredentialExpired("the replacement needs an expiry in the future")
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
         replacement = _insert_credential(
             active_conn,
@@ -808,6 +813,8 @@ def rotate_credential(
             verifier_root=verifier_root,
             scopes=current.scopes,
         )
+        if defer_revocation:
+            return replacement
         now = timestamp(active_now)
         active_conn.execute(
             "UPDATE credentials SET revoked_at = ?, revocation_reason = ?, updated_at = ? "

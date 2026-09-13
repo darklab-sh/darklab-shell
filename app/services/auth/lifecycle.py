@@ -166,6 +166,7 @@ def issue(
     credential_type: str = "portable",
     label: str = "",
     expires_at: str | datetime | None = None,
+    expires_in_days: int | None = None,
     scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
@@ -179,6 +180,7 @@ def issue(
             credential_type=credential_type,
             label=label,
             expires_at=expires_at,
+            expires_in_days=expires_in_days,
             scopes=scopes,
             created_by_credential_id=context.credential_id or None,
             conn=conn,
@@ -461,6 +463,7 @@ def rotate(
     *,
     label: str | None = None,
     expires_at: str | datetime | None = None,
+    defer_revocation: bool = False,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
@@ -473,12 +476,16 @@ def rotate(
             credential_id,
             label=label,
             expires_at=expires_at,
+            defer_revocation=defer_revocation,
             conn=conn,
         )
         record_event(
-            AuditEventType.CREDENTIAL_ROTATE,
-            target_id=credential_id,
-            details=_credential_details(replacement.metadata, target_id=replacement.metadata.id),
+            AuditEventType.CREDENTIAL_CREATE if defer_revocation else AuditEventType.CREDENTIAL_ROTATE,
+            target_id=replacement.metadata.id if defer_revocation else credential_id,
+            details=_credential_details(
+                replacement.metadata, target_id=credential_id if defer_revocation else replacement.metadata.id,
+                source="rotation_preparation" if defer_revocation else "self_service",
+            ),
             conn=conn,
             **_audit_fields(request_fields),
         )

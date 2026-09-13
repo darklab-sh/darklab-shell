@@ -14,6 +14,7 @@ import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { applyMobileTextInputDefaults as importedApplyMobileTextInputDefaults } from '../../ui/ui_helpers.js';
 import { clearCredentialReveal, showCredentialReveal } from './credential_reveal.js';
 import { credentialState, renderCredentialRows } from './credential_rows.js';
+import { buildCredentialCreationFields } from './credential_creation.js';
 
 const elements = {
   panel: document.getElementById('options-panel-access'),
@@ -45,6 +46,7 @@ const elements = {
 };
 
 let credentials = [];
+let patPolicy = null;
 let refreshSequence = 0;
 let pendingAction = '';
 let editorReturnFocus = null;
@@ -180,6 +182,7 @@ async function refreshAccessPanel({ force = false } = {}) {
     currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
     const credentialsPayload = await _request('/auth/credentials');
     if (sequence !== refreshSequence) return null;
+    patPolicy = credentialsPayload.pat_policy || null;
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
     await _refreshOIDC(sequence);
@@ -296,17 +299,20 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   const title = document.createElement('strong');
   title.textContent = mode === 'keep'
     ? 'Keep this workspace'
-    : mode === 'create' ? 'Add an access credential' : mode === 'rename' ? 'Rename credential' : 'Change expiry';
+    : mode === 'create' ? 'Add a credential' : mode === 'rename' ? 'Rename credential' : 'Change expiry';
   const description = document.createElement('p');
   description.className = 'options-access-description';
   description.textContent = mode === 'keep'
     ? 'Give this browser an optional label. Your current files and history will stay in the same workspace.'
     : mode === 'create'
-      ? 'Create a credential for another browser or device. You will see the full value once.'
-      : mode === 'rename' ? 'Labels help you recognize where a credential is used.' : 'Leave the expiry blank for no expiry.';
+      ? 'Create browser access or an API token. You will see the full value once.'
+      : mode === 'rename' ? 'Labels help you recognize where a credential is used.'
+        : credential?.credential_type === 'pat' ? 'API tokens need an expiry between 1 and 365 days from now.'
+          : 'Leave the expiry blank for no expiry.';
   elements.editor.append(title, description);
   let labelInput = null;
   let expiryInput = null;
+  let creationFields = null;
   if (mode !== 'expiry') {
     labelInput = _input('text', credential?.label || (mode === 'keep' ? 'This browser' : ''));
     labelInput.maxLength = 64;
@@ -315,7 +321,12 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   }
   if (mode === 'create' || mode === 'expiry') {
     expiryInput = _input('datetime-local', _localExpiry(credential?.expires_at));
-    elements.editor.append(_field('Expiry', expiryInput));
+    const expiryField = _field('Expiry', expiryInput);
+    if (mode === 'create') {
+      creationFields = buildCredentialCreationFields({ policy: patPolicy, field: _field, input: _input, expiryField, expiryInput });
+      elements.editor.append(creationFields.host);
+    }
+    elements.editor.append(expiryField);
   }
   const error = document.createElement('div');
   error.className = 'options-access-message is-error';
@@ -336,8 +347,8 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   save.addEventListener('click', async () => {
     save.disabled = true;
     error.hidden = true;
-    const expiresAt = expiryInput?.value ? new Date(expiryInput.value).toISOString() : null;
     try {
+      const expiresAt = expiryInput?.value ? new Date(expiryInput.value).toISOString() : null;
       if (mode === 'keep') {
         const payload = await _request('/auth/principals', {
           method: 'POST',
@@ -354,7 +365,7 @@ function _showEditor(mode, credential = null, returnFocus = null) {
         const payload = await _request('/auth/credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'portable', label: labelInput?.value.trim() || '', expires_at: expiresAt }),
+          body: JSON.stringify({ ...creationFields.readOptions(), label: labelInput?.value.trim() || '' }),
         });
         _closeEditor({ restoreFocus: false });
         await refreshAccessPanel();
@@ -515,16 +526,10 @@ async function _rotateCredential(credential) {
     refocusOnResolve: false,
   });
   if (choice !== 'continue') return;
-  const requestBody = {
-    type: credential.credential_type,
-    label: credential.label ? `${credential.label} replacement` : 'Replacement credential',
-    scopes: credential.scopes || undefined,
-  };
-  if (credential.credential_type === 'portable') requestBody.expires_at = credential.expires_at || null;
-  const response = await _request('/auth/credentials', {
+  const response = await _request(`/auth/credentials/${encodeURIComponent(credential.id)}/rotate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({ defer_revocation: true }),
   });
   await refreshAccessPanel();
   showCredentialReveal({

@@ -15,6 +15,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Options → Access can create API tokens for the CLI and integrations.** Choose **API token (PAT)** in **Add credential**, select permissions, and set a lifetime from 1 to 365 days. Tokens are shown once, and their rows list their permissions. Browser and direct API rotation share the same implementation and preserve the existing label, permissions, and expiry; browser rotation waits for you to save the replacement before revoking the old credential.
 - **Access-profile qualification covers every sign-in policy on both databases, asset modes, and viewport sizes.**
   - **Before:** Focused access checks didn't exercise the complete browser grid.
   - **After:** Isolated SQLite and disposable-schema PostgreSQL servers run the same desktop and mobile browser journey for `open`, `token_required`, `oidc_required`, and `mixed` in source and bundled asset modes. The journey checks sign-in choices, protected reads and cookies, personal and Team scope, file round trips, reload, and logout. CI runs both PostgreSQL browser asset modes.
