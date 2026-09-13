@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.6a7f39e51692.js",
-      "hash": "051b1507877ecc22ee464279e82cfd60f7139ca890e0d62bbb246d5e5e6400c5",
+      "path": "/static/build/shell-bootstrap.90ddc0a9976e.js",
+      "hash": "f7370258ec12db489d3b66a17cb837215b7312f3842cd5f96211eed13f0e6222",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -257,7 +257,7 @@
         "/static/js/search.js": "c7e8df8444568d4a8ae92fa2aa5ebf2897a6b4b9d00b3c76742704ad2826614a",
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "47b220da6ea5b7267811a5ca2dc102677197f2ce554d3f1f8cf98f1bb47c3ac4",
-        "/static/js/shell_bootstrap.entry.js": "3eac50c34a8e11eddc8a42a323d52308b417c777c6d05e66f16b9d40e84448f3",
+        "/static/js/shell_bootstrap.entry.js": "fbe928bcd8f4ba33b4c764e650a27de0394727fe84624e50cfd8982119f44be2",
         "/static/js/shell_chrome.js": "bd45b956a796098e754266d0dc2781e6eefe9f50590d456cb88f4ec8d9deeb85",
         "/static/js/tabs.js": "9ce291966d50e6244ff1ede4d9c7cf5484735e24ab0a3dae9be74552131b33ce",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
@@ -394,8 +394,8 @@
       "hash": "c5bac9ec1de8739c1272771d9ad5333bfe7a2a534f1b0b697f6c25227390bf42"
     },
     "/static/js/features/preferences/access_panel.js": {
-      "path": "/static/build/static-access-panel.157420c87746.js",
-      "hash": "59af5c1e7dc05f0eee90de54e37e4491041a6b9c4c8dc8d7858e6c064ab11c50"
+      "path": "/static/build/static-access-panel.ff83fed0e177.js",
+      "hash": "3c9d2c319b95300a51c47c046f7268f5c8701357ba426d3bcee7233dd9391421"
     },
     "/static/js/features/preferences/notification_channels.js": {
       "path": "/static/build/static-notification-channels.1a944fe92e03.js",

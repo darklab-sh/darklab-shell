@@ -16,7 +16,7 @@
     <section class="restricted-sign-in-card">
       <div class="restricted-sign-in-kicker">RESTRICTED ACCESS</div>
       <h1 id="restricted-sign-in-title">Sign in to {{ app_name }}</h1>
-      {% if credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
+      {% if force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
       {% if error %}<div class="restricted-sign-in-error" role="alert">{{ error }}</div>{% endif %}
       {% if oidc_sign_in_enabled %}
       <a class="btn btn-primary restricted-sign-in-provider" href="{{ url_for('auth.oidc_start', next=next_path) }}">Continue with identity provider</a>
@@ -24,6 +24,7 @@
       {% if credential_sign_in_enabled %}
       <form method="post" action="{{ url_for('auth.sign_in') }}" autocomplete="off">
         <input type="hidden" name="next" value="{{ next_path }}">
+        {% if force_credential %}<input type="hidden" name="force" value="credential">{% endif %}
         <input type="hidden" name="sign_in_nonce" value="{{ sign_in_nonce }}">
         <label for="restricted-credential">Access credential</label>
         <input

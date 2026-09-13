@@ -155,6 +155,7 @@ def sign_in():
     if not is_restricted():
         return redirect("/")
     next_path = safe_next_path(request.values.get("next"))
+    force_credential = _credential_sign_in_enabled() and request.values.get("force") == "credential"
     error = "Provider sign-in couldn't be completed. Please try again." if request.args.get("oidc_error") else ""
     if request.method == "POST":
         if not _credential_sign_in_enabled():
@@ -215,7 +216,8 @@ def sign_in():
         sign_in_nonce=nonce,
         error=error,
         credential_sign_in_enabled=_credential_sign_in_enabled(),
-        oidc_sign_in_enabled=_oidc_sign_in_enabled(),
+        oidc_sign_in_enabled=_oidc_sign_in_enabled() and not force_credential,
+        force_credential=force_credential,
     )))
     response.set_cookie(
         _SIGN_IN_NONCE_COOKIE,
@@ -337,10 +339,13 @@ def oidc_link():
         url, state = oidc.start_flow(
             active_config(), purpose="link", principal_id=context.principal_id,
             browser_session_id=context.browser_session_id,
+            next_path=safe_next_path(_payload().get("next")),
         )
     except oidc.OIDCError as exc:
         log.warning("OIDC_LINK_START_FAILED", extra={"reason": type(exc).__name__})
         return jsonify({"error": "oidc_unavailable", "message": "The identity provider is unavailable."}), 503
+    except IdentityStorageError as exc:
+        return _error(exc)
     response = _no_store(jsonify({"authorization_url": url}))
     _set_oidc_state_cookie(response, state)
     return response
@@ -489,6 +494,7 @@ def _context_payload(context: AuthenticatedContext) -> dict:
         "authentication_method": context.authentication_method,
         "browser_session": context.authentication_method == "browser_cookie",
         "browser_session_expires_at": context.browser_session_absolute_expires_at,
+        "recent_credential_session": _recent_credential_session(context),
         "selected_team_id": context.selected_team_id or None,
         "role": context.role or None,
         "capabilities": sorted(context.capabilities),

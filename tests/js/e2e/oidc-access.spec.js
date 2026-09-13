@@ -41,7 +41,25 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
     await ensurePromptReady(page)
     const original = await page.evaluate(async () => (await (await apiFetch('/auth/principal')).json()).principal.id)
 
+    // Simulate an older principal response; Python request tests cover the real
+    // clock boundary. The rest of this journey uses real credential sign-in.
+    await page.route('**/auth/principal', async route => {
+      const response = await route.fetch()
+      const data = await response.json()
+      data.authentication.recent_credential_session = false
+      await route.fulfill({ response, json: data })
+    })
     await openAccess(page)
+    await expect(page.locator('#options-access-oidc-link')).toBeHidden()
+    await page.locator('#options-access-oidc-reauth').click()
+    await expect(page).toHaveURL(/force=credential/)
+    await expect(page.getByRole('link', { name: 'Continue with identity provider' })).toHaveCount(0)
+    await page.unroute('**/auth/principal')
+    await page.getByLabel('Access credential').fill(operatorCredential())
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await expect(page.locator('#options-panel-access')).toBeVisible()
+    await expect(page.locator('#options-tab-access')).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(url => url.pathname === '/' && !url.searchParams.has('options'))
     await expect(page.locator('#options-access-oidc-link')).toBeVisible()
     await Promise.all([
       page.waitForEvent('domcontentloaded'),
@@ -53,7 +71,7 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
       const response = await page.request.get('/auth/oidc/identity')
       return response.ok() && (await response.json()).linked
     }).toBe(true)
-    await openAccess(page)
+    await expect(page.locator('#options-panel-access')).toBeVisible()
     await expect(page.locator('#options-access-oidc-unlink')).toBeVisible()
     await page.locator('#options-access-oidc-unlink').click()
     await page.locator('#confirm-host [data-confirm-action-id="unlink"]').click()

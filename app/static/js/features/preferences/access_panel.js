@@ -55,6 +55,7 @@ let editorReturnFocus = null;
 let redemptionReturnFocus = null;
 let currentCredentialId = '';
 let currentAuthenticationType = '';
+let recentCredentialSession = false;
 
 function _markAccessPanelReady() {
   [
@@ -185,10 +186,11 @@ async function refreshAccessPanel({ force = false } = {}) {
   if (force) _setMessage('Refreshing access…');
   try {
     const principalPayload = await _request('/auth/principal');
-    currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
-    currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
     const credentialsPayload = await _request('/auth/credentials');
     if (sequence !== refreshSequence) return null;
+    currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
+    currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
+    recentCredentialSession = principalPayload?.authentication?.recent_credential_session === true;
     patPolicy = credentialsPayload.pat_policy || null;
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
@@ -219,25 +221,41 @@ async function _refreshOIDC(sequence) {
         ? 'This workspace can be opened through your identity provider.'
         : 'This workspace is not linked to an identity provider yet.';
     }
-    const credentialSession = currentAuthenticationType === 'portable';
-    if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !credentialSession;
-    if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !credentialSession;
-    if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || credentialSession;
+    const canManage = recentCredentialSession && profile !== 'oidc_required';
+    if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !canManage;
+    if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !canManage;
+    if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || canManage;
   } catch (error) {
     if (sequence === refreshSequence) elements.oidcSection.hidden = true;
+  }
+}
+
+function _offerCredentialReauthentication(error) {
+  if (error.code !== 'recent_credential_required') return;
+  recentCredentialSession = false;
+  if (elements.oidcLink) elements.oidcLink.hidden = true;
+  if (elements.oidcUnlink) elements.oidcUnlink.hidden = true;
+  if (elements.oidcReauth) {
+    elements.oidcReauth.hidden = false;
+    elements.oidcReauth.focus({ preventScroll: true });
   }
 }
 
 async function _linkOIDC() {
   if (elements.oidcLink) elements.oidcLink.disabled = true;
   try {
-    const data = await _request('/auth/oidc/link', { method: 'POST' });
+    const data = await _request('/auth/oidc/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ next: '/?options=access' }),
+    });
     const destination = new URL(data.authorization_url, window.location.href);
     if (destination.protocol !== 'https:') throw new Error('The provider URL is invalid.');
     window.location.assign(destination.href);
   } catch (error) {
     _setMessage(error.message || 'Could not start provider linking.', 'error');
     if (elements.oidcLink) elements.oidcLink.disabled = false;
+    _offerCredentialReauthentication(error);
   }
 }
 
@@ -247,7 +265,7 @@ async function _unlinkOIDC() {
     tone: 'warning',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'unlink', label: 'Unlink provider', role: 'danger' },
+      { id: 'unlink', label: 'Unlink provider', role: 'destructive' },
     ],
     refocusOnResolve: false,
   });
@@ -257,6 +275,7 @@ async function _unlinkOIDC() {
     window.location.assign('/auth/sign-in');
   } catch (error) {
     _setMessage(error.message || 'Could not unlink the identity provider.', 'error');
+    _offerCredentialReauthentication(error);
   }
 }
 

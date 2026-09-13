@@ -370,3 +370,64 @@ def test_oidc_link_requires_recent_credential_and_unlink_revokes_all_sessions(mo
     result = client.post("/auth/oidc/unlink", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
     assert result.get_json() == {"sessions_revoked": True, "unlinked": True}
     assert client.get("/", base_url=ORIGIN).status_code == 302
+
+
+@pytest.mark.parametrize("profile", ["mixed", "token_required", "oidc_required"])
+def test_credential_reauthentication_selects_the_permitted_sign_in_method(monkeypatch, profile):
+    config = _config(profile=profile, provisioning="disabled" if profile == "token_required" else "automatic")
+    client = _app(monkeypatch, config).test_client()
+    response = client.get("/auth/sign-in?force=credential&next=%2F%3Foptions%3Daccess", base_url=ORIGIN)
+    assert response.status_code == 200
+    assert (b"Continue with identity provider" in response.data) == (profile == "oidc_required")
+    if profile != "oidc_required":
+        assert b'name="force" value="credential"' in response.data
+        assert b'name="next" value="/?options=access"' in response.data
+        nonce = _response_cookie(response, "darklab_sign_in_nonce")
+        failed = client.post("/auth/sign-in", base_url=ORIGIN, data={
+            "credential": "invalid", "sign_in_nonce": nonce,
+            "force": "credential", "next": "/?options=access",
+        })
+        assert b"Continue with identity provider" not in failed.data
+        assert b'name="force" value="credential"' in failed.data
+    else:
+        assert b"restricted-credential" not in response.data
+
+
+def test_link_recency_is_visible_and_credential_reauthentication_restores_access(monkeypatch):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = "reauth-link-subject"
+    client = _app(monkeypatch, _config(profile="mixed")).test_client()
+    with get_db_connect()() as conn:
+        bundle = storage.create_principal_with_credential(conn=conn)
+        conn.commit()
+
+    def credential_sign_in():
+        page = client.get("/auth/sign-in?force=credential&next=%2F%3Foptions%3Daccess", base_url=ORIGIN)
+        return client.post("/auth/sign-in", base_url=ORIGIN, data={
+            "credential": bundle.credential.secret,
+            "sign_in_nonce": _response_cookie(page, "darklab_sign_in_nonce"),
+            "force": "credential", "next": "/?options=access",
+        })
+
+    assert credential_sign_in().headers["Location"] == "/?options=access"
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is True
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET authenticated_at = ?", (stale,))
+        conn.commit()
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is False
+    csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
+    for action in ("link", "unlink"):
+        response = client.post(f"/auth/oidc/{action}", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
+        assert response.status_code == 403
+        assert response.get_json()["error"] == "recent_credential_required"
+    assert credential_sign_in().headers["Location"] == "/?options=access"
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is True
+    csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
+    malformed = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf}, json=["invalid"])
+    assert malformed.status_code == 400
+    start = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf}, json={"next": "/?options=access"})
+    assert start.status_code == 200
+    state = parse_qs(urlsplit(start.get_json()["authorization_url"]).query)["state"][0]
+    provider.expect(state)
+    assert _callback(client, state).headers["Location"] == "/?options=access"

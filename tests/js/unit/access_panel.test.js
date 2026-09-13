@@ -79,7 +79,7 @@ function renderMarkup() {
         <button id="options-access-add-btn" disabled></button>
         <button id="options-access-remove-btn" disabled></button>
         <button id="options-access-remove-all-btn" disabled hidden></button>
-        <a id="options-access-session-reauth" href="/auth/sign-in?next=%2F" hidden>Sign in again</a>
+        <a id="options-access-session-reauth" href="/auth/sign-in?next=%2F%3Foptions%3Daccess" hidden>Sign in again</a>
       </div>
       <button id="options-access-refresh-btn" disabled></button>
       <div id="options-access-credentials-section" hidden>
@@ -96,7 +96,7 @@ function renderMarkup() {
         <div id="options-access-oidc-status"></div>
         <button id="options-access-oidc-link" hidden></button>
         <button id="options-access-oidc-unlink" hidden></button>
-        <a id="options-access-oidc-reauth" hidden></a>
+        <a id="options-access-oidc-reauth" href="/auth/sign-in?force=credential&amp;next=%2F%3Foptions%3Daccess" hidden></a>
       </div>
     </div>
   `
@@ -456,12 +456,49 @@ describe('Access panel', () => {
     await vi.waitFor(() => expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith('/auth/sessions/revoke-all', expect.objectContaining({ method: 'POST' })))
     if (needsReauth) {
       await vi.waitFor(() => expect(document.getElementById('options-access-session-reauth').hidden).toBe(false))
-      expect(document.getElementById('options-access-session-reauth').getAttribute('href')).toBe('/auth/sign-in?next=%2F')
+      expect(document.getElementById('options-access-session-reauth').getAttribute('href')).toBe('/auth/sign-in?next=%2F%3Foptions%3Daccess')
       expect(document.activeElement).toBe(document.getElementById('options-access-session-reauth'))
       expect(session.redirectToSignIn).not.toHaveBeenCalled()
     } else {
       await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
     }
+  })
+
+  it.each([false, true])('offers credential sign-in for an older session, linked: %s', async linked => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'mixed' }
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', validFormat: true }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => response(url === '/auth/principal'
+      ? { authentication: { credential_type: 'portable', recent_credential_session: false } }
+      : url === '/auth/oidc/identity' ? { linked } : { credentials: [] }))
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-link').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(false)
+    globalThis.__accessPanelTest.appConfig.access_profile = 'oidc_required'
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(true)
+  })
+
+  it.each(['link', 'unlink'])('offers reauthentication when recency expires before %s', async action => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'mixed' }
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', validFormat: true }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('unlink')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { credential_type: 'portable', recent_credential_session: true } })
+      if (url === '/auth/oidc/identity') return response({ linked: action === 'unlink' })
+      if (url === `/auth/oidc/${action}`) return response({ error: 'recent_credential_required', message: 'Sign in again with your credential.' }, 403)
+      return response({ credentials: [] })
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    const button = document.getElementById(`options-access-oidc-${action}`)
+    expect(button.hidden).toBe(false)
+    button.click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(false))
+    expect(button.hidden).toBe(true)
+    expect(document.activeElement).toBe(document.getElementById('options-access-oidc-reauth'))
+    expect(document.getElementById('options-access-msg').textContent).toContain('Sign in again')
   })
 
   it('shows safe provider-link actions only for a credential-backed browser session', async () => {
@@ -470,7 +507,7 @@ describe('Access panel', () => {
       kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
     }
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url) => {
-      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable', recent_credential_session: true } })
       if (url === '/auth/credentials') return response({ credentials: [credential()] })
       if (url === '/auth/oidc/identity') return response({ linked: false, issuer: 'https://idp.example' })
       if (url === '/auth/oidc/link') return response({ authorization_url: 'http://unsafe.example/authorize' })

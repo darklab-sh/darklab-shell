@@ -209,7 +209,7 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.
 
-Restricted Access browser checks exercise the local and session-wide sign-out buttons, including rejection of a second browser after session-wide sign-out. Unit checks cover provider-specific copy and the recent-sign-in recovery link.
+Restricted Access browser checks exercise the local and session-wide sign-out buttons, including rejection of a second browser after session-wide sign-out. Unit checks cover provider-specific copy, recency-based provider controls, and recovery when link or unlink outlives the authentication window. Python request tests age the real session and verify reauthentication; the local-provider browser journey uses an older-session response fixture, then verifies real credential sign-in and return to Access.
 
 Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits.
 
