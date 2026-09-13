@@ -176,7 +176,7 @@ def issue(
             label=label,
             expires_at=expires_at,
             scopes=scopes,
-            created_by_credential_id=context.credential_id,
+            created_by_credential_id=context.credential_id or None,
             conn=conn,
         )
         record_event(
@@ -232,6 +232,9 @@ def operator_recover(
     """Revoke existing credentials and return one replacement exactly once."""
     def operation(conn: Any) -> IssuedCredential:
         from .background_authorization import pause_durable_work_for_credential  # noqa: PLC0415
+        from .browser_sessions import revoke_principal_browser_sessions  # noqa: PLC0415
+
+        revoke_principal_browser_sessions(principal_id, reason="operator recovery", conn=conn)
 
         current = storage.list_credentials(principal_id, conn=conn)
         for credential in current:

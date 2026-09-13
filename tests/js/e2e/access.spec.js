@@ -170,7 +170,7 @@ test.describe('workspace Access', () => {
     await page.locator('#options-access-use-btn').click()
     await page.locator('#options-access-redemption-input').fill(replacementSecret)
     await page.locator('#options-access-redemption-apply').click()
-    await expect(page.locator('#options-access-summary')).toHaveText('Kept workspace')
+    await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expectAccessActions(page, 'kept')
     await expect(peer.locator('#hud-session')).toContainText('crd_')
     const replacementRow = page.locator('.options-access-row', { hasText: 'Travel device replacement' })
@@ -185,7 +185,7 @@ test.describe('workspace Access', () => {
     await page.locator('#options-access-use-btn').click()
     await page.locator('#options-access-redemption-input').fill(primarySecret)
     await page.locator('#options-access-redemption-apply').click()
-    await expect(page.locator('#options-access-summary')).toHaveText('Kept workspace')
+    await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
 
     await primaryRow.getByRole('button', { name: 'Revoke' }).click()
     await expect(page.locator('#confirm-host')).toContainText('last active access credential')

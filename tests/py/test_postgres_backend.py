@@ -1091,6 +1091,132 @@ def test_automation_notification_owner_clauses_preserve_mixed_postgres_result_se
 
 
 @pytest.mark.postgres
+def test_oidc_identity_and_browser_session_migrate_on_postgres(postgres_schema, tmp_path, monkeypatch):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import storage as principal_storage
+    from services.auth.browser_sessions import create_browser_session, resolve_browser_session
+    from services.secrets.vault import reset_master_key_cache_for_tests
+
+    data_dir = tmp_path / "oidc-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    raw_conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    conn = PostgresSqliteCompatConnection(raw_conn)
+    bundle = principal_storage.create_principal_with_credential(conn=conn)
+    identity_id = "oid_" + "a" * 32
+    conn.execute(
+        "INSERT INTO oidc_identities (id, principal_id, issuer, subject, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (identity_id, bundle.principal.id, "https://idp.example/realms/test", "subject-1",
+         datetime.now(timezone.utc).isoformat()),
+    )
+    raw_conn.commit()
+
+    issued = create_browser_session(
+        principal_id=bundle.principal.id, oidc_identity_id=identity_id,
+        absolute_seconds=3600, conn=conn,
+    )
+    assert resolve_browser_session(
+        issued.cookie_value, idle_seconds=1800, touch=False, conn=conn,
+    ).valid is True
+    row = raw_conn.execute(
+        "SELECT credential_id, oidc_identity_id FROM browser_sessions WHERE id = %s",
+        (issued.id,),
+    ).fetchone()
+    assert row["credential_id"] is None
+    assert row["oidc_identity_id"] == identity_id
+    with pytest.raises(Exception):
+        conn.execute(
+            "INSERT INTO oidc_identities (id, principal_id, issuer, subject, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("oid_" + "b" * 32, bundle.principal.id,
+             "https://idp.example/realms/test", "subject-1", datetime.now(timezone.utc).isoformat()),
+        )
+    raw_conn.rollback()
+
+
+@pytest.mark.postgres
+def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch):
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle
+    from test_oidc_sign_in import LocalProvider, _callback, _start, _config, _response_cookie, _client_cookie, ORIGIN
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    cfg = _config().with_overrides({
+        "database_backend": "postgres",
+        "database_url": _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema),
+        "data_dir": str(tmp_path / "oidc-pg-data"),
+    })
+    (tmp_path / "oidc-pg-data").mkdir()
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    provider = LocalProvider(monkeypatch)
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        client = app.test_client()
+        assert client.get("/", base_url=ORIGIN).status_code == 302
+        state = _start(client, provider)
+        assert _callback(client, state).headers["Location"] == "/"
+        assert client.get("/", base_url=ORIGIN).status_code == 200
+        identity = client.get("/auth/principal", base_url=ORIGIN).get_json()
+        assert identity["authentication"]["credential_type"] == "oidc"
+        assert client.post("/auth/logout", base_url=ORIGIN, headers={
+            "X-Darklab-CSRF": _client_cookie(client, "darklab_csrf"),
+        }).status_code == 204
+        assert client.get("/", base_url=ORIGIN).status_code == 302
+
+        recovered = lifecycle.operator_recover(identity["principal"]["id"])
+        mixed = cfg.with_overrides({"access_profile": "mixed", "oidc_provisioning": "disabled"})
+        app.config["DARKLAB_CONFIG"] = mixed
+        monkeypatch.setattr(shell_config, "CFG", mixed)
+        monkeypatch.setattr(application_module, "CFG", mixed)
+        monkeypatch.setattr(core_database, "CFG", mixed)
+        sign_in_page = client.get("/auth/sign-in", base_url=ORIGIN)
+        nonce = _response_cookie(sign_in_page, "darklab_sign_in_nonce")
+        assert client.post("/auth/sign-in", base_url=ORIGIN, data={
+            "credential": recovered.secret, "sign_in_nonce": nonce,
+        }).status_code == 302
+        csrf = _client_cookie(client, "darklab_csrf")
+        link = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
+        assert link.status_code == 200
+        link_state = parse_qsl(urlsplit(link.get_json()["authorization_url"]).query)
+        state = dict(link_state)["state"]
+        provider.expect(state)
+        assert _callback(client, state).headers["Location"] == "/"
+        assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["credential_type"] == "portable"
+        csrf = _client_cookie(client, "darklab_csrf")
+        unlinked = client.post("/auth/oidc/unlink", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
+        assert unlinked.get_json() == {"unlinked": True, "sessions_revoked": True}
+        assert client.get("/", base_url=ORIGIN).status_code == 302
+        state = _start(client, provider)
+        assert "oidc_error" in _callback(client, state).headers["Location"]
+    finally:
+        close_postgres_pool()
+
+
+@pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
     postgres_schema,
     tmp_path,
@@ -1947,6 +2073,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0081",
         "0082",
         "0083",
+        "0084",
     ]
     assert applied_again == []
     table_rows = conn.execute(

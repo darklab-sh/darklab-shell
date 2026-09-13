@@ -82,7 +82,7 @@ test.describe('restricted access profile', () => {
 
     await openRailAction(page, 'options')
     await page.locator('#options-tab-access').click()
-    await expect(page.locator('#options-access-summary')).toHaveText('Kept workspace')
+    await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expect(page.locator('.options-access-row')).toContainText('Current')
 
     const logoutStatus = await page.evaluate(async () => (await apiFetch('/auth/logout', {

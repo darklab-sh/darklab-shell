@@ -30,6 +30,10 @@ vi.mock('../../../app/static/js/ui/ui_helpers.js', () => ({
   applyMobileTextInputDefaults: vi.fn(),
 }))
 
+vi.mock('../../../app/static/js/core/config.js', () => ({
+  getAppConfig: () => globalThis.__accessPanelTest.appConfig || {},
+}))
+
 const SECRET = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
 const CURRENT_ID = `crd_${'a'.repeat(32)}`
 const REPLACEMENT_SECRET = `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`
@@ -85,6 +89,12 @@ function renderMarkup() {
         <button id="options-access-redemption-cancel"></button>
       </div>
       <div id="options-access-reveal" hidden></div>
+      <div id="options-access-oidc-section" hidden>
+        <div id="options-access-oidc-status"></div>
+        <button id="options-access-oidc-link" hidden></button>
+        <button id="options-access-oidc-unlink" hidden></button>
+        <a id="options-access-oidc-reauth" hidden></a>
+      </div>
     </div>
   `
 }
@@ -102,6 +112,7 @@ describe('Access panel', () => {
       showConfirm: vi.fn().mockResolvedValue('cancel'),
       copy: vi.fn().mockResolvedValue(undefined),
       toast: vi.fn(),
+      appConfig: {},
     }
   })
 
@@ -319,5 +330,38 @@ describe('Access panel', () => {
     await vi.waitFor(() => expect(session.activateAccessCredential).toHaveBeenCalledWith(REPLACEMENT_SECRET))
     const urls = globalThis.__accessPanelTest.apiFetch.mock.calls.map(([url]) => url)
     expect(urls.indexOf('/auth/credentials')).toBeLessThan(urls.indexOf(`/auth/credentials/${CURRENT_ID}/revoke`))
+  })
+
+  it('shows safe provider-link actions only for a credential-backed browser session', async () => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'mixed' }
+    globalThis.__accessPanelTest.identity = {
+      kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
+    }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
+      if (url === '/auth/credentials') return response({ credentials: [credential()] })
+      if (url === '/auth/oidc/identity') return response({ linked: false, issuer: 'https://idp.example' })
+      if (url === '/auth/oidc/link') return response({ authorization_url: 'http://unsafe.example/authorize' })
+      return response({})
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-section').hidden).toBe(false)
+    expect(document.getElementById('options-access-oidc-link').hidden).toBe(false)
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(true)
+    document.getElementById('options-access-oidc-link').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-msg').textContent).toContain('invalid'))
+    expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith('/auth/oidc/link', expect.objectContaining({ method: 'POST' }))
+
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: '', credential_type: 'oidc' } })
+      if (url === '/auth/credentials') return response({ credentials: [] })
+      if (url === '/auth/oidc/identity') return response({ linked: true, issuer: 'https://idp.example' })
+      return response({})
+    })
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-link').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(false)
   })
 })

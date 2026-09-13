@@ -9,8 +9,8 @@ SLOT="${2:?slot required}"
 ACCESS_PROFILE_VALUE="${3:-open}"
 CAPTURE_ANONYMOUS_ID="cafebabe-cafe-4abe-8afe-cafebabecafe"
 
-if [[ "$ACCESS_PROFILE_VALUE" != "open" && "$ACCESS_PROFILE_VALUE" != "token_required" ]]; then
-  echo "run_e2e_server.sh: access profile must be open or token_required" >&2
+if [[ "$ACCESS_PROFILE_VALUE" != "open" && "$ACCESS_PROFILE_VALUE" != "token_required" && "$ACCESS_PROFILE_VALUE" != "mixed" ]]; then
+  echo "run_e2e_server.sh: access profile must be open, token_required, or mixed" >&2
   exit 2
 fi
 
@@ -99,7 +99,23 @@ export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
 export FLASK_APP=wsgi.py
 
-if [[ "$ACCESS_PROFILE_VALUE" == "token_required" ]]; then
+if [[ "$ACCESS_PROFILE_VALUE" == "mixed" ]]; then
+  CERT_FILE="$DATA_DIR/oidc-local.crt"
+  KEY_FILE="$DATA_DIR/oidc-local.key"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -keyout "$KEY_FILE" -out "$CERT_FILE" \
+    -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
+  chmod 600 "$CERT_FILE" "$KEY_FILE"
+  export OIDC_ISSUER="https://127.0.0.1:$PORT/idp"
+  export OIDC_CLIENT_ID="playwright-client"
+  export OIDC_CLIENT_SECRET="playwright-only-secret"
+  export OIDC_REDIRECT_URI="https://127.0.0.1:$PORT/auth/oidc/callback"
+  export OIDC_PROVISIONING="automatic"
+  export OIDC_CA_BUNDLE="$CERT_FILE"
+  export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
+if [[ "$ACCESS_PROFILE_VALUE" == "token_required" || "$ACCESS_PROFILE_VALUE" == "mixed" ]]; then
   if [[ -z "${PW_E2E_SECRET_DIR:-}" ]]; then
     echo "run_e2e_server.sh: PW_E2E_SECRET_DIR is required for restricted tests" >&2
     exit 2
@@ -119,8 +135,12 @@ server_cmd=(
   --timeout 60
   --graceful-timeout 5
   --keep-alive 30
-  wsgi:application
 )
+if [[ "$ACCESS_PROFILE_VALUE" == "mixed" ]]; then
+  server_cmd+=(--certfile "$CERT_FILE" --keyfile "$KEY_FILE" oidc_provider_wsgi:application)
+else
+  server_cmd+=(wsgi:application)
+fi
 
 if [[ -n "$SERVER_LOG" ]]; then
   if [[ "${PW_WEBSERVER_LOGS:-}" == "1" ]]; then

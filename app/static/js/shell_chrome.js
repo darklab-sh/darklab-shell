@@ -1714,6 +1714,7 @@ let importedProjectWorkspaceShell;
   }
 
   let browserSessionCredentialId = '';
+  let browserSessionAuthType = '';
   let browserSessionCredentialSequence = 0;
 
   function _renderSession() {
@@ -1732,10 +1733,10 @@ let importedProjectWorkspaceShell;
       if (hudSessionEl) {
         hudSessionEl.textContent = browserSessionCredentialId
           ? `${browserSessionCredentialId.slice(0, 12)}••••`
-          : 'SESSION';
+          : (browserSessionAuthType === 'oidc' ? 'OIDC' : 'SESSION');
         hudSessionEl.title = browserSessionCredentialId
           ? 'Access credential active through a browser session'
-          : 'Signed-in browser session';
+          : (browserSessionAuthType === 'oidc' ? 'Identity provider session' : 'Signed-in browser session');
         _setValueColor(hudSessionEl, 'hud-value-green');
       }
       if (mobileAccessStateEl) mobileAccessStateEl.textContent = 'Kept';
@@ -1752,6 +1753,7 @@ let importedProjectWorkspaceShell;
   async function _refreshBrowserSessionCredentialHint() {
     const sequence = ++browserSessionCredentialSequence;
     browserSessionCredentialId = '';
+    browserSessionAuthType = '';
     _renderSession();
     const identity = typeof importedGetBrowserIdentitySnapshot === 'function'
       ? importedGetBrowserIdentitySnapshot()
@@ -1762,6 +1764,7 @@ let importedProjectWorkspaceShell;
       if (!response?.ok) return;
       const payload = await response.json();
       if (sequence !== browserSessionCredentialSequence) return;
+      browserSessionAuthType = payload?.authentication?.credential_type === 'oidc' ? 'oidc' : '';
       const credentialId = payload?.authentication?.credential_id;
       if (typeof credentialId === 'string' && /^crd_[0-9a-f]{32}$/.test(credentialId)) {
         browserSessionCredentialId = credentialId;

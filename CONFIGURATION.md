@@ -178,9 +178,10 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 
 - `open` is the default. New browsers can start anonymously and may keep a workspace later with a portable credential.
 - `token_required` shows a standalone credential screen before the application. Anonymous workspaces and unauthenticated credential issuance are disabled.
-- `oidc_required` and `mixed` are reserved names and aren't accepted by this release.
+- `oidc_required` signs browsers in with an OpenID Connect provider. It doesn't accept portable credentials at the browser sign-in screen.
+- `mixed` offers both provider sign-in and portable-credential sign-in. It's also the place to link an existing workspace to a provider identity before switching to `oidc_required`.
 
-Restricted access is intended for HTTPS deployments. Its browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`, so it won't work as a normal sign-in boundary over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
+Restricted access is intended for HTTPS deployments. Its browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`. The short-lived provider state cookie is `Secure`, `HttpOnly`, and `SameSite=Lax` so it returns on the provider's redirect. Sign-in won't work over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
 
 Set the profile and session lifetimes in the installation's `.env`, then recreate the app:
 
@@ -211,6 +212,14 @@ The bootstrap command succeeds only when `token_required` is active and no princ
 After redemption, the browser holds a signed server-side session instead of the portable credential. The session ends at the configured idle or absolute deadline. Sign-out revokes the current session; `/auth/sessions/revoke-all` and the operator `revoke-all-sessions` command close every browser session for one principal. Revoking or rotating a portable credential also closes sessions redeemed from that credential, and disabling a principal closes all of its sessions. Team membership and role changes rotate the acting browser's session and revoke a removed member's sessions.
 
 The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
+
+For provider sign-in, register a confidential OpenID Connect client with the authorization-code flow and PKCE S256 enabled. Set its exact redirect URI to `https://<your-shell-host>/auth/oidc/callback`. The issuer must match the provider's discovery document exactly. Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URI` in `.env`; `OIDC_SCOPES` defaults to `openid`. The app asks the provider to authenticate the browser, verifies its signed ID token, and stores only the issuer and provider subject as the stable link. It doesn't require or store an email address, name, groups, provider access token, or refresh token.
+
+`OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. Provider-only workspaces don't receive a portable credential automatically. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
+
+In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. Revoking every browser session in `oidc_required` or `mixed` also requires a recent sign-in. For a provider-only workspace, an operator can issue a recovery credential with `manage_principal_access.py recover`, then use `mixed` to sign in and manage the link. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
+
+The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed. If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup.
 
 Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
 
@@ -1245,10 +1254,18 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `HOST_BIND_ADDRESS` | Production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
-| `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary. `open` keeps anonymous-first access; `token_required` requires credential redemption into a protected browser session. Reserved values fail closed |
+| `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary: `open`, `token_required`, `oidc_required`, or `mixed` |
 | `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows unauthenticated capability-link creation and reads in `token_required`. Defaults to `false` |
 | `BROWSER_SESSION_IDLE_MINUTES` | Docker Compose, Flask app | Inactivity deadline for restricted browser sessions. Defaults to `30` minutes |
 | `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit |
+| `OIDC_ISSUER` | Docker Compose, Flask app | Exact HTTPS provider issuer from discovery, without a trailing slash |
+| `OIDC_CLIENT_ID` | Docker Compose, Flask app | Confidential client ID registered with the provider |
+| `OIDC_CLIENT_SECRET` | Docker Compose, Flask app | Private client secret; keep it in the installation's private `.env` |
+| `OIDC_REDIRECT_URI` | Docker Compose, Flask app | Exact public HTTPS callback URL ending in `/auth/oidc/callback` |
+| `OIDC_SCOPES` | Docker Compose, Flask app | Space-separated requested scopes; includes `openid` by default |
+| `OIDC_PROVISIONING` | Docker Compose, Flask app | `disabled`, `allowlist`, or `automatic`; defaults to `disabled` |
+| `OIDC_ALLOWED_SUBJECTS` | Docker Compose, Flask app | Comma-separated exact provider subjects when provisioning is `allowlist` |
+| `OIDC_CA_BUNDLE` | Docker Compose, Flask app | Optional PEM CA path, relative to private `conf/` or absolute inside the container |
 | `DARKLAB_IMAGE` | Production Compose | Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than `latest` |
 | `APP_LOCAL_CONF_DIR` | Flask app | Optional operator root for every supported local overlay. Production sets `/config`; when unset, loaders keep using sibling files beside their shipped assets |
 | `WORKSPACE_ENABLED` | Docker Compose, Flask app | Enables or disables personal and team Files |

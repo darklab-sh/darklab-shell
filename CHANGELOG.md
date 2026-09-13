@@ -15,6 +15,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Options → Access now calls signed-in workspaces “Authenticated workspace.”** The status is no longer confused with the **Keep this workspace** action for anonymous users.
+- **Private deployments can sign in through OpenID Connect, a portable credential, or both.**
+  - **Before:** Only the credential sign-in gate was active; the provider-only and combined access profiles were reserved.
+  - **After:** `oidc_required` and `mixed` use an HTTPS OIDC provider with authorization code, PKCE, one-time state and nonce, signed ID-token validation, and server-held browser sessions. Operators choose disabled, exact-subject allowlist, or automatic workspace provisioning. Existing credential users can link a provider after proving both identities, unlink only with a usable recovery credential, and revoke every browser session after a recent sign-in. Provider identities retain only issuer and subject; Team roles remain local and provider outages fail closed for new sign-ins.
+  - **Tests:** A deterministic local provider covers sign-in, bad claims and signature, state replay, callback origin, outage, provisioning, linking, unlinking, and session rotation. SQLite and isolated Postgres migration checks cover provider identity and browser-session storage. Playwright exercises provider success, refusal, linking, unlinking, and protected cookies against a local HTTPS provider in source and bundle modes; the existing restricted-profile checks keep open and credential-only behavior intact.
+  - **Maintenance:** Explicit callback arguments, CA and signing-key types, and asserted test cookies keep OIDC editor checks clean. OIDC imports certifi's public CA-bundle helper directly, with Requests and certifi declared as dependencies. The reviewed ownership-query inventory includes the new provider identity and browser-session queries.
+  - **Sign-in layout:** The identity provider action now has a clear gap below the sign-in details.
 - **Private deployments can now require an access credential before showing the workspace.**
   - **Before:** The open profile was the only active browser model. Portable credentials could keep a workspace across devices, but the application itself still loaded before a user proved access.
   - **After:** `ACCESS_PROFILE=token_required` puts a small server-rendered sign-in page in front of every workspace route, disables anonymous use and public credential issuance, and exchanges an operator-issued portable credential for a shorter-lived browser session. The reusable credential is never exposed to normal application JavaScript after redemption. Open mode keeps its existing anonymous-first behavior.

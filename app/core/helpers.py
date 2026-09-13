@@ -173,7 +173,7 @@ def get_authentication_result():
         request.headers,
         cookies=(
             request.cookies
-            if str(active_cfg.get("access_profile") or "open") == "token_required"
+            if str(active_cfg.get("access_profile") or "open") in {"token_required", "oidc_required", "mixed"}
             else None
         ),
         browser_session_idle_seconds=idle_seconds,

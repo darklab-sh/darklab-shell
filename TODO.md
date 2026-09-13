@@ -8,7 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-  - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
 - [Technical Debt](#technical-debt)
   - [Retire the one-time principal cutover tooling](#retire-the-one-time-principal-cutover-tooling)
 - [Feature Enhancements](#feature-enhancements)
@@ -30,11 +29,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** The remaining planned access work for v3.0.0 covers managed OpenID Connect sign-in. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.0 delivery scope.** Managed sign-in is implemented; production-like staging qualification remains the access release gate. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
 
-Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile and managed-sign-in work in reviewable slices with explicit transition tests.
+Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile changes reviewable with explicit transition tests.
 
-Exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps before starting OpenID Connect. Once every in-scope TODO is removed, both database backends and deployment profiles pass qualification, and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
+Exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Once the release gates pass on both database backends and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
@@ -88,25 +87,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-### Add managed sign-in through OpenID Connect
-
-Let operators point a deployment at an existing identity provider without darklab_shell collecting names, email addresses, or passwords. Scope this entry only after the restricted token profile has real deployment feedback.
-
-- [ ] Implement the provider flow:
-  - Use the authorization-code flow with current state, nonce, PKCE, issuer, signature, audience, redirect, and expiry validation through a maintained OIDC client library.
-  - Persist only the provider issuer and subject needed for a stable credential. Make display name optional and do not require or retain email, real name, or unrelated profile claims.
-- [ ] Define provisioning, linking, and configuration coherence:
-  - Support disabled, invite/allowlist, and automatic provisioning policies so an operator controls whether a valid identity-provider user may create a principal.
-  - Validate the access profile and provisioning policy together at startup and refuse to start on an incoherent pair, such as a profile requiring managed sign-in while provisioning is disabled. The stated goal is explicit profiles rather than interacting booleans, and these are two dimensions that can still contradict.
-  - Let an existing credential principal link a provider identity after proving possession of both credentials. Require recent authentication for credential linking, unlinking, recovery changes, and session-wide revocation.
-- [ ] Define failure and recovery behavior:
-  - Define local logout, provider logout guidance, provider-unavailable behavior, identity-provider subject changes, and the recovery path when a provider credential is the principal's only authenticator.
-  - Keep initial team roles managed by darklab_shell. Treat identity-provider group-to-team or group-to-role mapping as a separate follow-up decision rather than silently granting capabilities from unreviewed claims.
-- [ ] Qualify this entry before it ships:
-  - Extend the mode matrix and add browser coverage for provider sign-in success, provider failure, linking, and unlinking.
-  - Threat-model provider compromise, subject reuse, privilege changes, and background-work authorization. Record accepted boundaries in `DECISIONS.md`.
-  - Update `README.md`, `FEATURES.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `DECISIONS.md`, `tests/README.md`, release drafts, and `CHANGELOG.md`. Keep current test counts and the test appendix synchronized.
 
 ## Technical Debt
 

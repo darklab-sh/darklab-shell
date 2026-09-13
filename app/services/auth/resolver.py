@@ -60,13 +60,15 @@ class AuthenticatedContext:
     personal_workspace_id: str
     workspace_storage_key: str
     credential_id: str
-    credential_type: Literal["portable", "pat"]
+    credential_type: Literal["portable", "pat", "oidc"]
     authentication_method: AuthenticationMethod
     credential_created_at: str = ""
     credential_last_used_at: str | None = None
     credential_expires_at: str | None = None
     browser_session_id: str = ""
     browser_session_absolute_expires_at: str | None = None
+    browser_session_authenticated_at: str | None = None
+    oidc_identity_id: str = ""
     selected_team_id: str = ""
     role: str = ""
     capabilities: frozenset[str] = field(default_factory=frozenset)
@@ -396,13 +398,15 @@ def resolve_authentication(
                     personal_workspace_id=session.personal_workspace_id,
                     workspace_storage_key=session.workspace_storage_key,
                     credential_id=session.credential_id,
-                    credential_type="portable",
+                    credential_type="oidc" if session.oidc_identity_id else "portable",
                     authentication_method="browser_cookie",
                     credential_created_at=session.credential_created_at,
                     credential_last_used_at=session.credential_last_used_at,
                     credential_expires_at=session.credential_expires_at,
                     browser_session_id=session.id,
                     browser_session_absolute_expires_at=session.absolute_expires_at,
+                    browser_session_authenticated_at=session.authenticated_at,
+                    oidc_identity_id=session.oidc_identity_id,
                     capabilities=frozenset(PAT_SCOPES),
                 ),
                 credential_supplied=True,
