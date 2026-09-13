@@ -9,18 +9,11 @@ import json
 import logging
 from typing import Iterable
 
-from flask import request
+from blueprints.api_v1_run_streaming import sse_after_id as sse_after_id
 
 from core.helpers import get_log_session_id
 
 log = logging.getLogger("shell")
-
-
-def sse_after_id() -> str:
-    explicit = str(request.args.get("after") or "").strip()
-    if explicit:
-        return explicit
-    return str(request.headers.get("Last-Event-ID") or "0-0").strip() or "0-0"
 
 
 def log_api_run_stream_error(

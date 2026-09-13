@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from flask import Response, jsonify, request
+from flask import jsonify, request
 from blueprints import run as run_routes
-from services.auth.stream_authorization import authorized_stream
+from blueprints.run_streaming import browser_stream_response
 
 
 @run_routes.run_bp.route("/runs", methods=["POST"])
@@ -133,27 +133,8 @@ def stream_brokered_run(run_id):
     after_id = str(request.args.get("after", "0-0") or "0-0")
     owner_client_id = run_routes._active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = run_routes._active_run_owner_value(request.args.get("tab_id", ""))
-    stream = authorized_stream(
-        run_routes.stream_run_events(run_id, after_id=after_id), run_id=run_id, team_id=owner_scope.team_id,
-    )
-
-    def generate():
-        last_touch_monotonic = None
-        try:
-            for item in stream:
-                if owner_client_id:
-                    last_touch_monotonic = run_routes._maybe_touch_active_run_owner(
-                        run_id,
-                        owner_client_id,
-                        owner_tab_id,
-                        last_touch_monotonic=last_touch_monotonic,
-                    )
-                yield item
-        finally:
-            stream.close()
-
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    return browser_stream_response(
+        run_routes.stream_run_events(run_id, after_id=after_id),
+        run_id=run_id, team_id=owner_scope.team_id,
+        owner_client_id=owner_client_id, owner_tab_id=owner_tab_id,
     )

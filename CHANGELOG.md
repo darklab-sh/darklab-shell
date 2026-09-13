@@ -103,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Stream revocation handling stays within the module-size limits.** Shared browser delivery, API response construction, local PTY reads, and Redis timeout classification have focused helpers; route permissions, stream cleanup, and revocation behavior stay covered by the existing regressions.
 - **Team form refreshes preserve typing and clicks.** Refreshing the Team list keeps the current create, join, or recovery form mounted, so an update cannot replace a focused field or the Submit button during a click.
 - **The browser access-profile qualification has enough time to complete its full journey on CI.** Its per-test budget covers sign-in, protected reads, personal and Team writes, and session recovery; individual assertions keep their existing deadlines.
 - **Cross-site requests can't clear an open browser's saved workspace access.** The unused storage-clearing HTTP endpoint is removed. The existing Access-panel action still clears local access when the user chooses it.
