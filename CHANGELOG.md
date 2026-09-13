@@ -99,6 +99,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **OIDC browser checks no longer stall after provider linking.** The test waits for the provider redirect to load the application before checking the linked workspace, avoiding an unnecessary second navigation that could time out on CI.
 - **Restricted sign-in now shows the right access state in the HUD.** A valid browser session displays the same masked `crd_…••••` hint as open mode, and the mobile menu shows **Kept**, instead of incorrectly calling the workspace anonymous. The hint comes from safe authenticated metadata; the portable credential stays out of normal browser JavaScript.
 - **Options → Access now shows only the actions that fit the current workspace.** Anonymous browsers can keep or open a workspace, an invalid saved credential shows only its removal action, and kept workspaces show credential-management actions without the anonymous controls. The Credentials section, credential cards, and existing-credential form now have consistent spacing, so headings, card contents, and form buttons don't crowd nearby controls or borders. Browser tests cover these states and spacing in source and bundled assets.
 - **Markdown linting no longer pulls in a vulnerable TOML parser.** The existing markdownlint toolchain now resolves patched `smol-toml` 1.8.0 through a scoped dependency override.

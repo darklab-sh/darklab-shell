@@ -44,15 +44,15 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
     await openAccess(page)
     await expect(page.locator('#options-access-oidc-link')).toBeVisible()
     await Promise.all([
+      page.waitForEvent('domcontentloaded'),
       page.waitForResponse(response => new URL(response.url()).pathname === '/auth/oidc/callback'),
       page.locator('#options-access-oidc-link').click(),
     ])
+    await ensurePromptReady(page)
     await expect.poll(async () => {
       const response = await page.request.get('/auth/oidc/identity')
       return response.ok() && (await response.json()).linked
     }).toBe(true)
-    await page.goto('/')
-    await ensurePromptReady(page)
     await openAccess(page)
     await expect(page.locator('#options-access-oidc-unlink')).toBeVisible()
     await page.locator('#options-access-oidc-unlink').click()
