@@ -623,7 +623,6 @@ These routes establish and manage pseudonymous principal credentials. Authentica
 | `POST` | `/auth/principals` | Atomically attaches the caller's validated anonymous workspace to a new principal and returns the first portable credential once. |
 | `POST` | `/auth/credentials/redeem` | Validates a portable credential submitted in the JSON body and returns its safe authenticated context without retaining or echoing the secret. Restricted deployments also set a protected browser session. |
 | `GET` | `/auth/principal` | Returns the current authenticated principal, workspace, credential type, and capabilities; PAT callers need `identity:read`. |
-| `POST` | `/auth/local-access/clear` | Returns a no-store response that tells the browser to clear its local identity and credential storage. |
 | `POST` | `/auth/logout` | Revokes the current browser session and clears its session and CSRF cookies. |
 | `POST` | `/auth/sessions/revoke-all` | Revokes every browser session for the current principal and clears the current browser cookies. |
 | `GET` | `/auth/credentials` | Lists safe credential metadata for a portable credential, or only the calling PAT's metadata when that PAT has `identity:read`. |

@@ -514,14 +514,6 @@ def current_principal():
     })
 
 
-@auth_bp.post("/local-access/clear")
-def clear_local_access():
-    """Ask the browser to clear local identity and credential storage."""
-    response = current_app.response_class(status=204)
-    response.headers["Clear-Site-Data"] = '"storage"'
-    return _no_store(response)
-
-
 @auth_bp.post("/logout")
 def logout():
     context = require_authenticated_context()

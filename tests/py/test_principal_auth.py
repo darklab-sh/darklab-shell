@@ -727,6 +727,16 @@ def test_secret_bearing_auth_routes_are_post_only():
     assert all(route_methods == {"OPTIONS", "POST"} for route_methods in methods.values())
 
 
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://unrelated.example", "Sec-Fetch-Site": "cross-site"}])
+def test_removed_local_storage_clear_route_cannot_erase_browser_identity(headers):
+    from conftest import make_test_app
+
+    client = make_test_app().test_client()
+    response = client.post("/auth/local-access/clear", headers=headers, base_url="https://localhost")
+    assert response.status_code == 404
+    assert "Clear-Site-Data" not in response.headers
+
+
 def test_anonymous_upgrade_rekeys_rows_in_place_and_preserves_fts_and_workspace(
     ownership_cutover_db,
     tmp_path,
