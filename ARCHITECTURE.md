@@ -2405,6 +2405,8 @@ Active process tracking (`run_id →  → pid`) was previously a third table (`a
 
 ### Authentication And Session Identity
 
+Before the access-profile gate, scoped PATs are confined to `/api/v1/` and an explicit allowlist of `/auth` identity-read and self-revocation handlers. Those handlers enforce their own scope and self-only rules. Browser product routes never accept a PAT, including a PAT with every scope; `oidc_required` further limits PATs to API v1.
+
 Every request first passes through one typed authentication resolver. It distinguishes a request with no credential from valid, malformed, unknown, expired, revoked, and disabled-principal outcomes. A canonical anonymous UUID creates a separate anonymous context; it is never represented by an empty owner or the shared literal `anonymous`. Portable credentials use `X-Darklab-Credential`, scoped PATs use `Authorization: Bearer`, and restricted browsers use the signed HttpOnly session cookie. Sending conflicting identity transports or any supplied-but-invalid credential returns an explicit authentication failure before route code can resolve an owner, read personal data, or create workspace paths.
 
 A valid principal credential resolves to an immutable request context containing the principal id, personal-workspace id, credential id and type, authentication method, selected team fields, role, and capabilities. `OwnerContext` accepts that typed result or a validated anonymous UUID; it rejects missing identities and authentication failures. Credential last-used writes are bounded, and unsuccessful resolution is audited by failure class without retaining the submitted bearer value or a stable cross-deployment fingerprint.

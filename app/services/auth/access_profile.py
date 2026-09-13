@@ -49,6 +49,14 @@ RESTRICTED_PUBLIC_ENDPOINTS = frozenset({
 })
 RESTRICTED_SHARE_ENDPOINT = "history.get_share"
 RESTRICTED_SHARE_CREATE_ENDPOINT = "history.save_share"
+# These handlers enforce identity:read and/or restrict a PAT to itself.
+# No browser data or session-management endpoint may accept a scoped PAT.
+PAT_AUTH_ENDPOINTS = frozenset({
+    "auth.current_principal",
+    "auth.credentials",
+    "auth.credential_durable_work",
+    "auth.revoke_credential",
+})
 PRIVILEGE_CHANGE_ENDPOINTS = frozenset({
     "teams.session_teams_create",
     "teams.session_teams_join",
@@ -93,6 +101,19 @@ def _unauthorized_response():
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error("credential_required", "Sign in is required.")), 401
     return jsonify({"error": "credential_required", "message": "Sign in is required."}), 401
+
+
+def enforce_pat_route_access(authentication_result):
+    """Keep bearer tokens inside interfaces that enforce their scope policy."""
+    context = authentication_result.context
+    if not isinstance(context, AuthenticatedContext) or context.credential_type != "pat":
+        return None
+    if request.path.startswith("/api/v1/") or request.endpoint in PAT_AUTH_ENDPOINTS:
+        return None
+    return jsonify({
+        "error": "pat_route_forbidden",
+        "message": "Personal access tokens use API v1 and cannot access browser routes.",
+    }), 403
 
 
 def enforce_restricted_access(authentication_result):

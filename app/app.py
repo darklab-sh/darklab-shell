@@ -61,6 +61,7 @@ from services.auth.rate_limit import check_failed_redemption
 from services.auth.resolver import public_lookup_id_from_headers
 from services.auth.access_profile import (
     enforce_browser_csrf,
+    enforce_pat_route_access,
     enforce_restricted_access,
     is_public_endpoint,
     is_restricted,
@@ -425,7 +426,11 @@ def _enforce_authentication_resolution():
 
 
 def _enforce_access_profile():
-    return enforce_restricted_access(get_authentication_result())
+    result = get_authentication_result()
+    pat_rejection = enforce_pat_route_access(result)
+    if pat_rejection is not None:
+        return pat_rejection
+    return enforce_restricted_access(result)
 
 
 def _enforce_csrf():

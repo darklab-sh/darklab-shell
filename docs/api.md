@@ -58,6 +58,8 @@ names, and fixed choices such as output formats and notification channel kinds.
 
 Use a scoped PAT in the standard bearer header. Browser credentials and anonymous browser identities aren't accepted by `/api/v1`.
 
+PATs can't access browser routes such as `/history`, `/projects`, or `/workspace/files`, even with every scope selected. Use their API v1 equivalents. The supported `/auth` identity reads and self-revocation handlers retain their scope and self-only restrictions; `oidc_required` accepts PATs only through API v1.
+
 ```bash
 curl -H "Authorization: Bearer $DARKLAB_PAT" \
   http://localhost:8888/api/v1/whoami
