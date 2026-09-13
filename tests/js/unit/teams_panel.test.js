@@ -391,7 +391,7 @@ describe('Options Teams permissions UI', () => {
     expect(showToast).toHaveBeenCalledWith('Personal scope selected', 'success')
   })
 
-  it('preserves in-progress create form values when teams refresh', async () => {
+  it('preserves the active form and selection when teams refresh', async () => {
     const apiFetch = buildApiFetch({ role: 'owner' })
     const harness = await loadAppFns({
       apiFetch,
@@ -408,9 +408,19 @@ describe('Options Teams permissions UI', () => {
     form.querySelector('[name="slug"]').value = 'refresh-race-team'
     form.querySelector('[name="display_name"]').value = 'Owner'
 
+    const name = form.querySelector('[name="name"]')
+    name.focus()
+    name.setSelectionRange(2, 7)
+    const submit = form.querySelector('button[type="submit"]')
+
     await harness.refreshOptionsTeams()
 
     const refreshedForm = document.querySelector('[data-team-form="create"]')
+    expect(refreshedForm).toBe(form)
+    expect(refreshedForm.querySelector('button[type="submit"]')).toBe(submit)
+    expect(document.activeElement).toBe(name)
+    expect([name.selectionStart, name.selectionEnd]).toEqual([2, 7])
+    expect(submit.disabled).toBe(false)
     expect(refreshedForm.querySelector('[name="name"]').value).toBe('Refresh Race Team')
     expect(refreshedForm.querySelector('[name="slug"]').value).toBe('refresh-race-team')
     expect(refreshedForm.querySelector('[name="display_name"]').value).toBe('Owner')

@@ -1002,6 +1002,8 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 **Session Entity Atlas surface.** Atlas is a top-level overlay backed by its own service, schema, and routes. The full surface contract — entity dedup, transcript-token wiring, intel snapshots, findings triage, run-delete cleanup, and bulk-delete confirmations — lives in **Atlas and Entity Model**.
 
+**Team form continuity.** The Options Team panel keeps its current create, join, or recovery form mounted during list and detail refreshes. Only changing or closing the form replaces it, preserving focus, text selection, and pointer targets while background requests finish.
+
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` plus four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. These helpers are ES modules with named exports, and callers import the helper they use instead of relying on load order. The helper modules also keep documented compatibility fallbacks for legacy harnesses and cyclic browser boundaries, but new code should treat the named exports as the contract.
 
 - `refocusComposerAfterAction({ preventScroll = true, defer = false })` in `ui_helpers.js` is the canonical post-action composer refocus. Handles mobile-skip, `preventScroll` default, and `getVisibleComposerInput()` target resolution in one place. `defer: true` preserves legacy `setTimeout(0)` semantics for chrome-close paths that need a pending blur to finish first. 46+ call sites across `controller.js`, `app.js`, `tabs.js`, `runner.js`, `welcome.js`, `autocomplete.js`, `shell_chrome.js`, and `history.js` route through it.

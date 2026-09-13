@@ -406,8 +406,8 @@
       "hash": "5b1cf0950898e3b396f3b7d36d31eb4552ce350cbf1b928d876c02a298708c31"
     },
     "/static/js/features/preferences/teams_panel.js": {
-      "path": "/static/build/static-teams-panel.a47d1f247245.js",
-      "hash": "30003e1b9e337f43ece7f63a7b34832d19ce9d73f0b3514d93f3181882976d64"
+      "path": "/static/build/static-teams-panel.e491f95979dc.js",
+      "hash": "91ceae444fcbc0a765aabd0918691bf3672f7502961ca414ef234d3e6f4bbae8"
     },
     "/static/js/features/probes/probe_terminal.js": {
       "path": "/static/build/static-probe-terminal.55eb6daffe0b.js",
