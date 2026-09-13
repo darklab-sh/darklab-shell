@@ -103,7 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Scoped API tokens can't bypass their permissions through browser routes.** A shared request gate restricts PATs to API v1 and the explicitly supported identity and self-revocation handlers in every access profile. Regression coverage checks browser reads, writes, run streams, credential creation, and session revocation with both minimal and full-scope PATs.
+- **Scoped API tokens can't bypass their permissions through browser routes.** A shared request gate restricts PATs to API v1 and the explicitly supported identity and self-revocation handlers in every access profile. SQLite coverage checks browser reads, writes, run streams, credential creation, and session revocation with both minimal and full-scope PATs; PostgreSQL repeats the browser read/write denial in every profile and asset mode.
 - **The PostgreSQL credential-resolution test now uses an explicitly typed dict-row connection.** This clears its editor diagnostic without changing the query or result handling.
 - **PostgreSQL access-profile browser startup no longer imports unrelated CVE feeds.** Isolated Playwright servers skip that work, and the PostgreSQL browser job allows more time for fresh-schema startup.
 - **Branch images now pick up fixed Debian glibc packages.** The runtime install explicitly refreshes `libc6` and `libc-bin`, and branch CI can bypass the runtime cache for a security recheck without rebuilding the compiled tool stages.

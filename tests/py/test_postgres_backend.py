@@ -1331,9 +1331,12 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
         assert api_principal.status_code == 200
         assert api_principal.get_json()["principal"]["id"] == principal_id
         assert api_client.get("/api/v1/projects", base_url=ORIGIN, headers=pat_headers).status_code == 200
-        assert api_client.get("/projects", base_url=ORIGIN, headers=pat_headers).status_code == (
-            401 if profile == "oidc_required" else 200
-        )
+        for method in ("GET", "POST"):
+            browser_projects = api_client.open(
+                "/projects", method=method, base_url=ORIGIN, headers=pat_headers, json={},
+            )
+            assert browser_projects.status_code == 403
+            assert browser_projects.get_json()["error"] == "pat_route_forbidden"
     finally:
         close_postgres_pool()
         reset_master_key_cache_for_tests()
