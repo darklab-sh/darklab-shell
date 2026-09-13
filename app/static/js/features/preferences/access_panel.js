@@ -29,6 +29,8 @@ const elements = {
   discardInvalid: document.getElementById('options-access-discard-invalid-btn'),
   add: document.getElementById('options-access-add-btn'),
   remove: document.getElementById('options-access-remove-btn'),
+  removeAll: document.getElementById('options-access-remove-all-btn'),
+  sessionReauth: document.getElementById('options-access-session-reauth'),
   refresh: document.getElementById('options-access-refresh-btn'),
   credentialsSection: document.getElementById('options-access-credentials-section'),
   credentials: document.getElementById('options-access-credentials'),
@@ -61,6 +63,7 @@ function _markAccessPanelReady() {
     elements.discardInvalid,
     elements.add,
     elements.remove,
+    elements.removeAll,
     elements.refresh,
   ].forEach((control) => {
     if (control) control.disabled = false;
@@ -123,6 +126,10 @@ async function _request(url, options = {}) {
 }
 
 function _setIdentityLayout(authenticated) {
+  const browserSession = importedGetBrowserIdentitySnapshot().kind === 'browser_session';
+  if (elements.remove) elements.remove.textContent = browserSession ? 'Sign out' : 'Remove from browser';
+  if (elements.removeAll) elements.removeAll.hidden = !authenticated || !browserSession;
+  if (!authenticated && elements.sessionReauth) elements.sessionReauth.hidden = true;
   if (elements.anonymousActions) elements.anonymousActions.hidden = authenticated;
   if (elements.authenticatedActions) elements.authenticatedActions.hidden = !authenticated;
   if (elements.credentialsSection) elements.credentialsSection.hidden = !authenticated;
@@ -555,18 +562,20 @@ async function _handleCredentialAction(action, credential, returnFocus = null) {
 }
 
 async function _removeLocalAccess({ invalid = false } = {}) {
+  const identity = importedGetBrowserIdentitySnapshot();
+  const browserSession = identity.kind === 'browser_session';
   const choice = await importedShowConfirm({
-    body: invalid
-      ? 'Remove the invalid credential saved in this browser and continue with a new anonymous workspace?'
+    body: browserSession
+      ? `Sign out this browser? Your workspace stays saved.${currentAuthenticationType === 'oidc' ? ' Your identity provider stays signed in.' : ''}`
+      : invalid ? 'Remove the invalid credential saved in this browser and continue with a new anonymous workspace?'
       : 'Remove this credential from this browser? The credential will remain active on other devices until you revoke it.',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'remove', label: 'Remove from browser', role: 'danger' },
+      { id: 'remove', label: browserSession ? 'Sign out' : 'Remove from browser', role: 'destructive' },
     ],
     refocusOnResolve: false,
   });
   if (choice !== 'remove') return;
-  const identity = importedGetBrowserIdentitySnapshot();
   if (identity.kind === 'browser_session') {
     try {
       await _request('/auth/logout', { method: 'POST' });
@@ -589,6 +598,33 @@ async function _removeLocalAccess({ invalid = false } = {}) {
   importedShowToast?.('Access removed from this browser');
 }
 
+async function _signOutEverywhere() {
+  const choice = await importedShowConfirm({
+    body: `Sign out every browser using this workspace, including this one? Saved credentials and API tokens remain usable.${currentAuthenticationType === 'oidc' ? ' Your identity provider stays signed in.' : ''}`,
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'sign-out-all', label: 'Sign out everywhere', role: 'destructive' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'sign-out-all') return;
+  elements.removeAll.disabled = true;
+  if (elements.sessionReauth) elements.sessionReauth.hidden = true;
+  try {
+    await _request('/auth/sessions/revoke-all', { method: 'POST' });
+    importedRedirectToSignIn();
+  } catch (error) {
+    _setMessage(error.message || 'Could not sign out every browser. Try again.', 'error');
+    if (error.code === 'recent_authentication_required' && elements.sessionReauth) {
+      elements.sessionReauth.hidden = false;
+      elements.sessionReauth.focus({ preventScroll: true });
+    }
+  } finally {
+    elements.removeAll.disabled = false;
+  }
+}
+
 async function openAccessAction(action = '') {
   pendingAction = String(action || '').toLowerCase();
   await refreshAccessPanel();
@@ -608,6 +644,7 @@ elements.use?.addEventListener('click', () => _openRedemption(elements.use));
 elements.discardInvalid?.addEventListener('click', () => void _removeLocalAccess({ invalid: true }));
 elements.add?.addEventListener('click', () => _showEditor('create', null, elements.add));
 elements.remove?.addEventListener('click', () => void _removeLocalAccess());
+elements.removeAll?.addEventListener('click', () => void _signOutEverywhere());
 elements.refresh?.addEventListener('click', () => void refreshAccessPanel({ force: true }));
 elements.redemptionApply?.addEventListener('click', () => void _redeemCredential());
 elements.oidcLink?.addEventListener('click', () => void _linkOIDC());

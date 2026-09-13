@@ -85,15 +85,15 @@ test.describe('restricted access profile', () => {
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expect(page.locator('.options-access-row')).toContainText('Current')
 
-    const logoutStatus = await page.evaluate(async () => (await apiFetch('/auth/logout', {
-      method: 'POST',
-    })).status)
-    expect(logoutStatus).toBe(204)
-    await page.evaluate(() => { if (typeof apiFetch === 'function') void apiFetch('/projects') })
+    const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/logout')
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+    await expect(page.locator('#confirm-host')).toContainText('Your workspace stays saved')
+    await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
+    expect((await logoutResponse).status()).toBe(204)
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   })
 
-  test('keeps invalid credentials off the page and supports session-wide revocation', async ({ page }) => {
+  test('keeps invalid credentials off the page and signs out every browser through Access', async ({ page, browser }) => {
     await openSignIn(page)
     await page.getByLabel('Access credential').fill('not-a-credential')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -101,12 +101,23 @@ test.describe('restricted access profile', () => {
     await expect(page.getByLabel('Access credential')).toHaveValue('')
 
     await signIn(page)
-    const status = await page.evaluate(async () => (await apiFetch('/auth/sessions/revoke-all', {
-      method: 'POST',
-    })).status)
-    expect(status).toBe(200)
-    await page.evaluate(() => { if (typeof apiFetch === 'function') void apiFetch('/projects') })
-    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+    const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+    const peer = await peerContext.newPage()
+    try {
+      await openSignIn(peer)
+      await signIn(peer)
+      await openRailAction(page, 'options')
+      await page.locator('#options-tab-access').click()
+      const revoked = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/sessions/revoke-all')
+      await page.getByRole('button', { name: 'Sign out everywhere', exact: true }).click()
+      await page.locator('#confirm-host [data-confirm-action-id="sign-out-all"]').click()
+      expect((await revoked).status()).toBe(200)
+      await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+      // Raw fetch observes the other browser's denial without navigating it.
+      expect(await peer.evaluate(async () => (await fetch('/projects')).status)).toBe(401)
+    } finally {
+      await peerContext.close()
+    }
   })
 
   test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context }) => {

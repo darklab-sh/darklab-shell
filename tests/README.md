@@ -209,6 +209,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.
 
+Restricted Access browser checks exercise the local and session-wide sign-out buttons, including rejection of a second browser after session-wide sign-out. Unit checks cover provider-specific copy and the recent-sign-in recovery link.
+
 Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits.
 
 Each browser qualification case has a two-minute budget for its full sign-in, scope, and recovery journey; individual assertions still use their own deadlines.

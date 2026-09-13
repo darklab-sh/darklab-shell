@@ -78,6 +78,8 @@ function renderMarkup() {
       <div id="options-access-authenticated-actions" hidden>
         <button id="options-access-add-btn" disabled></button>
         <button id="options-access-remove-btn" disabled></button>
+        <button id="options-access-remove-all-btn" disabled hidden></button>
+        <a id="options-access-session-reauth" href="/auth/sign-in?next=%2F" hidden>Sign in again</a>
       </div>
       <button id="options-access-refresh-btn" disabled></button>
       <div id="options-access-credentials-section" hidden>
@@ -421,6 +423,45 @@ describe('Access panel', () => {
     expect(JSON.parse(options.body)).toEqual({ type: 'pat', label: 'CLI work', expires_in_days: 1, scopes })
     expect(session.activateAccessCredential).not.toHaveBeenCalled()
     expect(document.getElementById('options-access-reveal').textContent).not.toContain(token)
+  })
+
+  it.each(['portable', 'oidc'])('shows session sign-out wording for %s browsers', async kind => {
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', credentialId: '', validFormat: true }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => response(url === '/auth/principal'
+      ? { authentication: { credential_id: kind === 'portable' ? CURRENT_ID : '', credential_type: kind } }
+      : { credentials: [] }))
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-remove-btn').textContent).toBe('Sign out')
+    expect(document.getElementById('options-access-remove-all-btn').hidden).toBe(false)
+    document.getElementById('options-access-remove-btn').click()
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls[0][0].body).toContain('Your workspace stays saved')
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls[0][0].body.includes('identity provider')).toBe(kind === 'oidc')
+    globalThis.__accessPanelTest.identity = { kind: 'credential', credentialId: CURRENT_ID, validFormat: true }
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-remove-btn').textContent).toBe('Remove from browser')
+    expect(document.getElementById('options-access-remove-all-btn').hidden).toBe(true)
+  })
+
+  it.each([false, true])('signs out everywhere or offers recent sign-in when required: %s', async needsReauth => {
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', credentialId: '', validFormat: true }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('sign-out-all')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => url === '/auth/sessions/revoke-all'
+      ? response(needsReauth ? { error: 'recent_authentication_required', message: 'Sign in again first.' } : { revoked_sessions: 2 }, needsReauth ? 403 : 200)
+      : response(url === '/auth/principal' ? { authentication: { credential_type: 'oidc' } } : { credentials: [] }))
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.getElementById('options-access-remove-all-btn').click()
+    await vi.waitFor(() => expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith('/auth/sessions/revoke-all', expect.objectContaining({ method: 'POST' })))
+    if (needsReauth) {
+      await vi.waitFor(() => expect(document.getElementById('options-access-session-reauth').hidden).toBe(false))
+      expect(document.getElementById('options-access-session-reauth').getAttribute('href')).toBe('/auth/sign-in?next=%2F')
+      expect(document.activeElement).toBe(document.getElementById('options-access-session-reauth'))
+      expect(session.redirectToSignIn).not.toHaveBeenCalled()
+    } else {
+      await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+    }
   })
 
   it('shows safe provider-link actions only for a credential-backed browser session', async () => {
