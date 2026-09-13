@@ -1713,6 +1713,9 @@ let importedProjectWorkspaceShell;
     _setValueColor(hudTabsEl, running > 0 ? 'hud-value-amber' : 'hud-muted');
   }
 
+  let browserSessionCredentialId = '';
+  let browserSessionCredentialSequence = 0;
+
   function _renderSession() {
     const identity = typeof importedGetBrowserIdentitySnapshot === 'function'
       ? importedGetBrowserIdentitySnapshot()
@@ -1725,6 +1728,17 @@ let importedProjectWorkspaceShell;
         _setValueColor(hudSessionEl, identity.credentialId ? 'hud-value-green' : 'hud-value-red');
       }
       if (mobileAccessStateEl) mobileAccessStateEl.textContent = identity.credentialId ? 'Kept' : 'Check';
+    } else if (identity.kind === 'browser_session') {
+      if (hudSessionEl) {
+        hudSessionEl.textContent = browserSessionCredentialId
+          ? `${browserSessionCredentialId.slice(0, 12)}••••`
+          : 'SESSION';
+        hudSessionEl.title = browserSessionCredentialId
+          ? 'Access credential active through a browser session'
+          : 'Signed-in browser session';
+        _setValueColor(hudSessionEl, 'hud-value-green');
+      }
+      if (mobileAccessStateEl) mobileAccessStateEl.textContent = 'Kept';
     } else {
       if (hudSessionEl) {
         hudSessionEl.textContent = 'ANON';
@@ -1732,6 +1746,30 @@ let importedProjectWorkspaceShell;
         _setValueColor(hudSessionEl, 'hud-muted');
       }
       if (mobileAccessStateEl) mobileAccessStateEl.textContent = 'Anonymous';
+    }
+  }
+
+  async function _refreshBrowserSessionCredentialHint() {
+    const sequence = ++browserSessionCredentialSequence;
+    browserSessionCredentialId = '';
+    _renderSession();
+    const identity = typeof importedGetBrowserIdentitySnapshot === 'function'
+      ? importedGetBrowserIdentitySnapshot()
+      : null;
+    if (identity?.kind !== 'browser_session') return;
+    try {
+      const response = await _shellApiFetch('/auth/principal', { cache: 'no-store' });
+      if (!response?.ok) return;
+      const payload = await response.json();
+      if (sequence !== browserSessionCredentialSequence) return;
+      const credentialId = payload?.authentication?.credential_id;
+      if (typeof credentialId === 'string' && /^crd_[0-9a-f]{32}$/.test(credentialId)) {
+        browserSessionCredentialId = credentialId;
+      }
+    } catch (_) {
+      // The browser session remains the safe fallback when metadata is unavailable.
+    } finally {
+      if (sequence === browserSessionCredentialSequence) _renderSession();
     }
   }
 
@@ -5255,11 +5293,12 @@ let importedProjectWorkspaceShell;
     }
   });
   window.addEventListener('app:identity-changed', () => {
-    _renderSession();
+    void _refreshBrowserSessionCredentialHint();
     loadActiveProjectContext().catch(() => {});
   });
   document.addEventListener('visibilitychange', () => {
     _startHudStatusPoll({ pollNow: document.visibilityState === 'visible' });
+    if (document.visibilityState === 'visible') void _refreshBrowserSessionCredentialHint();
   });
   window.addEventListener('resize', () => {
     _scheduleProjectFilterSortDividerSync(projectExplorerBody);
@@ -5312,7 +5351,7 @@ let importedProjectWorkspaceShell;
   // Initial render and pollers.
   _renderLastExit();
   _renderTabs();
-  _renderSession();
+  void _refreshBrowserSessionCredentialHint();
   _renderClock();
   _renderLatency();
   _renderUptime();

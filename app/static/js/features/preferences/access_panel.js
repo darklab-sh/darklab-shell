@@ -122,6 +122,8 @@ function _renderAnonymous({ invalid = false } = {}) {
   credentials = [];
   _setIdentityLayout(false);
   if (elements.credentials) elements.credentials.replaceChildren();
+  if (elements.keep) elements.keep.hidden = invalid;
+  if (elements.use) elements.use.hidden = invalid;
   if (elements.discardInvalid) elements.discardInvalid.hidden = !invalid;
   if (elements.summary) elements.summary.textContent = invalid ? 'Credential needs attention' : 'Anonymous workspace';
   if (elements.summaryDetail) {

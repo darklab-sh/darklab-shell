@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.53cad0a75c32.css",
-      "hash": "53cad0a75c3214660088fe9e16427bb1fcf89db956876c5166d7c75b30eca054",
+      "path": "/static/build/app.2c18b4baedf4.css",
+      "hash": "2c18b4baedf42ff1b7aed4bd3e3aa15034cc567cdde1b1012c9373039e5229ff",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -21,7 +21,7 @@
       "source_hashes": {
         "/static/css/core/fonts.css": "914c2b233046e7c8db325a5b6ba796de9bf8ca106b0b5c120c1e4738ddbe4020",
         "/static/css/core/base.css": "905154591bdd0a119b99e830dacc4ed405a53ff5630677e53b31c9b01ce4fb7b",
-        "/static/css/shell.css": "612d8ed8f51264b04869c1dafb2afe1ca6c04dd5a3719968cf3c914e752d9777",
+        "/static/css/shell.css": "2aafd0cb28b75ae100a8e2d91826d61856f5b1393f4c01f81e7eb939c82dc05a",
         "/static/css/primitives/components.css": "ca337727884ba26edc956d153ff26317fca1f064ef67a53a33b0ebdae5beca29",
         "/static/css/welcome.css": "a903960078807dddbd3b361e1ae546fde87411f0b29e035b1659dffe346f6ae3",
         "/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.853bde971b11.js",
-      "hash": "eef97e8b39049d44d91a18286e53ae080b0c80ce64bb12bdb607fcff380c190b",
+      "path": "/static/build/shell-bootstrap.dabf82ba6d5c.js",
+      "hash": "77cdb6a68ba62077d708d61fdf5dc67f808c6357c92eb033da26fd71cd9c7f82",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -258,7 +258,7 @@
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "7cd66ef3312896ce2b2506bac94b81d2b1b4aa5b32614d85097b586d4860355f",
         "/static/js/shell_bootstrap.entry.js": "3eac50c34a8e11eddc8a42a323d52308b417c777c6d05e66f16b9d40e84448f3",
-        "/static/js/shell_chrome.js": "b5c08537c0bd746825acf2ea20c1545fc014e4437a3542c573516dd70397582e",
+        "/static/js/shell_chrome.js": "19807069b0fea1194d3d7f628f10f2a3d44df4588dc159ba9868522dfe6721da",
         "/static/js/tabs.js": "9ce291966d50e6244ff1ede4d9c7cf5484735e24ab0a3dae9be74552131b33ce",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
         "/static/js/ui/cleanup_reasons.js": "51a7d0c8cd780bc72234b7d4bf0b0ad69f1cf9bdd143a157fa0cccd719d54d4c",
@@ -394,8 +394,8 @@
       "hash": "c5bac9ec1de8739c1272771d9ad5333bfe7a2a534f1b0b697f6c25227390bf42"
     },
     "/static/js/features/preferences/access_panel.js": {
-      "path": "/static/build/static-access-panel.1211a2027016.js",
-      "hash": "2b00d0d378b02b05c1e34b88f63fbec82f947189fb03a972eac6d4743c59495b"
+      "path": "/static/build/static-access-panel.980a6ae492b9.js",
+      "hash": "904aed1f7b4fc99678e6019b47dd970519d3762ee7fe050b316e38eb8775087e"
     },
     "/static/js/features/preferences/notification_channels.js": {
       "path": "/static/build/static-notification-channels.8b2884847da6.js",

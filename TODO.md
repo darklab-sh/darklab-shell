@@ -9,7 +9,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
   - [Add managed sign-in through OpenID Connect](#add-managed-sign-in-through-openid-connect)
-- [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
   - [Retire the one-time principal cutover tooling](#retire-the-one-time-principal-cutover-tooling)
 - [Feature Enhancements](#feature-enhancements)
@@ -108,15 +107,6 @@ Let operators point a deployment at an existing identity provider without darkla
   - Extend the mode matrix and add browser coverage for provider sign-in success, provider failure, linking, and unlinking.
   - Threat-model provider compromise, subject reuse, privilege changes, and background-work authorization. Record accepted boundaries in `DECISIONS.md`.
   - Update `README.md`, `FEATURES.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `DECISIONS.md`, `tests/README.md`, release drafts, and `CHANGELOG.md`. Keep current test counts and the test appendix synchronized.
-
-## Known Issues
-
-- **Options → Access shows the wrong action buttons.** A kept workspace can show **Keep this workspace**, **Use an existing credential**, and **Remove invalid credential** beside its valid current credential. This is a display issue; the server rejects an attempt to keep an already authenticated workspace again.
-  - **Cause:** The panel marks those controls as hidden, but its CSS display rules make them visible.
-  - **Fix:** Make hidden controls stay hidden in anonymous, invalid-credential, and kept-workspace states.
-  - **Tests:** Cover those states in browser tests with source and bundled assets.
-
----
 
 ## Technical Debt
 
