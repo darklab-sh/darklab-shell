@@ -1662,6 +1662,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "rm -rf /var/lib/apt/lists/*" in dockerfile
     runtime_stage = dockerfile.split("FROM wordlist-assets AS runtime", 1)[1]
     assert "ARG APT_CACHE_EPOCH" in runtime_stage
+    assert "libc6 libc-bin" in runtime_stage
     assert runtime_stage.index('case "${APT_CACHE_EPOCH}" in') < (
         runtime_stage.index("apt-get update")
     )
@@ -2659,6 +2660,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_STAGING_KEEP_DAYS"] == "14"
     assert "RELEASE_CACHE_SCOPE" not in parsed_ci["variables"]
     assert "RELEASE_CACHE_PROBE" not in ci_config
+    postgres_browser_script = "\n".join(parsed_ci["test-js-e2e-postgres-auth-profiles"]["script"])
+    assert postgres_browser_script.count("--server-timeout 90000") == 2
     assert parsed_ci["stages"].index("cache") < parsed_ci["stages"].index("build")
     docker_build_rules = parsed_ci["docker-build"]["rules"]
     assert docker_build_rules[0]["if"] == (
@@ -2684,6 +2687,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "resolve_apt_cache_epoch.sh" in branch_build_script
     assert "$CI_PIPELINE_CREATED_AT" in branch_build_script
     assert '--build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}"' in branch_build_script
+    assert '"${BRANCH_IMAGE_FRESH_APT:-false}" = "true"' in branch_build_script
+    assert 'set -- --no-cache-filter runtime' in branch_build_script
+    assert 'docker buildx build "$@" --platform linux/amd64' in branch_build_script
     assert '.platform.architecture == "amd64"' in branch_build_script
     assert (
         "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}"

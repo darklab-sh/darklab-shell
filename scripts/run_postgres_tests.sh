@@ -10,10 +10,13 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/run_postgres_tests.sh [--host|--container|--compose] [--] [pytest args...]
+  scripts/run_postgres_tests.sh --browser [--] [Playwright helper args...]
 
 Runs the opt-in Postgres pytest lane. By default, the script uses
 DARKLAB_TEST_POSTGRES_DSN when it is set; otherwise it starts a disposable
 Postgres test container, exports the DSN, and removes the container on exit.
+The --browser lane always uses a disposable container and runs the focused
+four-profile Playwright matrix against isolated schemas.
 
 Examples:
   DARKLAB_TEST_POSTGRES_DSN=postgresql://darklab:darklab_dev_password@localhost:5432/darklab_shell \
@@ -26,6 +29,7 @@ EOF
 }
 
 mode="auto"
+browser_mode=0
 pytest_args=()
 started_container=""
 
@@ -45,6 +49,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --wait-only)
       mode="wait"
+      shift
+      ;;
+    --browser)
+      browser_mode=1
       shift
       ;;
     -h|--help)
@@ -148,13 +156,21 @@ EOF
   export DARKLAB_TEST_POSTGRES_DSN="postgresql://${postgres_user}:${postgres_password}@localhost:${mapped_port}/${postgres_db}"
 }
 
-if [ "${#pytest_args[@]}" -eq 0 ]; then
+if [ "$browser_mode" -eq 1 ]; then
+  if [ "$mode" != "auto" ] && [ "$mode" != "container" ]; then
+    echo "--browser uses a disposable Postgres container; --host and --compose aren't supported" >&2
+    exit 2
+  fi
+  mode="container"
+fi
+
+if [ "$browser_mode" -eq 0 ] && [ "${#pytest_args[@]}" -eq 0 ]; then
   pytest_args=("${default_args[@]}")
 fi
-if [ -n "${PYTEST_JUNIT_XML:-}" ]; then
+if [ "$browser_mode" -eq 0 ] && [ -n "${PYTEST_JUNIT_XML:-}" ]; then
   pytest_args+=("--junitxml=${PYTEST_JUNIT_XML}")
 fi
-if [ -n "${PYTEST_DURATIONS:-}" ]; then
+if [ "$browser_mode" -eq 0 ] && [ -n "${PYTEST_DURATIONS:-}" ]; then
   pytest_args+=("--durations=${PYTEST_DURATIONS}")
 fi
 
@@ -178,6 +194,15 @@ fi
 if [ "$mode" = "container" ]; then
   start_test_container
   wait_for_postgres
+  if [ "$browser_mode" -eq 1 ]; then
+    export PW_E2E_POSTGRES_DSN="$DARKLAB_TEST_POSTGRES_DSN"
+    export PLAYWRIGHT_BASE_PORT="${PLAYWRIGHT_BASE_PORT:-5201}"
+    export PLAYWRIGHT_SERVER_COUNT=4
+    bash scripts/run_playwright.sh \
+      --config .tooling/playwright.auth-profile-postgres.config.js \
+      "${pytest_args[@]}"
+    exit $?
+  fi
   bash scripts/run_pytest.sh "${pytest_args[@]}"
   exit $?
 fi

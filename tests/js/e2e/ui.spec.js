@@ -1335,6 +1335,7 @@ test.describe('project workspace modal', () => {
     })
     await page.locator('#project-target-submit').click()
     await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await waitForProjectTargetValue(page, projectId, 'manual-finding.playwright.example')
 
     await switchProjectTab(page, 'findings')
     await page.locator('[data-project-action="create-manual-finding"]').click()
