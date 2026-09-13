@@ -302,6 +302,7 @@ def _row_to_settings(
             "personal_workspace_id": default_session_id,
             "team_id": default_team_id,
             "enabled": False,
+            "paused_reason": "",
             "cadence_preset": _configured_default_cadence(),
             "channel_ids": [],
             "quiet_no_change": False,
@@ -316,6 +317,7 @@ def _row_to_settings(
         "personal_workspace_id": str(row["personal_workspace_id"]),
         "team_id": str(row["team_id"] or ""),
         "enabled": bool(row["enabled"]),
+        "paused_reason": str(row["paused_reason"] or ""),
         "cadence_preset": str(row["cadence_preset"] or DEFAULT_DIGEST_CADENCE),
         "channel_ids": _loads_json_list(row["channel_ids_json"]),
         "quiet_no_change": bool(row["quiet_no_change"]),
@@ -391,7 +393,7 @@ def get_digest_settings(session_id: str, project_id: str, *, team_id: str = "", 
         return None
     settings_session_id = _settings_session_id(project, session_id, team_id)
     row = conn.execute(
-        "SELECT project_id, personal_workspace_id, team_id, enabled, cadence_preset, channel_ids_json, "
+        "SELECT project_id, personal_workspace_id, team_id, enabled, paused_reason, cadence_preset, channel_ids_json, "
         "quiet_no_change, risk_escalations_enabled, last_evaluated_at, last_sent_at, created, updated "
         "FROM project_digest_settings WHERE project_id = ? AND personal_workspace_id = ? AND team_id = ?",
         (project_id, settings_session_id, team_id),
@@ -459,6 +461,7 @@ def save_digest_settings(
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?) "
         "ON CONFLICT(project_id, personal_workspace_id, team_id) DO UPDATE SET "
         "enabled = excluded.enabled, cadence_preset = excluded.cadence_preset, "
+        "paused_reason = CASE WHEN excluded.enabled THEN '' ELSE project_digest_settings.paused_reason END, "
         "channel_ids_json = excluded.channel_ids_json, quiet_no_change = excluded.quiet_no_change, "
         "risk_escalations_enabled = excluded.risk_escalations_enabled, "
         "principal_id = COALESCE(excluded.principal_id, project_digest_settings.principal_id), "
@@ -469,11 +472,11 @@ def save_digest_settings(
             project_id,
             settings_session_id,
             team_id,
-            int(enabled),
+            dialect_for_backend(get_db_backend()).boolean_param(enabled),
             cadence,
             _json_param(list(channel_ids)),
-            int(quiet_no_change),
-            int(risk_escalations_enabled),
+            dialect_for_backend(get_db_backend()).boolean_param(quiet_no_change),
+            dialect_for_backend(get_db_backend()).boolean_param(risk_escalations_enabled),
             now,
             now,
             resolved_principal_id or None,

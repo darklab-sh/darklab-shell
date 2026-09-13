@@ -165,6 +165,7 @@
     "/vendor/xterm.css"
   ],
   "excluded": [
+    "/static/js/ui/background_pause.js",
     "/static/css/styles.css",
     "/static/js/features/atlas/atlas_quick_lookup_mode.js",
     "/static/js/features/findings/finding_record_context.js",

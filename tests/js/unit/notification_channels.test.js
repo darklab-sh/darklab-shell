@@ -8,10 +8,10 @@ import { resolve } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stripEsmExports } from './helpers/extract.js'
 
-const NOTIFICATION_CHANNELS_SRC = stripEsmExports(readFileSync(
-  resolve(process.cwd(), 'app/static/js/features/preferences/notification_channels.js'),
-  'utf8',
-))
+const NOTIFICATION_CHANNELS_SRC = stripEsmExports([
+  'app/static/js/ui/background_pause.js',
+  'app/static/js/features/preferences/notification_channels.js',
+].map(path => readFileSync(resolve(process.cwd(), path), 'utf8')).join('\n'))
 
 function jsonResponse(body, status = 200) {
   return {
@@ -94,6 +94,22 @@ describe('notification channel preferences panel', () => {
     await refreshNotificationChannels({ force: true })
     expect(msg.textContent).toBe('')
     expect(list.textContent).toContain('Add a channel to get pinged when long runs finish.')
+  })
+
+  it('distinguishes an operator mute from a manual mute', async () => {
+    const apiFetch = vi.fn(async () => jsonResponse({ channels: [{
+      id: 'ntc_operator', kind: 'webhook', label: 'Operator paused', config: {},
+      triggers: ['run_complete'], muted: true, muted_reason: 'principal_disabled',
+    }, {
+      id: 'ntc_manual', kind: 'webhook', label: 'Manually muted', config: {},
+      triggers: ['run_complete'], muted: true, muted_reason: '',
+    }] }))
+    const { list, refreshNotificationChannels } = loadNotificationChannels({ apiFetch })
+    await refreshNotificationChannels({ force: true })
+    expect(list.textContent.match(/Paused by an operator action\./g)).toHaveLength(1)
+    expect(list.textContent).toContain('Review this work before resuming it.')
+    expect(list.textContent).not.toContain('principal_disabled')
+    expect([...list.querySelectorAll('button')].filter(button => button.textContent === 'Unmute')).toHaveLength(2)
   })
 
   it('uses cached channel metadata for tab revisits and preserves it after forced load failures', async () => {

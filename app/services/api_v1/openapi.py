@@ -1266,6 +1266,7 @@ OPENAPI_SPEC: dict = {
                     },
                     "secret_fields": {"type": "array", "items": _ref("NotificationSecretField")},
                     "muted": {"type": "boolean"},
+                    "muted_reason": {"type": "string", "description": "Reason for an operator mute; empty for a manual mute."},
                     "created": {"type": "string", "nullable": True},
                     "updated": {"type": "string", "nullable": True},
                 },

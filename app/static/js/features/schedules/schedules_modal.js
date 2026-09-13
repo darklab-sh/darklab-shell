@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
+import { backgroundPauseMessage } from '../../ui/background_pause.js';
 
 // Browser schedules modal and handoff actions.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
@@ -327,6 +328,7 @@ function _scheduleStatusLabel(schedule) {
   if (!schedule) return '';
   const reason = String(schedule.paused_reason || '').trim();
   if (schedule.enabled === false) {
+    if (reason === 'principal_disabled') return 'operator paused';
     return /revok/i.test(reason) ? 'credential revoked' : 'paused';
   }
   if (schedule.last_error) return 'needs attention';
@@ -913,10 +915,10 @@ function _renderSchedulesDetail() {
     header.appendChild(status);
   }
   root.appendChild(header);
-  if (schedule?.paused_reason && /revok/i.test(schedule.paused_reason)) {
+  if (backgroundPauseMessage(schedule?.paused_reason)) {
     const revoked = document.createElement('div');
     revoked.className = 'schedules-alert';
-    revoked.textContent = 'Paused because its originating access credential was revoked.';
+    revoked.textContent = backgroundPauseMessage(schedule.paused_reason);
     root.appendChild(revoked);
   } else if (schedule?.last_error) {
     const err = document.createElement('div');

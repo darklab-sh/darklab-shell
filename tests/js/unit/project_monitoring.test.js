@@ -25,7 +25,7 @@ function loadMonitoringModule() {
   globalThis.openHistoryRunDetails = vi.fn()
   globalThis.fetchAndRenderHistoryComparison = vi.fn()
   return fromDomScripts(
-    ['app/static/js/features/projects/project_monitoring.js'],
+    ['app/static/js/ui/background_pause.js', 'app/static/js/features/projects/project_monitoring.js'],
     { document, window },
     'globalThis.DarklabProjectMonitoring',
   )
@@ -306,6 +306,21 @@ describe('project monitoring controller', () => {
     vi.useRealTimers()
     setHistoryRunModalStateHandlers({ openHistoryRunDetails: null })
     setHistoryCompareHandlers({ fetchAndRenderHistoryComparison: null })
+  })
+
+  it.each(['paused_reason', 'schedule_paused_reason'])('explains operator-paused digests from %s', async (reasonField) => {
+    const monitoringApi = loadMonitoringModule()
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse({
+      ...monitoringPayload,
+      digest_settings: { ...monitoringPayload.digest_settings, enabled: false, [reasonField]: 'principal_disabled' },
+    }))
+    const controller = monitoringApi.createProjectMonitoringController(makeContext(projectWorkspaceRequest))
+    await controller.load('prj_1', { render: false })
+    const container = document.createElement('div')
+    controller.renderMonitoring(container, 'prj_1')
+    expect(container.textContent).toContain('Paused by an operator action. Review this work before resuming it.')
+    expect(container.textContent).not.toContain('principal_disabled')
+    expect(container.querySelector('[data-project-digest-field="enabled"]').checked).toBe(false)
   })
 
   it('renders project monitoring counts monitors and disables missing-run comparisons', async () => {

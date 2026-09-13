@@ -73,7 +73,7 @@ function loadSchedulesModalTestFns({
   `
   const bindDismissible = vi.fn()
   const fns = fromDomScripts(
-    ['app/static/js/features/schedules/schedules_modal.js'],
+    ['app/static/js/ui/background_pause.js', 'app/static/js/features/schedules/schedules_modal.js'],
     {
       document,
       window,
@@ -136,7 +136,7 @@ function loadWatchersModalTestFns({
     return cell
   }
   const fns = fromDomScripts(
-    ['app/static/js/features/watchers/watchers_modal.js'],
+    ['app/static/js/ui/background_pause.js', 'app/static/js/features/watchers/watchers_modal.js'],
     {
       document,
       window,
@@ -692,6 +692,35 @@ describe('app helpers', () => {
     })
     expect(list.textContent).toContain('Hourly darklab')
     expect(list.querySelector('.schedules-list-row.is-selected')?.classList.contains('selection-row')).toBe(true)
+  })
+
+  it.each(['schedule', 'watcher'])('explains operator suspension in the %s detail', async (kind) => {
+    const schedule = {
+      id: 'sch_operator', label: 'Review me', command_text: 'true', cadence_preset: 'hourly',
+      cron_expr: '0 * * * *', timezone: 'UTC', enabled: false, paused_reason: 'principal_disabled',
+    }
+    const watcher = {
+      id: 'wtr_operator', label: 'Review me', command_text: 'true', state: 'paused',
+      state_reason: 'principal_disabled', baseline_run_id: '', schedule,
+    }
+    const apiFetch = vi.fn(async url => ({ ok: true, json: async () => {
+      if (url === '/schedules') return { schedules: [schedule] }
+      if (url === '/watchers') return { watchers: [watcher] }
+      if (url.startsWith('/schedules/preview')) return { next_fires: [] }
+      return { fires: [], total: 0, has_more: false }
+    } }))
+    if (kind === 'schedule') {
+      const api = loadSchedulesModalTestFns({ apiFetch })
+      api._bindSchedulesModal()
+      await api.openSchedulesModal({ scheduleId: schedule.id })
+    } else {
+      const api = loadWatchersModalTestFns({ apiFetch })
+      api._bindWatchersModal()
+      await api.openWatchersModal({ watcherId: watcher.id })
+    }
+    await vi.waitFor(() => expect(document.querySelector(`.${kind}s-alert`)?.textContent)
+      .toBe('Paused by an operator action. Review this work before resuming it.'))
+    expect(document.querySelector(`#${kind}s-detail`).textContent).not.toContain('principal_disabled')
   })
 
   it('pauses resumes and fires schedules from the modal action buttons', async () => {

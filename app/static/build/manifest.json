@@ -398,8 +398,8 @@
       "hash": "93caee1209a66914b1f12332c7d219286020003e564e621207dd5c1adbed2056"
     },
     "/static/js/features/preferences/notification_channels.js": {
-      "path": "/static/build/static-notification-channels.fa0d020750c9.js",
-      "hash": "c865a334f84f29371c49b88aa08e2cf808772e46ac5823d48f414b6cad67a194"
+      "path": "/static/build/static-notification-channels.742e2ec96948.js",
+      "hash": "d451d41706f9e411cf3df009fe7c67e84515604589d25a2327530320b80a8048"
     },
     "/static/js/features/preferences/secrets_panel.js": {
       "path": "/static/build/static-secrets-panel.15b109ef2892.js",
@@ -526,8 +526,8 @@
       "hash": "e4e998fa90c2b6482c3527ef8af0f178f3b2cf7604a49c47fd539d5cb9156230"
     },
     "/static/js/features/projects/project_monitoring.js": {
-      "path": "/static/build/static-project-monitoring.6406a1bb6f78.js",
-      "hash": "26e871a58024f879c4df13b63a862d4ab2c3fd18e4d80ae31865598a0e207658"
+      "path": "/static/build/static-project-monitoring.75a577e99242.js",
+      "hash": "d8b6160148e231da0050481e354e99581173b4888e51dbe04c695a6457d03de9"
     },
     "/static/js/features/projects/project_navigation.js": {
       "path": "/static/build/static-project-navigation.d077036f6f09.js",
@@ -610,8 +610,8 @@
       "hash": "00f455e558ccdd16091997cb4e1f93e32f6169dd23cbb23a87f496605e42dbbf"
     },
     "/static/js/features/schedules/schedules_modal.js": {
-      "path": "/static/build/static-schedules-modal.25329ca18bee.js",
-      "hash": "81c26860c5db47ce95ff01140b1bd8de9f5a865b7fc0d5bb656ba86b01dc587e"
+      "path": "/static/build/static-schedules-modal.c7b7b6e82a74.js",
+      "hash": "4fac0e7d7b5c99987bb998b88f9c820caa80bc2aa4e89822ba50e2f771ad55da"
     },
     "/static/js/features/status-monitor/status_monitor_assessments.js": {
       "path": "/static/build/static-status-monitor-assessments.57958841af0a.js",
@@ -634,8 +634,8 @@
       "hash": "193f8cc6501d852c8030fd33061d8637760a6fea5c0309d43dce6d391fdb53b1"
     },
     "/static/js/features/watchers/watchers_modal.js": {
-      "path": "/static/build/static-watchers-modal.042bd7701593.js",
-      "hash": "3e4119fdc27fc9cdd45e873678d898d0343364566e3b8632202e35886febc2d8"
+      "path": "/static/build/static-watchers-modal.bf2314504a48.js",
+      "hash": "a3968ea04a76d9cd04fbd44e45204f8b0df493e14875466e385616f2a9f23379"
     },
     "/static/js/features/workflows/workflow_catalog.js": {
       "path": "/static/build/static-workflow-catalog.c024e8c1f901.js",
@@ -756,6 +756,10 @@
     "/static/js/features/workspace/workspace_viewer_formats.js": {
       "path": "/static/build/static-workspace-viewer-formats.6112b79f7617.js",
       "hash": "6112b79f76176a233405024c38c59943c91e540b9b3f97a3d2678dde91368ff1"
+    },
+    "/static/js/ui/background_pause.js": {
+      "path": "/static/build/static-background-pause.34e52ddfa3ab.js",
+      "hash": "34e52ddfa3ab7730e344f38a784f42921e0fe2ed9dfb20fdee3d98c957c25323"
     },
     "/vendor/ansi_up.js": {
       "path": "/static/build/vendor-ansi-up.f013c66e11a7.js",

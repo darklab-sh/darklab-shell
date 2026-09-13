@@ -1438,7 +1438,7 @@ wget -q -O /dev/null --server-response https://example.com
 - Preferences are stored server-side per personal workspace and mirrored into browser cookies/local storage for reload continuity, so a kept workspace restores the same option set across browsers and devices.
 - The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
 
-**Limits:** anonymous UUID workspaces remain browser-local by design, so a workspace must be kept before its preferences, team memberships, schedules, watchers, and outbound notification channels can be used across devices. Existing credential secrets can't be retrieved later; create or rotate a credential when another device needs access. Blocked browser notification permission can't be re-prompted by the toggle — it must be re-enabled in browser settings. Email channels require operator SMTP settings before they can be saved or tested.
+**Limits:** anonymous UUID workspaces remain browser-local by design, so a workspace must be kept before its preferences, team memberships, schedules, watchers, and outbound notification channels can be used across devices. If an operator suspends your workspace, Schedules, Watchers, notification channels, and Project digests explain the pause. They stay paused after access is restored until you review and resume them. Existing credential secrets can't be retrieved later; create or rotate a credential when another device needs access. Blocked browser notification permission can't be re-prompted by the toggle — it must be re-enabled in browser settings. Email channels require operator SMTP settings before they can be saved or tested.
 
 **Configuration:**
 

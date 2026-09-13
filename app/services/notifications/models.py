@@ -132,6 +132,7 @@ class NotificationChannel:
     principal_id: str = ""
     created_by_credential_id: str = ""
     last_changed_by_credential_id: str = ""
+    muted_reason: str = ""
 
     @property
     def secret_owner_token(self) -> str:
@@ -149,6 +150,7 @@ class NotificationChannel:
             config=_decode_json_dict(row["config_json"]),
             triggers=_decode_json_list(row["triggers_json"]),
             muted=bool(row["muted"]),
+            muted_reason=str(row["muted_reason"] or "") if "muted_reason" in row.keys() else "",
             created=str(row["created"]),
             updated=str(row["updated"]),
             principal_id=str(row["principal_id"] or "") if "principal_id" in row.keys() else "",

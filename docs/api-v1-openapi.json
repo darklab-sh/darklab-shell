@@ -9002,6 +9002,10 @@
           "muted": {
             "type": "boolean"
           },
+          "muted_reason": {
+            "description": "Reason for an operator mute; empty for a manual mute.",
+            "type": "string"
+          },
           "secret_fields": {
             "items": {
               "$ref": "#/components/schemas/NotificationSecretField"

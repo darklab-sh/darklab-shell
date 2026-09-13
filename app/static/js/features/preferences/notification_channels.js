@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
+import { backgroundPauseMessage } from '../../ui/background_pause.js';
 
 // Options modal outbound-notification channel management.
 import { showToast as importedShowToast } from '../../core/utils.js';
@@ -371,6 +372,12 @@ let exportedOpenNotificationChannelEditor = null;
       const triggers = (channel.triggers || []).map(trigger => trigger.replaceAll('_', ' ')).join(', ') || 'run complete';
       meta.textContent = [triggers, summary].filter(Boolean).join(' · ');
       body.append(name, chips, meta);
+      if (channel.muted && backgroundPauseMessage(channel.muted_reason)) {
+        const reason = document.createElement('div');
+        reason.className = 'options-secret-meta';
+        reason.textContent = backgroundPauseMessage(channel.muted_reason);
+        body.append(reason);
+      }
 
       const actions = document.createElement('div');
       actions.className = 'options-secret-actions';

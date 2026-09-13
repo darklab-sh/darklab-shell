@@ -170,6 +170,8 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py revoke
 docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
 ```
 
+`status` includes a `suspended_work` list with the affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
+
 `issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
 
 ### Restricted browser access

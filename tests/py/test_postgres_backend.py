@@ -1748,6 +1748,47 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
 
 
 @pytest.mark.postgres
+def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema, tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle, storage
+    from services.auth.suspended_work import operator_suspended_work
+    from services.notifications import channels_store
+    from services.projects import digests
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+    from test_suspended_work import _seed_work
+
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    reset_master_key_cache_for_tests()
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(channels_store.database, "db_connect", lambda: nullcontext(conn))
+    monkeypatch.setattr("services.auth.background_runtime.stop_principal_active_work", lambda _principal: ())
+    settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
+    bundle = storage.create_principal_with_credential(settings=settings, conn=conn)
+    _, channel, project = _seed_work(conn, bundle, "postgres")
+    _seed_work(conn, bundle, "manual", manually_paused=True, jobs=False)
+    conn.commit()
+    lifecycle.set_principal_enabled(bundle.principal.id, enabled=False, reason="review", connect=lambda: nullcontext(conn))
+    suspended = operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn))
+    assert suspended["count"] == 9 and suspended["resumable_count"] == 4
+    assert "manual" not in str(suspended)
+    lifecycle.set_principal_enabled(bundle.principal.id, enabled=True, connect=lambda: nullcontext(conn))
+    assert operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn)) == suspended
+    assert digests.get_digest_settings(bundle.workspace.id, project, conn=conn)["paused_reason"] == "principal_disabled"
+    resumed = channels_store.update_notification_channel(bundle.workspace.id, channel["id"], {"muted": False})
+    assert not resumed["muted"] and resumed["muted_reason"] == ""
+    digest = digests.save_digest_settings(bundle.workspace.id, project,
+                                         {"enabled": True, "channel_ids": [channel["id"]]}, conn=conn)
+    assert digest["enabled"] and digest["paused_reason"] == ""
+    assert operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn))["count"] == 7
+    reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
 def test_principal_background_authorization_matches_postgres_contract(
     postgres_schema,
     tmp_path,
@@ -2277,6 +2318,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0082",
         "0083",
         "0084",
+        "0085",
     ]
     assert applied_again == []
     table_rows = conn.execute(
