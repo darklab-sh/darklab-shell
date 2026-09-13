@@ -1176,7 +1176,7 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
 
     def measure(headers: dict[str, str]) -> dict[str, float | int]:
         def resolve(_index: int) -> float:
-            with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            with psycopg.Connection[dict[str, Any]].connect(isolated_dsn, row_factory=dict_row) as raw_conn:
                 active_conn = PostgresSqliteCompatConnection(raw_conn)
                 started = perf_counter()
                 result = resolve_authentication(headers, conn=active_conn, touch_last_used=False)

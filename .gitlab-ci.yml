@@ -643,6 +643,21 @@ docker-build-bana:
   tags:
     - bana
 
+docker-build-bolla:
+  extends: .scheduled-docker-build
+  tags:
+    - bolla
+
+docker-build-bannik:
+  extends: .scheduled-docker-build
+  tags:
+    - bannik
+
+docker-build-buta:
+  extends: .scheduled-docker-build
+  tags:
+    - buta
+
 docker-build-baku:
   extends: .scheduled-docker-build
   tags:
