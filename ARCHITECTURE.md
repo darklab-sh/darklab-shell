@@ -625,8 +625,8 @@ These routes establish and manage pseudonymous principal credentials. Authentica
 | `GET` | `/auth/principal` | Returns the current authenticated principal, workspace, credential type, capabilities, and a server-computed `recent_credential_session` flag for provider-link controls; PAT callers need `identity:read`. |
 | `POST` | `/auth/logout` | Revokes the current browser session and clears its session and CSRF cookies. Stale-session recovery requires a same-origin POST; valid cookie sessions still require CSRF verification. |
 | `POST` | `/auth/sessions/revoke-all` | Revokes every browser session for the current principal and clears the current browser cookies. |
-| `GET` | `/auth/credentials` | Lists safe credential metadata for a portable credential, or only the calling PAT's metadata when that PAT has `identity:read`. |
-| `POST` | `/auth/credentials` | Creates a portable credential or scoped, expiring PAT and returns its secret once; PAT callers cannot issue credentials. |
+| `GET` | `/auth/credentials` | Lists safe workspace credential metadata and `portable_credentials_enabled` issuance policy, or only the calling PAT's metadata when that PAT has `identity:read`. |
+| `POST` | `/auth/credentials` | Creates a profile-permitted portable credential or scoped, expiring PAT and returns its secret once; `oidc_required` disables self-service portable creation and rotation. PAT callers cannot issue credentials. |
 | `PATCH` | `/auth/credentials/<credential_id>` | Changes one credential label or expiry through a portable credential. |
 | `GET` | `/auth/credentials/<credential_id>/durable-work` | Lists future schedules, watchers, workflows, notification channels, and digest settings attributed to one credential. |
 | `POST` | `/auth/credentials/<credential_id>/rotate` | Issues a replacement with the existing label, scopes, and expiry. By default it revokes the old credential atomically; `defer_revocation: true` prepares the replacement for the browser save-and-revoke flow. |

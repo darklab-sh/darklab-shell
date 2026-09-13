@@ -385,7 +385,8 @@ describe('Access panel', () => {
     await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
   })
 
-  it('creates an API token with chosen scopes and lifetime through Add credential', async () => {
+  it.each(['open', 'oidc_required'])('creates an API token with the permitted credential choices in %s', async profile => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: profile }
     const scopes = ['identity:read', 'history:read', 'runs:execute', 'projects:read']
     const token = `dlp_v1_pat_${'e'.repeat(32)}_${'f'.repeat(43)}`
     globalThis.__accessPanelTest.identity = {
@@ -394,7 +395,7 @@ describe('Access panel', () => {
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
       if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID } })
       if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: token }, 201)
-      if (url === '/auth/credentials') return response({ credentials: [credential()], pat_policy: {
+      if (url === '/auth/credentials') return response({ credentials: [credential()], portable_credentials_enabled: profile !== 'oidc_required', pat_policy: {
         scopes, default_scopes: scopes.slice(0, 3), default_expiry_days: 90, min_expiry_days: 1, max_expiry_days: 365,
       } })
       return response({})
@@ -405,6 +406,12 @@ describe('Access panel', () => {
     document.getElementById('options-access-add-btn').click()
     const editor = document.getElementById('options-access-editor')
     const type = editor.querySelector('select')
+    if (profile === 'oidc_required') {
+      expect(type.value).toBe('pat')
+      expect(type.querySelector('[value="portable"]')).toBeNull()
+      expect(document.querySelector('[data-credential-action="rotate"]')).toBeNull()
+      expect(document.getElementById('options-access-credentials').textContent).toContain('Recovery credential')
+    }
     type.value = 'pat'
     type.dispatchEvent(new Event('change'))
     expect(editor.querySelector('input[type="datetime-local"]').closest('label').hidden).toBe(true)

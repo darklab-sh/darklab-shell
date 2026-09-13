@@ -167,12 +167,15 @@ def issue(
     label: str = "",
     expires_at: str | datetime | None = None,
     expires_in_days: int | None = None,
+    portable_credentials_enabled: bool = True,
     scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     if context.credential_type == "pat":
         raise PermissionError("PATs cannot issue credentials")
+    if credential_type == "portable" and not portable_credentials_enabled:
+        raise PermissionError("Browser credentials are disabled for this deployment. Create an API token instead.")
 
     def operation(conn: Any) -> IssuedCredential:
         issued = storage.issue_credential(
@@ -464,6 +467,7 @@ def rotate(
     label: str | None = None,
     expires_at: str | datetime | None = None,
     defer_revocation: bool = False,
+    portable_credentials_enabled: bool = True,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
@@ -471,6 +475,12 @@ def rotate(
         raise PermissionError("PATs cannot rotate credentials")
 
     def operation(conn: Any) -> IssuedCredential:
+        if not portable_credentials_enabled:
+            current = storage._credential_row(conn, context.principal_id, credential_id)  # noqa: SLF001
+            if current["credential_type"] == "portable":
+                raise PermissionError(
+                    "Browser credentials are disabled for this deployment. Ask an operator about recovery access."
+                )
         replacement = storage.rotate_credential(
             context.principal_id,
             credential_id,

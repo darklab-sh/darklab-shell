@@ -431,3 +431,40 @@ def test_link_recency_is_visible_and_credential_reauthentication_restores_access
     state = parse_qs(urlsplit(start.get_json()["authorization_url"]).query)["state"][0]
     provider.expect(state)
     assert _callback(client, state).headers["Location"] == "/?options=access"
+
+
+@pytest.mark.parametrize("profile", ["mixed", "oidc_required"])
+@pytest.mark.parametrize("defer", [False, True])
+def test_provider_only_issuance_policy_rejects_unusable_browser_credentials(monkeypatch, profile, defer):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = f"issuance-{profile}-{defer}"
+    client = _app(monkeypatch, _config(profile=profile)).test_client()
+    assert _callback(client, _start(client, provider)).status_code == 302
+    principal_id = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+    csrf = {"X-Darklab-CSRF": _client_cookie(client, BROWSER_CSRF_COOKIE)}
+    policy = client.get("/auth/credentials", base_url=ORIGIN).get_json()
+    assert policy["portable_credentials_enabled"] is (profile == "mixed")
+    recovery = lifecycle.operator_issue(principal_id, credential_type="portable", label="Operator recovery")
+    for payload in ({}, {"type": "portable"}):
+        issued = client.post("/auth/credentials", base_url=ORIGIN, headers=csrf, json=payload)
+        assert issued.status_code == (201 if profile == "mixed" else 403)
+        if profile == "oidc_required":
+            assert "Browser credentials are disabled" in issued.get_json()["message"]
+            assert "secret" not in issued.get_json()
+    rotated = client.post(f"/auth/credentials/{recovery.metadata.id}/rotate", base_url=ORIGIN,
+                          headers=csrf, json={"defer_revocation": defer})
+    assert rotated.status_code == (201 if profile == "mixed" else 403)
+    if profile == "oidc_required":
+        remaining = client.get("/auth/credentials", base_url=ORIGIN).get_json()["credentials"]
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == recovery.metadata.id
+        assert remaining[0]["revoked_at"] is None
+    pat = client.post("/auth/credentials", base_url=ORIGIN, headers=csrf,
+                      json={"type": "pat", "scopes": ["identity:read"]})
+    assert pat.status_code == 201
+    replacement = client.post(f"/auth/credentials/{pat.get_json()['credential']['id']}/rotate",
+                              base_url=ORIGIN, headers=csrf, json={"defer_revocation": defer})
+    assert replacement.status_code == 201
+    bearer = {"Authorization": f"Bearer {replacement.get_json()['secret']}"}
+    api_client = client.application.test_client(use_cookies=False)
+    assert api_client.get("/api/v1/whoami", base_url=ORIGIN, headers=bearer).status_code == 200

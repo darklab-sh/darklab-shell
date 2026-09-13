@@ -587,6 +587,7 @@ def credentials():
             items = lifecycle.list_safe_credentials(context)
         return jsonify({
             "credentials": [item.to_safe_dict() for item in items],
+            "portable_credentials_enabled": active_profile() != "oidc_required",
             "pat_policy": {
                 "scopes": sorted(PAT_SCOPES), "default_scopes": sorted(DEFAULT_PAT_SCOPES),
                 "default_expiry_days": PAT_DEFAULT_EXPIRY_DAYS,
@@ -610,6 +611,7 @@ def create_credential():
             label=str(data.get("label") or ""),
             expires_at=data.get("expires_at"),
             expires_in_days=data.get("expires_in_days"),
+            portable_credentials_enabled=active_profile() != "oidc_required",
             scopes=data.get("scopes"),
             request_fields=_request_fields(),
         )
@@ -673,6 +675,7 @@ def rotate_credential(credential_id: str):
             label=data.get("label"),
             expires_at=data.get("expires_at"),
             defer_revocation=data.get("defer_revocation", False),
+            portable_credentials_enabled=active_profile() != "oidc_required",
             request_fields=_request_fields(),
         )
         return _secret_response(issued)

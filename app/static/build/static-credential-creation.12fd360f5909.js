@@ -19,12 +19,13 @@ const SCOPE_LABELS = {
   'teams:write': 'Manage Teams',
 };
 
-function buildCredentialCreationFields({ policy, field, input, expiryField, expiryInput }) {
+function buildCredentialCreationFields({ policy, portableCredentialsEnabled = true, field, input, expiryField, expiryInput }) {
   const host = document.createElement('div');
   const type = document.createElement('select');
   type.className = 'form-select';
   type.dataset.credentialType = '1';
   for (const [value, label] of [['portable', 'Browser access'], ['pat', 'API token (PAT)']]) {
+    if (value === 'portable' && !portableCredentialsEnabled) continue;
     const option = document.createElement('option');
     option.value = value;
     option.textContent = label;
@@ -72,6 +73,7 @@ function buildCredentialCreationFields({ policy, field, input, expiryField, expi
   return {
     host,
     readOptions() {
+      if (!policy && !portableCredentialsEnabled) throw new Error('API token settings could not be loaded. Refresh Access and try again.');
       if (type.value !== 'pat') {
         return { type: 'portable', expires_at: expiryInput.value ? new Date(expiryInput.value).toISOString() : null };
       }

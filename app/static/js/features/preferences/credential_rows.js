@@ -33,7 +33,9 @@ function _action(label, action, credential, onAction, tone = '') {
   return button;
 }
 
-function renderCredentialRows(host, credentials, { currentCredentialId = '', onAction = () => {} } = {}) {
+function renderCredentialRows(host, credentials, {
+  currentCredentialId = '', portableCredentialsEnabled = true, onAction = () => {},
+} = {}) {
   host.replaceChildren();
   if (!credentials.length) {
     host.append(_node('div', 'options-access-empty', 'No credentials have been issued yet.'));
@@ -50,7 +52,8 @@ function renderCredentialRows(host, credentials, { currentCredentialId = '', onA
     if (current) heading.append(_node('span', 'badge badge-tone-green', 'Current'));
     heading.append(_node('span', `badge ${state === 'Active' ? 'badge-tone-green' : 'badge-tone-red'}`, state));
     const prefix = _node('code', 'options-access-prefix', credential.public_prefix || credential.id || '');
-    const kind = credential.credential_type === 'pat' ? 'Personal access token' : 'Access credential';
+    const recoveryOnly = credential.credential_type === 'portable' && !portableCredentialsEnabled;
+    const kind = credential.credential_type === 'pat' ? 'Personal access token' : recoveryOnly ? 'Recovery credential' : 'Access credential';
     const facts = _node('div', 'options-access-row-facts');
     facts.append(
       _node('span', '', kind),
@@ -61,6 +64,9 @@ function renderCredentialRows(host, credentials, { currentCredentialId = '', onA
     if (credential.credential_type === 'pat') {
       facts.append(_node('span', '', `Permissions: ${(credential.scopes || []).join(', ')}`));
     }
+    if (recoveryOnly) {
+      facts.append(_node('span', '', 'An operator must enable credential sign-in before this can open your workspace.'));
+    }
     main.append(heading, prefix, facts);
     row.append(main);
     if (state === 'Active') {
@@ -68,9 +74,9 @@ function renderCredentialRows(host, credentials, { currentCredentialId = '', onA
       actions.append(
         _action('Rename', 'rename', credential, onAction),
         _action('Expiry', 'expiry', credential, onAction),
-        _action('Rotate', 'rotate', credential, onAction),
-        _action('Revoke', 'revoke', credential, onAction, 'secondary btn-warning'),
       );
+      if (!recoveryOnly) actions.append(_action('Rotate', 'rotate', credential, onAction));
+      actions.append(_action('Revoke', 'revoke', credential, onAction, 'secondary btn-warning'));
       row.append(actions);
     }
     host.append(row);

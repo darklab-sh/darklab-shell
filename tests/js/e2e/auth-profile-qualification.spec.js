@@ -6,7 +6,7 @@ import { resolve } from 'path'
 
 import { test, expect } from '@playwright/test'
 
-import { ensurePromptReady, keepBrowserWorkspace } from './helpers.js'
+import { ensurePromptReady, keepBrowserWorkspace, openRailAction } from './helpers.js'
 
 // Each case signs in, checks every protected surface, writes personal and Team
 // data, and verifies recovery across navigations on the isolated CI servers.
@@ -130,6 +130,31 @@ async function qualifyBrowser(page, context, projectName) {
   }
   await expect(page).toHaveURL(url => url.pathname === '/')
   await ensurePromptReady(page)
+
+  if (profile === 'oidc_required') {
+    const mobile = await page.locator('#hamburger-btn').isVisible()
+    if (mobile) {
+      await page.locator('#hamburger-btn').click()
+      await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
+    } else {
+      await openRailAction(page, 'options')
+      await page.locator('#options-tab-access').click()
+    }
+    await page.locator('#options-access-add-btn').click()
+    const editor = page.locator('#options-access-editor')
+    await expect(editor.getByLabel('Credential type')).toHaveValue('pat')
+    await expect(editor.locator('option[value="portable"]')).toHaveCount(0)
+    await editor.getByLabel('Label', { exact: true }).fill('Provider workspace CLI')
+    const issued = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/credentials'
+      && response.request().method() === 'POST')
+    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await issued).status()).toBe(201)
+    await expect(page.locator('#options-access-reveal')).toBeVisible()
+    await page.locator('#options-access-reveal').getByRole('button', { name: 'Close', exact: true }).click()
+    if (mobile) await page.locator('#options-overlay').click({ position: { x: 5, y: 5 } })
+    else await page.getByRole('button', { name: 'Close options', exact: true }).click()
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/\bopen\b/)
+  }
 
   if (profile !== 'oidc_required') {
     const credentialAbsent = await page.evaluate(secret =>

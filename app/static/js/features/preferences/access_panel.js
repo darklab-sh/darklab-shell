@@ -49,6 +49,7 @@ const elements = {
 
 let credentials = [];
 let patPolicy = null;
+let portableCredentialsEnabled = true;
 let refreshSequence = 0;
 let pendingAction = '';
 let editorReturnFocus = null;
@@ -165,6 +166,7 @@ function _renderAuthenticated() {
   if (elements.credentials) {
     renderCredentialRows(elements.credentials, credentials, {
       currentCredentialId: currentId,
+      portableCredentialsEnabled,
       onAction: _handleCredentialAction,
     });
   }
@@ -192,6 +194,8 @@ async function refreshAccessPanel({ force = false } = {}) {
     currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
     recentCredentialSession = principalPayload?.authentication?.recent_credential_session === true;
     patPolicy = credentialsPayload.pat_policy || null;
+    portableCredentialsEnabled = credentialsPayload.portable_credentials_enabled !== false
+      && importedGetAppConfig?.()?.access_profile !== 'oidc_required';
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
     await _refreshOIDC(sequence);
@@ -328,10 +332,12 @@ function _showEditor(mode, credential = null, returnFocus = null) {
     : mode === 'create' ? 'Add a credential' : mode === 'rename' ? 'Rename credential' : 'Change expiry';
   const description = document.createElement('p');
   description.className = 'options-access-description';
-  description.textContent = mode === 'keep'
+    description.textContent = mode === 'keep'
     ? 'Give this browser an optional label. Your current files and history will stay in the same workspace.'
     : mode === 'create'
-      ? 'Create browser access or an API token. You will see the full value once.'
+      ? portableCredentialsEnabled
+        ? 'Create browser access or an API token. You will see the full value once.'
+        : 'Browser sign-in uses your identity provider. Create an API token for the CLI or integrations; you will see it once.'
       : mode === 'rename' ? 'Labels help you recognize where a credential is used.'
         : credential?.credential_type === 'pat' ? 'API tokens need an expiry between 1 and 365 days from now.'
           : 'Leave the expiry blank for no expiry.';
@@ -349,7 +355,9 @@ function _showEditor(mode, credential = null, returnFocus = null) {
     expiryInput = _input('datetime-local', _localExpiry(credential?.expires_at));
     const expiryField = _field('Expiry', expiryInput);
     if (mode === 'create') {
-      creationFields = buildCredentialCreationFields({ policy: patPolicy, field: _field, input: _input, expiryField, expiryInput });
+      creationFields = buildCredentialCreationFields({
+        policy: patPolicy, portableCredentialsEnabled, field: _field, input: _input, expiryField, expiryInput,
+      });
       elements.editor.append(creationFields.host);
     }
     elements.editor.append(expiryField);
