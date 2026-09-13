@@ -195,7 +195,7 @@ The access checks use the same four policy choices on both databases. The browse
 | `oidc_required` | Denied | Provider-backed cookie session only | Required | Scoped PAT; no PAT browser access |
 | `mixed` | Denied | Portable or provider-backed cookie session | Available | Scoped PAT |
 
-The browser smoke checks an anonymous request before sign-in, the available sign-in methods, cookie protection, protected reads for Config, Files, Projects, Atlas, History, Schedules, Watchers, Workflows, Secrets, and Notifications, plus personal and Team Project isolation, an Assessment read, a file round trip, reload, and logout. The mixed profile checks both credential and provider sign-in. Each profile runs at 375-pixel mobile width and desktop width in both asset modes. The Postgres smoke also checks a separate PAT client, so a browser cookie can't accidentally satisfy API access.
+The browser smoke checks an anonymous request before sign-in, the available sign-in methods, cookie protection, protected reads for Config, Files, Projects, Atlas, History, Schedules, Watchers, Workflows, Secrets, and Notifications, plus personal and Team Project isolation, an Assessment read, a file round trip, reload, and logout. The mixed profile checks both credential and provider sign-in. Each profile runs at 375-pixel mobile width and desktop width in both asset modes. The Postgres smoke also checks a separate PAT client, so a browser cookie can't accidentally satisfy API access. The isolated browser servers skip CVE feed loading because these journeys don't use it; the PostgreSQL CI job allows 90 seconds for fresh-schema startup.
 
 | Contract | Focused evidence |
 | --- | --- |

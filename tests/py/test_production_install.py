@@ -2660,6 +2660,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["variables"]["RELEASE_STAGING_KEEP_DAYS"] == "14"
     assert "RELEASE_CACHE_SCOPE" not in parsed_ci["variables"]
     assert "RELEASE_CACHE_PROBE" not in ci_config
+    postgres_browser_script = "\n".join(parsed_ci["test-js-e2e-postgres-auth-profiles"]["script"])
+    assert postgres_browser_script.count("--server-timeout 90000") == 2
     assert parsed_ci["stages"].index("cache") < parsed_ci["stages"].index("build")
     docker_build_rules = parsed_ci["docker-build"]["rules"]
     assert docker_build_rules[0]["if"] == (

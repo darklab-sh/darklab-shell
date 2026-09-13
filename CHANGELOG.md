@@ -103,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **PostgreSQL access-profile browser startup no longer imports unrelated CVE feeds.** Isolated Playwright servers skip that work, and the PostgreSQL browser job allows more time for fresh-schema startup.
 - **Branch images now pick up fixed Debian glibc packages.** The runtime install explicitly refreshes `libc6` and `libc-bin`, and branch CI can bypass the runtime cache for a security recheck without rebuilding the compiled tool stages.
 - **Keeping a workspace no longer fails when two browsers create their first credentials at once.**
   - **Root cause:** Concurrent first-time SQLite upgrades could both try to create the verifier key, returning a server error. Browser-test retries then used up the shared anonymous-issuance limit and surfaced as a misleading 429.

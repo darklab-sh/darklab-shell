@@ -58,6 +58,10 @@ rate_limit_per_second: 25
 evidence_package_download_rate_limit_per_minute: 10000
 evidence_package_download_rate_limit_per_second: 100
 run_broker_require_redis: false
+# Browser tests don't exercise CVE risk feeds. Loading the bundled snapshots
+# into every isolated database would make startup dominate this suite.
+cve_risk:
+  bootstrap_enabled: false
 EOF
 
 cd "$APP_DIR"

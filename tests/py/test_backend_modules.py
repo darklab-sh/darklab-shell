@@ -19004,6 +19004,7 @@ class TestEntrypointWorkspaceRepair:
         assert '"$PYTHON_BIN" -c "import app"' not in server_helper
         assert 'export APP_CONF_DIR="$SHIPPED_CONF_DIR"' in server_helper
         assert 'export APP_LOCAL_CONF_DIR="$LOCAL_CONF_DIR"' in server_helper
+        assert "cve_risk:\n  bootstrap_enabled: false" in server_helper
         assert 'cp "$APP_DIR/conf/config.yaml"' not in server_helper
 
 

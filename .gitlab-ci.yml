@@ -107,8 +107,8 @@ test-js-e2e-postgres-auth-profiles:
     PLAYWRIGHT_SERVER_COUNT: "4"
   script:
     - bash scripts/run_postgres_tests.sh --wait-only
-    - bash scripts/run_playwright.sh --asset-bundle-mode source --config .tooling/playwright.auth-profile-postgres.config.js
-    - bash scripts/run_playwright.sh --asset-bundle-mode bundle --config .tooling/playwright.auth-profile-postgres.config.js
+    - bash scripts/run_playwright.sh --server-timeout 90000 --asset-bundle-mode source --config .tooling/playwright.auth-profile-postgres.config.js
+    - bash scripts/run_playwright.sh --server-timeout 90000 --asset-bundle-mode bundle --config .tooling/playwright.auth-profile-postgres.config.js
 
 .pytest-lane:
   stage: test
