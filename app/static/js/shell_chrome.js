@@ -1443,10 +1443,12 @@ let importedProjectWorkspaceShell;
   }
 
   function _canCreateHudShareSnapshot() {
+    if (_shellValue('APP_CONFIG')?.public_shares_enabled === false) return false;
     return _shellActiveTeamScopeCan('manage_history');
   }
 
   function _hudShareSnapshotDeniedTitle() {
+    if (_shellValue('APP_CONFIG')?.public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
     return _shellTeamScopeDeniedMessage('create team history snapshots');
   }
 
@@ -1455,7 +1457,7 @@ let importedProjectWorkspaceShell;
     const allowed = _canCreateHudShareSnapshot();
     hudShareSnapshotBtn.disabled = !allowed;
     hudShareSnapshotBtn.title = allowed
-      ? 'Share tab as permalink (Option+P / Alt+P)'
+      ? 'Share tab as permalink (Option+Shift+P / Alt+Shift+P)'
       : _hudShareSnapshotDeniedTitle();
   }
 
@@ -1502,7 +1504,7 @@ let importedProjectWorkspaceShell;
     hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && permalinkCurrentTab) permalinkCurrentTab(id);
-    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)');
+    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+Shift+P / Alt+Shift+P)');
     hudActions.appendChild(hudShareSnapshotBtn);
     _refreshHudShareSnapshotState();
 

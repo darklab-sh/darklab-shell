@@ -240,6 +240,8 @@ def test_restricted_mode_sign_in_cookie_csrf_logout_and_fail_closed_gate(
         json={"label": "Restricted share", "content": ["restricted share line"]},
     )
     assert disabled_share.status_code == 403
+    share_config = client.get("/config", base_url=origin, headers={"X-Darklab-Credential": bundle.credential.secret})
+    assert share_config.get_json()["public_shares_enabled"] is False
     restricted["restricted_public_shares_enabled"] = True
     created_share = client.post(
         "/share",
@@ -248,6 +250,8 @@ def test_restricted_mode_sign_in_cookie_csrf_logout_and_fail_closed_gate(
         json={"label": "Restricted share", "content": ["restricted share line"]},
     )
     assert created_share.status_code == 200
+    share_config = client.get("/config", base_url=origin, headers={"X-Darklab-Credential": bundle.credential.secret})
+    assert share_config.get_json()["public_shares_enabled"] is True
     share_path = created_share.get_json()["url"]
     restricted["restricted_public_shares_enabled"] = False
     assert client.get(share_path, base_url=origin).status_code == 404
@@ -456,6 +460,7 @@ def test_open_mode_keeps_anonymous_identity_and_does_not_issue_browser_cookies(
     config_response = client.get("/config", headers=anonymous.headers)
     assert config_response.status_code == 200
     assert config_response.get_json()["access_profile"] == "open"
+    assert config_response.get_json()["public_shares_enabled"] is True
     upgraded = client.post("/auth/principals", headers=anonymous.headers, json={})
     assert upgraded.status_code == 201
     redeemed = client.post(

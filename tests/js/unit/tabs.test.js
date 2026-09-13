@@ -28,6 +28,7 @@ function loadTabsFns({
   maxOutputLines = 100,
   version = undefined,
   projectSource = undefined,
+  publicSharesEnabled = true,
   shareRedactionEnabled = true,
   shareRedactionRules = [],
   confirmPermalinkRedactionChoice = () =>
@@ -104,6 +105,7 @@ function loadTabsFns({
         max_tabs: maxTabs,
         max_output_lines: maxOutputLines,
         app_name: 'darklab_shell',
+        public_shares_enabled: publicSharesEnabled,
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
         ...(version !== undefined && { version }),
@@ -1075,6 +1077,36 @@ describe('tabs helpers', () => {
     const payload = JSON.parse(shareCall[1].body)
     expect(payload.apply_redaction).toBe(false)
     expect(payload.content[0].text).toBe('connected to 203.0.113.10')
+  })
+
+  it('disables public snapshots and blocks keyboard sharing when deployment policy forbids them', async () => {
+    const apiFetch = vi.fn()
+    const confirmPermalinkRedactionChoice = vi.fn()
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      publicSharesEnabled: false, apiFetch, confirmPermalinkRedactionChoice,
+    })
+    const id = createTab('private tab')
+    _getTabs()[0].rawLines.push({ text: 'private output', cls: '', tsC: '', tsE: '' })
+    const button = document.querySelector(`[data-tab="${id}"][data-action="permalink"]`)
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('Public share links are disabled for this deployment.')
+    await permalinkTab(id)
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(confirmPermalinkRedactionChoice).not.toHaveBeenCalled()
+    expect(document.getElementById('permalink-toast').textContent).toBe(button.title)
+  })
+
+  it('shows the server explanation when share creation is refused after the UI loaded', async () => {
+    const message = 'Public share links are disabled for this deployment.'
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false, status: 403, json: () => Promise.resolve({ error: 'public_shares_disabled', message }),
+    }))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({ apiFetch })
+    const id = createTab('private tab')
+    _getTabs()[0].rawLines.push({ text: 'private output', cls: '', tsC: '', tsE: '' })
+    await permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(document.getElementById('permalink-toast').textContent).toBe(message)
   })
 
   it('permalinkTab cancels sharing when the redaction confirmation is dismissed', async () => {

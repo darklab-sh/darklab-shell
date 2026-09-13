@@ -120,6 +120,28 @@ test.describe('restricted access profile', () => {
     }
   })
 
+  for (const width of [1280, 375]) test.describe(`private sharing at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
+    test('disables public snapshot controls and explains keyboard denial', async ({ page }) => {
+      await openSignIn(page)
+      await signIn(page)
+      const selector = width < 600
+        ? '.tab-panel.active .terminal-actions [data-action="permalink"]'
+        : '.hud-actions [data-action="permalink"]'
+      const button = page.locator(selector)
+      await expect(button).toBeVisible()
+      await expect(button).toBeDisabled()
+      await expect(button).toHaveAttribute('title', 'Public share links are disabled for this deployment.')
+      const requests = []
+      page.on('request', request => {
+        if (new URL(request.url()).pathname === '/share' && request.method() === 'POST') requests.push(request)
+      })
+      await page.keyboard.press('Alt+Shift+p')
+      await expect(page.locator('#permalink-toast')).toContainText('Public share links are disabled for this deployment.')
+      expect(requests).toEqual([])
+    })
+  })
+
   test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context }) => {
     await openSignIn(page)
     await signIn(page)

@@ -211,6 +211,8 @@ The Team panel unit suite checks that a list refresh preserves the active form, 
 
 Restricted Access browser checks exercise the local and session-wide sign-out buttons, including rejection of a second browser after session-wide sign-out. Unit checks cover provider-specific copy, recency-based provider controls, and recovery when link or unlink outlives the authentication window. Python request tests age the real session and verify reauthentication; the local-provider browser journey uses an older-session response fixture, then verifies real credential sign-in and return to Access.
 
+Restricted-browser share checks verify disabled snapshot controls at desktop and mobile widths, keyboard denial without a share request, and server-message feedback for a refused request.
+
 Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits.
 
 Each browser qualification case has a two-minute budget for its full sign-in, scope, and recovery journey; individual assertions still use their own deadlines.

@@ -218,7 +218,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
 | `GET` | `/` | Serves the Flask-rendered shell UI, frontend bootstrap config, active theme CSS variables, and initial rail state. |
-| `GET` | `/config` | Returns browser-facing runtime config derived from `config.yaml` and `config.local.yaml`. |
+| `GET` | `/config` | Returns browser-facing runtime config derived from `config.yaml` and `config.local.yaml`, including the effective `public_shares_enabled` policy used by snapshot controls. |
 | `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
 | `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
 | `GET` | `/commands/catalog` | Returns compact command registry entries for the Command Registry modal and sheet. |

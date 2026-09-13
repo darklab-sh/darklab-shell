@@ -106,6 +106,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Disabled public sharing is reflected in desktop, mobile, and keyboard actions.** Snapshot controls explain the deployment policy, and a refused share request shows the server's explanation.
 - **Provider linking offers a direct route through credential sign-in when the session is too old.** Access shows link and unlink actions only after a recent credential sign-in, offers the same recovery link if that window expires while the panel is open, and returns to Access after reauthentication or linking.
 - **Expired or revoked browser sessions return to sign-in automatically.** Restricted deployments recover on the next protected request, and same-origin logout can clear stale session cookies. Rotating or revoking the credential used by the current browser warns that it will sign out; a rotation keeps the replacement visible until it is saved. Failed logout shows an error with a retry path.
 - **Stream revocation handling stays within the module-size limits.** Shared browser delivery, API response construction, local PTY reads, and Redis timeout classification have focused helpers; route permissions, stream cleanup, and revocation behavior stay covered by the existing regressions.
