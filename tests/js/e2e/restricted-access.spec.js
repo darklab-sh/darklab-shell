@@ -89,7 +89,8 @@ test.describe('restricted access profile', () => {
       method: 'POST',
     })).status)
     expect(logoutStatus).toBe(204)
-    await openSignIn(page)
+    await page.evaluate(() => { if (typeof apiFetch === 'function') void apiFetch('/projects') })
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   })
 
   test('keeps invalid credentials off the page and supports session-wide revocation', async ({ page }) => {
@@ -104,7 +105,29 @@ test.describe('restricted access profile', () => {
       method: 'POST',
     })).status)
     expect(status).toBe(200)
+    await page.evaluate(() => { if (typeof apiFetch === 'function') void apiFetch('/projects') })
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+  })
+
+  test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context }) => {
     await openSignIn(page)
+    await signIn(page)
+    const cookies = await context.cookies()
+    const session = cookies.find(cookie => cookie.name === 'darklab_browser_session')
+    const csrf = cookies.find(cookie => cookie.name === 'darklab_csrf')
+    const revoked = await page.evaluate(async () => (await apiFetch('/auth/sessions/revoke-all', { method: 'POST' })).status)
+    expect(revoked).toBe(200)
+    await context.addCookies([session, csrf])
+
+    // The still-open app meets a real revoked-session response, with no reload.
+    await page.evaluate(() => { void apiFetch('/projects') })
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+    await expect(page.getByLabel('Access credential')).toBeVisible()
+    const logout = await page.evaluate(async () => (await fetch('/auth/logout', { method: 'POST' })).status)
+    expect(logout).toBe(204)
+    expect((await context.cookies()).filter(cookie => ['darklab_browser_session', 'darklab_csrf'].includes(cookie.name))).toEqual([])
+    await signIn(page)
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
   })
 
   test.describe('mobile sign-in', () => {

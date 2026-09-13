@@ -103,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Expired or revoked browser sessions return to sign-in automatically.** Restricted deployments recover on the next protected request, and same-origin logout can clear stale session cookies. Rotating or revoking the credential used by the current browser warns that it will sign out; a rotation keeps the replacement visible until it is saved. Failed logout shows an error with a retry path.
 - **Stream revocation handling stays within the module-size limits.** Shared browser delivery, API response construction, local PTY reads, and Redis timeout classification have focused helpers; route permissions, stream cleanup, and revocation behavior stay covered by the existing regressions.
 - **Team form refreshes preserve typing and clicks.** Refreshing the Team list keeps the current create, join, or recovery form mounted, so an update cannot replace a focused field or the Submit button during a click.
 - **The browser access-profile qualification has enough time to complete its full journey on CI.** Its per-test budget covers sign-in, protected reads, personal and Team writes, and session recovery; individual assertions keep their existing deadlines.

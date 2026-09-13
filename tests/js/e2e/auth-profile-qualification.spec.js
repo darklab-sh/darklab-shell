@@ -156,10 +156,10 @@ async function qualifyBrowser(page, context, projectName) {
 
   const logoutStatus = await page.evaluate(async () => (await apiFetch('/auth/logout', { method: 'POST' })).status)
   expect(logoutStatus).toBe(204)
-  expect((await readStatuses(page))['/projects']).toBe(401)
+  expect((await page.request.get('/projects')).status()).toBe(401)
+  await page.evaluate(() => { void apiFetch('/projects') })
+  await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   if (profile === 'mixed') {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
     await page.getByRole('link', { name: 'Continue with identity provider' }).click()
     await expect(page).toHaveURL(url => url.pathname === '/')
     await ensurePromptReady(page)

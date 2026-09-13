@@ -8,6 +8,7 @@ import {
   apiFetch as importedApiFetch,
   clearAccessCredential as importedClearAccessCredential,
   getBrowserIdentitySnapshot as importedGetBrowserIdentitySnapshot,
+  redirectToSignIn as importedRedirectToSignIn,
 } from '../../session.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { applyMobileTextInputDefaults as importedApplyMobileTextInputDefaults } from '../../ui/ui_helpers.js';
@@ -457,13 +458,15 @@ function _durableWorkContent(disposition) {
 }
 
 async function _revokeCredential(credential, { rotationReplacement = null } = {}) {
-  const currentId = importedGetBrowserIdentitySnapshot().credentialId;
+  const identity = importedGetBrowserIdentitySnapshot();
+  const currentId = currentCredentialId || identity.credentialId;
+  const signsOut = identity.kind === 'browser_session' && credential.id === currentId;
   const activePortable = credentials.filter(item => item.credential_type === 'portable' && credentialState(item) === 'Active');
   const isLastPortable = credential.credential_type === 'portable' && activePortable.length === 1;
   const payload = await _request(`/auth/credentials/${encodeURIComponent(credential.id)}/durable-work`);
   const content = _durableWorkContent(payload.durable_work || {});
   const choice = await importedShowConfirm({
-    body: `${credential.id === currentId ? 'This credential is active in this browser. ' : ''}${isLastPortable ? 'This is the last active access credential. Operator recovery will be required after revocation. ' : ''}Revocation cannot be undone.`,
+    body: `${signsOut ? 'This will sign out this browser. Sign in again with an active credential to continue. ' : credential.id === currentId ? 'This credential is active in this browser. ' : ''}${isLastPortable ? 'This is the last active access credential. Operator recovery will be required after revocation. ' : ''}Revocation cannot be undone.`,
     content: content.wrapper,
     tone: 'danger',
     actions: [
@@ -482,6 +485,11 @@ async function _revokeCredential(credential, { rotationReplacement = null } = {}
       pause_related_work: content.pause.checked,
     }),
   });
+  if (signsOut) {
+    clearCredentialReveal({ restoreFocus: false });
+    importedRedirectToSignIn();
+    return true;
+  }
   if (credential.id === currentId) {
     if (rotationReplacement) importedActivateAccessCredential(rotationReplacement);
     else importedClearAccessCredential();
@@ -495,8 +503,10 @@ async function _revokeCredential(credential, { rotationReplacement = null } = {}
 }
 
 async function _rotateCredential(credential) {
+  const signsOut = importedGetBrowserIdentitySnapshot().kind === 'browser_session'
+    && credential.id === currentCredentialId;
   const choice = await importedShowConfirm({
-    body: 'A replacement will be created and shown once. The old credential stays active until you confirm that the replacement is saved.',
+    body: `A replacement will be created and shown once. The old credential stays active until you confirm that the replacement is saved.${signsOut ? ' Revoking the old credential will sign out this browser. Use the saved replacement to sign in again.' : ''}`,
     tone: 'warning',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
@@ -553,8 +563,12 @@ async function _removeLocalAccess({ invalid = false } = {}) {
   if (choice !== 'remove') return;
   const identity = importedGetBrowserIdentitySnapshot();
   if (identity.kind === 'browser_session') {
-    await _request('/auth/logout', { method: 'POST' });
-    window.location.assign('/auth/sign-in');
+    try {
+      await _request('/auth/logout', { method: 'POST' });
+      importedRedirectToSignIn();
+    } catch (error) {
+      _setMessage(error.message || 'Could not sign out. Try again.', 'error');
+    }
     return;
   }
   importedClearAccessCredential();

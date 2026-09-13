@@ -623,7 +623,7 @@ These routes establish and manage pseudonymous principal credentials. Authentica
 | `POST` | `/auth/principals` | Atomically attaches the caller's validated anonymous workspace to a new principal and returns the first portable credential once. |
 | `POST` | `/auth/credentials/redeem` | Validates a portable credential submitted in the JSON body and returns its safe authenticated context without retaining or echoing the secret. Restricted deployments also set a protected browser session. |
 | `GET` | `/auth/principal` | Returns the current authenticated principal, workspace, credential type, and capabilities; PAT callers need `identity:read`. |
-| `POST` | `/auth/logout` | Revokes the current browser session and clears its session and CSRF cookies. |
+| `POST` | `/auth/logout` | Revokes the current browser session and clears its session and CSRF cookies. Stale-session recovery requires a same-origin POST; valid cookie sessions still require CSRF verification. |
 | `POST` | `/auth/sessions/revoke-all` | Revokes every browser session for the current principal and clears the current browser cookies. |
 | `GET` | `/auth/credentials` | Lists safe credential metadata for a portable credential, or only the calling PAT's metadata when that PAT has `identity:read`. |
 | `POST` | `/auth/credentials` | Creates a portable credential or scoped, expiring PAT and returns its secret once; PAT callers cannot issue credentials. |
@@ -2405,6 +2405,8 @@ Active process tracking (`run_id →  → pid`) was previously a third table (`a
 ---
 
 ### Authentication And Session Identity
+
+In restricted profiles, `apiFetch` recognizes terminal browser-session authentication errors and sends the browser to sign-in once. The return destination carries only the local pathname, keeping query strings and fragments out of the sign-in URL. Access actions that revoke the current parent credential navigate after the replacement-save confirmation; logout failure remains visible and retryable.
 
 Credential and OIDC sign-in validate return destinations before URL normalization. Only local paths are accepted; raw or encoded path backslashes, control characters, whitespace, and authority-changing separators fall back to the root page. Ordinary encoded query values and fragments remain intact.
 

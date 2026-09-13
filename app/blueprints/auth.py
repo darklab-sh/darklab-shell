@@ -516,8 +516,18 @@ def current_principal():
 
 @auth_bp.post("/logout")
 def logout():
-    context = require_authenticated_context()
-    if context.browser_session_id:
+    context = get_authentication_result().context
+    if not isinstance(context, AuthenticatedContext):
+        if not is_restricted():
+            require_authenticated_context()
+        # Invalid sessions cannot pass the normal session-backed CSRF check.
+        # Only a same-origin browser POST may clear their leftover cookies.
+        if request.headers.get("Origin") != request.host_url.rstrip("/"):
+            return jsonify({
+                "error": "csrf_validation_failed",
+                "message": "The request couldn't be verified. Refresh the page and try again.",
+            }), 403
+    if isinstance(context, AuthenticatedContext) and context.browser_session_id:
         revoke_browser_session(context.browser_session_id, reason="logout")
         log.info(
             "BROWSER_SESSION_REVOKED",

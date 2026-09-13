@@ -282,7 +282,22 @@ if (SESSION_GLOBAL && typeof SESSION_GLOBAL.addEventListener === 'function') {
 }
 
 // Wrapper around fetch that sends exactly one browser identity header.
-function apiFetch(url, options = {}) {
+let _signInNavigationPending = false;
+const BROWSER_SESSION_ERRORS = new Set([
+  'credential_required', 'idle_browser_session', 'expired_browser_session',
+  'revoked_browser_session', 'unknown_browser_session', 'malformed_browser_session',
+]);
+
+function redirectToSignIn() {
+  const location = SESSION_GLOBAL?.location;
+  if (_signInNavigationPending || !location || location.pathname.startsWith('/auth/')) return;
+  _signInNavigationPending = true;
+  // Carry only the local route. Query strings and fragments can contain
+  // sensitive user input and must not enter the sign-in request or its logs.
+  location.replace(`/auth/sign-in?next=${encodeURIComponent(location.pathname || '/')}`);
+}
+
+async function apiFetch(url, options = {}) {
   _ensureSessionIdentity();
   const requestOptions = _sessionCore().withIdentityHeaders(options, _browserIdentity, CLIENT_ID);
   const teamId = typeof importedGetActiveTeamId === 'function'
@@ -300,7 +315,17 @@ function apiFetch(url, options = {}) {
       });
     }
   }
-  return fetch(url, requestOptions);
+  const response = await fetch(url, requestOptions);
+  if (_restrictedBrowserSessionEnabled() && response.status === 401) {
+    try {
+      const payload = await response.clone().json();
+      const code = typeof payload.error === 'string' ? payload.error : payload.error?.code;
+      if (BROWSER_SESSION_ERRORS.has(code)) redirectToSignIn();
+    } catch (_) {
+      // Keep the original response available for the caller's error handling.
+    }
+  }
+  return response;
 }
 
 function describeFetchError(err, context = 'server') {
@@ -389,6 +414,7 @@ export {
   getClientId,
   getSessionId,
   logClientError,
+  redirectToSignIn,
 };
 
 _ensureSessionIdentity();

@@ -44,6 +44,7 @@ RESTRICTED_PUBLIC_ENDPOINTS = frozenset({
     "assets.vendor_xterm_css",
     "assets.vendor_fonts",
     "auth.sign_in",
+    "auth.logout",
     "auth.redeem",
     "auth.oidc_start",
     "auth.oidc_callback",

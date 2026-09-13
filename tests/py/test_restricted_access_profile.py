@@ -106,6 +106,7 @@ def test_restricted_public_route_allowlist_is_an_explicit_complete_inventory():
     assert actual == {
         ("auth.redeem", "/auth/credentials/redeem", ("POST",)),
         ("auth.sign_in", "/auth/sign-in", ("GET", "POST")),
+        ("auth.logout", "/auth/logout", ("POST",)),
         ("auth.oidc_start", "/auth/oidc/start", ("GET",)),
         ("auth.oidc_callback", "/auth/oidc/callback", ("GET",)),
         ("assets.favicon", "/favicon.ico", ("GET",)),

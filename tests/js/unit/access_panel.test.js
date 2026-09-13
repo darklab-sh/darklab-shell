@@ -8,6 +8,7 @@ vi.mock('../../../app/static/js/session.js', () => ({
       kind: 'credential', anonymousId: '', credentialId: id, validFormat: true,
     }
   }),
+  redirectToSignIn: vi.fn(),
   apiFetch: (...args) => globalThis.__accessPanelTest.apiFetch(...args),
   clearAccessCredential: vi.fn(() => {
     globalThis.__accessPanelTest.identity = {
@@ -330,6 +331,53 @@ describe('Access panel', () => {
     await vi.waitFor(() => expect(session.activateAccessCredential).toHaveBeenCalledWith(REPLACEMENT_SECRET))
     const urls = globalThis.__accessPanelTest.apiFetch.mock.calls.map(([url]) => url)
     expect(urls.indexOf('/auth/credentials')).toBeLessThan(urls.indexOf(`/auth/credentials/${CURRENT_ID}/revoke`))
+  })
+
+  it.each(['revoke', 'rotate'])('signs out a restricted browser after current credential %s', async action => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'token_required' }
+    globalThis.__accessPanelTest.identity = {
+      kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
+    }
+    if (action === 'rotate') globalThis.__accessPanelTest.showConfirm.mockResolvedValueOnce('continue')
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValueOnce('revoke')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
+      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
+      if (url === '/auth/credentials') return response({ credentials: [credential()] })
+      if (url.endsWith('/durable-work')) return response({ durable_work: { affected: [] } })
+      if (url.endsWith('/revoke')) return response({ durable_work: {} })
+      return response({})
+    })
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.querySelector(`[data-credential-action="${action}"]`).click()
+    if (action === 'rotate') {
+      await vi.waitFor(() => expect(document.getElementById('options-access-reveal').hidden).toBe(false))
+      expect(session.redirectToSignIn).not.toHaveBeenCalled()
+      expect(globalThis.__accessPanelTest.apiFetch.mock.calls.some(([url]) => url.endsWith('/revoke'))).toBe(false)
+      ;[...document.querySelectorAll('#options-access-reveal button')].find(button => button.textContent === 'I saved it').click()
+    }
+    await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls.at(-1)[0].body).toContain('sign out this browser')
+    expect(session.activateAccessCredential).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-reveal').textContent).not.toContain(REPLACEMENT_SECRET)
+  })
+
+  it('shows a failed logout in the Access panel and permits retry', async () => {
+    globalThis.__accessPanelTest.identity = {
+      kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
+    }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('remove')
+    globalThis.__accessPanelTest.apiFetch.mockRejectedValueOnce(new Error('Connection lost'))
+      .mockImplementation(() => response({}, 204))
+    const session = await import('../../../app/static/js/session.js')
+    await import('../../../app/static/js/features/preferences/access_panel.js')
+    document.getElementById('options-access-remove-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-msg').textContent).toContain('Connection lost'))
+    expect(session.redirectToSignIn).not.toHaveBeenCalled()
+    document.getElementById('options-access-remove-btn').click()
+    await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
   })
 
   it('shows safe provider-link actions only for a credential-backed browser session', async () => {
