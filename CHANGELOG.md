@@ -103,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Sign-in return links stay on the same deployment.** Credential and provider sign-in reject external destinations, backslashes, control characters, and encoded path separators that can change how a browser interprets the redirect. Normal local paths, queries, and fragments remain supported.
 - **Revoked access now disconnects open run streams and stops interactive PTYs.**
   - **Root cause:** Streams trusted the identity accepted when the connection opened, so later revocation wasn't checked.
   - **Fix:** Browser and API streams recheck credential, browser-session, principal, and Team state within a 15-second authorization heartbeat, including idle streams. Checks retain only safe IDs and don't extend activity timestamps. An accepted ordinary command continues; a controlling PTY is stopped.

@@ -201,7 +201,7 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 | Contract | Focused evidence |
 | --- | --- |
-| Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `auth-profile-qualification.spec.js` |
+| Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_auth_redirects.py`, `auth-profile-qualification.spec.js` |
 | PAT scopes, API, CLI, and redaction | `test_principal_auth.py`, `test_api_v1.py`, `test_postgres_backend.py`, `test_logging.py` |
 | Personal and Team ownership; Files, Projects, Assessments, Atlas, History, and shares | `test_postgres_backend.py`, `test_api_v1.py`, `test_run_history_share.py`, `team-mode.spec.js`, `assessment.spec.js`, `share.spec.js` |
 | PTY, streams, schedules, watchers, workflows, notifications, and Secrets | `test_stream_authorization.py`, `test_postgres_backend.py`, `test_workflows_v2.py`, `test_notifications_channels.py`, `test_notifications_hooks.py`, `test_api_v1.py`, `output.spec.js` |

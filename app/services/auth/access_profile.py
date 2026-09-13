@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from flask import current_app, jsonify, redirect, request, url_for
 
@@ -91,10 +92,23 @@ def is_public_endpoint(endpoint: str | None = None) -> bool:
 
 
 def safe_next_path(value: object, *, fallback: str = "/") -> str:
-    path = str(value or "").strip()
-    if not path.startswith("/") or path.startswith("//") or "\r" in path or "\n" in path:
+    path = str(value or "")
+    if not path.startswith("/") or path.startswith("//") or len(path) > 2048:
         return fallback
-    return path[:2048]
+    # Browsers normalize backslashes and strip control characters when parsing
+    # Location. Validate before any parser can discard those characters.
+    if any(char == "\\" or char.isspace() or ord(char) < 32 or ord(char) == 127 for char in path):
+        return fallback
+    try:
+        parsed = urlsplit(path)
+        decoded_path = unquote(parsed.path, errors="strict")
+    except (UnicodeError, ValueError):
+        return fallback
+    if parsed.scheme or parsed.netloc or decoded_path.startswith("//"):
+        return fallback
+    if any(char == "\\" or char.isspace() or ord(char) < 32 or ord(char) == 127 for char in decoded_path):
+        return fallback
+    return path
 
 
 def _unauthorized_response():

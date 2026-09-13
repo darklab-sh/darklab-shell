@@ -2405,6 +2405,8 @@ Active process tracking (`run_id →  → pid`) was previously a third table (`a
 
 ### Authentication And Session Identity
 
+Credential and OIDC sign-in validate return destinations before URL normalization. Only local paths are accepted; raw or encoded path backslashes, control characters, whitespace, and authority-changing separators fall back to the root page. Ordinary encoded query values and fragments remain intact.
+
 Browser, API SSE/NDJSON, and interactive PTY streams retain their initial typed identity without reusable secrets. A shared guard rechecks current session, credential, principal, workspace, and Team authority every ten seconds; readers cap idle waits at five seconds so revocation is detected within the 15-second authorization heartbeat. Rechecks don't write credential last-used or browser last-seen timestamps. Rejection emits a terminal error and releases the subscription. A controlling PTY is canceled through the scoped process-group path, while an ordinary accepted run continues as principal-owned work.
 
 Before the access-profile gate, scoped PATs are confined to `/api/v1/` and an explicit allowlist of `/auth` identity-read and self-revocation handlers. Those handlers enforce their own scope and self-only rules. Browser product routes never accept a PAT, including a PAT with every scope; `oidc_required` further limits PATs to API v1.
