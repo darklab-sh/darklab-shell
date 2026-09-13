@@ -11,6 +11,7 @@ import {
   openThemeSelector as importedOpenThemeSelector,
 } from './app.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from './ui/overlay_actions_bridge.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
 import { setControllerActionHandlers as importedSetControllerActionHandlers } from './controller_action_bridge.js';
 import {
   openFaq as importedOpenFaq,
@@ -1443,12 +1444,14 @@ let importedProjectWorkspaceShell;
   }
 
   function _canCreateHudShareSnapshot() {
-    if (_shellValue('APP_CONFIG')?.public_shares_enabled === false) return false;
+    const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    if (config?.public_shares_enabled === false) return false;
     return _shellActiveTeamScopeCan('manage_history');
   }
 
   function _hudShareSnapshotDeniedTitle() {
-    if (_shellValue('APP_CONFIG')?.public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
+    const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    if (config?.public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
     return _shellTeamScopeDeniedMessage('create team history snapshots');
   }
 

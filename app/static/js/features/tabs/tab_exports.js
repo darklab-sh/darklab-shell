@@ -547,7 +547,7 @@ async function permalinkTab(id) {
       run_id: String(t.historyRunId || ''),
     })
   }).then(async (r) => {
-    const data = await r.json();
+    const data = await r.json().catch(() => null);
     if (r.ok === false || !data || typeof data.url !== 'string') {
       throw new Error((data && data.message) || 'Failed to create permalink');
     }
