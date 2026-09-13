@@ -490,7 +490,7 @@ RUN case "${APT_CACHE_EPOCH}" in \
         > /etc/apt/sources.list.d/pgdg.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
+        libc6 libc-bin man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
         netcat-traditional mtr whois tcptraceroute dnsrecon git \
         libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
         python3-requests fierce dnsenum libcap2-bin sudo groff-base \

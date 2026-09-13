@@ -223,7 +223,7 @@ The local **Sign out** action revokes this app's browser session; it doesn't sig
 
 Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
 
-Public share permalinks are disabled by default in `token_required`: authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
+Public share permalinks are disabled by default in every restricted profile: authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
 ### v3 identity cutover
 
@@ -1255,7 +1255,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
 | `HOST_BIND_ADDRESS` | Production Compose | Host address used for the published app port. The public stack defaults to `0.0.0.0` so remote hosts can connect. Use `127.0.0.1` when only a local reverse proxy should reach the app |
 | `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary: `open`, `token_required`, `oidc_required`, or `mixed` |
-| `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows unauthenticated capability-link creation and reads in `token_required`. Defaults to `false` |
+| `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows capability-link creation and unauthenticated reads in restricted profiles. Defaults to `false` |
 | `BROWSER_SESSION_IDLE_MINUTES` | Docker Compose, Flask app | Inactivity deadline for restricted browser sessions. Defaults to `30` minutes |
 | `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit |
 | `OIDC_ISSUER` | Docker Compose, Flask app | Exact HTTPS provider issuer from discovery, without a trailing slash |

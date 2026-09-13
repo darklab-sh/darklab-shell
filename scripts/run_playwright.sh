@@ -176,7 +176,7 @@ print_server_diagnostics() {
 
 if ((stop_servers)); then
   bash scripts/test-support/playwright/stop_e2e_servers.sh \
-    "$(( ${PLAYWRIGHT_PROJECT_COUNT:-5} + 2 ))" \
+    "${PLAYWRIGHT_SERVER_COUNT:-$(( ${PLAYWRIGHT_PROJECT_COUNT:-5} + 5 ))}" \
     "${PLAYWRIGHT_BASE_PORT:-5001}"
 fi
 

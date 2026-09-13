@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Access-profile qualification covers every sign-in policy on both databases, asset modes, and viewport sizes.**
+  - **Before:** Focused access checks didn't exercise the complete browser grid.
+  - **After:** Isolated SQLite and disposable-schema PostgreSQL servers run the same desktop and mobile browser journey for `open`, `token_required`, `oidc_required`, and `mixed` in source and bundled asset modes. The journey checks sign-in choices, protected reads and cookies, personal and Team scope, file round trips, reload, and logout. CI runs both PostgreSQL browser asset modes.
+  - **Tests:** PostgreSQL request-policy cases check scoped PAT access. SQLite and PostgreSQL measurements record concurrent portable/PAT lookup latency, enforce bounded last-used writes, and reject stored reusable credential material. The testing handbook maps the grid to deeper product, recovery, and migration suites. Markdown lint ignores generated browser reports, and the authored-finding browser test waits for its target to be saved before opening the editor.
 - **Options → Access now calls signed-in workspaces “Authenticated workspace.”** The status is no longer confused with the **Keep this workspace** action for anonymous users.
 - **Private deployments can sign in through OpenID Connect, a portable credential, or both.**
   - **Before:** Only the credential sign-in gate was active; the provider-only and combined access profiles were reserved.
@@ -99,6 +103,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Branch images now pick up fixed Debian glibc packages.** The runtime install explicitly refreshes `libc6` and `libc-bin`, and branch CI can bypass the runtime cache for a security recheck without rebuilding the compiled tool stages.
 - **Keeping a workspace no longer fails when two browsers create their first credentials at once.**
   - **Root cause:** Concurrent first-time SQLite upgrades could both try to create the verifier key, returning a server error. Browser-test retries then used up the shared anonymous-issuance limit and surfaced as a misleading 429.
   - **Fix:** SQLite reserves the write transaction before checking the verifier key. The browser-test helper makes one request and reports its original failure instead of retrying it into a rate limit.

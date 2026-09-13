@@ -17,7 +17,7 @@ const basePort = Math.max(
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => name.endsWith('.spec.js'))
-  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js'].includes(name))
+  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js'].includes(name))
   .sort()
 
 // Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
@@ -80,7 +80,7 @@ const openProjects = specGroups
     if (!specs.length) return null
     return {
       name: `chromium-w${index + 1}`,
-      testMatch: specs,
+      testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js'] : specs,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: `http://127.0.0.1:${basePort + index}`,
@@ -111,12 +111,47 @@ const oidcProject = {
     trace: 'on-first-retry',
   },
 }
-const projects = [...openProjects, restrictedProject, oidcProject]
+const oidcRequiredPort = oidcPort + 1
+const oidcRequiredProject = {
+  name: 'chromium-oidc-required',
+  testMatch: ['auth-profile-qualification.spec.js'],
+  use: {
+    ...devices['Desktop Chrome'],
+    baseURL: `https://127.0.0.1:${oidcRequiredPort}`,
+    ignoreHTTPSErrors: true,
+    trace: 'on-first-retry',
+  },
+}
+const restrictedQualificationPort = oidcRequiredPort + 1
+const restrictedQualificationProject = {
+  name: 'chromium-restricted-qualification',
+  testMatch: ['auth-profile-qualification.spec.js'],
+  use: {
+    ...devices['Desktop Chrome'],
+    baseURL: `http://127.0.0.1:${restrictedQualificationPort}`,
+    trace: 'on-first-retry',
+  },
+}
+const oidcQualificationPort = restrictedQualificationPort + 1
+const oidcQualificationProject = {
+  name: 'chromium-oidc-qualification',
+  testMatch: ['auth-profile-qualification.spec.js'],
+  use: {
+    ...devices['Desktop Chrome'],
+    baseURL: `https://127.0.0.1:${oidcQualificationPort}`,
+    ignoreHTTPSErrors: true,
+    trace: 'on-first-retry',
+  },
+}
+const projects = [
+  ...openProjects, restrictedProject, oidcProject, oidcRequiredProject,
+  restrictedQualificationProject, oidcQualificationProject,
+]
 
 export default defineConfig({
   testDir,
   fullyParallel: false,
-  workers: projects.length,
+  workers: Math.min(7, projects.length),
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),
@@ -128,5 +163,8 @@ export default defineConfig({
     ),
     buildIsolatedWebServer(restrictedPort, 'restricted', 'token_required'),
     buildIsolatedWebServer(oidcPort, 'oidc', 'mixed', true),
+    buildIsolatedWebServer(oidcRequiredPort, 'oidc-required', 'oidc_required', true),
+    buildIsolatedWebServer(restrictedQualificationPort, 'restricted-qualification', 'token_required'),
+    buildIsolatedWebServer(oidcQualificationPort, 'oidc-qualification', 'mixed', true),
   ],
 })

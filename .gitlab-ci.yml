@@ -92,6 +92,24 @@ test-js-e2e-source:
   script:
     - npm run test:e2e:source
 
+test-js-e2e-postgres-auth-profiles:
+  extends: .playwright-lane
+  services:
+    - name: postgres:18-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: darklab_shell
+    POSTGRES_USER: darklab
+    POSTGRES_PASSWORD: darklab_dev_password
+    DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+    PW_E2E_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+    PLAYWRIGHT_BASE_PORT: "5201"
+    PLAYWRIGHT_SERVER_COUNT: "4"
+  script:
+    - bash scripts/run_postgres_tests.sh --wait-only
+    - bash scripts/run_playwright.sh --asset-bundle-mode source --config .tooling/playwright.auth-profile-postgres.config.js
+    - bash scripts/run_playwright.sh --asset-bundle-mode bundle --config .tooling/playwright.auth-profile-postgres.config.js
+
 .pytest-lane:
   stage: test
   rules:
@@ -457,7 +475,11 @@ docker-build:
       build_context=$(mktemp)
       trap 'rm -f "$build_context"' EXIT
       scripts/container/create_portable_build_context.sh "$build_context"
-      docker buildx build --platform linux/amd64 --provenance=false \
+      set --
+      if [ "${BRANCH_IMAGE_FRESH_APT:-false}" = "true" ]; then
+        set -- --no-cache-filter runtime
+      fi
+      docker buildx build "$@" --platform linux/amd64 --provenance=false \
         --progress=plain \
         --build-arg "PYTHON_BASE_IMAGE=${python_base_image}@${python_base_digest}" \
         --build-arg "PYTHON_BASE_DIGEST=${python_base_digest}" \

@@ -9,8 +9,8 @@ SLOT="${2:?slot required}"
 ACCESS_PROFILE_VALUE="${3:-open}"
 CAPTURE_ANONYMOUS_ID="cafebabe-cafe-4abe-8afe-cafebabecafe"
 
-if [[ "$ACCESS_PROFILE_VALUE" != "open" && "$ACCESS_PROFILE_VALUE" != "token_required" && "$ACCESS_PROFILE_VALUE" != "mixed" ]]; then
-  echo "run_e2e_server.sh: access profile must be open, token_required, or mixed" >&2
+if [[ "$ACCESS_PROFILE_VALUE" != "open" && "$ACCESS_PROFILE_VALUE" != "token_required" && "$ACCESS_PROFILE_VALUE" != "oidc_required" && "$ACCESS_PROFILE_VALUE" != "mixed" ]]; then
+  echo "run_e2e_server.sh: access profile must be open, token_required, oidc_required, or mixed" >&2
   exit 2
 fi
 
@@ -99,7 +99,18 @@ export REDIS_URL=""
 export APP_FAKE_REDIS="$APP_FAKE_REDIS"
 export FLASK_APP=wsgi.py
 
-if [[ "$ACCESS_PROFILE_VALUE" == "mixed" ]]; then
+if [[ -n "${PW_E2E_POSTGRES_DSN:-}" ]]; then
+  if [[ "$SLOT" != pg-* ]]; then
+    echo "run_e2e_server.sh: PostgreSQL qualification requires a pg- slot" >&2
+    exit 2
+  fi
+  export DATABASE_BACKEND=postgres
+  export DATABASE_URL="$PW_E2E_POSTGRES_DSN"
+  PG_SCHEMA="$("$PYTHON_BIN" "$SCRIPT_DIR/prepare_postgres_schema.py" "$SLOT")"
+  export PGOPTIONS="${PGOPTIONS:+$PGOPTIONS }-c search_path=$PG_SCHEMA"
+fi
+
+if [[ "$ACCESS_PROFILE_VALUE" == "mixed" || "$ACCESS_PROFILE_VALUE" == "oidc_required" ]]; then
   CERT_FILE="$DATA_DIR/oidc-local.crt"
   KEY_FILE="$DATA_DIR/oidc-local.key"
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
@@ -122,8 +133,15 @@ if [[ "$ACCESS_PROFILE_VALUE" == "token_required" || "$ACCESS_PROFILE_VALUE" == 
   fi
   mkdir -p "$PW_E2E_SECRET_DIR"
   chmod 700 "$PW_E2E_SECRET_DIR"
-  "$PYTHON_BIN" "$REPO_ROOT/scripts/test-support/playwright/bootstrap_restricted_access.py" \
+  bootstrap_cmd=(
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/test-support/playwright/bootstrap_restricted_access.py"
     --secret-file "$PW_E2E_SECRET_DIR/${SLOT}.credential"
+  )
+  if [[ -n "$SERVER_LOG" ]]; then
+    "${bootstrap_cmd[@]}" >> "$SERVER_LOG" 2>&1
+  else
+    "${bootstrap_cmd[@]}"
+  fi
 fi
 
 server_cmd=(
@@ -136,7 +154,7 @@ server_cmd=(
   --graceful-timeout 5
   --keep-alive 30
 )
-if [[ "$ACCESS_PROFILE_VALUE" == "mixed" ]]; then
+if [[ "$ACCESS_PROFILE_VALUE" == "mixed" || "$ACCESS_PROFILE_VALUE" == "oidc_required" ]]; then
   server_cmd+=(--certfile "$CERT_FILE" --keyfile "$KEY_FILE" oidc_provider_wsgi:application)
 else
   server_cmd+=(wsgi:application)

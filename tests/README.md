@@ -30,6 +30,7 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 - [Running the Suites](#running-the-suites)
 - [Recommended Workflow](#recommended-workflow)
 - [Suite Summaries](#suite-summaries)
+  - [Access Profile Qualification](#access-profile-qualification)
   - [Pytest](#pytest)
   - [Vitest](#vitest)
   - [Playwright](#playwright)
@@ -142,7 +143,7 @@ The direct Playwright commands above only list dedicated suites. Use `bash scrip
 Playwright notes:
 
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. Each server keeps the shipped catalogs under `app/conf` and writes only its private settings overlay to a per-slot temporary directory. The helper uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
-- `npm run test:e2e:source` runs a fast source-mode Playwright slice against the Project Assessment lifecycle, boot resilience, share/permalink flows, shell-output entity actions, and the high-risk lazy shell surfaces. Its lazy-surface check also runs a workflow terminal command before the Workflows controller has loaded, which keeps cold-start command lifecycle regressions covered. It is included in `npm test` and runs as a separate required GitLab job, so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
+- `npm run test:e2e:source` runs a source-mode Playwright slice against the four-profile access matrix, Project Assessment lifecycle, boot resilience, share/permalink flows, shell-output entity actions, and the high-risk lazy shell surfaces. Its lazy-surface check also runs a workflow terminal command before the Workflows controller has loaded, which keeps cold-start command lifecycle regressions covered. It is included in `npm test` and runs as a separate required GitLab job, so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - CI retries a failed Playwright case once to capture a trace, but `failOnFlakyTests` keeps the job red if that retry passes. `forbidOnly` also rejects focused tests before they can quietly reduce the suite.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
@@ -177,6 +178,34 @@ A practical local loop is usually:
 ## Suite Summaries
 
 These summaries explain what belongs in each layer. Use the live-listing commands above when you need the current test inventory.
+
+### Access Profile Qualification
+
+The access checks use the same four policy choices on both databases. The browser matrix gives each profile an isolated server and checks source and bundled assets at desktop and mobile widths on both SQLite and PostgreSQL. PostgreSQL request-policy checks also repeat the profile gate and PAT access without relying on a browser cookie.
+
+| Database | Source assets | Bundled assets |
+| --- | --- | --- |
+| SQLite | All four profiles, desktop and mobile | All four profiles, desktop and mobile |
+| PostgreSQL | All four profiles, desktop and mobile | All four profiles, desktop and mobile |
+
+| Profile | Anonymous workspace | Browser sign-in | OIDC | PAT/API |
+| --- | --- | --- | --- | --- |
+| `open` | Available | Portable credential stays in the browser | Off | Scoped PAT |
+| `token_required` | Denied | Portable credential becomes a protected cookie session | Off | Scoped PAT |
+| `oidc_required` | Denied | Provider-backed cookie session only | Required | Scoped PAT; no PAT browser access |
+| `mixed` | Denied | Portable or provider-backed cookie session | Available | Scoped PAT |
+
+The browser smoke checks an anonymous request before sign-in, the available sign-in methods, cookie protection, protected reads for Config, Files, Projects, Atlas, History, Schedules, Watchers, Workflows, Secrets, and Notifications, plus personal and Team Project isolation, an Assessment read, a file round trip, reload, and logout. The mixed profile checks both credential and provider sign-in. Each profile runs at 375-pixel mobile width and desktop width in both asset modes. The Postgres smoke also checks a separate PAT client, so a browser cookie can't accidentally satisfy API access.
+
+| Contract | Focused evidence |
+| --- | --- |
+| Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `auth-profile-qualification.spec.js` |
+| PAT scopes, API, CLI, and redaction | `test_principal_auth.py`, `test_api_v1.py`, `test_postgres_backend.py`, `test_logging.py` |
+| Personal and Team ownership; Files, Projects, Assessments, Atlas, History, and shares | `test_postgres_backend.py`, `test_api_v1.py`, `test_run_history_share.py`, `team-mode.spec.js`, `assessment.spec.js`, `share.spec.js` |
+| PTY, streams, schedules, watchers, workflows, notifications, and Secrets | `test_postgres_backend.py`, `test_workflows_v2.py`, `test_notifications_channels.py`, `test_notifications_hooks.py`, `test_api_v1.py`, `output.spec.js` |
+| Disablement, credential/session revocation, Team-role changes, backup/restore, SQLite-to-Postgres copy, and restart recovery | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_backup_system.py`, `test_postgres_backend.py` |
+
+Run the SQLite browser matrix with `bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/auth-profile-qualification.spec.js` and repeat with `--asset-bundle-mode bundle`. Run the disposable Postgres browser matrix with `bash scripts/run_postgres_tests.sh --browser -- --asset-bundle-mode source`, then repeat with `--asset-bundle-mode bundle`; CI runs both modes against its temporary Postgres service. The Postgres request-policy lane uses `bash scripts/run_postgres_tests.sh`; its credential-resolution case prints safe portable/PAT concurrency measurements when pytest output capture is disabled. For a disposable SQLite lookup measurement, run `.venv/bin/python scripts/test-support/measure_credential_resolution.py`. Both measurements check the five-minute last-used write bound and reject stored reusable credential material. The complete suite commands above remain the final regression check; the matrix smoke isn't a replacement for the deeper product journeys.
 
 ### Pytest
 
@@ -321,7 +350,7 @@ bash scripts/run_playwright.sh --asset-bundle-mode bundle
 
 The open-profile Access journey keeps an anonymous workspace, proves the one-time secret leaves the DOM, manages safe credential metadata, rotates replacement-first, distinguishes local removal from revocation, uses an existing credential, and exercises current- and last-credential warnings. It also checks that only the right actions are visible for anonymous, invalid-credential, and kept-workspace states, and that the Credentials section, card contents, and existing-credential form have room around them. Its mobile path checks the shared panel, action visibility and spacing, focus, touch targets, and horizontal containment. The dedicated restricted journey starts an isolated `token_required` server with an operator-bootstrapped credential, then checks the standalone sign-in, HttpOnly cookie exchange, the masked safe credential id in the HUD and **Kept** mobile access label, script-readable storage cleanup, CSRF rejection and success, safe credential rows, logout, session-wide revocation, invalid-credential redaction, and the mobile sign-in layout.
 
-The managed-sign-in journey starts a separate `mixed` server with a test-only HTTPS provider. It signs in with a portable credential, links the provider after both proofs, unlinks it and checks session revocation, then signs in through the provider and checks the HttpOnly cookie and `OIDC` HUD label. It waits for the provider redirect to finish before checking the linked workspace, without a second page load. It also checks a refused provider authorization. The provider generates a short-lived local certificate and never contacts Keycloak or the internet; run the spec in source or bundle mode through `bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/oidc-access.spec.js`.
+The managed-sign-in journey starts a separate `mixed` server with a test-only HTTPS provider. It signs in with a portable credential, links the provider after both proofs, unlinks it and checks session revocation, then signs in through the provider and checks the HttpOnly cookie and `OIDC` HUD label. It waits for the provider redirect to finish before checking the linked workspace, without a second page load. It also checks a refused provider authorization. The profile matrix adds a separate `oidc_required` server and mobile checks. The provider generates a short-lived local certificate and never contacts Keycloak or the internet; run the spec in source or bundle mode through `bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/oidc-access.spec.js`.
 
 `tests/js/e2e/` covers the browser UI against a live Flask server, including mobile behavior, kill/history/search/share flows, team scope switching, browser-visible output behavior, and startup resilience. Output coverage keeps detected entity text selectable while exercising the compact action menu, canonical-value copy, exact desktop and mobile command insertion, keyboard navigation, viewport clamping, context dismissal, and Atlas handoff. Project coverage creates and edits an assessor-authored finding through the shared editor against a real confirmed target, including the immutable target shown during edit, and creates another finding from selected saved Run Details lines before verifying the exact typed evidence through the live route. Focused Quick Lookup flows cover the desktop rail, mobile menu, and `Alt+Q` / `Option+Q`, hostname and IP profiles, URL-parent recovery, app and cached-provider evidence, live source-run paging, related-entity navigation, owner-scope refresh, Atlas handoff, and direct form/profile close-to-composer focus restoration without leaking an Option-key glyph. Both bundled and source asset modes exercise these paths.
 

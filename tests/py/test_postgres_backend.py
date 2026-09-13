@@ -1140,6 +1140,206 @@ def test_oidc_identity_and_browser_session_migrate_on_postgres(postgres_schema, 
 
 
 @pytest.mark.postgres
+def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_schema, postgres_dsn, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from statistics import median
+    from time import perf_counter
+
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import storage as principal_storage
+    from services.auth.resolver import AuthenticationState, resolve_authentication
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    data_dir = tmp_path / "credential-measure-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    settings = WorkspaceSettings(True, "volume", tmp_path / "credential-measure-workspaces", 1024, 1024, 10, 1)
+    settings.root.mkdir()
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    bundle = principal_storage.create_principal_with_credential(settings=settings, conn=conn)
+    pat = principal_storage.issue_credential(
+        bundle.principal.id,
+        credential_type="pat",
+        created_by_credential_id=bundle.credential.metadata.id,
+        conn=conn,
+    )
+    postgres_schema.conn.commit()
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+
+    def measure(headers: dict[str, str]) -> dict[str, float | int]:
+        def resolve(_index: int) -> float:
+            with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+                active_conn = PostgresSqliteCompatConnection(raw_conn)
+                started = perf_counter()
+                result = resolve_authentication(headers, conn=active_conn, touch_last_used=False)
+                elapsed_ms = (perf_counter() - started) * 1000
+            assert result.state == AuthenticationState.VALID
+            return elapsed_ms
+
+        started = perf_counter()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            samples = list(pool.map(resolve, range(64)))
+        elapsed = perf_counter() - started
+        return {
+            "requests": len(samples),
+            "workers": 8,
+            "median_ms": round(median(samples), 3),
+            "p95_ms": round(sorted(samples)[int((len(samples) - 1) * 0.95)], 3),
+            "requests_per_second": round(len(samples) / elapsed, 1),
+        }
+
+    portable_headers = {"X-Darklab-Credential": bundle.credential.secret}
+    pat_headers = {"Authorization": f"Bearer {pat.secret}"}
+    result = {"backend": "postgres", "portable": measure(portable_headers), "pat": measure(pat_headers)}
+    stored_credentials = repr([
+        dict(row) for row in conn.execute("SELECT * FROM credentials").fetchall()
+    ])
+    for secret in (bundle.credential.secret, pat.secret):
+        assert secret not in stored_credentials
+        assert secret.rsplit("_", 1)[-1] not in stored_credentials
+    result["credential_row_disclosure_check"] = "passed"
+
+    def last_used():
+        row = conn.execute(
+            "SELECT last_used_at FROM credentials WHERE id = ?",
+            (bundle.credential.metadata.id,),
+        ).fetchone()
+        return row["last_used_at"]
+
+    now = datetime.now(timezone.utc)
+    assert resolve_authentication(portable_headers, conn=conn, now=now).state == AuthenticationState.VALID
+    postgres_schema.conn.commit()
+    first = last_used()
+    assert (
+        resolve_authentication(portable_headers, conn=conn, now=now + timedelta(seconds=1)).state
+        == AuthenticationState.VALID
+    )
+    postgres_schema.conn.commit()
+    assert last_used() == first
+    assert (
+        resolve_authentication(portable_headers, conn=conn, now=now + timedelta(seconds=301)).state
+        == AuthenticationState.VALID
+    )
+    postgres_schema.conn.commit()
+    assert last_used() != first
+    result["bounded_last_used_writes"] = "passed"
+    print(json.dumps(result, sort_keys=True))
+    reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("profile", ["open", "token_required", "oidc_required", "mixed"])
+@pytest.mark.parametrize("asset_mode", ["source", "bundle"])
+def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch, profile, asset_mode):
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import storage as principal_storage
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+    from test_oidc_sign_in import LocalProvider, _callback, _response_cookie, _start, _config, ORIGIN
+
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    data_dir = tmp_path / "auth-profile-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    base = _config(profile=profile) if profile in {"oidc_required", "mixed"} else build_test_config({
+        "access_profile": profile,
+        "asset_bundle_mode": asset_mode,
+    })
+    cfg = base.with_overrides({
+        "database_backend": "postgres",
+        "database_url": _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema),
+        "data_dir": str(data_dir),
+        "asset_bundle_mode": asset_mode,
+    })
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    provider = LocalProvider(monkeypatch) if profile in {"oidc_required", "mixed"} else None
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        client = app.test_client()
+        root = client.get("/", base_url=ORIGIN)
+        assert root.status_code == (200 if profile == "open" else 302)
+        anonymous_headers = {"X-Darklab-Anonymous-ID": str(uuid.uuid4())}
+        assert client.get("/projects", base_url=ORIGIN, headers=anonymous_headers).status_code == (
+            200 if profile == "open" else 401
+        )
+
+        settings = WorkspaceSettings(True, "volume", tmp_path / "auth-profile-workspaces", 1024, 1024, 10, 1)
+        settings.root.mkdir()
+        if profile == "oidc_required":
+            assert provider is not None
+            assert _callback(client, _start(client, provider)).status_code == 302
+            principal_id = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+            browser_headers = {}
+        else:
+            with isolated_connect() as conn:
+                bundle = principal_storage.create_principal_with_credential(settings=settings, conn=conn)
+                conn.commit()
+            principal_id = bundle.principal.id
+            browser_headers = {"X-Darklab-Credential": bundle.credential.secret}
+            if profile != "open":
+                nonce = _response_cookie(client.get("/auth/sign-in", base_url=ORIGIN), "darklab_sign_in_nonce")
+                signed_in = client.post("/auth/sign-in", base_url=ORIGIN, data={
+                    "credential": bundle.credential.secret,
+                    "sign_in_nonce": nonce,
+                })
+                assert signed_in.status_code == 302
+                browser_headers = {}
+
+        assert client.get("/", base_url=ORIGIN, headers=browser_headers).status_code == 200
+        assert client.get("/projects", base_url=ORIGIN, headers=browser_headers).status_code == 200
+        assert client.get("/history", base_url=ORIGIN, headers=browser_headers).status_code == 200
+        with isolated_connect() as conn:
+            pat = principal_storage.issue_credential(
+                principal_id,
+                credential_type="pat",
+                scopes={"identity:read", "projects:read"},
+                conn=conn,
+            )
+            conn.commit()
+        pat_headers = {"Authorization": f"Bearer {pat.secret}"}
+        api_client = app.test_client()
+        api_principal = api_client.get("/api/v1/principal", base_url=ORIGIN, headers=pat_headers)
+        assert api_principal.status_code == 200
+        assert api_principal.get_json()["principal"]["id"] == principal_id
+        assert api_client.get("/api/v1/projects", base_url=ORIGIN, headers=pat_headers).status_code == 200
+        assert api_client.get("/projects", base_url=ORIGIN, headers=pat_headers).status_code == (
+            401 if profile == "oidc_required" else 200
+        )
+    finally:
+        close_postgres_pool()
+        reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
 def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch):
     psycopg = pytest.importorskip("psycopg")
     from psycopg.rows import dict_row
