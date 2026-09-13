@@ -285,7 +285,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 | **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed red, `—` muted when no run has finished yet; dims to muted while any tab is actively running |
 | **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
-| **ACCESS** | Active workspace access | `ANON` (muted) for a browser-local workspace or a safe `crd_…` hint (green) for a kept workspace in either access profile — see [Workspace Access](#workspace-access) |
+| **ACCESS** | Active workspace access | `ANON` for an anonymous workspace, a safe `crd_…` hint for credential access, or `OIDC` for provider sign-in — see [Workspace Access](#workspace-access) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
 | **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
 | **DB** | Configured database connection state | `ONLINE` green, `OFFLINE` red |
@@ -1548,7 +1548,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - **Remove from browser** forgets the local credential and creates a fresh anonymous workspace in that browser. The kept workspace and credentials on other devices remain unchanged.
 - **Options → Access** shows only the actions that apply: anonymous browsers can keep or open a workspace, invalid saved credentials can be removed, and kept workspaces can manage their credentials or remove access from this browser.
 - Access changes propagate to other tabs. History, autocomplete, preferences, Files, Teams, automation, and identity summaries refresh around the new workspace, while an invalid or revoked credential fails closed and must be removed or replaced deliberately.
-- The desktop HUD shows **ANON** or a safe `crd_…` hint, including after restricted sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
+- The desktop HUD shows **ANON**, a safe `crd_…` hint after credential sign-in, or **OIDC** after provider sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
 - In the `token_required` profile, the application opens on a focused credential screen instead of creating an anonymous workspace. A successful sign-in replaces the portable value with an HttpOnly browser session and removes any old credential or anonymous identity from browser storage before the main application starts.
 - In `oidc_required`, the sign-in screen sends you to the configured identity provider and opens the linked workspace after you return. `mixed` offers that choice alongside portable-credential sign-in. A new provider identity gets a workspace only when the operator's provisioning policy allows it; no email or real name is required.
 - **Options → Access** shows whether this workspace is linked to the provider. A recent credential sign-in and a fresh provider sign-in are both required to link it. Unlinking requires a usable portable credential and signs out every browser session for the workspace. Provider-only users can ask an operator for recovery access if their provider identity changes.
@@ -1743,7 +1743,7 @@ curl http://localhost:8888/metrics
 
 The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
-**Limits:** CIDR allowlists always gate `/diag`, `/diag/audit`, and `/metrics`. In `token_required`, `/diag` and `/diag/audit` also require a signed-in browser, while `/metrics` stays identity-free for monitoring systems and still requires an allowed source address. Empty `diagnostics_allowed_cidrs` disables all three surfaces. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
+**Limits:** CIDR allowlists always gate `/diag`, `/diag/audit`, and `/metrics`. In restricted profiles, `/diag` and `/diag/audit` also require sign-in, while `/metrics` stays identity-free for monitoring systems and still requires an allowed source address. Empty `diagnostics_allowed_cidrs` disables all three surfaces. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and metric histogram buckets live in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md).
 

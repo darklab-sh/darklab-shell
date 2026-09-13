@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "2.9.2",
-  "reviewed_on": "2026-09-06",
+  "reviewed_on": "2026-09-13",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -19,6 +19,8 @@
     "apt:inetutils-telnet": "Python container base and Debian packages",
     "apt:iptables": "Python container base and Debian packages",
     "apt:iputils-ping": "Python container base and Debian packages",
+    "apt:libc-bin": "Python container base and Debian packages",
+    "apt:libc6": "Python container base and Debian packages",
     "apt:libcap2-bin": "Python container base and Debian packages",
     "apt:libjson-perl": "Python container base and Debian packages",
     "apt:libnet-ssleay-perl": "Python container base and Debian packages",
