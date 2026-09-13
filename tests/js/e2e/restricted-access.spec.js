@@ -42,6 +42,12 @@ test.describe('restricted access profile', () => {
     })
     await signIn(page)
 
+    const principal = await page.evaluate(async () => (await (await apiFetch('/auth/principal')).json()).authentication)
+    expect(principal.credential_id).toMatch(/^crd_[0-9a-f]{32}$/)
+    await expect(page.locator('#hud-session')).toHaveText(`${principal.credential_id.slice(0, 12)}••••`)
+    await expect(page.locator('#hud-session')).toHaveClass(/\bhud-value-green\b/)
+    await expect(page.locator('#mobile-menu-access-state')).toHaveText('Kept')
+
     const localIdentity = await page.evaluate(() => ({
       credential: localStorage.getItem('access_credential'),
       anonymous: localStorage.getItem('anonymous_id'),

@@ -285,7 +285,7 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 | **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed red, `—` muted when no run has finished yet; dims to muted while any tab is actively running |
 | **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
-| **ACCESS** | Active workspace access | `ANON` (muted) for a browser-local workspace or a safe `crd_…` hint (green) for a kept workspace — see [Workspace Access](#workspace-access) |
+| **ACCESS** | Active workspace access | `ANON` (muted) for a browser-local workspace or a safe `crd_…` hint (green) for a kept workspace in either access profile — see [Workspace Access](#workspace-access) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
 | **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
 | **DB** | Configured database connection state | `ONLINE` green, `OFFLINE` red |
@@ -1546,8 +1546,9 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Credential rows show only a label, safe prefix, type, creation and last-used dates, expiry, state, and a **Current** badge. Existing reusable values are never returned by list or status requests.
 - You can add a credential, rename it, change its expiry, rotate it, or revoke it. Rotation creates and reveals the replacement before asking to revoke the old credential. Revocation previews future work associated with that credential and can pause eligible schedules or watchers.
 - **Remove from browser** forgets the local credential and creates a fresh anonymous workspace in that browser. The kept workspace and credentials on other devices remain unchanged.
+- **Options → Access** shows only the actions that apply: anonymous browsers can keep or open a workspace, invalid saved credentials can be removed, and kept workspaces can manage their credentials or remove access from this browser.
 - Access changes propagate to other tabs. History, autocomplete, preferences, Files, Teams, automation, and identity summaries refresh around the new workspace, while an invalid or revoked credential fails closed and must be removed or replaced deliberately.
-- The desktop HUD shows **ANON** or a safe `crd_…` hint. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
+- The desktop HUD shows **ANON** or a safe `crd_…` hint, including after restricted sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
 - In the `token_required` profile, the application opens on a focused credential screen instead of creating an anonymous workspace. A successful sign-in replaces the portable value with an HttpOnly browser session and removes any old credential or anonymous identity from browser storage before the main application starts.
 - Restricted browser sessions expire after both an idle limit and an absolute limit. **Remove from browser** signs out that browser; the session-wide route and operator command can close every browser session for the principal. Revoking or rotating a portable credential also closes sessions that came from it.
 

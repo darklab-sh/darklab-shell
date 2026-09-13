@@ -2191,6 +2191,10 @@ body.mobile-terminal-mode .output-follow-btn {
   margin-top: 16px;
 }
 
+#options-panel-access > .faq-item + .faq-item {
+  margin-top: 16px;
+}
+
 .options-section-heading {
   display: flex;
   align-items: center;
@@ -2271,8 +2275,16 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 8px;
 }
 
+#options-panel-access [hidden] {
+  display: none;
+}
+
 .options-access-editor-field {
   margin-top: 10px;
+}
+
+#options-access-redemption > .options-access-actions {
+  margin-top: 12px;
 }
 
 .options-access-message {
@@ -2319,6 +2331,7 @@ body.mobile-terminal-mode .output-follow-btn {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  padding: 12px;
 }
 
 .options-access-row-main {
