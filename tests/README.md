@@ -209,6 +209,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.
 
+Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits.
+
 Each browser qualification case has a two-minute budget for its full sign-in, scope, and recovery journey; individual assertions still use their own deadlines.
 
 Run the SQLite browser matrix with `bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/auth-profile-qualification.spec.js` and repeat with `--asset-bundle-mode bundle`. Run the disposable Postgres browser matrix with `bash scripts/run_postgres_tests.sh --browser -- --asset-bundle-mode source`, then repeat with `--asset-bundle-mode bundle`; CI runs both modes against its temporary Postgres service. The Postgres request-policy lane uses `bash scripts/run_postgres_tests.sh`; its credential-resolution case prints safe portable/PAT concurrency measurements when pytest output capture is disabled. For a disposable SQLite lookup measurement, run `.venv/bin/python scripts/test-support/measure_credential_resolution.py`. Both measurements check the five-minute last-used write bound and reject stored reusable credential material. The complete suite commands above remain the final regression check; the matrix smoke isn't a replacement for the deeper product journeys.

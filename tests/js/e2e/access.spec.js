@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, keepBrowserWorkspace, openRailAction } from './helpers.js'
+import { ensurePromptReady, keepBrowserWorkspace, makeTestIp, openRailAction } from './helpers.js'
+
+let accessTestIpOffset = 200
+test.beforeEach(async ({ page }) => {
+  // Each journey is a separate client; keeping several test workspaces must
+  // not consume another journey's hourly anonymous-issuance allowance.
+  await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(accessTestIpOffset++) })
+})
 
 async function resetAnonymousBrowser(page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
