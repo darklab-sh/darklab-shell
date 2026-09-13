@@ -142,6 +142,8 @@ class AuditEventType(str, Enum):
     PRINCIPAL_CREATE = "principal.create"
     PRINCIPAL_DISABLE = "principal.disable"
     PRINCIPAL_ENABLE = "principal.enable"
+    OIDC_IDENTITY_LINK = "oidc.identity_link"
+    OIDC_IDENTITY_UNLINK = "oidc.identity_unlink"
     CREDENTIAL_CREATE = "credential.create"
     CREDENTIAL_REDEEM = "credential.redeem"
     CREDENTIAL_LABEL = "credential.label"
@@ -348,6 +350,12 @@ EVENT_SPECS: dict[str, EventSpec] = {
     ),
     AuditEventType.PRINCIPAL_ENABLE.value: _spec(
         AuditEventType.PRINCIPAL_ENABLE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.OIDC_IDENTITY_LINK.value: _spec(
+        AuditEventType.OIDC_IDENTITY_LINK, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
+    ),
+    AuditEventType.OIDC_IDENTITY_UNLINK.value: _spec(
+        AuditEventType.OIDC_IDENTITY_UNLINK, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
     ),
     AuditEventType.CREDENTIAL_CREATE.value: _spec(
         AuditEventType.CREDENTIAL_CREATE, AuditTargetType.CREDENTIAL, RecordingMode.FAIL_CLOSED

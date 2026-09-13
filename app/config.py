@@ -53,6 +53,7 @@ _DERIVED_CONFIG_DEFAULTS = {
     "output_preview_max_bytes": 1024 * 1024,
 }
 _SECRET_CONFIG_KEYS = {
+    "oidc_client_secret",
     "ai_api_key",
     "ai_api_key_secret_name",
     "notifications.smtp.password_secret_id",
@@ -1158,25 +1159,57 @@ def _format_validation_error(exc: ValidationError, provenance: dict[str, str], r
 
 def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str]) -> None:
     access_profile = str(defaults.get("access_profile") or "open").strip().lower()
-    if access_profile in {"oidc_required", "mixed"}:
-        _record_config_load_failure(
-            phase="access_profile_validation",
-            source=_config_source(provenance, "access_profile"),
-            key="access_profile",
-            error="reserved profile",
-        )
-        raise ConfigLoadError(
-            f"access_profile {access_profile!r} is reserved and isn't available yet"
-        )
-    if access_profile not in {"open", "token_required"}:
+    if access_profile not in {"open", "token_required", "oidc_required", "mixed"}:
         _record_config_load_failure(
             phase="access_profile_validation",
             source=_config_source(provenance, "access_profile"),
             key="access_profile",
             error="unsupported profile",
         )
-        raise ConfigLoadError("access_profile must be open or token_required")
+        raise ConfigLoadError("access_profile must be open, token_required, oidc_required, or mixed")
     defaults["access_profile"] = access_profile
+    for key in ("oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri", "oidc_ca_bundle"):
+        defaults[key] = str(defaults.get(key) or "").strip()
+    policy = str(defaults.get("oidc_provisioning") or "disabled").strip().lower()
+    if policy not in {"disabled", "allowlist", "automatic"}:
+        raise ConfigLoadError("oidc_provisioning must be disabled, allowlist, or automatic")
+    defaults["oidc_provisioning"] = policy
+    for key, separator in (("oidc_scopes", " "), ("oidc_allowed_subjects", ",")):
+        value = defaults.get(key) or []
+        if isinstance(value, str):
+            value = value.split(separator)
+        if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
+            raise ConfigLoadError(f"{key} must be a list of strings")
+        defaults[key] = [item.strip() for item in value if item.strip()]
+    if "openid" not in defaults["oidc_scopes"]:
+        raise ConfigLoadError("oidc_scopes must include openid")
+    if len(defaults["oidc_scopes"]) != len(set(defaults["oidc_scopes"])):
+        raise ConfigLoadError("oidc_scopes must not repeat values")
+    if len(defaults["oidc_allowed_subjects"]) != len(set(defaults["oidc_allowed_subjects"])):
+        raise ConfigLoadError("oidc_allowed_subjects must not repeat values")
+    configured = any(defaults[key] for key in (
+        "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri", "oidc_ca_bundle"
+    ))
+    if access_profile in {"oidc_required", "mixed"} and not configured:
+        raise ConfigLoadError("OIDC provider configuration is required for this access profile")
+    if configured:
+        for key in ("oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri"):
+            if not defaults[key]:
+                raise ConfigLoadError(f"{key} is required when OIDC is configured")
+        issuer = urlsplit(defaults["oidc_issuer"])
+        redirect = urlsplit(defaults["oidc_redirect_uri"])
+        if (issuer.scheme != "https" or not issuer.netloc or issuer.username or issuer.password
+                or issuer.query or issuer.fragment or defaults["oidc_issuer"].endswith("/")):
+            raise ConfigLoadError("oidc_issuer must be an HTTPS issuer URL without a trailing slash or query")
+        if (redirect.scheme != "https" or not redirect.netloc or redirect.username or redirect.password
+                or redirect.query or redirect.fragment or redirect.path != "/auth/oidc/callback"):
+            raise ConfigLoadError("oidc_redirect_uri must be an HTTPS /auth/oidc/callback URL")
+    if policy == "allowlist" and not defaults["oidc_allowed_subjects"]:
+        raise ConfigLoadError("oidc_allowed_subjects is required for allowlist provisioning")
+    if policy != "allowlist" and defaults["oidc_allowed_subjects"]:
+        raise ConfigLoadError("oidc_allowed_subjects is only used with allowlist provisioning")
+    if access_profile not in {"oidc_required", "mixed"} and policy != "disabled":
+        raise ConfigLoadError("OIDC provisioning requires oidc_required or mixed access")
     for key, minimum, maximum in (
         ("browser_session_idle_minutes", 1, 1440),
         ("browser_session_absolute_hours", 1, 8760),
@@ -1354,6 +1387,14 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "restricted_public_shares_enabled": False,
         "browser_session_idle_minutes": 30,
         "browser_session_absolute_hours": 12,
+        "oidc_issuer": "",
+        "oidc_client_id": "",
+        "oidc_client_secret": "",
+        "oidc_redirect_uri": "",
+        "oidc_scopes": ["openid"],
+        "oidc_provisioning": "disabled",
+        "oidc_allowed_subjects": [],
+        "oidc_ca_bundle": "",
         "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
         "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
@@ -1820,6 +1861,14 @@ def load_config(conf_dir=None, local_conf_dir=None):
         "RESTRICTED_PUBLIC_SHARES_ENABLED": "restricted_public_shares_enabled",
         "BROWSER_SESSION_IDLE_MINUTES": "browser_session_idle_minutes",
         "BROWSER_SESSION_ABSOLUTE_HOURS": "browser_session_absolute_hours",
+        "OIDC_ISSUER": "oidc_issuer",
+        "OIDC_CLIENT_ID": "oidc_client_id",
+        "OIDC_CLIENT_SECRET": "oidc_client_secret",
+        "OIDC_REDIRECT_URI": "oidc_redirect_uri",
+        "OIDC_SCOPES": "oidc_scopes",
+        "OIDC_PROVISIONING": "oidc_provisioning",
+        "OIDC_ALLOWED_SUBJECTS": "oidc_allowed_subjects",
+        "OIDC_CA_BUNDLE": "oidc_ca_bundle",
     }
     for env_name, cfg_key in access_env_keys.items():
         raw = str(os.environ.get(env_name) or "").strip()

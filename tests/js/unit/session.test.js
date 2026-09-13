@@ -77,10 +77,10 @@ describe('session.js', () => {
     })
   })
 
-  it('restricted mode removes reusable identity storage and relies on the browser session cookie', async () => {
+  for (const profile of ['token_required', 'oidc_required', 'mixed']) it(`${profile} removes reusable identity storage and relies on the browser session cookie`, async () => {
     const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
     const { apiFetch, fetchCalls, getBrowserIdentitySnapshot, storage } = loadSession({
-      appConfig: { access_profile: 'token_required' },
+      appConfig: { access_profile: profile },
       storageData: {
         anonymous_id: 'old-anonymous-id',
         access_credential: secret,
@@ -103,9 +103,9 @@ describe('session.js', () => {
     expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('restricted-client')
   })
 
-  it('restricted cookie mutations copy the CSRF cookie into a request header', async () => {
+  for (const profile of ['token_required', 'oidc_required', 'mixed']) it(`${profile} copies the CSRF cookie into unsafe request headers`, async () => {
     const { apiFetch, fetchCalls } = loadSession({
-      appConfig: { access_profile: 'token_required' },
+      appConfig: { access_profile: profile },
       cookie: 'darklab_csrf=csrf-token-value; preference=value',
     })
 

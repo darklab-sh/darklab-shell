@@ -2703,6 +2703,7 @@ body .tab .tab-status.ok { background: var(--green); }
 
 .restricted-sign-in-card h1 { margin: 8px 0 12px; font-size: 1.35rem; }
 .restricted-sign-in-card p { color: var(--muted); line-height: 1.55; }
+.restricted-sign-in-provider { margin-top: 16px; }
 .restricted-sign-in-card form { display: grid; gap: 12px; margin-top: 22px; }
 .restricted-sign-in-card .btn { min-height: 40px; }
 .restricted-sign-in-kicker { color: var(--green); font-size: .75rem; letter-spacing: .12em; }

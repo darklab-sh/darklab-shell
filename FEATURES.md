@@ -1422,8 +1422,8 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
-- The modal has five tabs: **Preferences** for display, run, and compare controls; **Access** for keeping an anonymous workspace and managing credentials; **Secrets** for provider readiness and stored API keys; **Teams** for shared scopes, members, invites, and recovery codes; and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your workspace preferences.
-- The **Access** tab explains whether the workspace is anonymous or kept. **Keep this workspace** creates the first credential without asking for a username, email address, or password. **Use an existing credential** opens a paste-safe password field for another device.
+- The modal has five tabs: **Preferences** for display, run, and compare controls; **Access** for keeping an anonymous workspace, managing credentials, and linking a sign-in provider; **Secrets** for provider readiness and stored API keys; **Teams** for shared scopes, members, invites, and recovery codes; and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your workspace preferences.
+- The **Access** tab shows **Anonymous workspace** or **Authenticated workspace** according to how you're using it. **Keep this workspace** creates the first credential without asking for a username, email address, or password. **Use an existing credential** opens a paste-safe password field for another device.
 - New and replacement credentials are masked by default and shown only once. Reveal and Copy are deliberate actions, and closing the reveal removes the reusable value from the DOM. The saved list shows only labels, safe prefixes, type, dates, expiry, state, and a passive **Current** badge.
 - Credential actions support add, rename, expiry, replacement-first rotation, and revocation. Revocation previews related schedules, watchers, and other future work, can pause eligible work, and warns before removing the current or last active credential. In the open profile, **Remove from browser** clears only the local credential and starts a fresh anonymous workspace. In the restricted profile it signs out the current browser. Neither action revokes access on another device.
 - Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
@@ -1535,7 +1535,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ## Workspace Access
 
-**Purpose:** use an anonymous-first workspace on trusted networks, or require an operator-issued credential before a private deployment opens.
+**Purpose:** use an anonymous-first workspace on trusted networks, or sign in with a credential, identity provider, or both on a private deployment.
 
 **Behavior:**
 
@@ -1550,6 +1550,8 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Access changes propagate to other tabs. History, autocomplete, preferences, Files, Teams, automation, and identity summaries refresh around the new workspace, while an invalid or revoked credential fails closed and must be removed or replaced deliberately.
 - The desktop HUD shows **ANON** or a safe `crd_…` hint, including after restricted sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
 - In the `token_required` profile, the application opens on a focused credential screen instead of creating an anonymous workspace. A successful sign-in replaces the portable value with an HttpOnly browser session and removes any old credential or anonymous identity from browser storage before the main application starts.
+- In `oidc_required`, the sign-in screen sends you to the configured identity provider and opens the linked workspace after you return. `mixed` offers that choice alongside portable-credential sign-in. A new provider identity gets a workspace only when the operator's provisioning policy allows it; no email or real name is required.
+- **Options → Access** shows whether this workspace is linked to the provider. A recent credential sign-in and a fresh provider sign-in are both required to link it. Unlinking requires a usable portable credential and signs out every browser session for the workspace. Provider-only users can ask an operator for recovery access if their provider identity changes.
 - Restricted browser sessions expire after both an idle limit and an absolute limit. **Remove from browser** signs out that browser; the session-wide route and operator command can close every browser session for the principal. Revoking or rotating a portable credential also closes sessions that came from it.
 
 **Terminal commands:**
@@ -1558,7 +1560,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - `credential list` shows safe credential metadata.
 - `credential create`, `credential use`, `credential expiry`, `credential rotate`, `credential revoke`, and `credential recover` open **Options → Access** for the matching action. Extra values are rejected and removed before command history is saved.
 
-**Limits:** anyone holding a portable credential can open its principal's workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require local operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until they are kept. Restricted access needs HTTPS; its Secure session cookie won't be sent over ordinary HTTP.
+**Limits:** anyone holding a portable credential can open its principal's workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require local operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until they are kept. Restricted access needs HTTPS; its Secure session cookie won't be sent over ordinary HTTP. Local sign-out doesn't end the identity provider's separate single-sign-on session.
 
 **Configuration:** no user profile or email settings are needed. `ACCESS_PROFILE=open` is the default. See [Restricted browser access](CONFIGURATION.md#restricted-browser-access) for bootstrap, session lifetime, public shares, signing-key rotation, and recovery. Operators can use the container-only principal access command described in [CONFIGURATION.md](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
 

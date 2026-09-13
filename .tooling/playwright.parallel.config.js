@@ -17,7 +17,7 @@ const basePort = Math.max(
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => name.endsWith('.spec.js'))
-  .filter((name) => name !== 'restricted-access.spec.js')
+  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js'].includes(name))
   .sort()
 
 // Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
@@ -100,7 +100,18 @@ const restrictedProject = {
     trace: 'on-first-retry',
   },
 }
-const projects = [...openProjects, restrictedProject]
+const oidcPort = restrictedPort + 1
+const oidcProject = {
+  name: 'chromium-oidc',
+  testMatch: ['oidc-access.spec.js'],
+  use: {
+    ...devices['Desktop Chrome'],
+    baseURL: `https://127.0.0.1:${oidcPort}`,
+    ignoreHTTPSErrors: true,
+    trace: 'on-first-retry',
+  },
+}
+const projects = [...openProjects, restrictedProject, oidcProject]
 
 export default defineConfig({
   testDir,
@@ -116,5 +127,6 @@ export default defineConfig({
       buildIsolatedWebServer(basePort + index, `w${index + 1}`),
     ),
     buildIsolatedWebServer(restrictedPort, 'restricted', 'token_required'),
+    buildIsolatedWebServer(oidcPort, 'oidc', 'mixed', true),
   ],
 })

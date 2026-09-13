@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import copy_pristine_sqlite_database
 from core.database_backend import DatabaseBackend
 from core.database_access import get_db_connect
 from core.migrations import (
@@ -25,7 +26,7 @@ from core.migrations import (
     v0083_browser_sessions,
 )
 from core.migrations.runner import run_migrations
-from services.auth import lifecycle, storage
+from services.auth import lifecycle, storage, verifier_keys
 from services.auth.background_authorization import (
     BackgroundAuthorizationState,
     durable_work_for_credential,
@@ -346,6 +347,61 @@ def test_concurrent_revocations_cannot_remove_both_portable_credentials(tmp_path
             (bundle.principal.id,),
         ).fetchone()[0]
     assert usable == 1
+    reset_master_key_cache_for_tests()
+
+
+def test_concurrent_first_anonymous_upgrades_share_one_verifier_root(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    path = copy_pristine_sqlite_database(tmp_path / "auth.db")
+    settings = _settings(tmp_path)
+
+    def connect():
+        conn = sqlite3.connect(path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    original_insert = verifier_keys._insert_root
+    first_insert = threading.Barrier(2)
+
+    def delayed_first_insert(conn, version, root, created_at):
+        try:
+            first_insert.wait(timeout=1)
+        except threading.BrokenBarrierError:
+            # The SQLite write lock keeps the second upgrade out until commit.
+            pass
+        return original_insert(conn, version, root, created_at)
+
+    monkeypatch.setattr(verifier_keys, "_insert_root", delayed_first_insert)
+    barrier = threading.Barrier(2)
+    bundles = []
+    errors = []
+
+    def upgrade():
+        barrier.wait()
+        try:
+            bundles.append(lifecycle.create_principal(
+                anonymous_id=str(uuid.uuid4()), settings=settings, connect=connect,
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=upgrade) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert not errors
+    assert len(bundles) == 2
+    with connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM credential_verifier_roots").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM principals").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 2
     reset_master_key_cache_for_tests()
 
 
