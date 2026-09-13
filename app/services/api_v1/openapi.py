@@ -1464,7 +1464,8 @@ OPENAPI_SPEC: dict = {
                     "({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the "
                     "versioned line-event payload while preserving type and legacy cls for older clients. "
                     "High-volume live streams may emit output_batch rows with a lines array of line events. "
-                    "Idle streams may emit type=heartbeat events."
+                    "Idle streams may emit type=heartbeat events. Authorization loss closes the stream "
+                    "with type=error, code=1 and a string error_code without stopping an accepted ordinary run."
                 ),
                 "properties": {
                     "type": {"type": "string"},
@@ -1482,6 +1483,7 @@ OPENAPI_SPEC: dict = {
                     "tsC": {"type": "string"},
                     "tsE": {"type": "string"},
                     "code": {"type": "integer"},
+                    "error_code": {"type": "string", "description": "Authorization failure on an established stream."},
                     "signals": {"type": "array", "items": {"type": "string"}},
                     "line_index": {"type": "integer", "nullable": True},
                     "command_root": {"type": "string"},

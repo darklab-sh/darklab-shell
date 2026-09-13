@@ -12,6 +12,7 @@ from flask import Response, jsonify, request
 
 from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
+from services.auth.stream_authorization import authorized_stream
 from services.ai.assists import AIAssistRouteError, enqueue_next_commands_assist, enqueue_summary_assist, list_run_assists
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.links import link_project_entity, unlink_project_entity
@@ -275,10 +276,13 @@ def api_run_stream(run_id):
         "route": str(request.path or ""),
         "method": str(request.method or ""),
     }
+    stream = authorized_stream(
+        api_routes.stream_run_events(run_id, after_id=after_id), run_id=run_id, team_id=owner_scope.team_id,
+    )
     if str(request.args.get("format") or "").lower() == "ndjson":
         return Response(
             api_routes._ndjson_from_sse_chunks(
-                api_routes.stream_run_events(run_id, after_id=after_id),
+                stream,
                 run_id=run_id,
                 session_id=session_id,
                 team_id=owner_scope.team_id,
@@ -289,7 +293,7 @@ def api_run_stream(run_id):
         )
     return Response(
         api_routes._sse_chunks_with_error_logging(
-            api_routes.stream_run_events(run_id, after_id=after_id),
+            stream,
             run_id=run_id,
             session_id=session_id,
             team_id=owner_scope.team_id,

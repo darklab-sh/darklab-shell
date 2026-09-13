@@ -120,6 +120,10 @@ def ndjson_from_sse_chunks(
             "code": "stream_error",
             "message": str(exc) or "Run stream interrupted.",
         }) + "\n"
+    finally:
+        close = getattr(chunks, "close", None)
+        if close is not None:
+            close()
 
 
 def sse_chunks_with_error_logging(

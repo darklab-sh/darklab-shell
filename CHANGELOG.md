@@ -103,6 +103,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Revoked access now disconnects open run streams and stops interactive PTYs.**
+  - **Root cause:** Streams trusted the identity accepted when the connection opened, so later revocation wasn't checked.
+  - **Fix:** Browser and API streams recheck credential, browser-session, principal, and Team state within a 15-second authorization heartbeat, including idle streams. Checks retain only safe IDs and don't extend activity timestamps. An accepted ordinary command continues; a controlling PTY is stopped.
+  - **Tests:** Live response iteration covers credential revocation, rotation, expiry, principal disablement, browser logout, provider-session unlinking, and API SSE/NDJSON. Process tests verify that revocation stops an interactive process while ordinary work continues; reader checks bound idle waits and release subscriptions.
 - **Scoped API tokens can't bypass their permissions through browser routes.** A shared request gate restricts PATs to API v1 and the explicitly supported identity and self-revocation handlers in every access profile. SQLite coverage checks browser reads, writes, run streams, credential creation, and session revocation with both minimal and full-scope PATs; PostgreSQL repeats the browser read/write denial in every profile and asset mode.
 - **The PostgreSQL credential-resolution test now uses an explicitly typed dict-row connection.** This clears its editor diagnostic without changing the query or result handling.
 - **PostgreSQL access-profile browser startup no longer imports unrelated CVE feeds.** Isolated Playwright servers skip that work, and the PostgreSQL browser job allows more time for fresh-schema startup.

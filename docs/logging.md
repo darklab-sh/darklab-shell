@@ -278,6 +278,9 @@ The current event inventory is:
 | INFO | `BROWSER_SESSION_ROTATED` | successful Team privilege-change response | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSION_REVOKED` | browser logout | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSIONS_REVOKED` | browser principal-wide session revocation | principal_id, credential_id, count, reason |
+| INFO | `AUTH_STREAM_CLOSED` | established stream loses current authorization | run_id, team_id, principal_id, credential_id, reason, interactive |
+| ERROR | `AUTH_STREAM_CHECK_FAILED` | stream authorization storage check fails closed | run_id (+ traceback) |
+| ERROR | `AUTH_STREAM_PTY_STOP_FAILED` | revoked controlling PTY cannot be stopped | run_id (+ traceback) |
 | INFO | `SESSION_PREFERENCES_SAVED` | `session_preferences_save` | ip, session, session_kind, key_count |
 | INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
 | INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |

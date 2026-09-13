@@ -850,6 +850,8 @@ Muted channels stay configured and skip normal deliveries, but explicit test sen
 
 ## Streaming
 
+Stream authorization is checked within 15 seconds, including while output is idle. If the PAT expires or is revoked, the principal is disabled, or Team access is removed, the stream sends a final `{"type":"error","code":1,"error_code":"revoked_credential","text":"..."}` payload with the applicable failure reason and closes. The accepted ordinary run continues; another authorized client can reconnect. These checks don't extend the PAT's last-used timestamp.
+
 SSE is the default stream format:
 
 ```bash

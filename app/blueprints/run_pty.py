@@ -8,6 +8,7 @@ from __future__ import annotations
 from flask import Response, jsonify, request
 
 from blueprints import run as run_routes
+from services.auth.stream_authorization import authorized_stream
 from services.teams.capabilities import Capability
 
 
@@ -155,17 +156,25 @@ def stream_interactive_pty_run(run_id):
         else:
             run_routes.claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
 
+    stream = authorized_stream(
+        run_routes.stream_pty_events(run_id, session_id, after=after_id, team_id=owner_scope.team_id),
+        run_id=run_id, team_id=owner_scope.team_id, terminate_pty=can_control,
+    )
+
     def generate():
         last_touch_monotonic = None
-        for item in run_routes.stream_pty_events(run_id, session_id, after=after_id, team_id=owner_scope.team_id):
-            if owner_client_id and can_control:
-                last_touch_monotonic = run_routes._maybe_touch_active_run_owner(
-                    run_id,
-                    owner_client_id,
-                    owner_tab_id,
-                    last_touch_monotonic=last_touch_monotonic,
-                )
-            yield item
+        try:
+            for item in stream:
+                if owner_client_id and can_control:
+                    last_touch_monotonic = run_routes._maybe_touch_active_run_owner(
+                        run_id,
+                        owner_client_id,
+                        owner_tab_id,
+                        last_touch_monotonic=last_touch_monotonic,
+                    )
+                yield item
+        finally:
+            stream.close()
 
     return Response(
         generate(),
