@@ -92,6 +92,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Restricted sign-in now shows the right access state in the HUD.** A valid browser session displays the same masked `crd_…••••` hint as open mode, and the mobile menu shows **Kept**, instead of incorrectly calling the workspace anonymous. The hint comes from safe authenticated metadata; the portable credential stays out of normal browser JavaScript.
+- **Options → Access now shows only the actions that fit the current workspace.** Anonymous browsers can keep or open a workspace, an invalid saved credential shows only its removal action, and kept workspaces show credential-management actions without the anonymous controls. The Credentials section, credential cards, and existing-credential form now have consistent spacing, so headings, card contents, and form buttons don't crowd nearby controls or borders. Browser tests cover these states and spacing in source and bundled assets.
 - **Markdown linting no longer pulls in a vulnerable TOML parser.** The existing markdownlint toolchain now resolves patched `smol-toml` 1.8.0 through a scoped dependency override.
 - **JavaScript dependency audits no longer flag vulnerable `colord` or `js-yaml` releases.** The Stylelint toolchain now resolves `colord` 2.10.0 and patched `js-yaml` 4.3.2 without changing the parent tooling versions.
 - **WHOIS lookups now save only the queried IP address or domain as an Atlas entity.** Registration ranges, registry and registrar hosts, nameservers, contact handles, RDAP and referral links, and policy URLs remain visible in the transcript without becoming Atlas records or Project targets.

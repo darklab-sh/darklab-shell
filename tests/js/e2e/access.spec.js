@@ -41,6 +41,45 @@ async function chooseConfirmAction(page, actionId) {
   await action.click()
 }
 
+async function expectAccessActions(page, state) {
+  const expected = {
+    anonymous: ['keep', 'use'],
+    invalid: ['discard-invalid'],
+    kept: ['add', 'remove'],
+  }[state]
+  expect(expected).toBeDefined()
+  for (const action of ['keep', 'use', 'discard-invalid', 'add', 'remove']) {
+    const button = page.locator(`#options-access-${action}-btn`)
+    if (expected.includes(action)) await expect(button).toBeVisible()
+    else await expect(button).toBeHidden()
+  }
+}
+
+async function expectCredentialSpacing(page) {
+  const spacing = await page.locator('#options-panel-access').evaluate((panel) => {
+    const actions = panel.querySelector('#options-access-authenticated-actions')
+    const heading = panel.querySelector('#options-access-credentials-section .faq-q')
+    const row = panel.querySelector('.options-access-row')
+    const style = window.getComputedStyle(row)
+    return {
+      sectionGap: heading.getBoundingClientRect().top - actions.getBoundingClientRect().bottom,
+      rowInsets: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft]
+        .map(value => Number.parseFloat(value)),
+    }
+  })
+  expect(spacing.sectionGap).toBeGreaterThanOrEqual(15)
+  expect(Math.min(...spacing.rowInsets)).toBeGreaterThanOrEqual(10)
+}
+
+async function expectRedemptionSpacing(page) {
+  const gap = await page.locator('#options-access-redemption').evaluate((form) => {
+    const input = form.querySelector('#options-access-redemption-input')
+    const actions = form.querySelector('.options-access-actions')
+    return actions.getBoundingClientRect().top - input.getBoundingClientRect().bottom
+  })
+  expect(gap).toBeGreaterThanOrEqual(10)
+}
+
 test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => resetAnonymousBrowser(page))
 
@@ -51,6 +90,7 @@ test.describe('workspace Access', () => {
     const tabs = await page.locator('[data-options-tab]').evaluateAll(items => items.map(item => item.textContent.trim()))
     expect(tabs.slice(0, 2)).toEqual(['Preferences', 'Access'])
     await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
+    await expectAccessActions(page, 'anonymous')
 
     await page.locator('#options-access-keep-btn').click()
     await page.locator('#options-access-editor input[type="text"]').fill('Primary browser')
@@ -60,6 +100,8 @@ test.describe('workspace Access', () => {
     const primaryRow = page.locator('.options-access-row', { hasText: 'Primary browser' })
     await expect(primaryRow).toContainText('Current')
     await expect(primaryRow).toContainText('Active')
+    await expectAccessActions(page, 'kept')
+    await expectCredentialSpacing(page)
     await expect(page.locator('#hud-session')).toContainText('crd_')
 
     const peer = await page.context().newPage()
@@ -103,6 +145,7 @@ test.describe('workspace Access', () => {
     await page.locator('#options-access-remove-btn').click()
     await chooseConfirmAction(page, 'remove')
     await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
+    await expectAccessActions(page, 'anonymous')
     await expect(page.locator('#hud-session')).toHaveText('ANON')
     await expect(peer.locator('#hud-session')).toHaveText('ANON')
 
@@ -111,11 +154,14 @@ test.describe('workspace Access', () => {
       window.dispatchEvent(new StorageEvent('storage', { key: 'access_credential', newValue: 'not-a-valid-credential' }))
     })
     await expect(page.locator('#options-access-summary')).toHaveText('Credential needs attention')
+    await expectAccessActions(page, 'invalid')
     await page.locator('#options-access-discard-invalid-btn').click()
     await chooseConfirmAction(page, 'remove')
     await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
+    await expectAccessActions(page, 'anonymous')
 
     await page.locator('#options-access-use-btn').click()
+    await expectRedemptionSpacing(page)
     await page.locator('#options-access-redemption-input').fill('not-a-credential')
     await page.locator('#options-access-redemption-apply').click()
     await expect(page.locator('#options-access-msg')).toHaveAttribute('role', 'alert')
@@ -125,6 +171,7 @@ test.describe('workspace Access', () => {
     await page.locator('#options-access-redemption-input').fill(replacementSecret)
     await page.locator('#options-access-redemption-apply').click()
     await expect(page.locator('#options-access-summary')).toHaveText('Kept workspace')
+    await expectAccessActions(page, 'kept')
     await expect(peer.locator('#hud-session')).toContainText('crd_')
     const replacementRow = page.locator('.options-access-row', { hasText: 'Travel device replacement' })
     await expect(replacementRow).toContainText('Current')
@@ -161,7 +208,9 @@ test.describe('mobile workspace Access', () => {
     const accessPanel = page.locator('#options-panel-access')
     await expect(accessPanel).toBeVisible()
     await expect(accessPanel).toHaveAttribute('data-access-panel-bound', '1')
+    await expectAccessActions(page, 'anonymous')
     await page.locator('#options-access-use-btn').click()
+    await expectRedemptionSpacing(page)
     const input = page.locator('#options-access-redemption-input')
     await input.fill('not-a-credential')
     await expect(input).toBeFocused()
@@ -186,5 +235,7 @@ test.describe('mobile workspace Access', () => {
     await expect(page.locator('#options-access-reveal')).toBeVisible()
     await page.locator('#options-access-reveal').getByRole('button', { name: 'Close' }).click()
     await expect(page.locator('.options-access-row', { hasText: 'Phone' })).toContainText('Current')
+    await expectAccessActions(page, 'kept')
+    await expectCredentialSpacing(page)
   })
 })
