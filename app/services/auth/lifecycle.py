@@ -51,6 +51,10 @@ def create_principal(
     connect: Callable[[], Any] | None = None,
 ) -> PrincipalBundle:
     def operation(conn: Any) -> PrincipalBundle:
+        if storage._database_backend(conn).value == "sqlite":  # noqa: SLF001
+            # Reserve the write transaction before reading the verifier root.
+            # Two first-time upgrades must not both decide it needs creation.
+            conn.execute("BEGIN IMMEDIATE")
         bundle = storage.create_principal_with_credential(
             anonymous_id=anonymous_id,
             credential_label=credential_label,
