@@ -65,6 +65,42 @@ def _result(count: int, limit: int, *, window: int, now: float, policy: str) -> 
     )
 
 
+def _read(namespace: str, subject: str, window: int, now: float, redis_client: Any) -> int:
+    bucket = int(now // window)
+    subject_key = _safe_key(subject)
+    if redis_client is not None:
+        try:
+            return int(redis_client.get(f"darklab:auth-rate:{namespace}:{subject_key}:{window}:{bucket}") or 0)
+        except Exception:
+            pass
+    with _LOCK:
+        return _COUNTERS.get((f"{namespace}:{subject_key}", window, bucket), 0)
+
+
+def check_credential_redemption(
+    client_ip: str,
+    lookup_id: str = "",
+    *,
+    redis_client: Any = None,
+    now: float | None = None,
+    enabled: bool = True,
+) -> CredentialRateLimitResult:
+    """Check failure counters before verification without consuming an attempt."""
+    if not enabled:
+        return CredentialRateLimitResult(True)
+    checked_at = time.time() if now is None else float(now)
+    checks = [("failure-ip", client_ip, FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE, "IP")]
+    if lookup_id:
+        checks.append(("failure-lookup", lookup_id, FAILED_REDEMPTION_LIMIT_PER_LOOKUP_MINUTE, "lookup id"))
+    for namespace, subject, limit, label in checks:
+        count = _read(namespace, subject, 60, checked_at, redis_client)
+        result = _result(count + 1, limit, window=60, now=checked_at,
+                         policy=f"{limit} failed credentials per {label} per minute")
+        if not result.allowed:
+            return result
+    return CredentialRateLimitResult(True)
+
+
 def check_anonymous_issuance(
     client_ip: str,
     *,

@@ -398,6 +398,11 @@ def _enforce_dynamic_route_rate_limit():
 
 
 def _authentication_rejected_handler(exc):
+    if exc.code == "credential_authentication_rate_limited":
+        response = jsonify({"error": exc.code, "retry_after": exc.retry_after})
+        if exc.retry_after is not None:
+            response.headers["Retry-After"] = str(exc.retry_after)
+        return response, 429
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error(exc.code, exc.message)), 401
     return jsonify({"error": exc.code, "message": exc.message}), 401

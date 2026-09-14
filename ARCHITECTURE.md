@@ -2414,6 +2414,8 @@ The Access panel uses session-specific sign-out controls for restricted browser 
 
 In restricted profiles, `apiFetch` recognizes terminal browser-session authentication errors and sends the browser to sign-in once. The return destination carries only the local pathname, keeping query strings and fragments out of the sign-in URL. Access actions that revoke the current parent credential navigate after the replacement-save confirmation; logout failure remains visible and retryable.
 
+Credential throttling checks the IP and public lookup counters before authentication reads storage or verifier material. The request helper caches a rejection for the request, so response logging cannot trigger verification after an HTTP 429. The sign-in form and credential redemption endpoint apply the same precheck to submitted secrets; only failed verifications increment the counters. Redis shares the fixed-minute windows across workers, with process-local counters when Redis is unavailable.
+
 Credential and OIDC sign-in validate return destinations before URL normalization. Only local paths are accepted; raw or encoded path backslashes, control characters, whitespace, and authority-changing separators fall back to the root page. Ordinary encoded query values and fragments remain intact.
 
 `blueprints/run_streaming.py` shares browser stream delivery and owner heartbeats. `blueprints/api_v1_run_streaming.py` builds API SSE/NDJSON responses after route scope checks, `services/pty/streaming.py` owns local PTY event reads, and `core/redis_streams.py` classifies idle Redis timeouts.

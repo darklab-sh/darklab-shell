@@ -203,6 +203,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 | --- | --- |
 | Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_auth_redirects.py`, `test_browser_session_recovery.py`, `test_pat_issuance.py`, `auth-profile-qualification.spec.js` |
 
+`test_credential_throttle.py` covers failure limits before verification for portable credentials, PATs, browser cookies, redemption, and the sign-in form. It checks independent IP and lookup limits, reset windows, Redis and local counters, and successful requests that leave the allowance intact.
+
 `test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
 | PAT scopes, API, CLI, and redaction | `test_principal_auth.py`, `test_api_v1.py`, `test_postgres_backend.py`, `test_logging.py` |
 | Personal and Team ownership; Files, Projects, Assessments, Atlas, History, and shares | `test_postgres_backend.py`, `test_api_v1.py`, `test_run_history_share.py`, `team-mode.spec.js`, `assessment.spec.js`, `share.spec.js` |

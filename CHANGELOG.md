@@ -106,6 +106,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Credential throttling rejects excess attempts before verification.**
+  - **Root cause:** Limits were checked only after a failed verification, so blocked clients still caused authentication work and correct credentials bypassed the limit.
+  - **Fix:** Header and browser-session authentication, credential redemption, and the sign-in form check the current allowance first and return HTTP 429 with a retry delay when it is exhausted. Only failed verifications consume the allowance.
+  - **Tests:** Requests with correct credentials are blocked without a database lookup or session verification, then succeed after the window resets. Coverage includes IP and lookup limits, Redis and local counters, and disabling the limiter.
+
 - **Work paused by an operator can be reviewed before it resumes.**
   - **Root cause:** Account disablement hid the affected work from operator status and left muted channels and disabled digests without an explanation.
   - **Fix:** Operator status lists suspended definitions and stopped jobs with their workspace and review location. Schedules, Watchers, notification channels, and Project digests share a pause explanation. Existing manual pauses stay intact, and restoring access never resumes work automatically. Explicit digest resumption also uses the correct boolean parameters on PostgreSQL.

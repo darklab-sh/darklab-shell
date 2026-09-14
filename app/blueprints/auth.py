@@ -50,7 +50,7 @@ from services.auth.contracts import (
     LastCredentialLockout,
     PrincipalDisabled,
 )
-from services.auth.rate_limit import check_anonymous_issuance, check_failed_redemption
+from services.auth.rate_limit import check_anonymous_issuance, check_credential_redemption, check_failed_redemption
 from services.auth import oidc
 from services.auth.resolver import (
     AnonymousContext,
@@ -157,6 +157,7 @@ def sign_in():
     next_path = safe_next_path(request.values.get("next"))
     force_credential = _credential_sign_in_enabled() and request.values.get("force") == "credential"
     error = "Provider sign-in couldn't be completed. Please try again." if request.args.get("oidc_error") else ""
+    limited = None
     if request.method == "POST":
         if not _credential_sign_in_enabled():
             return current_app.response_class(status=404)
@@ -164,8 +165,9 @@ def sign_in():
             error = "The sign-in page expired. Reload it and try again."
         else:
             secret = str(request.form.get("credential") or "")
-            result = redeem_portable_credential(secret)
-            if not result.failed and isinstance(result.context, AuthenticatedContext):
+            limited = _redemption_limit(secret)
+            result = redeem_portable_credential(secret) if limited.allowed else None
+            if result is not None and not result.failed and isinstance(result.context, AuthenticatedContext):
                 lifecycle.record_redemption(result.context, request_fields=_request_fields())
                 request_context = get_authentication_result().context
                 replace_id = (
@@ -191,12 +193,8 @@ def sign_in():
                     path="/auth/sign-in",
                 )
                 return response
-            limited = check_failed_redemption(
-                get_client_ip(),
-                public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
-                redis_client=process_state.redis_client,
-                enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
-            )
+            if result is not None:
+                limited = _redemption_limit(secret, failed=True)
             if not limited.allowed:
                 error = "Too many sign-in attempts. Wait a moment and try again."
             else:
@@ -228,6 +226,9 @@ def sign_in():
         samesite="Strict",
         path="/auth/sign-in",
     )
+    if limited is not None and not limited.allowed:
+        response.status_code = 429
+        response.headers["Retry-After"] = str(limited.retry_after)
     return response
 
 
@@ -446,19 +447,28 @@ def create_principal():
     return _no_store(response), 201
 
 
+def _redemption_limit(secret: str, *, failed: bool = False):
+    check = check_failed_redemption if failed else check_credential_redemption
+    return check(
+        get_client_ip(), public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
+        redis_client=process_state.redis_client,
+        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
+    )
+
+
 @auth_bp.post("/credentials/redeem")
 def redeem():
     if active_profile() == "oidc_required":
         return jsonify({"error": "credential_sign_in_disabled", "message": "Use provider sign-in."}), 403
     secret = str(_payload().get("secret") or "")
+    limited = _redemption_limit(secret)
+    if not limited.allowed:
+        response = _no_store(jsonify({"error": "credential_redemption_rate_limited", "retry_after": limited.retry_after}))
+        response.headers["Retry-After"] = str(limited.retry_after)
+        return response, 429
     result = redeem_portable_credential(secret)
     if result.failed or not isinstance(result.context, AuthenticatedContext):
-        limited = check_failed_redemption(
-            get_client_ip(),
-            public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
-            redis_client=process_state.redis_client,
-            enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
-        )
+        limited = _redemption_limit(secret, failed=True)
         if limited.allowed:
             lifecycle.record_authentication_failure(result, request_fields=_request_fields())
         if not limited.allowed:

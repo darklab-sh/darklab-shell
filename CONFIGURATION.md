@@ -174,6 +174,8 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 
 `issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
 
+Failed credential attempts are limited to 30 per client IP and 10 per public credential lookup ID in each minute. Once either allowance is used, further attempts wait until the window resets, including attempts with a correct credential. Rejected requests return HTTP 429 with `Retry-After`; successful sign-ins don't consume the failure allowance.
+
 ### Restricted browser access
 
 `ACCESS_PROFILE` chooses the deployment's browser access boundary:

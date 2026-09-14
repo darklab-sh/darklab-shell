@@ -69,6 +69,8 @@ curl -H "Authorization: Bearer $DARKLAB_PAT" \
   http://localhost:8888/api/v1/whoami
 ```
 
+After repeated authentication failures, requests are limited by client IP and public credential lookup ID. HTTP 429 includes `Retry-After`; wait for that delay before retrying, even with a corrected token. Successful authentication does not consume this failure allowance.
+
 PATs are separate from portable browser credentials. Each PAT has an expiry and an explicit set of scopes, can be revoked without changing workspace ownership, and is returned only once when it's created. API requests use personal scope by default; callers can pass `X-Team-ID` or `team_id` when their principal belongs to that team.
 
 The OpenAPI document lists `x-required-pat-scope` on every protected operation. The available scopes are `identity:read`, `history:read`, `runs:execute`, `projects:read`, `projects:write`, `atlas:read`, `atlas:write`, `automation:read`, `automation:write`, `notifications:read`, `notifications:write`, `secrets:manage`, `teams:read`, and `teams:write`.
