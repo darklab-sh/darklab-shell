@@ -136,6 +136,7 @@ def test_channel_and_digest_keep_reason_until_explicit_resume(suspended_db):
     changed = channels_store.update_notification_channel(bundle.workspace.id, channel["id"], {"label": "Reviewed"})
     assert changed["muted"] and changed["muted_reason"] == "principal_disabled"
     settings = digests.get_digest_settings(bundle.workspace.id, project, conn=conn)
+    assert settings is not None
     assert not settings["enabled"] and settings["paused_reason"] == "principal_disabled"
     settings = digests.save_digest_settings(bundle.workspace.id, project, {"enabled": False}, conn=conn)
     assert settings["paused_reason"] == "principal_disabled"

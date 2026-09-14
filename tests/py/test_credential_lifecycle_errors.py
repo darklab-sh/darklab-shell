@@ -36,7 +36,7 @@ def error_records(monkeypatch):
     records = []
     handler = logging.Handler()
     handler.setLevel(logging.ERROR)
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("credential-lifecycle-test", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(observability, "log", logger)

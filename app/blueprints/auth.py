@@ -207,7 +207,7 @@ def sign_in():
                 return response
             if result is not None:
                 limited = _redemption_limit(secret, failed=True)
-            if not limited.allowed:
+            if result is None or not limited.allowed:
                 error = "Too many sign-in attempts. Wait a moment and try again."
             else:
                 lifecycle.record_authentication_failure(result, request_fields=_request_fields())

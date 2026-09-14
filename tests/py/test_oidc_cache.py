@@ -89,7 +89,9 @@ def test_unknown_key_refreshes_once_but_wrong_signature_does_not(monkeypatch):
     provider.signing_key = provider.private_key
     assert oidc.exchange_code(_config(), flow, "local-code") == expected
     assert len(provider.get_calls) == 3
-    provider.signing_key = jwk.RSAKey.generate_key(2048, {"kid": provider.private_key.kid}, private=True)
+    kid = provider.private_key.kid
+    assert kid is not None
+    provider.signing_key = jwk.RSAKey.generate_key(2048, {"kid": kid}, private=True)
     with pytest.raises(oidc.OIDCError, match="could not be verified"):
         oidc.exchange_code(_config(), flow, "local-code")
     assert len(provider.get_calls) == 3

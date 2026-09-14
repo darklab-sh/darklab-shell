@@ -63,7 +63,7 @@ class WhoisTargetResponse:
             try:
                 if "-" in value:
                     start, end = (ipaddress.ip_address(part.strip()) for part in value.split("-", 1))
-                    if start.version == target.version == end.version and start <= target <= end:
+                    if start.version == target.version == end.version and int(start) <= int(target) <= int(end):
                         return True
                 elif target in ipaddress.ip_network(value.strip(), strict=False):
                     return True

@@ -25,7 +25,7 @@ def records(monkeypatch, tmp_path):
     oidc_cache._cleanup_trust_bundle()
     captured = []
     handler = logging.Handler()
-    handler.emit = captured.append
+    handler.emit = lambda record: captured.append(record)
     logger = logging.Logger("oidc-diagnostics", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(oidc_diagnostics, "log", logger)

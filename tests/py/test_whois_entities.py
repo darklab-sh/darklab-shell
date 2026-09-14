@@ -10,10 +10,12 @@ from core.output_signals import OutputSignalClassifier
 
 def _entities(target, transcript):
     classifier = OutputSignalClassifier(f"whois {target}")
-    return [
-        entity for line in transcript.splitlines()
-        for entity in classifier.classify_line(line).get("entities", [])
-    ]
+    entities = []
+    for line in transcript.splitlines():
+        detected = classifier.classify_line(line).get("entities", [])
+        assert isinstance(detected, list)
+        entities.extend(detected)
+    return entities
 
 
 @pytest.mark.parametrize("target,response", [

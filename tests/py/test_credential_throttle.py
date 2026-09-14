@@ -55,7 +55,7 @@ def warning_records(monkeypatch):
     records = []
     handler = logging.Handler()
     handler.setLevel(logging.WARNING)
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("auth-warning-test", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(observability, "log", logger)
@@ -183,9 +183,11 @@ def test_failed_credentials_emit_one_safe_warning_per_reason(monkeypatch, kind, 
     clock = [100.0]
     monkeypatch.setattr(observability, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     secret = "private-submitted-credential-canary"
+    response = None
     for _ in range(3):
         response = _attempt(client, kind, secret)
         assert response.status_code == (200 if kind == "form" else 401)
+    assert response is not None
     assert len(warning_records) == 1
     first = warning_records[0]
     assert first.msg == "CREDENTIAL_AUTHENTICATION_REJECTED" and first.levelno == logging.WARNING

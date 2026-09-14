@@ -52,10 +52,10 @@ def running_app(tmp_path, monkeypatch):
     # The real worker finishes persistence before the test database disappears.
     deadline = time.monotonic() + 5
     pids = {child.pid for child in spawned}
-    while time.monotonic() < deadline:
+    while True:
         with process._pid_lock:
             active = [row for row in process._active_run_meta.values() if row.get("pid") in pids]
-        if not active:
+        if not active or time.monotonic() >= deadline:
             break
         time.sleep(0.02)
     assert not active, "Test run workers did not finish cleanup"
@@ -116,6 +116,7 @@ def test_workflow_launch_owner_keeps_attribution_and_rechecks_current_authority(
         "personal_workspace_id": identity.personal_workspace_id,
         "originating_credential_id": credential_id,
     }
+    member = None
     if team:
         admin = principal_identity("Workflow Team owner")
         with database.db_connect() as conn:
@@ -132,6 +133,7 @@ def test_workflow_launch_owner_keeps_attribution_and_rechecks_current_authority(
     storage.revoke_credential(identity.principal_id, credential_id, allow_lockout=True)
     assert execution_owner_context(execution) == owner
     if team:
+        assert member is not None
         with database.db_connect() as conn:
             team_storage.update_team_member(conn, member["id"], role="viewer")
             conn.commit()

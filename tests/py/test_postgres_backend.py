@@ -1927,7 +1927,9 @@ def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema
     assert "manual" not in str(suspended)
     lifecycle.set_principal_enabled(bundle.principal.id, enabled=True, connect=lambda: nullcontext(conn))
     assert operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn)) == suspended
-    assert digests.get_digest_settings(bundle.workspace.id, project, conn=conn)["paused_reason"] == "principal_disabled"
+    paused_digest = digests.get_digest_settings(bundle.workspace.id, project, conn=conn)
+    assert paused_digest is not None
+    assert paused_digest["paused_reason"] == "principal_disabled"
     resumed = channels_store.update_notification_channel(bundle.workspace.id, channel["id"], {"muted": False})
     assert not resumed["muted"] and resumed["muted_reason"] == ""
     digest = digests.save_digest_settings(bundle.workspace.id, project,

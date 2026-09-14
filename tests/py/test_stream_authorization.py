@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -63,6 +63,8 @@ def test_stream_revocation_stops_delivery_and_only_terminates_ptys(
     client = app.test_client()
     credential = bundle.credential
     session = None
+    identity_id = ""
+    last_seen = None
     if transport == "pat":
         with get_db_connect()() as conn:
             credential = storage.issue_credential(
@@ -74,7 +76,6 @@ def test_stream_revocation_stops_delivery_and_only_terminates_ptys(
         app.config["DARKLAB_CONFIG"] = {
             **app.config["DARKLAB_CONFIG"], "access_profile": "mixed" if transport == "oidc" else "token_required",
         }
-        identity_id = ""
         if transport == "oidc":
             identity_id = "oid_" + bundle.principal.id[4:]
             with get_db_connect()() as conn:
@@ -142,6 +143,7 @@ def test_stream_revocation_stops_delivery_and_only_terminates_ptys(
             elif action == "disable":
                 storage.disable_principal(bundle.principal.id, reason="stream test", conn=conn)
             elif action == "unlink":
+                assert identity_id
                 conn.execute("DELETE FROM oidc_identities WHERE id = ?", (identity_id,))
             conn.commit()
         if action in {"logout", "revoke_all"}:
@@ -168,6 +170,7 @@ def test_stream_revocation_stops_delivery_and_only_terminates_ptys(
                 "SELECT last_used_at FROM credentials WHERE id = ?", (credential.metadata.id,),
             ).fetchone()[0] == last_used
             if session:
+                assert last_seen is not None
                 assert conn.execute(
                     "SELECT last_seen_at FROM browser_sessions WHERE id = ?", (session.id,),
                 ).fetchone()[0] == last_seen
@@ -268,10 +271,12 @@ def test_broker_poll_is_bounded_and_first_event_close_releases_subscriber(monkey
     monkeypatch.setattr(broker, "_store", lambda: store)
     with mock.patch.object(metrics, "record_broker_subscriber_delta") as subscribers:
         stream = broker.stream_run_events("example")
+        assert isinstance(stream, Generator)
         next(stream)
         stream.close()
         assert subscribers.call_args_list == [mock.call(1), mock.call(-1)]
     stream = broker.stream_run_events("example")
+    assert isinstance(stream, Generator)
     next(stream)
     assert next(stream) == ": heartbeat\n\n"
     assert store.wait_after.call_args.kwargs["timeout"] <= 5
@@ -295,9 +300,10 @@ def test_local_and_redis_pty_readers_bound_idle_wait_without_holding_a_lock(monk
             self.waits.append(timeout)
 
     condition = Condition()
-    run = SimpleNamespace(condition=condition, events=[], closed=False)
+    run = mock.Mock(spec=service.PtyRun, condition=condition, events=[], closed=False)
     monkeypatch.setattr(service, "_pty_heartbeat_seconds", lambda: 120)
     local = service._stream_local_pty_events(run)
+    assert isinstance(local, Generator)
     assert "heartbeat" in next(local)
     assert condition.waits == [5]
     assert condition.held is False
@@ -310,6 +316,7 @@ def test_local_and_redis_pty_readers_bound_idle_wait_without_holding_a_lock(monk
     monkeypatch.setattr(service, "_load_pty_meta_for_scope", lambda *_args: {"closed": False})
     monkeypatch.setattr(service, "_prune_stale_open_pty", lambda *_args: False)
     remote = service.stream_pty_events("run", "workspace")
+    assert isinstance(remote, Generator)
     assert "heartbeat" in next(remote)
     assert "heartbeat" in next(remote)
     assert [call.kwargs["block"] for call in redis.xread.call_args_list] == [1, 5000]

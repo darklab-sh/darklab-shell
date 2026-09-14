@@ -35,7 +35,7 @@ def csrf_context(tmp_path, monkeypatch):
     client.set_cookie(BROWSER_SESSION_COOKIE, issued.cookie_value, secure=True)
     records = []
     handler = logging.Handler()
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("csrf-diagnostics-test", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(observability, "log", logger)

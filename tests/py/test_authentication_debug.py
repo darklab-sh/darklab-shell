@@ -55,7 +55,7 @@ def test_cached_resolution_logs_safe_branch_once(tmp_path, monkeypatch, kind, me
 
     records = []
     handler = logging.Handler()
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("auth-debug-test", level)
     logger.addHandler(handler)
     monkeypatch.setattr(observability, "log", logger)

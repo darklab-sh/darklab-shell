@@ -15,9 +15,9 @@ from services.auth import rate_limit, rate_limit_logging
 from test_credential_throttle import FakeRedis
 
 
-class FaultyRedis(FakeRedis):
+class FaultyRedis:
     def __init__(self, **failures):
-        super().__init__()
+        self.backend = FakeRedis()
         self.failures = failures
         self.calls = []
 
@@ -37,15 +37,15 @@ class FaultyRedis(FakeRedis):
 
     def get(self, key):
         result = self._result("read")
-        return super().get(key) if result is None else result
+        return self.backend.get(key) if result is None else result
 
     def incr(self, key):
         result = self._result("increment")
-        return super().incr(key) if result is None else result
+        return self.backend.incr(key) if result is None else result
 
     def expire(self, key, seconds):
         result = self._result("expiry")
-        return super().expire(key, seconds) if result is None else result
+        return self.backend.expire(key, seconds) if result is None else result
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def records(monkeypatch):
     rate_limit.reset_auth_rate_limits_for_tests()
     captured = []
     handler = logging.Handler()
-    handler.emit = captured.append
+    handler.emit = lambda record: captured.append(record)
     logger = logging.Logger("credential-limiter-backend", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(rate_limit_logging, "log", logger)

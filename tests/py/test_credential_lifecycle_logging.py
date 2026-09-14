@@ -16,7 +16,7 @@ from core.database_access import get_db_connect
 from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields
 from identity_helpers import anonymous_session_id
 from services.auth import lifecycle, lifecycle_logging, oidc, storage
-from services.auth.resolver import resolve_authentication
+from services.auth.resolver import AuthenticatedContext, resolve_authentication
 from services.scheduler.service import create_schedule
 from services.workspace.models import WorkspaceSettings
 
@@ -50,9 +50,9 @@ def _bundle(ctx):
     return storage.create_principal_with_credential(credential_label="private-initial-label", settings=ctx.settings)
 
 
-def _context(bundle):
+def _context(bundle) -> AuthenticatedContext:
     context = resolve_authentication({"X-Darklab-Credential": bundle.credential.secret}).context
-    assert context is not None
+    assert isinstance(context, AuthenticatedContext)
     return context
 
 

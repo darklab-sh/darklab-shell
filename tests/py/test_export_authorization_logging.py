@@ -53,7 +53,7 @@ def worker(request, tmp_path, monkeypatch):
         )
     records = []
     handler = logging.Handler()
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("export-authorization", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(module, "log", logger)
@@ -207,7 +207,7 @@ def test_real_package_builder_preserves_authorization_outcome_and_removes_partia
     archive_dir.mkdir()
     records = []
     handler = logging.Handler()
-    handler.emit = records.append
+    handler.emit = lambda record: records.append(record)
     logger = logging.Logger("package-progress-authorization", logging.DEBUG)
     logger.addHandler(handler)
     monkeypatch.setattr(package_archive, "log", logger)
