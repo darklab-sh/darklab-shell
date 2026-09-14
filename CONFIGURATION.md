@@ -1263,7 +1263,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary: `open`, `token_required`, `oidc_required`, or `mixed` |
 | `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows capability-link creation and unauthenticated reads in restricted profiles. Defaults to `false` |
 | `BROWSER_SESSION_IDLE_MINUTES` | Docker Compose, Flask app | Inactivity deadline for restricted browser sessions. Defaults to `30` minutes |
-| `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit |
+| `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit. Team privilege changes and provider linking preserve this deadline; only fresh sign-in renews it |
 | `OIDC_ISSUER` | Docker Compose, Flask app | Exact HTTPS provider issuer from discovery, without a trailing slash |
 | `OIDC_CLIENT_ID` | Docker Compose, Flask app | Confidential client ID registered with the provider |
 | `OIDC_CLIENT_SECRET` | Docker Compose, Flask app | Private client secret; keep it in the installation's private `.env` |

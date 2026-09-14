@@ -48,6 +48,10 @@ class IssuedBrowserSession:
     created_at: str
     absolute_expires_at: str
 
+    @property
+    def cookie_max_age(self) -> int:
+        return max(0, int((_as_utc(self.absolute_expires_at) - _active_now(None)).total_seconds()))
+
 
 @dataclass(frozen=True)
 class ResolvedBrowserSession:
@@ -215,12 +219,15 @@ def create_browser_session(
     absolute_seconds: int,
     replace_session_id: str = "",
     authenticated_at: str | None = None,
+    absolute_expires_at: str | None = None,
     now: datetime | None = None,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedBrowserSession:
     active_now = _active_now(now)
     expires_at = active_now + timedelta(seconds=max(1, int(absolute_seconds)))
+    if absolute_expires_at is not None:
+        expires_at = min(expires_at, _as_utc(absolute_expires_at))
 
     def operation(active_conn: Any) -> IssuedBrowserSession:
         if bool(credential_id) == bool(oidc_identity_id):

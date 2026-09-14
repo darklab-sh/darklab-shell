@@ -215,11 +215,12 @@ def rotate_browser_session_after_privilege_change(response):
         absolute_seconds=absolute_seconds,
         replace_session_id=context.browser_session_id,
         authenticated_at=context.browser_session_authenticated_at,
+        absolute_expires_at=context.browser_session_absolute_expires_at,
     )
     response.set_cookie(
         BROWSER_SESSION_COOKIE,
         issued.cookie_value,
-        max_age=absolute_seconds,
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=True,
         samesite="Strict",
@@ -228,7 +229,7 @@ def rotate_browser_session_after_privilege_change(response):
     response.set_cookie(
         BROWSER_CSRF_COOKIE,
         issued.csrf_token,
-        max_age=absolute_seconds,
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=False,
         samesite="Strict",

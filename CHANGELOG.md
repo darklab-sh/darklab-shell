@@ -110,6 +110,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Assessment confirmations restore focus after a refresh.** Canceling a lifecycle action returns to the current opening button when a background update replaced the original control, including a still-pending reload, and later Assessment updates preserve that focus. Moving to another control while the reload finishes keeps your chosen focus.
 
+- **Browser session rotation keeps the original absolute deadline.** Team changes and provider linking no longer extend access without fresh sign-in, and both session cookies use the remaining lifetime. Tests cover repeated near-expiry rotations, old-cookie replay, provider linking, and renewal after credential or provider sign-in.
+
 - **Mobile Project actions run once per tap.** Linking a run no longer reopens its confirmation after succeeding; the same dispatch guard covers other shared Project actions.
 
 - **Keeping a workspace retires its old anonymous Files access.** The original anonymous identity and its existing download links cannot read, overwrite, delete, or reopen the kept workspace, including after credential rotation, revocation, or account disablement. Files stay in place, failed attachment leaves anonymous access usable, and a restored browser can recover by proving its saved credential. History fallback-search tests retain the current ownership schema while removing only the optional search index.

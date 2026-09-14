@@ -105,7 +105,7 @@ def _set_browser_session_cookies(response, issued) -> None:
     response.set_cookie(
         BROWSER_SESSION_COOKIE,
         issued.cookie_value,
-        max_age=_session_cookie_seconds(),
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=True,
         samesite="Strict",
@@ -114,7 +114,7 @@ def _set_browser_session_cookies(response, issued) -> None:
     response.set_cookie(
         BROWSER_CSRF_COOKIE,
         issued.csrf_token,
-        max_age=_session_cookie_seconds(),
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=False,
         samesite="Strict",
@@ -291,13 +291,15 @@ def oidc_callback():
         credential_id = ""
         oidc_identity_id = identity.id
         authenticated_at: str | None = None
+        absolute_expires_at: str | None = None
         if flow.purpose == "link":
-            credential_id, authenticated_at = oidc.linked_credential_source(flow)
+            credential_id, authenticated_at, absolute_expires_at = oidc.linked_credential_source(flow)
             oidc_identity_id = ""
         issued = create_browser_session(
             principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
             replace_session_id=flow.browser_session_id, credential_id=credential_id,
             oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
+            absolute_expires_at=absolute_expires_at,
         )
         if flow.purpose == "sign_in" and flow.browser_session_id:
             revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")

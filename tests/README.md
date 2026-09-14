@@ -213,7 +213,7 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 `test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
 
-`test_credential_session_replacement.py` replays prior cookies after same-account and cross-account credential sign-in through both routes. It checks that other devices remain signed in and that invalid credentials, failed request proofs, or failed session creation preserve the current session.
+`test_credential_session_replacement.py` replays prior cookies after same-account and cross-account credential sign-in through both routes. It checks that other devices remain signed in and that invalid credentials, failed request proofs, or failed session creation preserve the current session. Repeated Team rotations keep the original absolute deadline and cap both cookies to the remaining time. Provider-linking checks enforce the same rule; fresh credential and provider sign-ins renew the lifetime.
 
 Assessment lifecycle unit and browser checks refresh the Project while its confirmation is open, then verify that canceling restores focus to the replacement button without sending a mutation. A late-response check redraws the Assessment again and verifies focus stays on its current control.
 

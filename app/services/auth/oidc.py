@@ -352,20 +352,20 @@ def find_identity(principal_id: str, issuer: str) -> OIDCIdentity | None:
     return run_read(operation)
 
 
-def linked_credential_source(flow: OIDCFlow) -> tuple[str, str]:
-    """Return the recently proved credential and its original authentication time."""
+def linked_credential_source(flow: OIDCFlow) -> tuple[str, str, str]:
+    """Return the proved credential, authentication time, and absolute deadline."""
     if flow.purpose != "link":
         raise OIDCError("A credential source is required for provider linking.")
 
-    def operation(conn: Any) -> tuple[str, str]:
+    def operation(conn: Any) -> tuple[str, str, str]:
         data = _row(conn.execute(
-            "SELECT credential_id, authenticated_at FROM browser_sessions "
+            "SELECT credential_id, authenticated_at, absolute_expires_at FROM browser_sessions "
             "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",
             (flow.browser_session_id, flow.principal_id),
         ).fetchone())
         if not data or not data.get("credential_id"):
             raise OIDCError("The credential session is no longer available.")
-        return str(data["credential_id"]), str(data["authenticated_at"])
+        return str(data["credential_id"]), str(data["authenticated_at"]), str(data["absolute_expires_at"])
 
     return run_read(operation)
 

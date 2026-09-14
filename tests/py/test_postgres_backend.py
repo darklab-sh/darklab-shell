@@ -1129,6 +1129,22 @@ def test_oidc_identity_and_browser_session_migrate_on_postgres(postgres_schema, 
     ).fetchone()
     assert row["credential_id"] is None
     assert row["oidc_identity_id"] == identity_id
+    deadline = datetime.fromisoformat(issued.absolute_expires_at)
+    replacement = create_browser_session(
+        principal_id=bundle.principal.id, oidc_identity_id=identity_id,
+        absolute_seconds=3600, absolute_expires_at=issued.absolute_expires_at,
+        authenticated_at=issued.created_at, replace_session_id=issued.id,
+        now=deadline - timedelta(seconds=10), conn=conn,
+    )
+    assert replacement.absolute_expires_at == issued.absolute_expires_at
+    assert resolve_browser_session(
+        replacement.cookie_value, idle_seconds=1800, touch=False,
+        now=deadline - timedelta(seconds=1), conn=conn,
+    ).valid is True
+    for cookie in (issued.cookie_value, replacement.cookie_value):
+        assert resolve_browser_session(
+            cookie, idle_seconds=1800, touch=False, now=deadline, conn=conn,
+        ).valid is False
     with pytest.raises(Exception):
         conn.execute(
             "INSERT INTO oidc_identities (id, principal_id, issuer, subject, created_at) "

@@ -19,7 +19,8 @@ from flask.testing import FlaskClient
 from joserfc import jwk, jwt
 from services.auth import oidc, oidc_cache, storage
 from services.auth import lifecycle
-from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
+from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE, resolve_browser_session
+from services.auth.contracts import timestamp
 
 ISSUER = "https://idp.example/realms/test"
 ORIGIN = "https://shell.example"
@@ -360,13 +361,40 @@ def test_oidc_link_requires_recent_credential_and_unlink_revokes_all_sessions(mo
     nonce = _response_cookie(page, "darklab_sign_in_nonce")
     signed = client.post("/auth/sign-in", base_url=ORIGIN, data={"credential": bundle.credential.secret, "sign_in_nonce": nonce})
     assert signed.status_code == 302
+    original_cookie = _client_cookie(client, BROWSER_SESSION_COOKIE)
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=30)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE browser_sessions SET absolute_expires_at = ? WHERE principal_id = ?",
+            (timestamp(deadline), bundle.principal.id),
+        )
+        authenticated_at = conn.execute(
+            "SELECT authenticated_at FROM browser_sessions WHERE principal_id = ? AND revoked_at IS NULL",
+            (bundle.principal.id,),
+        ).fetchone()["authenticated_at"]
+        conn.commit()
     csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
     assert client.post("/auth/oidc/link", base_url=ORIGIN).status_code == 403
     start = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
     assert start.status_code == 200
     state = parse_qs(urlsplit(start.get_json()["authorization_url"]).query)["state"][0]
     provider.expect(state)
-    assert _callback(client, state).headers["Location"] == "/"
+    linked = _callback(client, state)
+    assert linked.headers["Location"] == "/"
+    for header in linked.headers.getlist("Set-Cookie"):
+        cookies = SimpleCookie(header)
+        for name in (BROWSER_SESSION_COOKIE, BROWSER_CSRF_COOKIE):
+            if name in cookies:
+                assert 0 < int(cookies[name]["max-age"]) <= 30
+    with get_db_connect()() as conn:
+        replacement = conn.execute(
+            "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
+            "WHERE principal_id = ? AND revoked_at IS NULL", (bundle.principal.id,),
+        ).fetchone()
+    assert replacement["authenticated_at"] == authenticated_at
+    assert replacement["absolute_expires_at"] == timestamp(deadline)
+    for cookie in (original_cookie, _client_cookie(client, BROWSER_SESSION_COOKIE)):
+        assert not resolve_browser_session(cookie, idle_seconds=1800, now=deadline, touch=False).valid
     principal = client.get("/auth/principal", base_url=ORIGIN).get_json()
     assert principal["principal"]["id"] == bundle.principal.id
     assert principal["authentication"]["credential_type"] == "portable"
@@ -377,6 +405,32 @@ def test_oidc_link_requires_recent_credential_and_unlink_revokes_all_sessions(mo
     result = client.post("/auth/oidc/unlink", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
     assert result.get_json() == {"sessions_revoked": True, "unlinked": True}
     assert client.get("/", base_url=ORIGIN).status_code == 302
+
+
+def test_fresh_oidc_sign_in_renews_absolute_deadline(monkeypatch):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = "fresh-oidc-deadline"
+    app = _app(monkeypatch, _config())
+    client = app.test_client()
+    assert _callback(client, _start(client, provider)).status_code == 302
+    principal_id = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+    original_cookie = _client_cookie(client, BROWSER_SESSION_COOKIE)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE browser_sessions SET absolute_expires_at = ? WHERE principal_id = ?",
+            (timestamp(datetime.now(timezone.utc) + timedelta(seconds=30)), principal_id),
+        )
+        conn.commit()
+    started = datetime.now(timezone.utc)
+    assert _callback(client, _start(client, provider)).status_code == 302
+    with get_db_connect()() as conn:
+        replacement = conn.execute(
+            "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
+            "WHERE principal_id = ? AND revoked_at IS NULL", (principal_id,),
+        ).fetchone()
+    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started
+    assert datetime.fromisoformat(replacement["absolute_expires_at"]) >= started + timedelta(hours=12)
+    assert not resolve_browser_session(original_cookie, idle_seconds=1800, touch=False).valid
 
 
 @pytest.mark.parametrize("profile", ["mixed", "token_required", "oidc_required"])
