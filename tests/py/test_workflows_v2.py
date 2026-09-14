@@ -19,6 +19,7 @@ from conftest import make_test_app
 from identity_helpers import anonymous_session_id, browser_identity_headers, principal_owner
 from core.database import delete_run_artifacts
 from core.database_access import get_db_connect
+from services.teams.scope import anonymous_owner_context
 from services.runs.output_model import LineEntity, LineEvent, LineKind, LineNoiseKind, LineRole
 from services.workflows.captures import WorkflowCaptureAccumulator
 from services.workflows.collections import WorkflowCollectionAccumulator
@@ -2395,6 +2396,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
         original_command=raw_command,
         display_command=display_command,
         session_id=session_id,
+        owner_context=anonymous_owner_context(session_id),
         client_ip="127.0.0.1",
         handlers=run_routes._run_start_handlers(),
         link_project_id=project_id,
@@ -2438,6 +2440,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
             original_command=f"true {denied_value}",
             display_command=display_command,
             session_id=session_id,
+            owner_context=anonymous_owner_context(session_id),
             client_ip="127.0.0.1",
             handlers=run_routes._run_start_handlers(),
             private_values=(denied_value,),
@@ -2454,6 +2457,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
             original_command=f"true {spawn_value}",
             display_command=display_command,
             session_id=session_id,
+            owner_context=anonymous_owner_context(session_id),
             client_ip="127.0.0.1",
             handlers=run_routes._run_start_handlers(),
             private_values=(spawn_value,),
@@ -2479,6 +2483,7 @@ def test_sensitive_workflow_run_redacts_real_lifecycle_metadata(monkeypatch, cap
         original_command=f"{missing_value} --help",
         display_command=missing_display_command,
         session_id=session_id,
+        owner_context=anonymous_owner_context(session_id),
         client_ip="127.0.0.1",
         handlers=missing_handlers,
         private_values=(missing_value,),

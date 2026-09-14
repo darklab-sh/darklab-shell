@@ -78,6 +78,7 @@ def api_runs_start():
         started = api_routes._start_brokered_run_service(
             original_command=original_command,
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=owner_scope.team_id,
             team_role=team_role,
             client_ip=client_ip,

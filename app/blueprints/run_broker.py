@@ -34,12 +34,12 @@ def start_brokered_run():
         return jsonify({"error": "No command provided"}), 400
     team_id = ""
     team_role = ""
-    if run_routes.requested_team_id(request):
-        try:
-            owner_scope = run_routes.current_request_scope(session_id, request)
-        except run_routes.RequestScopeError as exc:
-            payload, status = run_routes.scope_error_payload(exc)
-            return jsonify(payload), status
+    try:
+        owner_scope = run_routes.current_request_scope(session_id, request)
+    except run_routes.RequestScopeError as exc:
+        payload, status = run_routes.scope_error_payload(exc)
+        return jsonify(payload), status
+    if owner_scope.is_team:
         capability_response = run_routes._require_team_capability(owner_scope, run_routes.Capability.RUN_COMMANDS)
         if capability_response:
             return capability_response
@@ -66,6 +66,7 @@ def start_brokered_run():
         started = run_routes._start_brokered_run_service(
             original_command=original_command,
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=team_id,
             team_role=team_role,
             client_ip=client_ip,

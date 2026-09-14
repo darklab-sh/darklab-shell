@@ -1085,8 +1085,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/execution_kinds.py", 30, "split-package-ratchet"),
     ModuleSizeBudget(
-        "app/services/workflows/execution_authorization.py", 106, "split-package-ratchet"
+        "app/services/workflows/execution_authorization.py", 87, "split-package-ratchet"
     ),
+    ModuleSizeBudget("app/services/workflows/execution_owner.py", 29, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),

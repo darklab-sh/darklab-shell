@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
 from services.runs.start_context import cleanup_started_run_material
 from services.workflows.child_launch_spec import ChildLaunchSpec
+from services.workflows.execution_owner import execution_owner_context
 from services.workflows.fanout_child_lifecycle import (
     bind_fanout_child_run,
     finalize_fanout_child_run,
@@ -88,6 +89,7 @@ def launch_fanout_child(
             original_command=command,
             display_command=launch_spec.display_command,
             session_id=str(execution.get("personal_workspace_id") or ""),
+            owner_context=execution_owner_context(execution),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
             client_ip="",

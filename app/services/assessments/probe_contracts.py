@@ -56,6 +56,15 @@ class ProbePlanRequest:
     http_profile_id: str = ""
 
 
+@dataclass(frozen=True)
+class ProbeExecutionResult:
+    """A freshly confirmed plan and its ordinary brokered run."""
+
+    plan: dict[str, Any]
+    started: Any
+    audit_summary: dict[str, Any]
+
+
 __all__ = [
     "PROBE_CATALOG_SCHEMA_VERSION",
     "PROBE_EXCLUSIONS",
@@ -66,5 +75,6 @@ __all__ = [
     "PROBE_PROTECTED_CAPABILITIES",
     "PROBE_TARGET_TYPES",
     "ProbeError",
+    "ProbeExecutionResult",
     "ProbePlanRequest",
 ]

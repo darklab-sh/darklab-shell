@@ -5,23 +5,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from services.assessments.probe_confirmation import confirm_project_probe_plan
 from services.assessments.probe_broker_launch import launch_confirmed_probe
-from services.assessments.probe_contracts import ProbeError, ProbePlanRequest
+from services.assessments.probe_contracts import ProbeError, ProbeExecutionResult, ProbePlanRequest
 from services.assessments.probe_log_context import ProbeLogContext
 from services.assessments.probe_observability import observe_probe
-
-
-@dataclass(frozen=True)
-class ProbeExecutionResult:
-    """A freshly confirmed plan and its ordinary brokered run."""
-
-    plan: dict[str, Any]
-    started: Any
-    audit_summary: dict[str, Any]
+from services.teams.scope import OwnerContext
 
 
 @observe_probe("launch")
@@ -31,6 +22,7 @@ def start_project_probe(
     probe_request: ProbePlanRequest,
     confirmation: Mapping[str, Any],
     *,
+    owner_context: OwnerContext,
     team_id: str = "",
     team_role: str = "",
     actor_member_id: str = "",
@@ -61,6 +53,7 @@ def start_project_probe(
     started, audit_summary = launch_confirmed_probe(
         plan,
         session_id=session_id,
+        owner_context=owner_context,
         project_id=project_id,
         team_id=team_id,
         team_role=team_role,

@@ -10,6 +10,7 @@ import os
 from collections.abc import Mapping
 from services.metrics_lazy import app_metrics
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
+from services.workflows.execution_owner import execution_owner_context
 from services.runs.output_store import load_run_output_events_for_run
 from services.runs.output_model import LineEvent
 from services.workflows.captures import WorkflowCaptureAccumulator
@@ -415,6 +416,7 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
             display_command=display_command,
             private_values=private_values,
             session_id=str(execution.get("personal_workspace_id") or ""),
+            owner_context=execution_owner_context(execution),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
             client_ip="",

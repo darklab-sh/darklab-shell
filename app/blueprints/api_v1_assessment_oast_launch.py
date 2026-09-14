@@ -127,6 +127,7 @@ def api_project_assessment_oast_launch(
             original_command=protected.execution_command,
             display_command=launch.plan["display_command"],
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=owner_scope.team_id,
             team_role=team_role,
             client_ip=get_client_ip(),

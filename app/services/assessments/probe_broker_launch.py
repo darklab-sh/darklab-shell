@@ -11,12 +11,14 @@ from services.assessments.http_profile_execution import ProtectedHttpLaunch
 from services.assessments.probe_cleanup import best_effort_probe_cleanup
 from services.assessments.probe_launch import probe_run_launch_context
 from services.assessments.probe_protected_launch import materialize_probe_run_launch
+from services.teams.scope import OwnerContext
 
 
 def launch_confirmed_probe(
     plan: dict[str, Any],
     *,
     session_id: str,
+    owner_context: OwnerContext,
     project_id: str,
     team_id: str,
     team_role: str,
@@ -39,6 +41,7 @@ def launch_confirmed_probe(
             original_command=protected.execution_command,
             display_command=plan["display_command"],
             session_id=session_id,
+            owner_context=owner_context,
             team_id=team_id,
             team_role=team_role,
             client_ip=client_ip,

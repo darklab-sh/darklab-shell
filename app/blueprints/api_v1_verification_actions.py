@@ -96,15 +96,15 @@ def api_project_finding_verification_action_launch(project_id, finding_id, check
         )
         response.headers["Retry-After"] = "5"
         return response, status
-    team_role = str((owner_scope.member or {}).get("role") or "") if owner_scope.is_team else ""
     started_at = datetime.now(timezone.utc).isoformat()
     try:
         started = api_routes._start_brokered_run_service(
             original_command=plan["display_command"],
             display_command=plan["display_command"],
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=owner_scope.team_id,
-            team_role=team_role,
+            team_role=str((owner_scope.member or {}).get("role") or ""),
             client_ip=get_client_ip(),
             handlers=api_routes._api_run_start_handlers(),
             owner_tab_id="",
