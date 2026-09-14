@@ -32,6 +32,7 @@ _REASONS = frozenset({
     "credential_required", "anonymous_identity_required", "invalid_credential",
 })
 _POLICIES = frozenset({"failed_credential_ip", "failed_credential_lookup", "anonymous_issuance_ip"})
+_CSRF_REASONS = frozenset({"missing_cookie", "missing_header", "token_mismatch", "stored_token_invalid"})
 _WARNING_INTERVAL = 60.0
 _WARNING_LOCK = Lock()
 # Keys come only from the fixed event/reason/policy sets, never from requests.
@@ -81,6 +82,22 @@ def log_credential_rate_limited(result: CredentialRateLimitResult) -> None:
         "CREDENTIAL_RATE_LIMITED", policy, policy=policy,
         retry_after=result.retry_after, http_status=429,
     )
+
+
+def log_browser_csrf_rejected(reason: str) -> None:
+    code = reason if reason in _CSRF_REASONS else "invalid_csrf"
+    _warning("BROWSER_CSRF_REJECTED", code, reason=code, http_status=403)
+
+
+def log_sign_in_form_rejected() -> None:
+    if not log.isEnabledFor(logging.DEBUG) or not has_request_context():
+        return
+    log.debug("BROWSER_SIGN_IN_FORM_REJECTED", extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64),
+        "endpoint": _request_value(request.endpoint, 160),
+        "reason": "invalid_nonce",
+        "http_status": 200,
+    })
 
 
 def log_authentication_resolved(result: AuthenticationResult, *, cookies_enabled: bool) -> None:

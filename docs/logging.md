@@ -92,6 +92,7 @@ The current event inventory is:
 | ------- | ------- | ------- | ----------------- |
 | DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
 | DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, http_status, size |
+| DEBUG | `BROWSER_SIGN_IN_FORM_REJECTED` | expired or mismatched standalone sign-in form nonce | request_id, endpoint, reason, http_status |
 | DEBUG | `AUTHENTICATION_RESOLVED` | first authentication resolution in a request | request_id, endpoint, method, state, owner_kind, supplied_transports, browser_cookie_enabled, last_used_write_due |
 | DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
@@ -425,6 +426,7 @@ The current event inventory is:
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN | `BROWSER_CSRF_REJECTED` | browser-cookie mutation CSRF rejection | request_id, endpoint, reason, http_status, suppressed_repeat_count |
 | WARN | `CREDENTIAL_AUTHENTICATION_REJECTED` | shared credential rejection, sign-in form, and redemption boundaries | request_id, endpoint, reason, http_status, suppressed_repeat_count |
 | WARN | `CREDENTIAL_RATE_LIMITED` | credential precheck, failed verification, sign-in, redemption, and anonymous issuance limits | request_id, endpoint, policy, retry_after, http_status, suppressed_repeat_count |
 | WARN | `PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED` | Project HTTP-profile scope discovery | project_id, team_scope, invalid_target_count, invalid_target_types |
@@ -634,6 +636,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+`BROWSER_CSRF_REJECTED` distinguishes a missing cookie, missing header, mismatched token pair, and failed stored-token validation. It uses the same per-process, per-reason warning sampler as credential rejections, including the count of suppressed repeats. An expired or mismatched standalone sign-in form instead emits `BROWSER_SIGN_IN_FORM_REJECTED` at DEBUG and keeps its normal refreshed-form response. Neither event records tokens, nonces, or browser-session ids.
 
 `CONFIG_LOADED` includes the validated sign-in profile, whether an OIDC provider is configured, provisioning mode, effective public-share availability, and browser-session idle and absolute limits. `public_shares_enabled` is true in open mode or when restricted sharing is explicitly enabled. These INFO fields contain only policy names, booleans, and durations; provider URLs, client identifiers, secrets, and subjects stay out of the summary.
 

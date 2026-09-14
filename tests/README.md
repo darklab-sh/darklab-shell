@@ -251,6 +251,8 @@ The OIDC cases use a deterministic local provider in `test_oidc_sign_in.py`. `te
 
 `test_logging.py` imports configuration in fresh processes to verify one fatal startup record for invalid OIDC policy, scopes, allowlists, required settings, URLs, and inconsistent browser-session limits. Text and GELF cases check fixed reasons and source attribution while keeping private configuration values out of the output. Successful startup cases cover every access profile, each provisioning mode, and default or explicit sharing policy, including the session-limit values in the existing INFO summary.
 
+`test_browser_csrf_logging.py` exercises real browser sessions for each CSRF rejection reason, valid requests, and header-authenticated exemptions. It checks skipped verifier work, bounded warning repeats, text/GELF privacy, and DEBUG-only expired-form diagnostics that never verify the submitted credential.
+
 #### Core backend, Atlas, and CVE risk
 
 Cutover backup checks keep managed archives as the default, allow an explicit development archive only in the cutover tool, and still reject it for managed restore.

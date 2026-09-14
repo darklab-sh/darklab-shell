@@ -2426,6 +2426,8 @@ In restricted profiles, `apiFetch` recognizes terminal browser-session authentic
 
 Credential lifecycle routes distinguish bounded validation failures from internal persistence faults. Expected client errors retain their existing status; verifier-root, workspace-storage, and other internal identity failures return a generic 500 and one `CREDENTIAL_LIFECYCLE_FAILED` ERROR with a fixed operation and reason, error class, and sanitized origin frames. Original exception text, source lines, and chained exceptions stay out of the response and log.
 
+Browser-cookie mutations classify CSRF failures before returning the existing 403 response. Missing or mismatched tokens skip the stored-token lookup; only a matching pair reaches verification. Fixed reasons feed sampled warnings without token or session values, while an expired standalone sign-in form emits only a DEBUG diagnostic.
+
 Credential throttling checks the IP and public lookup counters before authentication reads storage or verifier material. The request helper caches a rejection for the request, so response logging cannot trigger verification after an HTTP 429. The sign-in form and credential redemption endpoint apply the same precheck to submitted secrets; only failed verifications increment the counters. Redis shares the fixed-minute windows across workers, with process-local counters when Redis is unavailable.
 
 Credential and OIDC sign-in validate return destinations before URL normalization. Only local paths are accepted; raw or encoded path backslashes, control characters, whitespace, and authority-changing separators fall back to the root page. Ordinary encoded query values and fragments remain intact.

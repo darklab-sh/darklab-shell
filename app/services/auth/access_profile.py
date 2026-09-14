@@ -21,6 +21,7 @@ from .browser_sessions import (
     verify_csrf_token,
 )
 from .resolver import AuthenticatedContext
+from .observability import log_browser_csrf_rejected
 
 OPEN = "open"
 TOKEN_REQUIRED = "token_required"
@@ -176,16 +177,21 @@ def enforce_browser_csrf(authentication_result):
         return None
     cookie_token = str(request.cookies.get(BROWSER_CSRF_COOKIE) or "")
     header_token = str(request.headers.get("X-Darklab-CSRF") or "")
-    if (
-        not cookie_token
-        or not hmac_compare(cookie_token, header_token)
-        or not verify_csrf_token(context.browser_session_id, cookie_token)
-    ):
-        message = "The request couldn't be verified. Refresh the page and try again."
-        if request.path.startswith("/api/v1/"):
-            return jsonify(json_error("csrf_validation_failed", message)), 403
-        return jsonify({"error": "csrf_validation_failed", "message": message}), 403
-    return None
+    if not cookie_token:
+        reason = "missing_cookie"
+    elif not header_token:
+        reason = "missing_header"
+    elif not hmac_compare(cookie_token, header_token):
+        reason = "token_mismatch"
+    elif not verify_csrf_token(context.browser_session_id, cookie_token):
+        reason = "stored_token_invalid"
+    else:
+        return None
+    log_browser_csrf_rejected(reason)
+    message = "The request couldn't be verified. Refresh the page and try again."
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("csrf_validation_failed", message)), 403
+    return jsonify({"error": "csrf_validation_failed", "message": message}), 403
 
 
 def hmac_compare(left: str, right: str) -> bool:

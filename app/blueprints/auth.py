@@ -61,6 +61,7 @@ from services.auth.observability import (
     log_authentication_rejected,
     log_credential_lifecycle_failed,
     log_credential_rate_limited,
+    log_sign_in_form_rejected,
 )
 from services.auth import oidc
 from services.auth.resolver import (
@@ -176,6 +177,7 @@ def sign_in():
         if not _credential_sign_in_enabled():
             return current_app.response_class(status=404)
         if not _valid_sign_in_nonce(str(request.form.get("sign_in_nonce") or "")):
+            log_sign_in_form_rejected()
             error = "The sign-in page expired. Reload it and try again."
         else:
             secret = str(request.form.get("credential") or "")
