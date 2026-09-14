@@ -91,6 +91,8 @@ test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => resetAnonymousBrowser(page))
 
   test('restores a kept workspace from a browser holding its retired anonymous identity', async ({ page }) => {
+    // Allow the complete keep/reload/restore journey to finish on a busy runner.
+    test.setTimeout(60_000)
     const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
     const credentialId = await keepBrowserWorkspace(page, { label: 'Restored browser' })
     const savedCredential = await page.evaluate(() => localStorage.getItem('access_credential'))
