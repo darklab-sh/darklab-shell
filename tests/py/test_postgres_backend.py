@@ -8753,3 +8753,72 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert search_row["id"] == "run-1"
     assert (tmp_path / "run-output" / artifact_row["rel_path"]).exists()
     assert (tmp_path / pointer["rel_path"]).exists()
+
+
+def test_postgres_lifecycle_milestones_wait_for_commit_and_deduplicate_revocation(
+    postgres_schema, postgres_dsn, tmp_path, monkeypatch,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    import logging
+    from threading import Barrier
+
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle, lifecycle_logging
+    from services.workspace.models import WorkspaceSettings
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    settings = WorkspaceSettings(True, "volume", tmp_path / "milestone-workspaces", 1024, 1024, 10, 1)
+    settings.root.mkdir()
+
+    class FailedCommit(PostgresSqliteCompatConnection):
+        def commit(self):
+            raise RuntimeError("injected commit failure")
+
+    @contextmanager
+    def connect(*, fail_commit=False):
+        with psycopg.Connection[dict[str, Any]].connect(isolated_dsn, row_factory=dict_row) as raw:
+            yield FailedCommit(raw) if fail_commit else PostgresSqliteCompatConnection(raw)
+
+    records = []
+
+    def capture(record):
+        with connect() as conn:
+            assert conn.execute("SELECT status FROM principals WHERE id = ?", (record.principal_id,)).fetchone()
+            if hasattr(record, "credential_id"):
+                row = conn.execute("SELECT revoked_at FROM credentials WHERE id = ?", (record.credential_id,)).fetchone()
+                assert row is not None
+                assert (row["revoked_at"] is not None) == (record.msg == "CREDENTIAL_REVOKED")
+        records.append(record)
+
+    handler = logging.Handler()
+    handler.emit = capture
+    logger = logging.Logger("postgres-lifecycle-milestones", logging.INFO)
+    logger.addHandler(handler)
+    monkeypatch.setattr(lifecycle_logging, "log", logger)
+    bundle = lifecycle.operator_bootstrap(settings=settings, connect=connect)
+    issued = lifecycle.operator_issue(bundle.principal.id, connect=connect)
+    barrier = Barrier(2)
+
+    def revoke(_index):
+        barrier.wait(timeout=10)
+        return lifecycle.operator_revoke(bundle.principal.id, issued.metadata.id, reason="retired device", connect=connect)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(revoke, range(2)))
+    assert all(metadata.revoked_at is not None for metadata, _ in results)
+    assert [record.msg for record in records] == [
+        "PRINCIPAL_CREATED", "CREDENTIAL_CREATED", "CREDENTIAL_CREATED", "CREDENTIAL_REVOKED",
+    ]
+    records.clear()
+    with pytest.raises(RuntimeError, match="injected commit failure"):
+        lifecycle.operator_recover(bundle.principal.id, connect=lambda: connect(fail_commit=True))
+    assert not records
+    with connect() as conn:
+        active = conn.execute("SELECT id FROM credentials WHERE revoked_at IS NULL").fetchall()
+    assert [row["id"] for row in active] == [bundle.credential.metadata.id]

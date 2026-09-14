@@ -27,6 +27,8 @@ from services.storage.transactions import run_read, run_transaction
 from services.workspace.settings import workspace_settings
 
 from .contracts import IdentityStorageError, new_identifier, timestamp
+from .lifecycle_logging import LifecycleEvents
+from .storage import get_principal
 from .workspace_storage import new_workspace_storage_key, validate_workspace_storage_key
 from .oidc_cache import cached_provider_value, combined_trust_bundle, trust_cache_key
 
@@ -371,6 +373,8 @@ def linked_credential_source(flow: OIDCFlow) -> tuple[str, str, str]:
 
 
 def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, subject: str) -> OIDCIdentity:
+    events = LifecycleEvents("provider_provisioning")
+
     def operation(conn: Any) -> OIDCIdentity:
         existing = _row(conn.execute(
             "SELECT o.id, o.principal_id, o.issuer, o.subject, p.status FROM oidc_identities o "
@@ -414,6 +418,7 @@ def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, su
             if policy == "disabled" or (policy == "allowlist" and subject not in config.get("oidc_allowed_subjects", [])):
                 raise OIDCError("This provider identity isn't approved for a workspace.")
             principal_id = _create_principal(conn)
+            events.principal("PRINCIPAL_CREATED", get_principal(principal_id, conn=conn))
         if existing:
             return _identity(existing)
         identity_id = f"oid_{secrets.token_hex(16)}"
@@ -430,7 +435,7 @@ def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, su
         )
         return OIDCIdentity(identity_id, principal_id, issuer, subject)
 
-    return run_transaction(operation)
+    return events.run(operation)
 
 
 def unlink_identity(principal_id: str, issuer: str) -> bool:

@@ -278,6 +278,11 @@ The current event inventory is:
 | INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
+| INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
+| INFO | `CREDENTIAL_ROTATED` | committed immediate credential replacement | principal_id, credential_id, previous_credential_id, credential_type, scope_count, source, request_id |
+| INFO | `CREDENTIAL_REVOKED` | committed self-service or operator revocation and recovery | principal_id, credential_id, credential_type, scope_count, paused_work_count, source, request_id |
+| INFO | `PRINCIPAL_STATUS_CHANGED` | committed operator disable or enable transition | principal_id, status, source, request_id |
 | INFO | `BROWSER_SESSION_CREATED` | restricted sign-in and credential redemption | principal_id, credential_id, source |
 | INFO | `BROWSER_SESSION_ROTATED` | successful Team privilege-change response | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSION_REVOKED` | browser logout | principal_id, credential_id, reason |
@@ -637,6 +642,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+Principal and credential lifecycle milestones reach INFO only after the enclosing transaction commits, even when database audit storage is disabled. Recovery reports each newly revoked credential and its replacement after the whole recovery commits. Preparing a rotation reports creation until the old credential is revoked; repeated revocation or status requests add no false transition. These records contain IDs, fixed classifications, and counts. Credential secrets, labels, reasons, workspace paths, and provider identities stay out of the application log.
 
 `BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE` distinguishes missing keys, unsupported wrappers, failed decryption, and invalid decoded keys after a stored session confirms the key version. Ordinary malformed, unknown, wrong-version, or incorrectly signed cookies do not create key-incident records. A 64-entry cache coalesces repeated failures by key version and reason for one minute and reports suppressed repeats on the next event. Client rejection stays generic; ERROR records retain safe origin frames without cookie, session-id, key, plaintext, or original-exception content.
 

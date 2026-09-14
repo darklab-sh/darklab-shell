@@ -254,7 +254,7 @@ def _active_principal_row(conn: Any, principal_id: str) -> Any:
     return row
 
 
-def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
+def _lock_principal_row(conn: Any, principal_id: str) -> Any:
     validated = validate_identifier(principal_id, "principal")
     if _database_backend(conn) == DatabaseBackend.POSTGRES:
         row = conn.execute(
@@ -272,6 +272,11 @@ def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
         row = conn.execute("SELECT * FROM principals WHERE id = ?", (validated,)).fetchone()
     if row is None:
         raise PrincipalNotFound("principal was not found")
+    return row
+
+
+def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
+    row = _lock_principal_row(conn, principal_id)
     if str(_row_dict(row).get("status")) != "active":
         raise PrincipalDisabled("principal is disabled")
     return row
