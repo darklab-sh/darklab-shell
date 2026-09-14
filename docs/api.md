@@ -10,12 +10,14 @@ The bundled `darklab` CLI is a thin wrapper around this API. Install it from the
 python -m pip install ./tools/darklab_cli
 ```
 
-Create a token in **Options → Access → Add credential → API token (PAT)**, as described under [Auth](#auth), then point the CLI at the instance:
+Create a token in **Options → Access → Add credential → API token (PAT)**, as described under [Create a PAT](#create-a-pat). Save it in an owner-only local file or your secret manager, then load it without putting the value in shell history:
 
 ```bash
 export DARKLAB_API_URL=http://localhost:8888
-export DARKLAB_PAT=dlp_v1_pat_your_one_time_secret
+read -r DARKLAB_PAT < ./darklab.pat
+export DARKLAB_PAT
 darklab whoami
+unset DARKLAB_PAT
 ```
 
 Shell completion does not need a live API connection. `darklab completion install --shell auto`
@@ -56,9 +58,31 @@ names, and fixed choices such as output formats and notification channel kinds.
 
 ## Auth
 
-To create your first token, sign into the browser and open **Options → Access → Add credential**. In an open deployment, choose **Keep this workspace** first. Select **API token (PAT)**, give it a recognizable label, choose its permissions, and set an expiry of 1–365 days. The default permissions are `identity:read`, `history:read`, and `runs:execute`; add other permissions only for the API operations you need. Save the value from the one-time reveal, then use it as `DARKLAB_PAT` or the CLI's `pat` setting. A token cannot create more credentials.
+### Create a PAT
+
+To create your first token, sign into the browser and open **Options → Access → Add credential**. In an open deployment, choose **Keep this workspace** first. Select **API token (PAT)**, give it a recognizable label, choose its permissions, and set an expiry of 1–365 days; the default is 90 days. The default permissions are `identity:read`, `history:read`, and `runs:execute`; add other permissions only for the API operations you need. Save the value from the one-time reveal, then use it as `DARKLAB_PAT` or the CLI's `pat` setting. A token cannot create more credentials.
 
 You can rotate or revoke tokens from the same Access panel. Rotation keeps the label, permissions, and existing expiry, shows the replacement once, and waits for you to save it before asking to revoke the old token. Update each integration that uses the token. Rotating a token does not extend its lifetime; use **Expiry** when you intend to change it.
+
+For operator-issued access, use the [in-container principal tool](../CONFIGURATION.md#principal-access-operations). Use the principal ID recorded by operator bootstrap or cutover, or returned by `darklab whoami` with an existing PAT. Check that ID with `status` before issuing another token. This example creates a token for reading Project data; it doesn't grant Project writes or command execution:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  issue prn_example --type pat --label "Project inventory" \
+  --scope identity:read --scope projects:read \
+  --secret-file /data/project-inventory.pat
+
+umask 077
+docker compose cp shell:/data/project-inventory.pat ./project-inventory.pat
+chmod 600 ./project-inventory.pat
+```
+
+Repeat `--scope` for each required permission. An explicit list replaces the default scopes. Omitting `--expires-at` gives the token its 90-day default; an explicit ISO 8601 deadline must be between 1 and 365 days after issuance. Portable browser credentials are a different type and can't authenticate API v1 requests.
+
+The output path must be new; the tool creates an owner-only file and prints only safe metadata. Transfer that file through an operator-controlled secret store to the intended client. Load it with `read -r DARKLAB_PAT < ./project-inventory.pat`, export the variable, and run `darklab whoami` against the intended `DARKLAB_API_URL` to verify the principal and permissions. Then unset the variable and remove the temporary container and local copies after confirming the token is stored securely. Issue a separate token for each integration so its permissions and revocation can be managed independently.
+
+### Use a PAT
 
 Use a scoped PAT in the standard bearer header. Browser credentials and anonymous browser identities aren't accepted by `/api/v1`.
 

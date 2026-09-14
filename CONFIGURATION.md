@@ -174,7 +174,9 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 
 ### Issuing credentials and recovering access
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the intended principal ID from `status` or **Options → Access**.
+For CLI and integration tokens, follow [Create a PAT](docs/api.md#create-a-pat). It covers browser and operator issuance, permissions, expiry, private one-time output, and verification with `darklab whoami`.
+
+`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap or cutover, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
 
 To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
 
