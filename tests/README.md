@@ -213,6 +213,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 `test_credential_session_replacement.py` replays prior cookies after same-account and cross-account credential sign-in through both routes. It checks that other devices remain signed in and that invalid credentials, failed request proofs, or failed session creation preserve the current session.
 
+`project_click_dispatch.test.js` binds the actual mobile capture and modal bubbling handlers and checks one action per click on both layouts. The mobile Projects browser journey also checks that the link confirmation stays closed after success.
+
 `test_anonymous_workspace_retirement.py` and the PostgreSQL counterpart exercise anonymous file reads, writes, downloads, deletion, existing download tickets, and stale owner contexts after attachment. They cover credential rotation and revocation, principal disablement, failed-attachment rollback, and credential-based browser recovery. History fallback-search coverage removes only the FTS table from the current schema, so it still exercises authentication and ownership checks. Rejected retired-identity requests do not consume the allowance for actual credential attempts; the Access browser journey restores an old anonymous ID and proves recovery in both asset modes.
 
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.

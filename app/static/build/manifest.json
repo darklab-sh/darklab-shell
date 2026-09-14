@@ -570,8 +570,8 @@
       "hash": "8e7d7878d5e48e842f397c0a82914bd15df835dd1d80ce080e5ac4593ef24df5"
     },
     "/static/js/features/projects/project_workspace_events.js": {
-      "path": "/static/build/static-project-workspace-events.4bfd11447692.js",
-      "hash": "49f2d386b48e6f2bac5518a3a6666e9e4d4a6b708fd5cc1137ee8ac4bd5207df"
+      "path": "/static/build/static-project-workspace-events.bd2b26bb1fdd.js",
+      "hash": "e01ef38a057275b5947b5e885a96c2c471960cef1660c87655c314207a08d74d"
     },
     "/static/js/features/projects/project_workspace_lifecycle.js": {
       "path": "/static/build/static-project-workspace-lifecycle.c4d9df512b89.js",

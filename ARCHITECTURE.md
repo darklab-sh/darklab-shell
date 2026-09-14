@@ -911,6 +911,8 @@ The Assessment workspace keeps manual check decisions behind the existing Projec
 
 The Project Assessment browser modules are also covered by exact module-size budgets. New Assessment siblings must be classified by the architecture suite, and an existing file can't grow past its recorded baseline. When a module reaches its budget, split it along a real UI responsibility such as data loading, rendering, lifecycle actions, or connector behavior instead of raising the baseline.
 
+Project click delegation marks each event before asynchronous handlers run, so mobile capture and modal bubbling cannot execute the same action twice. Subsequent taps remain independent.
+
 ### Frontend Composition
 
 ```mermaid
