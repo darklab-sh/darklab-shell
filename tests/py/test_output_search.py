@@ -5,7 +5,6 @@
 import gzip
 import json
 import os
-import sqlite3
 import unittest.mock as mock
 import uuid
 from pathlib import Path
@@ -343,33 +342,20 @@ class TestOutputSearch:
         assert degraded.args[0] == "OUTPUT_SEARCH_TEXT_BACKFILL_DEGRADED"
         assert degraded.kwargs["extra"] == {"artifact_fallbacks": 1, "failed_rows": 0}
 
-    def test_fts_failure_falls_back_to_command_and_output_like(self, monkeypatch, tmp_path):
+    def test_fts_failure_falls_back_to_command_and_output_like(self):
         """When runs_fts is absent, history search falls back to LIKE without 500.
 
         Verifies: command-text and output-only queries still return results and
         the response is always 200.
         """
-        # Replace the current isolated DB with a minimal schema that has no FTS table.
-        no_fts_path = str(tmp_path / "nofts.db")
-        monkeypatch.setattr(shell_db, "DB_PATH", no_fts_path)
-        conn = sqlite3.connect(no_fts_path)
-        conn.execute("""
-            CREATE TABLE runs (
-                id TEXT PRIMARY KEY, personal_workspace_id TEXT NOT NULL, team_id TEXT NOT NULL DEFAULT '', command TEXT NOT NULL,
-                started TEXT NOT NULL, finished TEXT, exit_code INTEGER,
-                output TEXT, output_preview TEXT,
-                preview_truncated INTEGER NOT NULL DEFAULT 0,
-                output_line_count INTEGER NOT NULL DEFAULT 0,
-                full_output_available INTEGER NOT NULL DEFAULT 0,
-                full_output_truncated INTEGER NOT NULL DEFAULT 0,
-                output_search_text TEXT
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (personal_workspace_id)")
-        conn.commit()
-        conn.close()
-
         run_id = _insert_run(SESSION_A, "dig example.com", ["93.184.216.34"])
+
+        # Keep current authentication and ownership tables while removing only
+        # the optional FTS index. Startup is skipped so it cannot rebuild it.
+        with db_connect() as conn:
+            conn.execute("DROP TABLE runs_fts")
+            conn.commit()
+
 
         client = get_client(SESSION_A, init_db=False)
         # Command-text queries must still work via LIKE fallback.

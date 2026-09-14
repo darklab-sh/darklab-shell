@@ -106,7 +106,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
-- **Keeping a workspace retires its old anonymous Files access.** The original anonymous identity and its existing download links cannot read, overwrite, delete, or reopen the kept workspace, including after credential rotation, revocation, or account disablement. Files stay in place, failed attachment leaves anonymous access usable, and a restored browser can recover by proving its saved credential.
+- **Keeping a workspace retires its old anonymous Files access.** The original anonymous identity and its existing download links cannot read, overwrite, delete, or reopen the kept workspace, including after credential rotation, revocation, or account disablement. Files stay in place, failed attachment leaves anonymous access usable, and a restored browser can recover by proving its saved credential. History fallback-search tests retain the current ownership schema while removing only the optional search index.
 
 - **Credential throttling rejects excess attempts before verification.**
   - **Root cause:** Limits were checked only after a failed verification, so blocked clients still caused authentication work and correct credentials bypassed the limit.
