@@ -106,6 +106,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Credential failures and throttling appear in operational logs.** Sampled warnings identify the rejected authentication reason or limiting policy across browser sign-in, API requests, credential redemption, and workspace creation, without recording submitted identities or secrets.
+
 - **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.
 
 - **Assessment confirmations restore focus after a refresh.** Canceling a lifecycle action returns to the current opening button when a background update replaced the original control, including a still-pending reload, and later Assessment updates preserve that focus. Moving to another control while the reload finishes keeps your chosen focus.

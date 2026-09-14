@@ -51,6 +51,7 @@ from services.auth.contracts import (
     PrincipalDisabled,
 )
 from services.auth.rate_limit import check_anonymous_issuance, check_credential_redemption, check_failed_redemption
+from services.auth.observability import log_authentication_rejected, log_credential_rate_limited
 from services.auth import oidc
 from services.auth.resolver import (
     AnonymousContext,
@@ -197,6 +198,7 @@ def sign_in():
                 error = "Too many sign-in attempts. Wait a moment and try again."
             else:
                 lifecycle.record_authentication_failure(result, request_fields=_request_fields())
+                log_authentication_rejected(result.error_code, http_status=200)
                 error = "That access credential isn't valid."
     nonce = _new_sign_in_nonce()
     current_theme = get_theme_entry(
@@ -418,6 +420,7 @@ def create_principal():
     if result.failed:
         raise AuthenticationRejected(result.error_code, result.message)
     if not isinstance(result.context, AnonymousContext):
+        log_authentication_rejected("anonymous_identity_required")
         return jsonify({
             "error": "anonymous_identity_required",
             "message": "A validated anonymous identity is required for an upgrade.",
@@ -428,6 +431,7 @@ def create_principal():
         enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
     )
     if not limited.allowed:
+        log_credential_rate_limited(limited)
         return jsonify({
             "error": "credential_issuance_rate_limited",
             "retry_after": limited.retry_after,
@@ -449,11 +453,13 @@ def create_principal():
 
 def _redemption_limit(secret: str, *, failed: bool = False):
     check = check_failed_redemption if failed else check_credential_redemption
-    return check(
+    result = check(
         get_client_ip(), public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
         redis_client=process_state.redis_client,
         enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
     )
+    log_credential_rate_limited(result)
+    return result
 
 
 @auth_bp.post("/credentials/redeem")
@@ -473,6 +479,7 @@ def redeem():
             lifecycle.record_authentication_failure(result, request_fields=_request_fields())
         if not limited.allowed:
             return jsonify({"error": "credential_redemption_rate_limited", "retry_after": limited.retry_after}), 429
+        log_authentication_rejected(result.error_code)
         return jsonify({"error": result.error_code or "invalid_credential", "message": result.message}), 401
     lifecycle.record_redemption(result.context, request_fields=_request_fields())
     response = _no_store(jsonify({"authentication": _context_payload(result.context)}))

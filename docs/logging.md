@@ -423,6 +423,8 @@ The current event inventory is:
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN | `CREDENTIAL_AUTHENTICATION_REJECTED` | shared credential rejection, sign-in form, and redemption boundaries | request_id, endpoint, reason, http_status, suppressed_repeat_count |
+| WARN | `CREDENTIAL_RATE_LIMITED` | credential precheck, failed verification, sign-in, redemption, and anonymous issuance limits | request_id, endpoint, policy, retry_after, http_status, suppressed_repeat_count |
 | WARN | `PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED` | Project HTTP-profile scope discovery | project_id, team_scope, invalid_target_count, invalid_target_types |
 | WARN / ERROR | `TEAM_ACTION_REJECTED` / `TEAM_ROUTE_FAILED` / `TEAM_ACTION_FAILED` | browser/API team management routes | action, team_id, session, ip, result, source, reason, error_code, http_status, route, method |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
@@ -630,6 +632,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+Credential rejection warnings emit at most once per fixed reason per process each minute; throttle warnings use the same bound per fixed policy (`failed_credential_ip`, `failed_credential_lookup`, or `anonymous_issuance_ip`). The next warning for that classification includes the number of suppressed repeats. Its request id and endpoint identify the sampled request, while the repeat count covers that classification across endpoints. Duplicate warning calls within one request don't inflate the count. Submitted credentials, cookie values, lookup ids, fingerprints, IP addresses, and form contents stay out of these events and the sampling keys. A rejected sign-in form keeps its actual HTTP status in the event, and throttling reports 429.
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - GELF keeps its required top-level `version: "1.1"` field separate from the app release in `_app_version`. Structured context names that would become OpenSearch metadata fields are emitted under `_event_*` instead, such as `_event_version` and `_event_source`, so Graylog can index them without colliding with `_version` or `_source`

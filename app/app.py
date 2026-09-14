@@ -57,6 +57,7 @@ from services.metrics_lazy import app_metrics
 from services.api_v1.serialization import json_error
 from services.audit.context import request_audit_fields
 from services.auth.lifecycle import record_authentication_failure
+from services.auth.observability import log_authentication_rejected, log_credential_rate_limited
 from services.auth.rate_limit import check_failed_redemption
 from services.auth.resolver import public_lookup_id_from_headers
 from services.auth.access_profile import (
@@ -403,6 +404,7 @@ def _authentication_rejected_handler(exc):
         if exc.retry_after is not None:
             response.headers["Retry-After"] = str(exc.retry_after)
         return response, 429
+    log_authentication_rejected(exc.code)
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error(exc.code, exc.message)), 401
     return jsonify({"error": exc.code, "message": exc.message}), 401
@@ -429,6 +431,7 @@ def _enforce_authentication_resolution():
     if limited.allowed:
         record_authentication_failure(result, request_fields=request_audit_fields(request))
     if not limited.allowed:
+        log_credential_rate_limited(limited)
         return jsonify({
             "error": "credential_authentication_rate_limited",
             "retry_after": limited.retry_after,

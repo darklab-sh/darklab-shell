@@ -4,13 +4,18 @@
 """Credential limits reject requests before storage or verifier work."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
+import json
+import logging
+from types import SimpleNamespace
 
 import pytest
 
 from conftest import build_test_config, copy_pristine_sqlite_database, make_test_app
 from core import database
+from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields
 from identity_helpers import principal_identity
-from services.auth import rate_limit, resolver
+from services.auth import observability, rate_limit, resolver
 
 
 class FakeRedis:
@@ -40,8 +45,20 @@ class UnavailableRedis:
 def reset_limits(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", str(copy_pristine_sqlite_database(tmp_path / "throttle.db")))
     rate_limit.reset_auth_rate_limits_for_tests()
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
     yield
     rate_limit.reset_auth_rate_limits_for_tests()
+
+
+@pytest.fixture
+def warning_records(monkeypatch):
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger = logging.Logger("auth-warning-test", logging.DEBUG)
+    logger.addHandler(handler)
+    monkeypatch.setattr(observability, "log", logger)
+    return records
 
 
 @pytest.mark.parametrize("backend", ["local", "redis", "unavailable"])
@@ -79,7 +96,7 @@ def _attempt(client, kind, secret, ip="192.0.2.5"):
 
 @pytest.mark.parametrize("kind", ["portable", "pat", "redeem", "form"])
 @pytest.mark.parametrize("limit_scope", ["lookup", "ip"])
-def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeypatch, kind, limit_scope):
+def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeypatch, kind, limit_scope, warning_records):
     import core.process as process_state
 
     app = make_test_app()
@@ -114,12 +131,19 @@ def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeyp
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "20"
     assert secret.encode() not in response.data
+    warnings = [record for record in warning_records if record.msg == "CREDENTIAL_RATE_LIMITED"]
+    assert len(warnings) == 1
+    assert warnings[0].policy == f"failed_credential_{limit_scope}"
+    assert warnings[0].http_status == 429 and warnings[0].retry_after == 20
+    assert warnings[0].endpoint != "unknown" and warnings[0].request_id != "unknown"
+    assert warnings[0].levelno == logging.WARNING
+    assert secret not in GELFFormatter().format(warnings[0])
     now[0] += 60
     response = _attempt(client, kind, secret, ip)
     assert response.status_code == (302 if kind == "form" else 200)
 
 
-def test_ip_limit_precedes_cookie_verification_and_can_be_disabled(monkeypatch):
+def test_ip_limit_precedes_cookie_verification_and_can_be_disabled(monkeypatch, warning_records):
     import core.process as process_state
     from services.auth import browser_sessions
 
@@ -143,5 +167,102 @@ def test_ip_limit_precedes_cookie_verification_and_can_be_disabled(monkeypatch):
         response = client.get("/config", **kwargs)
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "20"
+    assert len(warning_records) == 1
+    assert warning_records[0].policy == "failed_credential_ip"
     app.config["RATELIMIT_ENABLED"] = False
     assert client.get("/config", **kwargs).status_code == 200
+
+
+@pytest.mark.parametrize("kind", ["portable", "pat", "redeem", "form"])
+def test_failed_credentials_emit_one_safe_warning_per_reason(monkeypatch, kind, warning_records):
+    app = make_test_app()
+    app.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": "token_required"})
+    app.config["RATELIMIT_ENABLED"] = False
+    client = app.test_client()
+    clock = [100.0]
+    monkeypatch.setattr(observability, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    secret = "private-submitted-credential-canary"
+    for _ in range(3):
+        response = _attempt(client, kind, secret)
+        assert response.status_code == (200 if kind == "form" else 401)
+    assert len(warning_records) == 1
+    first = warning_records[0]
+    assert first.msg == "CREDENTIAL_AUTHENTICATION_REJECTED" and first.levelno == logging.WARNING
+    assert first.reason == "malformed_credential"
+    assert first.http_status == response.status_code
+    assert set(_extra_fields(first)) == {
+        "request_id", "endpoint", "reason", "http_status", "suppressed_repeat_count",
+    }
+    assert first.request_id != "unknown" and first.endpoint != "unknown"
+    gelf = json.loads(GELFFormatter().format(first))
+    assert gelf["_reason"] == first.reason and gelf["_http_status"] == response.status_code
+    assert secret not in _TextFormatter().format(first) + json.dumps(gelf)
+    clock[0] += 60
+    _attempt(client, kind, secret)
+    assert len(warning_records) == 2 and warning_records[1].suppressed_repeat_count == 2
+
+
+@pytest.mark.parametrize("kind", ["portable", "pat", "redeem", "form"])
+def test_post_verification_limit_rejection_is_logged(monkeypatch, kind, warning_records):
+    import blueprints.auth as auth_routes
+    import core.process as process_state
+
+    app = make_test_app()
+    app.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": "token_required"})
+    app.config["RATELIMIT_ENABLED"] = True
+    monkeypatch.setattr(process_state, "redis_client", None)
+    monkeypatch.setattr(rate_limit.time, "time", lambda: 1_000.0)
+    for _ in range(rate_limit.FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE):
+        rate_limit.check_failed_redemption("192.0.2.5")
+    # Another in-flight request can exhaust the bucket after the precheck.
+    def allowed(*_args, **_kwargs):
+        return rate_limit.CredentialRateLimitResult(True)
+    monkeypatch.setattr(rate_limit, "check_credential_redemption", allowed)
+    monkeypatch.setattr(auth_routes, "check_credential_redemption", allowed)
+    response = _attempt(app.test_client(), kind, "private-malformed-credential")
+    assert response.status_code == 429
+    assert len(warning_records) == 1
+    assert warning_records[0].msg == "CREDENTIAL_RATE_LIMITED"
+    assert warning_records[0].policy == "failed_credential_ip"
+
+
+def test_anonymous_issuance_limit_is_logged_without_identity(monkeypatch, warning_records):
+    import core.process as process_state
+    from identity_helpers import anonymous_session_id
+
+    app = make_test_app()
+    app.config["RATELIMIT_ENABLED"] = True
+    monkeypatch.setattr(process_state, "redis_client", None)
+    for _ in range(rate_limit.ANONYMOUS_ISSUANCE_LIMIT_PER_HOUR):
+        rate_limit.check_anonymous_issuance("192.0.2.20")
+    anonymous = anonymous_session_id("limited issuance")
+    response = app.test_client().post(
+        "/auth/principals", json={"label": "private-label-canary"},
+        headers={"X-Darklab-Anonymous-ID": anonymous}, environ_overrides={"REMOTE_ADDR": "192.0.2.20"},
+    )
+    assert response.status_code == 429
+    assert len(warning_records) == 1 and warning_records[0].policy == "anonymous_issuance_ip"
+    assert anonymous not in GELFFormatter().format(warning_records[0])
+    assert "private-label-canary" not in GELFFormatter().format(warning_records[0])
+
+
+def test_warning_sampling_is_thread_safe_bounded_and_deduplicates_request_boundaries(monkeypatch, warning_records):
+    clock = [100.0]
+    monkeypatch.setattr(observability, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda _: observability.log_authentication_rejected("revoked_credential"), range(100)))
+    assert len(warning_records) == 1
+    clock[0] += 60
+    observability.log_authentication_rejected("revoked_credential")
+    assert warning_records[-1].suppressed_repeat_count == 99
+    for n in range(100):
+        observability.log_authentication_rejected(f"untrusted-submitted-reason-{n}")
+    assert len(observability._WARNING_STATE) == 2
+    assert "untrusted" not in "".join(GELFFormatter().format(record) for record in warning_records)
+    app = make_test_app()
+    with app.test_request_context("/config?private-query-canary"):
+        observability.log_authentication_rejected("unknown_browser_session")
+        observability.log_authentication_rejected("unknown_browser_session")
+    clock[0] += 60
+    observability.log_authentication_rejected("unknown_browser_session")
+    assert warning_records[-1].suppressed_repeat_count == 0

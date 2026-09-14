@@ -27,6 +27,7 @@ class CredentialRateLimitResult:
     retry_after: int | None = None
     limit_policy: str = ""
     first_rejection: bool = False
+    policy_code: str = ""
 
 
 def _safe_key(value: str) -> str:
@@ -55,13 +56,14 @@ def _increment(namespace: str, subject: str, window: int, now: float, redis_clie
         return count
 
 
-def _result(count: int, limit: int, *, window: int, now: float, policy: str) -> CredentialRateLimitResult:
+def _result(count: int, limit: int, *, window: int, now: float, policy: str, policy_code: str) -> CredentialRateLimitResult:
     allowed = count <= limit
     return CredentialRateLimitResult(
         allowed=allowed,
         retry_after=None if allowed else max(1, int(math.ceil(window - (now % window)))),
         limit_policy=policy,
         first_rejection=count == limit + 1,
+        policy_code=policy_code,
     )
 
 
@@ -95,7 +97,8 @@ def check_credential_redemption(
     for namespace, subject, limit, label in checks:
         count = _read(namespace, subject, 60, checked_at, redis_client)
         result = _result(count + 1, limit, window=60, now=checked_at,
-                         policy=f"{limit} failed credentials per {label} per minute")
+                         policy=f"{limit} failed credentials per {label} per minute",
+                         policy_code="failed_credential_ip" if namespace == "failure-ip" else "failed_credential_lookup")
         if not result.allowed:
             return result
     return CredentialRateLimitResult(True)
@@ -118,6 +121,7 @@ def check_anonymous_issuance(
         window=3600,
         now=checked_at,
         policy=f"{ANONYMOUS_ISSUANCE_LIMIT_PER_HOUR} anonymous upgrades per IP per hour",
+        policy_code="anonymous_issuance_ip",
     )
 
 
@@ -137,6 +141,7 @@ def check_failed_redemption(
             _increment("failure-ip", client_ip, 60, checked_at, redis_client),
             FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE,
             f"{FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE} failed credentials per IP per minute",
+            "failed_credential_ip",
         )
     ]
     if lookup_id:
@@ -144,9 +149,10 @@ def check_failed_redemption(
             _increment("failure-lookup", lookup_id, 60, checked_at, redis_client),
             FAILED_REDEMPTION_LIMIT_PER_LOOKUP_MINUTE,
             f"{FAILED_REDEMPTION_LIMIT_PER_LOOKUP_MINUTE} failed credentials per lookup id per minute",
+            "failed_credential_lookup",
         ))
-    for count, limit, policy in checks:
-        result = _result(count, limit, window=60, now=checked_at, policy=policy)
+    for count, limit, policy, policy_code in checks:
+        result = _result(count, limit, window=60, now=checked_at, policy=policy, policy_code=policy_code)
         if not result.allowed:
             return result
     return CredentialRateLimitResult(True)

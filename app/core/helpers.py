@@ -172,6 +172,7 @@ def get_authentication_result():
     """Return the request's cached, typed authentication result."""
     from services.auth.resolver import public_lookup_id_from_headers, resolve_authentication  # noqa: PLC0415
     from services.auth.rate_limit import check_credential_redemption  # noqa: PLC0415
+    from services.auth.observability import log_credential_rate_limited  # noqa: PLC0415
     from services.auth.browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
     import core.process as process_state  # noqa: PLC0415
 
@@ -190,6 +191,7 @@ def get_authentication_result():
             enabled=bool(current_app.config.get("RATELIMIT_ENABLED", active_cfg.get("rate_limit_enabled", True))),
         )
         if not limited.allowed:
+            log_credential_rate_limited(limited)
             blocked = CredentialAuthenticationRateLimited(limited.retry_after)
             g.darklab_credential_rate_limit = blocked
             raise blocked
