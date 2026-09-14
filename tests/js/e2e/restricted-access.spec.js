@@ -142,22 +142,37 @@ test.describe('restricted access profile', () => {
     })
   })
 
-  test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context }) => {
+  test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context, request }) => {
     await openSignIn(page)
     await signIn(page)
     const cookies = await context.cookies()
     const session = cookies.find(cookie => cookie.name === 'darklab_browser_session')
     const csrf = cookies.find(cookie => cookie.name === 'darklab_csrf')
-    const revoked = await page.evaluate(async () => (await apiFetch('/auth/sessions/revoke-all', { method: 'POST' })).status)
-    expect(revoked).toBe(200)
-    await context.addCookies([session, csrf])
-
-    // The still-open app meets a real revoked-session response, with no reload.
-    const denied = page.waitForResponse(response => new URL(response.url()).pathname === '/projects' && response.status() === 401)
-    await openRailAction(page, 'projects')
+    expect(session).toBeTruthy()
+    expect(csrf).toBeTruthy()
+    const origin = new URL(page.url()).origin
+    let revocationStatus
+    // Start a protected read while the app is still mounted. Revoke through an
+    // independent cookie jar before that request reaches the application.
+    await page.route('**/projects', async route => {
+      const revoked = await request.post(`${origin}/auth/sessions/revoke-all`, {
+        ignoreHTTPSErrors: true,
+        headers: {
+          Cookie: `darklab_browser_session=${session.value}; darklab_csrf=${csrf.value}`,
+          'X-Darklab-CSRF': csrf.value,
+        },
+      })
+      revocationStatus = revoked.status()
+      await route.continue()
+    }, { times: 1 })
+    // A background protected request may observe revocation before Projects.
+    const denied = page.waitForResponse(response => new URL(response.url()).origin === origin && response.status() === 401)
+    await page.evaluate(() => { void apiFetch('/projects').catch(() => {}) })
+    await expect.poll(() => revocationStatus).toBe(200)
     expect((await denied).status()).toBe(401)
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
     await expect(page.getByLabel('Access credential')).toBeVisible()
+    await context.addCookies([session, csrf])
     const logout = await page.evaluate(async () => (await fetch('/auth/logout', { method: 'POST' })).status)
     expect(logout).toBe(204)
     expect((await context.cookies()).filter(cookie => ['darklab_browser_session', 'darklab_csrf'].includes(cookie.name))).toEqual([])
