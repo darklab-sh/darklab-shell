@@ -34,7 +34,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile changes reviewable with explicit transition tests.
 
-Exercise open and restricted modes in a production-like staging deployment and use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Once the release gates pass on both database backends and the complete documentation reflects shipped behavior, create `release/3.0` from `main` and begin the normal release cycle with `v3.0.0-rc.1`.
+Exercise open and restricted modes in a production-like staging deployment during the `release/3.0` candidate cycle, starting with `v3.0.0-rc.1`. Use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Confirm the release gates pass on both database backends and the complete documentation reflects shipped behavior before the final release.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
