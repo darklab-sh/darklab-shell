@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any
 
+from .rate_limit_logging import backend_failed, backend_selected, backend_succeeded, reset_backend_state_for_tests
+
 
 ANONYMOUS_ISSUANCE_LIMIT_PER_HOUR = 5
 FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE = 30
@@ -39,13 +41,22 @@ def _increment(namespace: str, subject: str, window: int, now: float, redis_clie
     subject_key = _safe_key(subject)
     redis_key = f"darklab:auth-rate:{namespace}:{subject_key}:{window}:{bucket}"
     if redis_client is not None:
+        operation = "increment"
         try:
             count = int(redis_client.incr(redis_key))
             if count == 1:
-                redis_client.expire(redis_key, window + 2)
+                operation = "expiry"
+                if redis_client.expire(redis_key, window + 2) is False:
+                    raise RuntimeError("Redis counter expiry was not applied")
+        except Exception as exc:
+            backend_failed(namespace, operation, exc)
+        else:
+            backend_succeeded(namespace, "increment")
+            if count == 1:
+                backend_succeeded(namespace, "expiry")
+            backend_selected(namespace, "increment", shared=True, configured=True)
             return count
-        except Exception:
-            pass
+    backend_selected(namespace, "increment", shared=False, configured=redis_client is not None)
     key = (f"{namespace}:{subject_key}", window, bucket)
     with _LOCK:
         count = _COUNTERS.get(key, 0) + 1
@@ -72,9 +83,14 @@ def _read(namespace: str, subject: str, window: int, now: float, redis_client: A
     subject_key = _safe_key(subject)
     if redis_client is not None:
         try:
-            return int(redis_client.get(f"darklab:auth-rate:{namespace}:{subject_key}:{window}:{bucket}") or 0)
-        except Exception:
-            pass
+            count = int(redis_client.get(f"darklab:auth-rate:{namespace}:{subject_key}:{window}:{bucket}") or 0)
+        except Exception as exc:
+            backend_failed(namespace, "read", exc)
+        else:
+            backend_succeeded(namespace, "read")
+            backend_selected(namespace, "read", shared=True, configured=True)
+            return count
+    backend_selected(namespace, "read", shared=False, configured=redis_client is not None)
     with _LOCK:
         return _COUNTERS.get((f"{namespace}:{subject_key}", window, bucket), 0)
 
@@ -161,3 +177,4 @@ def check_failed_redemption(
 def reset_auth_rate_limits_for_tests() -> None:
     with _LOCK:
         _COUNTERS.clear()
+    reset_backend_state_for_tests()
