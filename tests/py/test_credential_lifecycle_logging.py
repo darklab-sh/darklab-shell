@@ -196,7 +196,7 @@ def test_principal_status_logs_only_transitions_after_commit(milestones):
 def _provider_identity():
     flow = oidc.OIDCFlow("private-state", "private-nonce", "private-verifier", "login", "", "", "/")
     return oidc.complete_identity(
-        {"oidc_provisioning": "auto"}, flow, "https://private-provider.example", "private-provider-subject"
+        {"oidc_provisioning": "automatic"}, flow, "https://private-provider.example", "private-provider-subject"
     )
 
 
@@ -249,7 +249,9 @@ def test_commit_failure_emits_no_success_and_rolls_back_every_lifecycle(operatio
         "recovery": lambda: lifecycle.operator_recover(bundle.principal.id),
         "provider": _provider_identity,
     }
-    with pytest.raises(RuntimeError, match="private-commit-failure"):
+    expected_error = oidc.OIDCUnavailable if operation == "provider" else RuntimeError
+    expected_message = "temporarily unavailable" if operation == "provider" else "private-commit-failure"
+    with pytest.raises(expected_error, match=expected_message):
         operations[operation]()
     assert not ctx.records
     assert _snapshot() == before

@@ -64,6 +64,7 @@ from services.auth.observability import (
     log_sign_in_form_rejected,
 )
 from services.auth import oidc
+from services.auth.oidc_diagnostics import log_oidc_failure, oidc_stage
 from services.auth.resolver import (
     AnonymousContext,
     AuthenticatedContext,
@@ -258,8 +259,12 @@ def _clear_oidc_state_cookie(response) -> None:
     )
 
 
-def _oidc_error_response(exc: BaseException):
-    log.warning("OIDC_AUTH_FAILED", extra={"reason": type(exc).__name__, "stage": request.endpoint or ""})
+def _oidc_error_response(exc: BaseException, *, purpose: str | None = None):
+    if not isinstance(exc, oidc.OIDCError):
+        exc = oidc.OIDCUnavailable(
+            "Sign-in is temporarily unavailable.", reason="storage_failed", error_type=type(exc).__name__,
+        )
+    log_oidc_failure(exc, purpose=purpose)
     response = _no_store(redirect("/auth/sign-in?oidc_error=1"))
     _clear_oidc_state_cookie(response)
     return response
@@ -292,14 +297,20 @@ def oidc_callback():
         return current_app.response_class(status=404)
     expected = urlsplit(str(active_config().get("oidc_redirect_uri") or ""))
     if request.host.lower() != expected.netloc.lower() or request.path != expected.path:
-        return _oidc_error_response(oidc.OIDCError("The callback origin did not match the configured redirect."))
+        return _oidc_error_response(oidc.OIDCError(
+            "The callback origin did not match the configured redirect.",
+            stage="callback_validation", reason="callback_origin_mismatch",
+        ))
+    flow: oidc.OIDCFlow | None = None
     try:
         flow = oidc.consume_flow(
             str(request.args.get("state") or ""),
             str(request.cookies.get(oidc.OIDC_STATE_COOKIE) or ""),
         )
         if request.args.get("error"):
-            raise oidc.OIDCError("The provider declined the sign-in request.")
+            raise oidc.OIDCError(
+                "The provider declined the sign-in request.", stage="provider_authorization", reason="provider_denied",
+            )
         issuer, subject = oidc.exchange_code(active_config(), flow, str(request.args.get("code") or ""))
         identity = oidc.complete_identity(active_config(), flow, issuer, subject)
         credential_id = ""
@@ -309,16 +320,17 @@ def oidc_callback():
         if flow.purpose == "link":
             credential_id, authenticated_at, absolute_expires_at = oidc.linked_credential_source(flow)
             oidc_identity_id = ""
-        issued = create_browser_session(
-            principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
-            replace_session_id=flow.browser_session_id, credential_id=credential_id,
-            oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
-            absolute_expires_at=absolute_expires_at,
-        )
-        if flow.purpose == "sign_in" and flow.browser_session_id:
-            revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
+        with oidc_stage("session_creation", purpose=flow.purpose):
+            issued = create_browser_session(
+                principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
+                replace_session_id=flow.browser_session_id, credential_id=credential_id,
+                oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
+                absolute_expires_at=absolute_expires_at,
+            )
+            if flow.purpose == "sign_in" and flow.browser_session_id:
+                revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
     except IdentityStorageError as exc:
-        return _oidc_error_response(exc)
+        return _oidc_error_response(exc, purpose=flow.purpose if flow is not None else None)
     log.info("OIDC_BROWSER_SESSION_CREATED", extra={"principal_id": identity.principal_id, "purpose": flow.purpose})
     response = _no_store(redirect(safe_next_path(flow.next_path)))
     _set_browser_session_cookies(response, issued)
@@ -346,6 +358,9 @@ def oidc_link():
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
+        log_oidc_failure(oidc.OIDCError(
+            "A recent credential session is required.", stage="identity_binding", reason="recent_credential_required",
+        ), purpose="link")
         return jsonify({
             "error": "recent_credential_required",
             "message": "Sign in again with your credential before linking.",
@@ -357,7 +372,7 @@ def oidc_link():
             next_path=safe_next_path(_payload().get("next")),
         )
     except oidc.OIDCError as exc:
-        log.warning("OIDC_LINK_START_FAILED", extra={"reason": type(exc).__name__})
+        log_oidc_failure(exc, purpose="link")
         return jsonify({"error": "oidc_unavailable", "message": "The identity provider is unavailable."}), 503
     except IdentityStorageError as exc:
         return _error(exc)
@@ -381,6 +396,9 @@ def oidc_unlink():
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
+        log_oidc_failure(oidc.OIDCError(
+            "A recent credential session is required.", stage="identity_binding", reason="recent_credential_required",
+        ), purpose="unlink")
         return jsonify({
             "error": "recent_credential_required",
             "message": "Sign in again with your credential before unlinking.",
@@ -388,6 +406,9 @@ def oidc_unlink():
     try:
         changed = oidc.unlink_identity(context.principal_id, str(active_config()["oidc_issuer"]))
     except oidc.OIDCError as exc:
+        log_oidc_failure(exc, purpose="unlink")
+        if isinstance(exc, oidc.OIDCUnavailable):
+            return jsonify({"error": "oidc_unavailable", "message": "Sign-in settings are temporarily unavailable."}), 503
         return jsonify({"error": "oidc_unlink_blocked", "message": str(exc)}), 409
     log.info("OIDC_IDENTITY_UNLINKED", extra={"principal_id": context.principal_id, "changed": changed})
     response = _no_store(jsonify({"unlinked": changed, "sessions_revoked": changed}))
