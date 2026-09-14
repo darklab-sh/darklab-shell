@@ -206,7 +206,9 @@ test.describe('workspace Access', () => {
     expect(travelCredentialId).toMatch(/^crd_[0-9a-f]{32}$/)
 
     await travelRow.getByRole('button', { name: 'Expiry' }).click()
-    await page.locator('#options-access-editor input[type="datetime-local"]').fill('2027-01-15T12:00')
+    // Use the runner's current clock with ample margin for server and timezone differences.
+    const futureExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+    await page.locator('#options-access-editor input[type="datetime-local"]').fill(futureExpiry)
     await page.locator('#options-access-editor').getByRole('button', { name: 'Save' }).click()
     await expect(travelRow).toContainText('Expires')
 

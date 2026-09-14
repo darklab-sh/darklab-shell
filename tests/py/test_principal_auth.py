@@ -524,13 +524,14 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     )
     assert updated.status_code == 200
     assert updated.get_json()["credential"]["label"] == "Travel laptop"
+    future_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).replace(microsecond=0).isoformat()
     expiring = client.patch(
         f"/auth/credentials/{second_id}",
         headers=first_headers,
-        json={"expires_at": "2027-01-01T00:00:00+00:00"},
+        json={"expires_at": future_expiry},
     )
     assert expiring.status_code == 200
-    assert expiring.get_json()["credential"]["expires_at"] == "2027-01-01T00:00:00+00:00"
+    assert expiring.get_json()["credential"]["expires_at"] == future_expiry
 
     rotated = client.post(
         f"/auth/credentials/{second_id}/rotate",
@@ -539,6 +540,7 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     )
     assert rotated.status_code == 201
     replacement = rotated.get_json()
+    assert replacement["credential"]["expires_at"] == future_expiry
     replacement_headers = {"X-Darklab-Credential": replacement["secret"]}
     assert client.get("/auth/principal", headers=replacement_headers).status_code == 200
     assert client.get(
@@ -1232,13 +1234,14 @@ def test_operator_lifecycle_covers_safe_lookup_and_recovery(ownership_cutover_db
         label="Operator-issued laptop",
         connect=connect,
     )
+    future_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).replace(microsecond=0).isoformat()
     expiring = lifecycle.operator_change_expiry(
         bundle.principal.id,
         second.metadata.id,
-        "2027-01-01T00:00:00+00:00",
+        future_expiry,
         connect=connect,
     )
-    assert expiring.expires_at == "2027-01-01T00:00:00+00:00"
+    assert expiring.expires_at == future_expiry
 
     rotated = lifecycle.operator_rotate(
         bundle.principal.id,
@@ -1247,6 +1250,7 @@ def test_operator_lifecycle_covers_safe_lookup_and_recovery(ownership_cutover_db
         connect=connect,
     )
     assert rotated.metadata.id != second.metadata.id
+    assert rotated.metadata.expires_at == future_expiry
     assert resolve_authentication(
         {"X-Darklab-Credential": second.secret},
         conn=conn,

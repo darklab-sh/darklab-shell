@@ -231,7 +231,7 @@ Provider-only qualification creates an API token through Access at desktop and m
 
 Restricted-browser share checks verify disabled snapshot controls at desktop and mobile widths, keyboard denial without a share request, and server-message feedback for a refused request. Malformed responses retain a friendly fallback, and the HUD reads config through its module import within the existing browser-boundary budget.
 
-Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits.
+Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits. Credential expiry journeys use dates 30 days after the runner clock, so active credentials don't become expired as the calendar advances; explicit expiry-rejection cases remain separate. Route and operator rotation checks also verify the replacement keeps the selected deadline.
 
 Each browser qualification case has a two-minute budget for its full sign-in, scope, and recovery journey; individual assertions still use their own deadlines. The retired-anonymous restoration case has a one-minute budget for its workspace creation, reloads, credential redemption, and restored access checks.
 
