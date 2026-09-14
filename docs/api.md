@@ -1065,6 +1065,8 @@ For zsh, make sure `~/.zfunc` is on `fpath` and `compinit` is loaded.
 
 ## CLI Configuration
 
+The v3 CLI uses `--pat`, `DARKLAB_PAT`, and the `pat` configuration key. The old `--token`, `DARKLAB_TOKEN`, and `token` settings are removed. Legacy `tok_` values no longer authenticate; create a [new PAT](#create-a-pat) for each integration when updating these settings.
+
 Config precedence is:
 
 1. flags such as `--api-url`, `--pat`, `--team`, and `--timeout`
