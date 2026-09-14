@@ -5982,7 +5982,9 @@ def test_api_v1_run_start_rewrites_workspace_root_output_paths(monkeypatch, tmp_
     monkeypatch.setitem(shell_app_module.CFG, "workspace_max_files", 10)
     monkeypatch.setitem(shell_app_module.CFG, "workspace_inactivity_ttl_hours", 1)
 
-    def fake_start(_original_command, _session_id, _client_ip, prepared_real):
+    def fake_start(_original_command, _session_id, _client_ip, prepared_real, *, owner_context):
+        assert owner_context.owner_id == _session_id
+        assert owner_context.actor_principal_id
         seen["command"] = prepared_real.command
         seen["writes"] = prepared_real.validation.workspace_writes
         return SimpleNamespace(

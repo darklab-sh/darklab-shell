@@ -11,6 +11,7 @@ import {
   openThemeSelector as importedOpenThemeSelector,
 } from './app.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from './ui/overlay_actions_bridge.js';
+import { getAppConfig as importedGetAppConfig } from './core/config.js';
 import { setControllerActionHandlers as importedSetControllerActionHandlers } from './controller_action_bridge.js';
 import {
   openFaq as importedOpenFaq,
@@ -1443,10 +1444,14 @@ let importedProjectWorkspaceShell;
   }
 
   function _canCreateHudShareSnapshot() {
+    const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    if (config?.public_shares_enabled === false) return false;
     return _shellActiveTeamScopeCan('manage_history');
   }
 
   function _hudShareSnapshotDeniedTitle() {
+    const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+    if (config?.public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
     return _shellTeamScopeDeniedMessage('create team history snapshots');
   }
 
@@ -1455,7 +1460,7 @@ let importedProjectWorkspaceShell;
     const allowed = _canCreateHudShareSnapshot();
     hudShareSnapshotBtn.disabled = !allowed;
     hudShareSnapshotBtn.title = allowed
-      ? 'Share tab as permalink (Option+P / Alt+P)'
+      ? 'Share tab as permalink (Option+Shift+P / Alt+Shift+P)'
       : _hudShareSnapshotDeniedTitle();
   }
 
@@ -1502,7 +1507,7 @@ let importedProjectWorkspaceShell;
     hudShareSnapshotBtn = _makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && permalinkCurrentTab) permalinkCurrentTab(id);
-    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)');
+    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+Shift+P / Alt+Shift+P)');
     hudActions.appendChild(hudShareSnapshotBtn);
     _refreshHudShareSnapshotState();
 

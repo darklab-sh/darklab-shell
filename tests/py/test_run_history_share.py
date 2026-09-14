@@ -1807,7 +1807,8 @@ class TestRunStreaming:
         assert entity_link_row["source"] == "active_project"
         assert entity_link_row["canonical_value"] in {"darklab.sh", "https://darklab.sh/admin"}
 
-    def test_completed_whois_run_links_only_the_queried_target_to_active_project(self):
+    @pytest.mark.parametrize("registered", [True, False])
+    def test_completed_whois_run_links_only_the_queried_target_to_active_project(self, registered):
         client = get_client()
         session_id = anonymous_session_id("sess-active-project-whois")
         project_resp = client.post(
@@ -1824,6 +1825,8 @@ class TestRunStreaming:
         assert active_resp.status_code == 200
 
         transcript = (Path(__file__).parent / "fixtures" / "whois-arin-164.111.15.52.txt").read_text(encoding="utf-8")
+        if not registered:
+            transcript = "No match for 164.111.15.52\n% Query rate limit exceeded\n"
         proc_lines = [f"{line}\n" for line in transcript.splitlines()] + [""]
         fake_proc = _FakeProc(lines=proc_lines)
         with (
@@ -1842,8 +1845,9 @@ class TestRunStreaming:
             streamed = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "164.111.0.0 - 164.111.255.255" in streamed
-        assert "https://rdap.arin.net/registry/entity/UCC-21" in streamed
+        assert ("164.111.0.0 - 164.111.255.255" if registered else "No match for 164.111.15.52") in streamed
+        if registered:
+            assert "https://rdap.arin.net/registry/entity/UCC-21" in streamed
         with db_connect() as conn:
             run_row = conn.execute(
                 "SELECT id FROM runs WHERE personal_workspace_id = ? AND command = ? ORDER BY started DESC LIMIT 1",
@@ -1863,12 +1867,12 @@ class TestRunStreaming:
                 "ORDER BY e.type, e.canonical_value",
                 (project["id"],),
             ).fetchall()
-        assert [(row["type"], row["canonical_value"]) for row in entity_rows] == [
-            ("ip", "164.111.15.52"),
-        ]
-        assert [(row["type"], row["canonical_value"], row["source"]) for row in project_entity_rows] == [
-            ("ip", "164.111.15.52", "auto_command")
-        ]
+        assert [(row["type"], row["canonical_value"]) for row in entity_rows] == (
+            [("ip", "164.111.15.52")] if registered else []
+        )
+        assert [(row["type"], row["canonical_value"], row["source"]) for row in project_entity_rows] == (
+            [("ip", "164.111.15.52", "auto_command")] if registered else []
+        )
 
     def test_active_project_entity_link_failure_keeps_run_finalization(self):
         client = get_client()

@@ -903,49 +903,12 @@ export async function ensurePromptReady(
 }
 
 export async function ensureAutocompleteReady(page, { timeout = 15_000 } = {}) {
-  // Wait for the /autocomplete fetch to populate the context registry.
-  // setComposerValueForTest calls getAutocompleteMatches synchronously, so if
-  // the registry is still empty it returns no items and immediately hides the
-  // dropdown — leaving expect.poll with nothing to poll.
-  // Note: acSuggestions (flat suggestions) was removed; the registry is the
-  // sole signal that the autocomplete fetch has completed.
+  // Observe the catalog loaded by the app. Starting another fetch here can
+  // leave this wait blocked on a duplicate request after startup has finished.
   await page.waitForFunction(
-    async () => {
-      if (typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0) {
-        return true
-      }
-      if (
-        typeof apiFetch !== 'function' ||
-        window.__e2eAutocompleteRecoveryPending
-      ) {
-        return false
-      }
-      window.__e2eAutocompleteRecoveryPending = true
-      try {
-        const resp = await apiFetch('/autocomplete')
-        if (!resp.ok) return false
-        const data = await resp.json()
-        acSuggestions = data.suggestions || []
-        acContextRegistry = data.context || {}
-        acWordlists = Array.isArray(data.wordlists) ? data.wordlists : []
-        acSpecialCommands = data.special_commands || []
-        acBuiltinCommandRoots = data.builtin_command_roots || []
-        if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {})
-        if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {})
-        if (typeof loadProjectAutocompleteTargets === 'function') {
-          loadProjectAutocompleteTargets().catch(() => {})
-        }
-        if (typeof scheduleSearchDiscoverabilityRefresh === 'function') {
-          scheduleSearchDiscoverabilityRefresh()
-        } else if (typeof refreshSearchDiscoverabilityUi === 'function') {
-          refreshSearchDiscoverabilityUi()
-        }
-        return Object.keys(acContextRegistry).length > 0
-      } catch {
-        return false
-      } finally {
-        window.__e2eAutocompleteRecoveryPending = false
-      }
+    () => {
+      const registry = window.APP_STATE_API?.getState?.()?.acContextRegistry
+      return !!registry && Object.keys(registry).length > 0
     },
     undefined,
     { timeout },

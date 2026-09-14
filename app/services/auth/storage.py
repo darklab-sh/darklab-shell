@@ -28,6 +28,7 @@ from .contracts import (
     DEFAULT_PAT_SCOPES,
     GENERATED_ID_ATTEMPTS,
     IdentityStorageError,
+    InvalidIdentityValue,
     IssuedCredential,
     LAST_USED_WRITE_INTERVAL_SECONDS,
     LastCredentialLockout,
@@ -229,7 +230,7 @@ def _secret_material(credential_type: str, credential_id: str) -> tuple[str, byt
     try:
         prefix = _CREDENTIAL_SECRET_PREFIX[credential_type]
     except KeyError as exc:
-        raise IdentityStorageError("unsupported credential type") from exc
+        raise InvalidIdentityValue("unsupported credential type") from exc
     secret_bytes = secrets.token_bytes(32)
     encoded = base64.urlsafe_b64encode(secret_bytes).rstrip(b"=").decode("ascii")
     secret = f"{prefix}{credential_id}_{encoded}"
@@ -253,7 +254,7 @@ def _active_principal_row(conn: Any, principal_id: str) -> Any:
     return row
 
 
-def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
+def _lock_principal_row(conn: Any, principal_id: str) -> Any:
     validated = validate_identifier(principal_id, "principal")
     if _database_backend(conn) == DatabaseBackend.POSTGRES:
         row = conn.execute(
@@ -271,6 +272,11 @@ def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
         row = conn.execute("SELECT * FROM principals WHERE id = ?", (validated,)).fetchone()
     if row is None:
         raise PrincipalNotFound("principal was not found")
+    return row
+
+
+def _lock_active_principal_row(conn: Any, principal_id: str) -> Any:
+    row = _lock_principal_row(conn, principal_id)
     if str(_row_dict(row).get("status")) != "active":
         raise PrincipalDisabled("principal is disabled")
     return row
@@ -404,11 +410,11 @@ def create_principal_with_credential(
     )
     active_settings = settings or workspace_settings()
     if anonymous_id is not None and cutover_owner_id is not None:
-        raise IdentityStorageError("principal creation accepts only one source owner")
+        raise InvalidIdentityValue("principal creation accepts only one source owner")
     if cutover_owner_id is not None:
         source_owner_id = str(cutover_owner_id or "").strip()
         if not source_owner_id or not cutover_storage_key:
-            raise IdentityStorageError("selected cutover requires an owner and storage key")
+            raise InvalidIdentityValue("selected cutover requires an owner and storage key")
         preserved_key = str(cutover_storage_key)
         validate_workspace_storage_key(
             preserved_key,
@@ -542,6 +548,7 @@ def issue_credential(
     credential_type: str = "portable",
     label: str = "",
     expires_at: str | datetime | None = None,
+    expires_in_days: int | None = None,
     created_by_credential_id: str | None = None,
     scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
     now: datetime | None = None,
@@ -550,13 +557,19 @@ def issue_credential(
 ) -> IssuedCredential:
     kind = str(credential_type or "")
     if kind not in _CREDENTIAL_SECRET_PREFIX:
-        raise IdentityStorageError("unsupported credential type")
+        raise InvalidIdentityValue("unsupported credential type")
     normalized_label = bounded_text(label, field_name="credential label", maximum=MAX_CREDENTIAL_LABEL_LENGTH)
     active_now = now or datetime.now(timezone.utc)
     if active_now.tzinfo is None:
         active_now = active_now.replace(tzinfo=timezone.utc)
     active_now = active_now.astimezone(timezone.utc)
     normalized_scopes = _normalize_credential_scopes(kind, scopes)
+    if expires_in_days is not None:
+        if kind != "pat" or expires_at is not None:
+            raise InvalidCredentialScope("expires_in_days is only for PATs and cannot be combined with expires_at")
+        if type(expires_in_days) is not int or not PAT_MIN_EXPIRY_DAYS <= expires_in_days <= PAT_MAX_EXPIRY_DAYS:
+            raise InvalidCredentialScope(f"PAT expiry must be between {PAT_MIN_EXPIRY_DAYS} and {PAT_MAX_EXPIRY_DAYS} days")
+        expires_at = active_now + timedelta(days=expires_in_days)
     normalized_expiry = _normalize_credential_expiry(kind, expires_at, now=active_now)
 
     def operation(active_conn: Any) -> IssuedCredential:
@@ -573,7 +586,7 @@ def issue_credential(
             if creator_expiry is not None and datetime.fromisoformat(creator_expiry) <= active_now:
                 raise CredentialExpired("creator credential is expired")
             if str(creator_data.get("credential_type")) == "pat":
-                raise IdentityStorageError("PATs cannot issue credentials")
+                raise InvalidIdentityValue("PATs cannot issue credentials")
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
         return _insert_credential(
             active_conn,
@@ -765,9 +778,12 @@ def rotate_credential(
     label: str | None = None,
     expires_at: str | datetime | None = None,
     reason: str = "rotated",
+    defer_revocation: bool = False,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
+    if type(defer_revocation) is not bool:
+        raise InvalidIdentityValue("defer_revocation must be a boolean")
     normalized_reason = bounded_text(reason, field_name="revocation reason", maximum=MAX_REASON_LENGTH)
 
     def operation(active_conn: Any) -> IssuedCredential:
@@ -784,17 +800,12 @@ def rotate_credential(
             maximum=MAX_CREDENTIAL_LABEL_LENGTH,
         )
         active_now = datetime.now(timezone.utc)
-        if current.credential_type == "pat":
-            replacement_expiry = _normalize_credential_expiry(
-                "pat",
-                expires_at,
-                now=active_now,
-            )
+        if expires_at is None:
+            replacement_expiry = current.expires_at
         else:
-            replacement_expiry = current.expires_at if expires_at is None else parse_timestamp(
-                expires_at,
-                field_name="credential expiry",
-            )
+            replacement_expiry = _normalize_credential_expiry(current.credential_type, expires_at, now=active_now)
+        if replacement_expiry is not None and datetime.fromisoformat(replacement_expiry) <= active_now:
+            raise CredentialExpired("the replacement needs an expiry in the future")
         verifier_version, verifier_root = ensure_active_verifier_root(active_conn)
         replacement = _insert_credential(
             active_conn,
@@ -808,6 +819,8 @@ def rotate_credential(
             verifier_root=verifier_root,
             scopes=current.scopes,
         )
+        if defer_revocation:
+            return replacement
         now = timestamp(active_now)
         active_conn.execute(
             "UPDATE credentials SET revoked_at = ?, revocation_reason = ?, updated_at = ? "
@@ -833,7 +846,7 @@ def disable_principal(
 ) -> PrincipalRecord:
     normalized = bounded_text(reason, field_name="disable reason", maximum=MAX_REASON_LENGTH)
     if not normalized:
-        raise IdentityStorageError("disable reason is required")
+        raise InvalidIdentityValue("disable reason is required")
 
     def operation(active_conn: Any) -> PrincipalRecord:
         _principal_row(active_conn, principal_id)

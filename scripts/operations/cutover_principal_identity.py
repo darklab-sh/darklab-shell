@@ -31,6 +31,7 @@ from services.auth.legacy_cutover import (  # noqa: E402
     discard_other_legacy_owners,
     legacy_inventory,
     plan_other_legacy_discard,
+    prepare_legacy_cutover_schema,
 )
 from services.workspace.settings import workspace_root as configured_workspace_root, workspace_settings  # noqa: E402
 from restore_system import verify_backup_archive  # noqa: E402
@@ -211,7 +212,12 @@ def _convert(args: argparse.Namespace) -> dict[str, Any]:
             else:
                 conn.execute("BEGIN IMMEDIATE")
             try:
+                locked_inventory = legacy_inventory(conn, workspace_root)
+                if (args.expected_legacy_credentials is not None
+                        and locked_inventory["legacy_credentials"] != args.expected_legacy_credentials):
+                    raise RuntimeError("legacy credential count changed since review; run preflight again")
                 if discard_requested:
+                    prepare_legacy_cutover_schema(conn)
                     discard_plan = plan_other_legacy_discard(
                         conn,
                         selected_credential=selected,
@@ -462,12 +468,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             _require_development_discard(args, backup)
             selected = _read_selected_credential(args.selected_credential_file)
             with _database_connection(args) as conn:
-                result["development_discard_review"] = plan_other_legacy_discard(
-                    conn,
-                    selected_credential=selected,
-                    reviewed_team_snapshot_ids=reviewed_team_snapshot_ids,
-                    expected_team_recent_values=expected_team_recent_values,
-                ).to_safe_dict()
+                acquire_postgres_migration_lock(conn)
+                try:
+                    prepare_legacy_cutover_schema(conn)
+                    result["development_discard_review"] = plan_other_legacy_discard(
+                        conn,
+                        selected_credential=selected,
+                        reviewed_team_snapshot_ids=reviewed_team_snapshot_ids,
+                        expected_team_recent_values=expected_team_recent_values,
+                    ).to_safe_dict()
+                finally:
+                    # Discard preview never commits prerequisite schema changes.
+                    conn.rollback()
         return result
     if args.command == "reset":
         return _fresh_reset(args)

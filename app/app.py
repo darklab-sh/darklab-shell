@@ -57,10 +57,12 @@ from services.metrics_lazy import app_metrics
 from services.api_v1.serialization import json_error
 from services.audit.context import request_audit_fields
 from services.auth.lifecycle import record_authentication_failure
+from services.auth.observability import log_authentication_rejected, log_credential_rate_limited
 from services.auth.rate_limit import check_failed_redemption
 from services.auth.resolver import public_lookup_id_from_headers
 from services.auth.access_profile import (
     enforce_browser_csrf,
+    enforce_pat_route_access,
     enforce_restricted_access,
     is_public_endpoint,
     is_restricted,
@@ -397,6 +399,12 @@ def _enforce_dynamic_route_rate_limit():
 
 
 def _authentication_rejected_handler(exc):
+    if exc.code == "credential_authentication_rate_limited":
+        response = jsonify({"error": exc.code, "retry_after": exc.retry_after})
+        if exc.retry_after is not None:
+            response.headers["Retry-After"] = str(exc.retry_after)
+        return response, 429
+    log_authentication_rejected(exc.code)
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error(exc.code, exc.message)), 401
     return jsonify({"error": exc.code, "message": exc.message}), 401
@@ -406,6 +414,12 @@ def _enforce_authentication_resolution():
     result = get_authentication_result()
     if not result.failed:
         return None
+    if result.error_code == "anonymous_workspace_attached":
+        if request.endpoint == "auth.redeem":
+            # Redemption proves a new credential before changing the browser's identity.
+            return None
+        # Rejected reads from a restored anonymous browser are not credential guesses.
+        raise AuthenticationRejected(result.error_code, result.message)
     if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
         return None
     limited = check_failed_redemption(
@@ -417,6 +431,7 @@ def _enforce_authentication_resolution():
     if limited.allowed:
         record_authentication_failure(result, request_fields=request_audit_fields(request))
     if not limited.allowed:
+        log_credential_rate_limited(limited)
         return jsonify({
             "error": "credential_authentication_rate_limited",
             "retry_after": limited.retry_after,
@@ -425,7 +440,11 @@ def _enforce_authentication_resolution():
 
 
 def _enforce_access_profile():
-    return enforce_restricted_access(get_authentication_result())
+    result = get_authentication_result()
+    pat_rejection = enforce_pat_route_access(result)
+    if pat_rejection is not None:
+        return pat_rejection
+    return enforce_restricted_access(result)
 
 
 def _enforce_csrf():

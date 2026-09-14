@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from core.database_backend import DatabaseBackend
+from core.migrations import MIGRATIONS
 from core.migrations.runner import applied_versions, apply_migration
+from core.migrations.v0080_principal_ownership_cutover import _PERSONAL_OWNER_COLUMNS
 from core.migrations.v0082_remove_legacy_session_identity import MIGRATION as REMOVAL_MIGRATION
 from services.workspace.settings import session_workspace_name
 from services.workspace.settings import workspace_settings
@@ -410,27 +412,30 @@ def legacy_inventory(conn: Any, workspace_root: Path) -> dict[str, Any]:
         conn,
         "SELECT COUNT(*) AS count FROM session_tokens WHERE last_seen_at IS NOT NULL AND last_seen_at != ''",
     )
+    # Preflight must also read the released v2.9.2 schema without migrating it.
+    ownership_prepared = "0080" in applied_versions(conn)
+    legacy_columns = dict(_PERSONAL_OWNER_COLUMNS)
     owned_rows: dict[str, int] = {}
     for table_name in PERSONAL_OWNER_TABLES:
+        owner_column = "personal_workspace_id" if ownership_prepared else legacy_columns[table_name]
         owned_rows[table_name] = _count(
             conn,
-            f"SELECT COUNT(*) AS count FROM {table_name} WHERE personal_workspace_id IN "  # nosec
+            f"SELECT COUNT(*) AS count FROM {table_name} WHERE {owner_column} IN "  # nosec
             "(SELECT token FROM session_tokens)",
         )
+    secret_owner = "owner_id" if ownership_prepared else "session_token"
     owned_rows["secrets"] = _count(
         conn,
-        "SELECT COUNT(*) AS count FROM secrets WHERE owner_id IN (SELECT token FROM session_tokens)",
+        f"SELECT COUNT(*) AS count FROM secrets WHERE {secret_owner} IN (SELECT token FROM session_tokens)",  # nosec
     )
-    team_rows = _count(
-        conn,
-        "SELECT COUNT(*) AS count FROM team_members "
-        "WHERE principal_id IS NULL OR principal_id = ''",
+    member_filter = " WHERE principal_id IS NULL OR principal_id = ''" if ownership_prepared else ""
+    team_rows = _count(conn, f"SELECT COUNT(*) AS count FROM team_members{member_filter}")  # nosec
+    creator_filter = (
+        "(created_by_principal_id IS NULL OR created_by_principal_id = '') AND " if ownership_prepared else ""
     )
     team_creator_rows = _count(
         conn,
-        "SELECT COUNT(*) AS count FROM teams WHERE "
-        "(created_by_principal_id IS NULL OR created_by_principal_id = '') "
-        "AND created_by_session_token_hash != ''",
+        f"SELECT COUNT(*) AS count FROM teams WHERE {creator_filter}created_by_session_token_hash != ''",  # nosec
     )
     shared_path = workspace_root.resolve(strict=False) / SHARED_ANONYMOUS_STORAGE_KEY
     shared_exists = shared_path.exists() or shared_path.is_symlink()
@@ -545,6 +550,16 @@ def _cutover_evidence(conn: Any, backend: DatabaseBackend) -> CutoverEvidence:
     return verify_runs_fts(conn)
 
 
+def prepare_legacy_cutover_schema(conn: Any) -> None:
+    """Apply the v3 prerequisites inside the caller's offline transaction."""
+    applied = applied_versions(conn)
+    if "0077" not in applied:
+        raise RuntimeError("selected conversion requires a v2.9.2 or prepared v3 database")
+    for migration in MIGRATIONS:
+        if "0078" <= migration.version <= "0081" and migration.version not in applied:
+            apply_migration(conn, migration, backend=_database_backend(conn), commit=False)
+
+
 def convert_selected_owner(
     conn: Any,
     *,
@@ -555,6 +570,7 @@ def convert_selected_owner(
     """Convert the sole selected legacy owner in the caller's transaction."""
     if "0082" in applied_versions(conn):
         raise RuntimeError("principal cutover has already completed")
+    prepare_legacy_cutover_schema(conn)
     selected = str(selected_credential or "").strip()
     row = conn.execute(
         "SELECT last_seen_at FROM session_tokens WHERE token = ?",

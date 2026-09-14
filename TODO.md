@@ -22,6 +22,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Native ticketing integrations](#native-ticketing-integrations)
   - [Operator-extensible signal and parser rules](#operator-extensible-signal-and-parser-rules)
   - [Local accounts for deployments without an identity provider](#local-accounts-for-deployments-without-an-identity-provider)
+  - [Operator admin console for instance settings](#operator-admin-console-for-instance-settings)
 - [Architecture](#architecture)
   - [Interactive PTY transport future-state](#interactive-pty-transport-future-state)
 
@@ -211,6 +212,58 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Prefer passkeys where the deployment and browser support them, with downloadable recovery codes and an operator recovery procedure that does not depend on collecting personal information.
 - If passwords are supported, use a maintained Argon2id implementation, long-password and password-manager-friendly rules, compromised-password screening, login throttling, safe reset flows, session revocation, and optional MFA. Do not add arbitrary composition rules, password hints, security questions, or periodic rotation.
 - Document and test username enumeration, credential stuffing, recovery abuse, lockout denial-of-service, passkey loss, and operator reset boundaries before enabling local registration.
+
+### Operator admin console for instance settings
+- A signed-in `/admin/` area where an authorized operator can review effective instance settings, validate changes, and apply a curated subset without host shell access.
+- It's feasible, but it can't be a thin form over the existing files. Four foundations are missing: an instance-operator identity, a writable settings layer, structured per-setting metadata, and an apply model for values that processes read once at startup.
+- **Current state:**
+  - Each process resolves settings once. The layers are built-in defaults, then `app/conf/config.yaml`, then `config.local.yaml`, then environment variables.
+  - Managed deployments mount `./conf` read-only at `/config`. `entrypoint.sh` copies it into a private `/tmp` snapshot before dropping privileges, and `CONFIGURATION.md` documents more than 350 YAML and environment settings.
+  - `app/config.py` already records each key's source, redacts secret and credential-bearing values, summarizes overlays and applied environment names, and validates through the pydantic-backed `AppConfig`. `/diag` shows about 50 of those keys as grouped, read-only cards.
+  - About 130 modules import the module-level `CFG`. Most reads happen at call time, but nothing reloads it.
+  - Some values are fixed when a process or container starts: the database backend, Redis wiring, logging, worker concurrency, and the scanner egress firewall.
+  - Some consumers run outside the gunicorn web workers: the scheduler loop in `shell`, and the `zap-worker` and `oast-worker` containers.
+  - The only web operator check is `diagnostics_allowed_cidrs`, a network allowlist with no identity behind it. Principals are pseudonymous and Team roles stay Team-scoped. Instance actions such as principal recovery run through in-container CLI tools.
+  - Operator secrets stay in the environment. The SMTP, ZAP, and OAST secret-id settings name environment variables. `OIDC_CLIENT_SECRET`, `SECRETS_MASTER_KEY`, `DATABASE_URL`, and `POSTGRES_PASSWORD` live in `.env`, which `darklab-deploy` manages. Backups already capture `.env` and the local `conf/` tree.
+- **Constraints:**
+  - Writing `conf/config.local.yaml` or `.env` from the app would undo deliberate hardening: the read-only root filesystem and config mount, owner-only host files, and managed-file checks. It would also need comment-preserving YAML rewrites that can race host edits. Admin-managed values belong in the database.
+  - An admin session turns "has host access" into "has a web session". Security-sensitive values such as `trusted_proxy_cidrs`, `diagnostics_allowed_cidrs`, share redaction rules, and AI egress allowlists need a deliberate decision before they become editable.
+  - Keep these host-owned and read-only in the UI:
+    - access profile and OIDC settings
+    - database and Files backend
+    - interactive PTY, raw-packet scanning, intrusive actions, and restricted command-input CIDRs
+    - ports and image
+    - every secret value
+  - Most edits still need a restart. gunicorn doesn't preload the app, so a graceful reload through its existing control socket would give web workers new values. The scheduler loop and worker containers need their own restarts, and settings that require recreating the container can't be applied from inside it without a Docker socket, which shouldn't be added.
+  - Setting descriptions exist only as `CONFIGURATION.md` tables and `config.yaml` comments, so the UI has no structured metadata to render.
+- **Entry-level scope:**
+  - Add an instance-operator grant to principals, managed only through `manage_principal_access.py`. Require both that grant and a `diagnostics_allowed_cidrs` match for `/admin/`.
+  - Prefer restricted-profile browser sessions with a recent sign-in for admin access. The `open` profile keeps the active credential readable by page scripts, so writes should stay disabled there unless an operator explicitly opts in.
+  - Show every effective setting with its redacted value, source layer, apply mode, and any load warnings (ignored, defaulted, or clamped).
+  - Validate proposed changes and produce a copyable `config.local.yaml` snippet, so operators get safe edits before the app stores anything.
+  - Replace the `/diag` config cards with this view so the two presentations can't drift.
+- **Editable scope:**
+  - Add an `instance_settings` table on SQLite and Postgres with value, revision, changed-by principal and credential, and timestamps. Load it after `config.local.yaml` and before environment variables, and keep environment-owned keys locked.
+  - Before building, decide how keys set in `config.local.yaml` behave. Either lock them in the UI (file wins) or allow a visible admin override with a reset action.
+  - Start with a reviewed allowlist of low-risk operational settings:
+    - branding, MOTD, default theme, and welcome and tour tuning
+    - retention, output, history, and Files limits
+    - notification retry, scheduler, watcher, and assessment batch tuning
+  - Validate each change through the same merge, normalization, and model checks as startup. Show warnings before saving, and reject a stale revision so two operators can't overwrite each other.
+  - Record an `instance.config_change` audit event with key names and redacted before and after values. Show which settings still need a restart until every affected process has reloaded.
+  - Offer a graceful web-worker reload. For worker or container restarts, show the exact host commands instead.
+- **Architecture:**
+  - Split `load_config()` into a side-effect-free builder that takes ordered layers and returns the config, per-key sources, and warnings. Startup, admin previews, and tests should share it; today the loader updates module-level warning and summary state and logs while it runs.
+  - Add a settings catalog with group, label, description, type and bounds, sensitivity, owner (`env`, `yaml`, or `admin`), and apply mode (`live`, `web_reload`, `worker_restart`, or `container_recreate`). Extend the existing `test_docs.py` default-parity checks to cover the catalog, `config.yaml`, and `CONFIGURATION.md`.
+  - Defer live apply. It would publish a settings generation number and have each process swap its `AppConfig` contents in place, because callers hold that object through `from config import CFG`.
+  - Cover the new table in schema manifests, backup, restore, and Postgres migration checks. The SQLite-to-Postgres tool already discovers tables automatically. After an upgrade, ignore stored keys that no longer exist and log a warning, as the YAML loader already does.
+  - Build desktop and mobile pages from shared UI primitives. Test precedence, authorization, validation, and audit in pytest; add Postgres parity, Vitest, and Playwright coverage in both asset modes.
+- **Effort:**
+  - Read-only view with the operator grant and source display: medium, about two or three merge requests.
+  - Config builder refactor, settings catalog, and docs parity: large but mostly mechanical, because every documented setting needs metadata and an apply mode.
+  - Database-backed edits for the allowlist, with audit and web-worker reload: large, about three or four merge requests across both database backends and browser coverage.
+  - Live apply and editing content catalogs are separate, larger efforts. The content catalogs are `commands.yaml`, workflows, themes, and assessment profiles. `commands.yaml` is part of the command-policy boundary and needs its own security design before it's editable.
+- **Cheaper first step:** add an operator command, either `darklab-deploy config check` or an in-container equivalent. It would validate `.env` and `config.local.yaml` through the shared builder, print effective values with their sources, and compare them with the running config. That delivers most of the safe-change value without a new web authorization surface. Its builder and catalog become the admin console's foundation.
 
 ---
 

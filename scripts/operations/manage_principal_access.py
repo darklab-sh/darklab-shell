@@ -20,6 +20,7 @@ sys.path.insert(0, str(APP_ROOT))
 from config import CFG  # noqa: E402
 from runtime_bootstrap import init_database  # noqa: E402
 from services.auth import lifecycle  # noqa: E402
+from services.auth.suspended_work import operator_suspended_work  # noqa: E402
 from services.auth.browser_sessions import (  # noqa: E402
     revoke_principal_browser_sessions,
     rotate_signing_key,
@@ -84,7 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--label", default="Initial operator access")
     bootstrap.add_argument("--secret-file", required=True)
 
-    status = commands.add_parser("status", help="Show safe principal and credential metadata.")
+    status = commands.add_parser("status", help="Show safe principal metadata, credentials, and suspended work.")
     status.add_argument("principal_id")
 
     issue = commands.add_parser("issue", help="Issue a portable credential or PAT.")
@@ -177,6 +178,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "principal": principal.to_safe_dict(),
             "credentials": [item.to_safe_dict() for item in credentials],
+            "suspended_work": operator_suspended_work(args.principal_id),
         }
     if args.command == "issue":
         return _issue_to_file(

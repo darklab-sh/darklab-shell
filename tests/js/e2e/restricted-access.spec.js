@@ -85,14 +85,15 @@ test.describe('restricted access profile', () => {
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expect(page.locator('.options-access-row')).toContainText('Current')
 
-    const logoutStatus = await page.evaluate(async () => (await apiFetch('/auth/logout', {
-      method: 'POST',
-    })).status)
-    expect(logoutStatus).toBe(204)
-    await openSignIn(page)
+    const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/logout')
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+    await expect(page.locator('#confirm-host')).toContainText('Your workspace stays saved')
+    await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
+    expect((await logoutResponse).status()).toBe(204)
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   })
 
-  test('keeps invalid credentials off the page and supports session-wide revocation', async ({ page }) => {
+  test('keeps invalid credentials off the page and signs out every browser through Access', async ({ page, browser }) => {
     await openSignIn(page)
     await page.getByLabel('Access credential').fill('not-a-credential')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -100,11 +101,83 @@ test.describe('restricted access profile', () => {
     await expect(page.getByLabel('Access credential')).toHaveValue('')
 
     await signIn(page)
-    const status = await page.evaluate(async () => (await apiFetch('/auth/sessions/revoke-all', {
-      method: 'POST',
-    })).status)
-    expect(status).toBe(200)
+    const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+    const peer = await peerContext.newPage()
+    try {
+      await openSignIn(peer)
+      await signIn(peer)
+      await openRailAction(page, 'options')
+      await page.locator('#options-tab-access').click()
+      const revoked = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/sessions/revoke-all')
+      await page.getByRole('button', { name: 'Sign out everywhere', exact: true }).click()
+      await page.locator('#confirm-host [data-confirm-action-id="sign-out-all"]').click()
+      expect((await revoked).status()).toBe(200)
+      await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+      // Raw fetch observes the other browser's denial without navigating it.
+      expect(await peer.evaluate(async () => (await fetch('/projects')).status)).toBe(401)
+    } finally {
+      await peerContext.close()
+    }
+  })
+
+  for (const width of [1280, 375]) test.describe(`private sharing at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
+    test('disables public snapshot controls and explains keyboard denial', async ({ page }) => {
+      await openSignIn(page)
+      await signIn(page)
+      const selector = width < 600
+        ? '.tab-panel.active .terminal-actions [data-action="permalink"]'
+        : '.hud-actions [data-action="permalink"]'
+      const button = page.locator(selector)
+      await expect(button).toBeVisible()
+      await expect(button).toBeDisabled()
+      await expect(button).toHaveAttribute('title', 'Public share links are disabled for this deployment.')
+      const requests = []
+      page.on('request', request => {
+        if (new URL(request.url()).pathname === '/share' && request.method() === 'POST') requests.push(request)
+      })
+      await page.keyboard.press('Alt+Shift+p')
+      await expect(page.locator('#permalink-toast')).toContainText('Public share links are disabled for this deployment.')
+      expect(requests).toEqual([])
+    })
+  })
+
+  test('returns a revoked open tab to sign-in and clears stale cookies on logout', async ({ page, context, request }) => {
     await openSignIn(page)
+    await signIn(page)
+    const cookies = await context.cookies()
+    const session = cookies.find(cookie => cookie.name === 'darklab_browser_session')
+    const csrf = cookies.find(cookie => cookie.name === 'darklab_csrf')
+    expect(session).toBeTruthy()
+    expect(csrf).toBeTruthy()
+    const origin = new URL(page.url()).origin
+    let revocationStatus
+    // Start a protected read while the app is still mounted. Revoke through an
+    // independent cookie jar before that request reaches the application.
+    await page.route('**/projects', async route => {
+      const revoked = await request.post(`${origin}/auth/sessions/revoke-all`, {
+        ignoreHTTPSErrors: true,
+        headers: {
+          Cookie: `darklab_browser_session=${session.value}; darklab_csrf=${csrf.value}`,
+          'X-Darklab-CSRF': csrf.value,
+        },
+      })
+      revocationStatus = revoked.status()
+      await route.continue()
+    }, { times: 1 })
+    // A background protected request may observe revocation before Projects.
+    const denied = page.waitForResponse(response => new URL(response.url()).origin === origin && response.status() === 401)
+    await page.evaluate(() => { void apiFetch('/projects').catch(() => {}) })
+    await expect.poll(() => revocationStatus).toBe(200)
+    expect((await denied).status()).toBe(401)
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+    await expect(page.getByLabel('Access credential')).toBeVisible()
+    await context.addCookies([session, csrf])
+    const logout = await page.evaluate(async () => (await fetch('/auth/logout', { method: 'POST' })).status)
+    expect(logout).toBe(204)
+    expect((await context.cookies()).filter(cookie => ['darklab_browser_session', 'darklab_csrf'].includes(cookie.name))).toEqual([])
+    await signIn(page)
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
   })
 
   test.describe('mobile sign-in', () => {

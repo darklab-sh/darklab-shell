@@ -10,6 +10,7 @@ import os
 from collections.abc import Mapping
 from services.metrics_lazy import app_metrics
 from services.runs.contracts import RunPreparationError, RunSpawnError, RunStartRejected
+from services.workflows.execution_owner import execution_owner_context
 from services.runs.output_store import load_run_output_events_for_run
 from services.runs.output_model import LineEvent
 from services.workflows.captures import WorkflowCaptureAccumulator
@@ -415,6 +416,7 @@ def launch_execution_step(execution_id: str) -> dict[str, object] | None:
             display_command=display_command,
             private_values=private_values,
             session_id=str(execution.get("personal_workspace_id") or ""),
+            owner_context=execution_owner_context(execution),
             team_id=str(execution.get("team_id") or ""),
             team_role=current_role or str(execution.get("actor_role") or ""),
             client_ip="",
@@ -663,17 +665,10 @@ def _recover_fanout_step(
 
 
 def recover_workflow_execution(execution_id: str) -> str:
-    execution = storage.get_execution_by_id(execution_id)
+    execution, step = storage.execution_state_for_recovery(execution_id)
     if not execution or str(execution.get("status") or "") not in storage.ACTIVE_EXECUTION_STATUSES:
         return "ignored"
     step_id = str(execution.get("current_step_id") or "")
-    steps = execution.get("steps")
-    step = next(
-        (
-            item for item in steps if isinstance(item, Mapping) and item.get("step_id") == step_id
-        ),
-        None,
-    ) if isinstance(steps, list) else None
     if not step:
         changed = storage.fail_execution(
             execution_id,

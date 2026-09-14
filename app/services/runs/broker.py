@@ -19,6 +19,8 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from config import resolve_effective_cfg
 from core import process
+from core.redis_streams import is_redis_idle_timeout_error as _is_redis_idle_timeout_error
+from services.auth.contracts import STREAM_AUTH_POLL_SECONDS
 from services.runs.output_model import (
     LINE_EVENT_SCHEMA_VERSION,
     LineEvent,
@@ -50,15 +52,6 @@ def _redis_client() -> Any | None:
 
 def _stream_key(run_id: str) -> str:
     return f"runstream:{run_id}"
-
-
-def _is_redis_idle_timeout_error(exc: BaseException) -> bool:
-    if isinstance(exc, RedisTimeoutError):
-        return True
-    if isinstance(exc, RedisConnectionError):
-        message = str(exc).lower()
-        return "timeout reading" in message or "timed out" in message
-    return False
 
 
 def _schema_sse() -> str:
@@ -679,11 +672,14 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
 
     app_metrics.record_broker_subscriber_delta(1)
     current_id = _normalize_resume_event_id(after_id)
-    yield _schema_sse()
     if not _is_beginning_event_id(current_id):
         log.debug("BROKER_STREAM_REATTACHED", extra={"run_id": run_id, "after_id": current_id})
-    block_seconds = max(1.0, float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15))
+    block_seconds = min(
+        STREAM_AUTH_POLL_SECONDS,
+        max(1.0, float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15)),
+    )
     try:
+        yield _schema_sse()
         if _is_beginning_event_id(current_id):
             for event in replay_run_events(run_id):
                 if _is_resumable_event(event):

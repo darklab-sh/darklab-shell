@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, openRailAction } from './helpers.js'
+import { ensurePromptReady, keepBrowserWorkspace, makeTestIp, openRailAction } from './helpers.js'
+
+let accessTestIpOffset = 200
+test.beforeEach(async ({ page }) => {
+  // Each journey is a separate client; keeping several test workspaces must
+  // not consume another journey's hourly anonymous-issuance allowance.
+  await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(accessTestIpOffset++) })
+})
 
 async function resetAnonymousBrowser(page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
@@ -83,6 +90,81 @@ async function expectRedemptionSpacing(page) {
 test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => resetAnonymousBrowser(page))
 
+  test('restores a kept workspace from a browser holding its retired anonymous identity', async ({ page }) => {
+    // Allow the complete keep/reload/restore journey to finish on a busy runner.
+    test.setTimeout(60_000)
+    const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
+    const credentialId = await keepBrowserWorkspace(page, { label: 'Restored browser' })
+    const savedCredential = await page.evaluate(() => localStorage.getItem('access_credential'))
+    await page.evaluate((retiredId) => {
+      localStorage.removeItem('access_credential')
+      localStorage.setItem('anonymous_id', retiredId)
+    }, anonymousId)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await ensurePromptReady(page)
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(401)
+    await openAccess(page)
+    await page.locator('#options-access-use-btn').click()
+    await page.locator('#options-access-redemption-input').fill(savedCredential)
+    await page.locator('#options-access-redemption-apply').click()
+    await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
+    await expect(page.locator(`[data-credential-id="${credentialId}"]`)).toContainText('Current')
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+  })
+
+  for (const width of [1280, 375]) test.describe(`API tokens at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
+
+    test('creates a scoped API token from Access', async ({ page }) => {
+      await keepBrowserWorkspace(page, { label: 'PAT issuer' })
+      if (width < 600) {
+        await page.locator('#hamburger-btn').click()
+        await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
+        await expect(page.locator('#options-panel-access')).toHaveAttribute('data-access-panel-bound', '1')
+      } else {
+        await openAccess(page)
+      }
+      await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
+      await page.locator('#options-access-add-btn').click()
+      const editor = page.locator('#options-access-editor')
+      await editor.getByLabel('Credential type').selectOption('pat')
+      await expect(editor.getByLabel('Expires in days')).toHaveValue('90')
+      const chosen = await editor.locator('[name="pat_scope"]:checked').evaluateAll(nodes => nodes.map(node => node.value).sort())
+      expect(chosen).toEqual(['history:read', 'identity:read', 'runs:execute'])
+      await editor.getByText('Read run history and output', { exact: true }).click()
+      await expect(editor.locator('[value="history:read"]')).not.toBeChecked()
+      await editor.getByText('Start and cancel commands', { exact: true }).click()
+      await expect(editor.locator('[value="runs:execute"]')).not.toBeChecked()
+      await editor.getByLabel('Label', { exact: true }).fill('CLI identity')
+      await editor.getByLabel('Expires in days').fill('1')
+      const issuedResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/credentials' && response.request().method() === 'POST')
+      await editor.getByRole('button', { name: 'Save', exact: true }).click()
+      const issued = await issuedResponse
+      expect(issued.status()).toBe(201)
+      const data = await issued.json()
+      expect(data.credential.scopes).toEqual(['identity:read'])
+      expect(Date.parse(data.credential.expires_at) - Date.parse(data.credential.created_at)).toBe(24 * 60 * 60 * 1000)
+      const reveal = page.locator('#options-access-reveal')
+      await expect(reveal).toBeVisible()
+      await expect(reveal).not.toContainText(data.secret)
+      await reveal.getByRole('button', { name: 'I saved it' }).click()
+      await expect(reveal).toBeHidden()
+      const statuses = await page.evaluate(async secret => {
+        const headers = { Authorization: `Bearer ${secret}` }
+        return [
+          (await fetch('/api/v1/whoami', { headers })).status,
+          (await fetch('/api/v1/projects', { headers })).status,
+          (await fetch('/projects', { headers })).status,
+        ]
+      }, data.secret)
+      expect(statuses).toEqual([200, 403, 403])
+      const row = page.locator(`[data-credential-id="${data.credential.id}"]`)
+      await expect(row).toContainText('CLI identity')
+      await expect(row).toContainText('identity:read')
+      await expect(page.locator('body')).not.toContainText(data.secret)
+    })
+  })
+
   test('keeps, manages, removes, and restores a workspace without retaining revealed secrets', async ({ page }) => {
     test.setTimeout(90_000)
     await openAccess(page)
@@ -124,7 +206,9 @@ test.describe('workspace Access', () => {
     expect(travelCredentialId).toMatch(/^crd_[0-9a-f]{32}$/)
 
     await travelRow.getByRole('button', { name: 'Expiry' }).click()
-    await page.locator('#options-access-editor input[type="datetime-local"]').fill('2027-01-15T12:00')
+    // Use the runner's current clock with ample margin for server and timezone differences.
+    const futureExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
+    await page.locator('#options-access-editor input[type="datetime-local"]').fill(futureExpiry)
     await page.locator('#options-access-editor').getByRole('button', { name: 'Save' }).click()
     await expect(travelRow).toContainText('Expires')
 
@@ -140,7 +224,10 @@ test.describe('workspace Access', () => {
     await expect(page.locator('#confirm-host')).toContainText('Revocation cannot be undone')
     await chooseConfirmAction(page, 'revoke')
     await expect(page.locator(`[data-credential-id="${travelCredentialId}"]`)).toContainText('Revoked')
-    await expect(page.locator('.options-access-row', { hasText: 'Travel device replacement' })).toContainText('Active')
+    const replacementId = replacementSecret.match(/crd_[0-9a-f]{32}/)[0]
+    const rotatedRow = page.locator(`[data-credential-id="${replacementId}"]`)
+    await expect(rotatedRow).toContainText('Travel device')
+    await expect(rotatedRow).toContainText('Active')
 
     await page.locator('#options-access-remove-btn').click()
     await chooseConfirmAction(page, 'remove')
@@ -173,7 +260,7 @@ test.describe('workspace Access', () => {
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expectAccessActions(page, 'kept')
     await expect(peer.locator('#hud-session')).toContainText('crd_')
-    const replacementRow = page.locator('.options-access-row', { hasText: 'Travel device replacement' })
+    const replacementRow = page.locator(`[data-credential-id="${replacementId}"]`)
     await expect(replacementRow).toContainText('Current')
 
     await replacementRow.getByRole('button', { name: 'Revoke' }).click()

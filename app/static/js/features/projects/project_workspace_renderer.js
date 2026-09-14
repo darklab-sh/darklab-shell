@@ -11,6 +11,31 @@ let exportedDarklabProjectWorkspaceRenderer = null;
 
   function createProjectWorkspaceRendererController(context) {
     const ctx = context || {};
+    let pressedPointer = null;
+    let renderPending = false;
+
+    function releasePointer(event) {
+      if (event.type !== 'blur' && event.pointerId !== pressedPointer) return;
+      pressedPointer = null;
+      document.removeEventListener('pointerup', releasePointer, true);
+      document.removeEventListener('pointercancel', releasePointer, true);
+      window.removeEventListener('blur', releasePointer, true);
+      // Native click dispatch follows pointerup in the same gesture.
+      window.setTimeout(() => {
+        if (!renderPending) return;
+        renderPending = false;
+        renderExplorer();
+      }, 0);
+    }
+
+    ctx.projectExplorerBody?.addEventListener('pointerdown', (event) => {
+      const action = event.target.closest?.('[data-project-action]');
+      if (!action || action.disabled || event.button !== 0 || pressedPointer !== null) return;
+      pressedPointer = event.pointerId;
+      document.addEventListener('pointerup', releasePointer, true);
+      document.addEventListener('pointercancel', releasePointer, true);
+      window.addEventListener('blur', releasePointer, true);
+    }, true);
 
     function tabsScrollState(body) {
       const strip = body?.querySelector?.('.project-explorer-tabs');
@@ -38,6 +63,10 @@ let exportedDarklabProjectWorkspaceRenderer = null;
     function renderExplorer() {
       const body = ctx.projectExplorerBody;
       if (!body) return;
+      if (pressedPointer !== null) {
+        renderPending = true;
+        return;
+      }
       const currentTab = ctx.workspaceTab();
       const previousTabsScroll = tabsScrollState(body);
       body.classList.toggle('project-explorer-body-details', currentTab === 'details');

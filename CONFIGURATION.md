@@ -130,7 +130,7 @@ The shipped file is the best starting point for the current schema. Every custom
 
 ## Headless CLI Configuration
 
-The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side settings. These do not change server behavior.
+The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side settings. These do not change server behavior. Create its token in **Options → Access → Add credential → API token (PAT)** and save the one-time value; [API authentication](docs/api.md#auth) explains permissions, expiry, and rotation.
 
 Resolution order is:
 
@@ -170,7 +170,45 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py revoke
 docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
 ```
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
+`status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
+
+### Issuing credentials and recovering access
+
+For CLI and integration tokens, follow [Create a PAT](docs/api.md#create-a-pat). It covers browser and operator issuance, permissions, expiry, private one-time output, and verification with `darklab whoami`.
+
+`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap or cutover, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
+
+To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  issue prn_example --type portable --label "Additional device" \
+  --secret-file /data/additional-device.credential
+```
+
+**Recovery revokes every portable credential, PAT, and browser session for the principal.** It also pauses schedules and watchers, mutes notification channels, and disables Project digests created or last changed with those newly revoked credentials. This happens automatically; `recover` has no option to keep that work running. Existing provider links and workspace data stay in place.
+
+Before recovery, review the principal's credentials and related work in **Options → Access**, Schedules, Watchers, **Options → Notifications**, and **Project → Monitoring**, including Team scope where applicable. The operator `status` command's `suspended_work` list covers principal disablement; it isn't a recovery-work inventory. If work must be stopped as part of an incident, use the principal's `disable` operation; recovery isn't a global stop for already accepted work.
+
+For a full access reset, replace both occurrences of `prn_example` with the intended principal ID and choose a new output filename:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  recover prn_example --confirm-principal prn_example \
+  --label "Recovered access" --secret-file /data/recovered-access.credential
+
+umask 077
+docker compose cp shell:/data/recovered-access.credential ./recovered-access.credential
+chmod 600 ./recovered-access.credential
+```
+
+Save and verify the copied credential in the operator's secret store, then remove both temporary copies. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
+
+For provider-only deployments, enable `mixed` before using a portable credential to sign in. Use `issue` when the purpose is only to regain a browser path for repairing a provider link; use `recover` when all existing credentials and sessions must be invalidated.
+
+### Credential-attempt limits
+
+Failed credential attempts are limited to 30 per client IP and 10 per public credential lookup ID in each minute. Once either allowance is used, further attempts wait until the window resets, including attempts with a correct credential. Rejected requests return HTTP 429 with `Retry-After`; successful sign-ins don't consume the failure allowance.
 
 ### Restricted browser access
 
@@ -180,6 +218,8 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 - `token_required` shows a standalone credential screen before the application. Anonymous workspaces and unauthenticated credential issuance are disabled.
 - `oidc_required` signs browsers in with an OpenID Connect provider. It doesn't accept portable credentials at the browser sign-in screen.
 - `mixed` offers both provider sign-in and portable-credential sign-in. It's also the place to link an existing workspace to a provider identity before switching to `oidc_required`.
+
+#### HTTPS and session settings
 
 Restricted access is intended for HTTPS deployments. Its browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`. The short-lived provider state cookie is `Secure`, `HttpOnly`, and `SameSite=Lax` so it returns on the provider's redirect. Sign-in won't work over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
 
@@ -193,6 +233,8 @@ BROWSER_SESSION_ABSOLUTE_HOURS=12
 
 docker compose up -d --force-recreate shell
 ```
+
+#### Bootstrap credential-required access
 
 A fresh restricted deployment has no public bootstrap endpoint. Create the first principal from inside the running application container and write the one-time credential to a new path under the private `/data` mount:
 
@@ -209,25 +251,71 @@ docker compose exec -T shell rm /data/initial-operator.credential
 
 The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the copied credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
 
+#### Session lifetime and sign-out
+
 After redemption, the browser holds a signed server-side session instead of the portable credential. The session ends at the configured idle or absolute deadline. Sign-out revokes the current session; `/auth/sessions/revoke-all` and the operator `revoke-all-sessions` command close every browser session for one principal. Revoking or rotating a portable credential also closes sessions redeemed from that credential, and disabling a principal closes all of its sessions. Team membership and role changes rotate the acting browser's session and revoke a removed member's sessions.
 
-The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
+**Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old.
 
-For provider sign-in, register a confidential OpenID Connect client with the authorization-code flow and PKCE S256 enabled. Set its exact redirect URI to `https://<your-shell-host>/auth/oidc/callback`. The issuer must match the provider's discovery document exactly. Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URI` in `.env`; `OIDC_SCOPES` defaults to `openid`. The app asks the provider to authenticate the browser, verifies its signed ID token, and stores only the issuer and provider subject as the stable link. It doesn't require or store an email address, name, groups, provider access token, or refresh token.
+The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed.
 
-`OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. Provider-only workspaces don't receive a portable credential automatically. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
-
-In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. Revoking every browser session in `oidc_required` or `mixed` also requires a recent sign-in. For a provider-only workspace, an operator can issue a recovery credential with `manage_principal_access.py recover`, then use `mixed` to sign in and manage the link. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
-
-The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed. If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup.
+Open run streams recheck access within 15 seconds, even while output is idle. These checks don't extend session activity. Losing access disconnects the stream and stops a controlling interactive PTY; an ordinary command already accepted can finish and be viewed through another valid credential.
 
 Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
 
-Public share permalinks are disabled by default in every restricted profile: authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
+#### Session signing keys
+
+The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
+
+#### Provider compatibility
+
+For provider sign-in, register a confidential OpenID Connect client with the authorization-code flow and PKCE S256 enabled. Set its exact redirect URI to `https://<your-shell-host>/auth/oidc/callback`. The issuer must match the provider's discovery document exactly. Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URI` in `.env`; `OIDC_SCOPES` defaults to `openid`. The app asks the provider to authenticate the browser, verifies its signed ID token, and stores only the issuer and provider subject as the stable link. It doesn't require or store an email address, name, groups, provider access token, or refresh token.
+
+The provider client must meet these requirements:
+
+| Setting | Required behavior |
+| --- | --- |
+| Client and flow | Confidential client using authorization code and PKCE `S256`. |
+| Token endpoint authentication | `client_secret_basic`; other client-secret or private-key authentication methods aren't supported. |
+| Discovery | HTTPS at `<OIDC_ISSUER>/.well-known/openid-configuration`, with an exact matching `issuer` and HTTPS `authorization_endpoint`, `token_endpoint`, and `jwks_uri`. Discovery, token, and signing-key requests don't follow redirects. |
+| Callback | Register exactly `https://<your-shell-host>/auth/oidc/callback` and use the same value for `OIDC_REDIRECT_URI`. The callback request must reach the configured origin. |
+| ID-token signing | `RS256`, `PS256`, or `ES256`, with the matching public key in the provider's JWKS. |
+| Identity and audience | A stable, non-empty `sub` of at most 512 characters, the configured issuer, the client ID in `aud`, and the requested nonce. When `aud` contains multiple audiences, `azp` must equal the client ID. |
+| Token times | Include `iat` and `exp`; keep the provider and app clocks synchronized. Validation allows 30 seconds of clock skew. |
+| Linking freshness | Honor the linking request's `max_age=300` and include an integer `auth_time` in the ID token. At callback it must be no more than five minutes old or 30 seconds ahead of the app clock. The source credential sign-in must also be within five minutes and still valid. |
+
+#### Provider provisioning
+
+`OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
+
+#### Provider linking and recovery
+
+In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
+
+#### Provider availability and trust
+
+If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup. Validated discovery metadata and signing keys are cached for five minutes. A token naming an unknown signing key triggers one key refresh; each sign-in still needs a successful code exchange with the provider. CA changes replace one private combined bundle per worker, which is removed when that worker exits normally.
+
+#### Provider troubleshooting
+
+For failed provider sign-ins, check `OIDC_PROVIDER_FAILED` for unavailable dependencies or local storage and `OIDC_AUTH_FAILED` for rejected attempts. The records identify the failed stage and a fixed reason without provider responses or credentials. Enable DEBUG for stage timings; see the [Logging Reference](docs/logging.md) for the fields. Check these stage and reason combinations first:
+
+- `discovery` with `issuer_mismatch`, `invalid_endpoint`, or `pkce_unsupported`: compare the provider's discovery settings with the table above.
+- `token_exchange` with `client_authentication_failed` or `client_not_authorized`: check the client ID, secret, allowed flow, and `client_secret_basic` setting.
+- `signing_keys` or `token_validation`: check the published signing key and supported algorithm; `audience_mismatch` and `authorized_party_mismatch` point to client audience settings.
+- `token_validation` with `recent_provider_required`: require a fresh provider sign-in that returns `auth_time`, then retry linking. Check both clocks if fresh sign-in is still rejected.
+
+The browser shows a generic failure message; the safe server records distinguish these setup problems from a provider outage.
+
+#### Public shares
+
+Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
 ### v3 identity cutover
 
-The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before upgrading an existing SQLite or Postgres deployment, verify a backup of the current stopped-state data and run the cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before starting v3 against an existing SQLite or Postgres database, verify a backup of the current stopped-state data and run the new image's cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+
+#### Development checkout
 
 For a development checkout using the bundled Postgres service, run the backup helper on the Docker host before stopping the stack. It uses `docker compose exec` for `pg_dump`, so Postgres must be running. Use the Python environment that has the app's requirements installed, and pass your actual `.env` and Compose paths if they differ. If you don't have an `.env`, omit that option and export the same `DATABASE_BACKEND` and `DATABASE_URL` used by the stack:
 
@@ -276,6 +364,8 @@ docker compose -f compose.dev.yaml run --rm --no-deps \
   --selected-credential-file /cutover/selected-credential.txt
 ```
 
+The selected development preflight holds the Postgres migration lock while calculating its review and rolls back any temporary schema updates before returning; it leaves the saved database state unchanged.
+
 The `development_discard_review` counts separate the other credentials, their owned rows, Team snapshots, Team recent values, and Team memberships without printing credential values. The discard path accepts only personal History runs, snapshots, recent values, preferences, and starred commands by default. If a Team snapshot belongs to a disposable test credential, inspect its metadata and links first. Once you've confirmed it can go, add `--reviewed-team-snapshot-id <snapshot-id>` to both the selected preflight above and the conversion below, repeating the flag for every Team snapshot you reviewed. Team recent-value suggestions have no standalone ID; inspect their Team, member role, kind, and count without printing the saved values, then add `--expected-discard-team-recent-values <reviewed-count>` to both commands. Both exceptions require an active Team owned by the selected operator and an active membership for the test credential. The snapshot IDs must match exactly and have no Project links, labels, or notes. The tool still refuses other Team-scoped data, unknown owner tables, linked runs or snapshots, Team owners, and memberships referenced elsewhere. Keep the backup if any check stops the conversion; don't delete token rows or History rows manually.
 
 For a development conversion, stop every application writer but leave Postgres running. Put the selected credential in an owner-only file, then use the same source mount and backup with the conversion confirmations:
@@ -316,12 +406,59 @@ Omit the Team-snapshot and Team-recent-value flags when those records aren't pre
 
 If the old workspace is on a separate volume or bind mount, mount that same location in the one-off container as well. The development-backup opt-in is not needed for managed archives and must not be used as a substitute for a managed production backup.
 
-For managed installations, run the tool only in a one-off application container. For Postgres, the database service must be running even if the app can't start. Mount the verified backup read-only and use a private operator directory for any selected credential input or one-time output:
+#### Managed upgrade from v2.9.2
+
+The v2.9.2 image doesn't contain `/app/tools/cutover_principal_identity.py`. Stage and verify the reviewed v3 release before running that tool, while keeping the application stopped. `darklab-deploy upgrade` updates managed files and selects the new image in `.env`; it doesn't start the application. Rehearse the chosen reset or conversion on a private copy of the old installation and its backup before changing the live installation.
+
+Run these commands from the managed installation directory. Keep the same Compose project name, `.env`, data, configuration, and workspace mounts throughout. This helper includes the operator override when present:
+
+```bash
+cutover_compose() {
+  if [ -f compose.operator.yaml ]; then
+    docker compose --env-file .env -f compose.yaml -f compose.operator.yaml "$@"
+  else
+    docker compose --env-file .env -f compose.yaml "$@"
+  fi
+}
+```
+
+1. **Stop application writers and back up the old state using v2.9.2.** Stop any external database or workspace writers too. Keep the existing Postgres service available; don't use `down` or remove its volume. If bundled Postgres is stopped, start only that service with `cutover_compose --profile postgres up -d --no-deps --wait postgres` before taking the backup.
+
+   ```bash
+   ./darklab-deploy status
+   cutover_compose stop shell zap-worker oast-worker
+   ./darklab-deploy backup
+   ```
+
+   The backup command verifies the managed archive and prints its path. Review its warnings and confirm it includes the database, private configuration, vault key, and the workspace files being preserved. Keep that exact archive and the old deployment files for recovery; no writers may change the backed-up state before cutover.
+
+2. **Stage the reviewed v3 release without starting it.** Replace the backup filename with the path printed above; use the exact reviewed v3 version if it differs from this example.
+
+   ```bash
+   ./darklab-deploy upgrade 3.0.0 \
+     --backup "$PWD/backups/darklab-backup-<timestamp>.tar.gz"
+   ./darklab-deploy status
+   ```
+
+   This verifies the supplied backup and release material, installs the v3 managed files, and updates `DARKLAB_IMAGE` in `.env`. Review new settings in `.env.example` and preserve the existing database and workspace configuration. Remove any exported `DARKLAB_IMAGE` override, and ensure `compose.operator.yaml` doesn't select a different application image. **Don't run the restart command printed by `upgrade` yet.**
+
+3. **Pull and verify the selected v3 application image.** These commands use the new `.env` and release manifest. Pulling the image and overriding its entrypoint for a one-off tool run don't start the application or its startup migrations.
+
+   ```bash
+   cutover_compose pull shell
+   ./verify-release-image.sh
+   cutover_compose run --rm --no-deps --entrypoint python shell \
+     /app/tools/cutover_principal_identity.py --help
+   ```
+
+4. **Run v3 preflight, then the selected reset or conversion below.** Keep Postgres running and every application writer stopped. The one-off `shell` service inherits the installation's data, config, and workspace mounts, including `compose.operator.yaml`; add any separately managed workspace mount if it isn't in that service definition. Mount the verified backup read-only and use a private operator directory for credential input and one-time output.
+
+For an initial inventory, omit `--expected-legacy-credentials` from the preflight command. Review the reported count, then supply it on the repeated preflight and chosen cutover command. A changed count stops the operation:
 
 ```bash
 mkdir -p cutover
 chmod 700 cutover
-docker compose run --rm --no-deps \
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   -v "$PWD/cutover:/cutover" \
   --entrypoint python shell \
@@ -334,8 +471,8 @@ docker compose run --rm --no-deps \
 For SQLite, the preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
 
 ```bash
-docker compose stop
-docker compose run --rm --no-deps \
+cutover_compose stop
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   --entrypoint python shell \
   /app/tools/cutover_principal_identity.py reset \
@@ -349,7 +486,7 @@ docker compose run --rm --no-deps \
 The reset prints database and workspace rollback directories. Keep both until the upgraded application is healthy. Before creating any new application state, you can restore the staged data with `rollback-reset`; the command refuses to overwrite a non-empty destination:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint python shell \
+cutover_compose run --rm --no-deps --entrypoint python shell \
   /app/tools/cutover_principal_identity.py rollback-reset \
   --database-rollback-path <printed-database-path> \
   --workspace-rollback-path <printed-workspace-path> \
@@ -363,17 +500,17 @@ For SQLite, stop the complete Compose project. For Postgres, leave the `postgres
 
 ```bash
 # SQLite
-docker compose stop
+cutover_compose stop
 
 # Postgres
-docker compose stop shell zap-worker oast-worker
+cutover_compose stop shell zap-worker oast-worker
 ```
 
 Then run the conversion:
 
 ```bash
 chmod 600 cutover/selected-credential.txt
-docker compose run --rm --no-deps \
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   -v "$PWD/cutover:/cutover" \
   --entrypoint python shell \
@@ -387,9 +524,18 @@ docker compose run --rm --no-deps \
   --confirm-selected-conversion convert-the-selected-operator
 ```
 
-The conversion keeps the existing workspace directory name, updates database ownership in one transaction, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
+Preflight can read an untouched v2.9.2 database. The conversion applies its required schema updates together with ownership conversion in one transaction, keeps the existing workspace directory name, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
 
 If conversion fails, the transaction rolls back, the old database and workspace remain in place, and the incomplete output file is removed. Keep the verified backup and don't restart the application until the command succeeds and the replacement credential is stored securely. After a successful conversion, the old credentials are invalid and normal startup can apply later migrations. SQLite reset and reset rollback aren't available for Postgres; production installations use managed backup and restore for recovery, while development checkouts restore their separately rehearsed Postgres dump and files.
+
+After the chosen cutover succeeds and the replacement credential is saved, start the selected v3 deployment and check its health:
+
+```bash
+cutover_compose up -d
+cutover_compose ps
+```
+
+For a conversion, sign in with the replacement and verify the preserved workspace, History search, and Files. For a reset, verify the intended fresh-access profile and bootstrap restricted access when required. Keep the verified pre-upgrade backup and any reset rollback directories until those checks succeed. A failed cutover leaves application writers stopped; don't start either release against an unreviewed partial state.
 
 ---
 
@@ -1257,7 +1403,7 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `ACCESS_PROFILE` | Docker Compose, Flask app, operator access command | Browser access boundary: `open`, `token_required`, `oidc_required`, or `mixed` |
 | `RESTRICTED_PUBLIC_SHARES_ENABLED` | Docker Compose, Flask app | Allows capability-link creation and unauthenticated reads in restricted profiles. Defaults to `false` |
 | `BROWSER_SESSION_IDLE_MINUTES` | Docker Compose, Flask app | Inactivity deadline for restricted browser sessions. Defaults to `30` minutes |
-| `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit |
+| `BROWSER_SESSION_ABSOLUTE_HOURS` | Docker Compose, Flask app | Maximum restricted browser-session lifetime from authentication. Defaults to `12` hours and must not be shorter than the idle limit. Team privilege changes and provider linking preserve this deadline; only fresh sign-in renews it |
 | `OIDC_ISSUER` | Docker Compose, Flask app | Exact HTTPS provider issuer from discovery, without a trailing slash |
 | `OIDC_CLIENT_ID` | Docker Compose, Flask app | Confidential client ID registered with the provider |
 | `OIDC_CLIENT_SECRET` | Docker Compose, Flask app | Private client secret; keep it in the installation's private `.env` |

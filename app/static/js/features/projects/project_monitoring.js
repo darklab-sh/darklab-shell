@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
+import { backgroundPauseMessage } from '../../ui/background_pause.js';
 
 import {
   hasHistoryRunModalStateHandler as importedHasHistoryRunModalStateHandler,
@@ -346,6 +347,7 @@ let exportedDarklabProjectMonitoring = null;
         next_due_at: String(settings.next_due_at || ''),
         schedule_last_error: String(settings.schedule_last_error || ''),
         schedule_paused_reason: String(settings.schedule_paused_reason || ''),
+        paused_reason: String(settings.paused_reason || ''),
         schedule_last_fire_at: String(settings.schedule_last_fire_at || ''),
         schedule_last_fire_reason: String(settings.schedule_last_fire_reason || ''),
         schedule_last_fire_status: String(settings.schedule_last_fire_status || ''),
@@ -485,7 +487,8 @@ let exportedDarklabProjectMonitoring = null;
         settings.next_due_at ? `next due: ${formatDateLabel(settings.next_due_at)}` : '',
         settings.last_evaluated_at ? `last checked: ${formatDateLabel(settings.last_evaluated_at)}` : '',
         settings.schedule_last_fire_reason ? `last result: ${settings.schedule_last_fire_reason}` : '',
-        settings.schedule_paused_reason ? `paused: ${settings.schedule_paused_reason}` : '',
+        backgroundPauseMessage(settings.paused_reason || settings.schedule_paused_reason)
+          || (settings.schedule_paused_reason ? `paused: ${settings.schedule_paused_reason}` : ''),
         settings.schedule_last_error ? `last issue: ${settings.schedule_last_error}` : '',
         canManage ? '' : 'read-only',
       ].filter(Boolean).join(' · ');

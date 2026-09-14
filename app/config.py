@@ -13,7 +13,7 @@ import ipaddress
 import re
 from copy import deepcopy
 from collections.abc import Iterator, Mapping, MutableMapping
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 from urllib.parse import urlsplit
 import yaml
 from pydantic import (
@@ -1157,6 +1157,16 @@ def _format_validation_error(exc: ValidationError, provenance: dict[str, str], r
     return "; ".join(parts)
 
 
+def _reject_access_config(
+    provenance: dict[str, str], key: str, reason: str, message: str,
+    *, phase: str = "oidc_validation",
+) -> NoReturn:
+    _record_config_load_failure(
+        phase=phase, source=_config_source(provenance, key), key=key, error=reason,
+    )
+    raise ConfigLoadError(message) from None
+
+
 def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str]) -> None:
     access_profile = str(defaults.get("access_profile") or "open").strip().lower()
     if access_profile not in {"open", "token_required", "oidc_required", "mixed"}:
@@ -1172,44 +1182,59 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
         defaults[key] = str(defaults.get(key) or "").strip()
     policy = str(defaults.get("oidc_provisioning") or "disabled").strip().lower()
     if policy not in {"disabled", "allowlist", "automatic"}:
-        raise ConfigLoadError("oidc_provisioning must be disabled, allowlist, or automatic")
+        _reject_access_config(provenance, "oidc_provisioning", "unsupported_provisioning",
+                              "oidc_provisioning must be disabled, allowlist, or automatic")
     defaults["oidc_provisioning"] = policy
     for key, separator in (("oidc_scopes", " "), ("oidc_allowed_subjects", ",")):
         value = defaults.get(key) or []
         if isinstance(value, str):
             value = value.split(separator)
         if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
-            raise ConfigLoadError(f"{key} must be a list of strings")
+            _reject_access_config(provenance, key, "invalid_list", f"{key} must be a list of strings")
         defaults[key] = [item.strip() for item in value if item.strip()]
     if "openid" not in defaults["oidc_scopes"]:
-        raise ConfigLoadError("oidc_scopes must include openid")
+        _reject_access_config(provenance, "oidc_scopes", "openid_scope_missing", "oidc_scopes must include openid")
     if len(defaults["oidc_scopes"]) != len(set(defaults["oidc_scopes"])):
-        raise ConfigLoadError("oidc_scopes must not repeat values")
+        _reject_access_config(provenance, "oidc_scopes", "duplicate_values", "oidc_scopes must not repeat values")
     if len(defaults["oidc_allowed_subjects"]) != len(set(defaults["oidc_allowed_subjects"])):
-        raise ConfigLoadError("oidc_allowed_subjects must not repeat values")
+        _reject_access_config(provenance, "oidc_allowed_subjects", "duplicate_values",
+                              "oidc_allowed_subjects must not repeat values")
     configured = any(defaults[key] for key in (
         "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri", "oidc_ca_bundle"
     ))
     if access_profile in {"oidc_required", "mixed"} and not configured:
-        raise ConfigLoadError("OIDC provider configuration is required for this access profile")
+        _reject_access_config(provenance, "access_profile", "oidc_configuration_required",
+                              "OIDC provider configuration is required for this access profile")
     if configured:
         for key in ("oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri"):
             if not defaults[key]:
-                raise ConfigLoadError(f"{key} is required when OIDC is configured")
-        issuer = urlsplit(defaults["oidc_issuer"])
-        redirect = urlsplit(defaults["oidc_redirect_uri"])
+                _reject_access_config(provenance, key, "required_setting_missing", f"{key} is required when OIDC is configured")
+        try:
+            issuer = urlsplit(defaults["oidc_issuer"])
+        except ValueError:
+            _reject_access_config(provenance, "oidc_issuer", "invalid_issuer_url", "oidc_issuer must be a valid HTTPS issuer URL")
+        try:
+            redirect = urlsplit(defaults["oidc_redirect_uri"])
+        except ValueError:
+            _reject_access_config(provenance, "oidc_redirect_uri", "invalid_redirect_uri",
+                                  "oidc_redirect_uri must be a valid HTTPS callback URL")
         if (issuer.scheme != "https" or not issuer.netloc or issuer.username or issuer.password
                 or issuer.query or issuer.fragment or defaults["oidc_issuer"].endswith("/")):
-            raise ConfigLoadError("oidc_issuer must be an HTTPS issuer URL without a trailing slash or query")
+            _reject_access_config(provenance, "oidc_issuer", "invalid_issuer_url",
+                                  "oidc_issuer must be an HTTPS issuer URL without a trailing slash or query")
         if (redirect.scheme != "https" or not redirect.netloc or redirect.username or redirect.password
                 or redirect.query or redirect.fragment or redirect.path != "/auth/oidc/callback"):
-            raise ConfigLoadError("oidc_redirect_uri must be an HTTPS /auth/oidc/callback URL")
+            _reject_access_config(provenance, "oidc_redirect_uri", "invalid_redirect_uri",
+                                  "oidc_redirect_uri must be an HTTPS /auth/oidc/callback URL")
     if policy == "allowlist" and not defaults["oidc_allowed_subjects"]:
-        raise ConfigLoadError("oidc_allowed_subjects is required for allowlist provisioning")
+        _reject_access_config(provenance, "oidc_allowed_subjects", "allowlist_required",
+                              "oidc_allowed_subjects is required for allowlist provisioning")
     if policy != "allowlist" and defaults["oidc_allowed_subjects"]:
-        raise ConfigLoadError("oidc_allowed_subjects is only used with allowlist provisioning")
+        _reject_access_config(provenance, "oidc_allowed_subjects", "allowlist_not_enabled",
+                              "oidc_allowed_subjects is only used with allowlist provisioning")
     if access_profile not in {"oidc_required", "mixed"} and policy != "disabled":
-        raise ConfigLoadError("OIDC provisioning requires oidc_required or mixed access")
+        _reject_access_config(provenance, "oidc_provisioning", "access_profile_disallows_provisioning",
+                              "OIDC provisioning requires oidc_required or mixed access")
     for key, minimum, maximum in (
         ("browser_session_idle_minutes", 1, 1440),
         ("browser_session_absolute_hours", 1, 8760),
@@ -1225,8 +1250,10 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
             raise ConfigLoadError(f"{key} must be an integer from {minimum} through {maximum}")
         defaults[key] = parsed
     if defaults["browser_session_idle_minutes"] * 60 > defaults["browser_session_absolute_hours"] * 3600:
-        raise ConfigLoadError(
-            "browser_session_idle_minutes cannot be longer than browser_session_absolute_hours"
+        _reject_access_config(
+            provenance, "browser_session_idle_minutes", "idle_exceeds_absolute",
+            "browser_session_idle_minutes cannot be longer than browser_session_absolute_hours",
+            phase="access_profile_validation",
         )
     defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
         defaults.get("ai_base_url_allowed_cidrs"),

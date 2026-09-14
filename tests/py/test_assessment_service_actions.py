@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 
 from identity_helpers import anonymous_session_id
+from services.teams.scope import anonymous_owner_context
 import config as app_config
 from core.output_nuclei import NUCLEI_JSON_MAX_LINE_BYTES, nuclei_output_metadata
 from services.assessments import action_plan_nuclei
@@ -4084,11 +4085,12 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
         workspace_notice_lines=lambda _validation: [],
         workspace_artifacts_from_validation=lambda *_args: [],
     )
-    monkeypatch.setattr("services.runs.start.owner_context_for_scope", lambda *_args, **_kwargs: object())
+    owner = anonymous_owner_context(anonymous_session_id("broker-context"))
     monkeypatch.setattr("services.runs.start.threading.Thread", Thread)
     brokered = start_brokered_run(
         original_command=prepared.command,
-        session_id="session-httpx",
+        session_id=owner.owner_id,
+        owner_context=owner,
         client_ip="192.0.2.1",
         handlers=handlers,
         output_signal_context=context,
@@ -4114,7 +4116,8 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     start_brokered_run(
         original_command=reviewed_execution.validation_command,
         display_command=reviewed_execution.execution_command,
-        session_id="session-httpx",
+        session_id=owner.owner_id,
+        owner_context=owner,
         client_ip="192.0.2.1",
         handlers=handlers,
         reviewed_execution=reviewed_execution,
@@ -4150,7 +4153,8 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     start_brokered_run(
         original_command=schemathesis_execution.validation_command,
         display_command=schemathesis_execution.execution_command,
-        session_id="session-httpx",
+        session_id=owner.owner_id,
+        owner_context=owner,
         client_ip="192.0.2.1",
         handlers=handlers,
         reviewed_execution=schemathesis_execution,
@@ -4162,7 +4166,8 @@ def test_real_command_classifier_receives_generated_run_id(monkeypatch):
     with pytest.raises(ValueError, match="invalid run output signal context"):
         start_brokered_run(
             original_command=prepared.command,
-            session_id="session-httpx",
+            session_id=owner.owner_id,
+            owner_context=owner,
             client_ip="192.0.2.1",
             handlers=handlers,
             output_signal_context=cast(

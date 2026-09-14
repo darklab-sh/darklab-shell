@@ -1,0 +1,193 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+"""Bounded authentication diagnostics without submitted identities."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import PurePath
+import re
+from threading import Lock
+import time
+from types import TracebackType
+from typing import TYPE_CHECKING
+
+from flask import g, has_request_context, request
+
+from services.auth.contracts import VerifierKeyError, WorkspaceStorageError
+
+if TYPE_CHECKING:
+    from services.auth.rate_limit import CredentialRateLimitResult
+    from services.auth.resolver import AuthenticationResult
+
+
+log = logging.getLogger("shell")
+_REASONS = frozenset({
+    "anonymous_workspace_attached", "disabled_principal", "expired_browser_session",
+    "expired_credential", "idle_browser_session", "invalid_authorization_header",
+    "invalid_credential_scopes", "legacy_identity_removed", "malformed_browser_session",
+    "malformed_credential", "multiple_credentials", "revoked_browser_session",
+    "revoked_credential", "unknown_browser_session", "unknown_credential",
+    "credential_required", "anonymous_identity_required", "invalid_credential",
+})
+_POLICIES = frozenset({"failed_credential_ip", "failed_credential_lookup", "anonymous_issuance_ip"})
+_CSRF_REASONS = frozenset({"missing_cookie", "missing_header", "token_mismatch", "stored_token_invalid"})
+_WARNING_INTERVAL = 60.0
+_WARNING_LOCK = Lock()
+# Keys come only from the fixed event/reason/policy sets, never from requests.
+_WARNING_STATE: dict[tuple[str, str], tuple[float, int]] = {}
+_SIGNING_KEY_ERROR_REASONS = frozenset({"missing_key", "unsupported_wrapper", "decryption_failed", "invalid_key"})
+_SIGNING_KEY_ERROR_MAX_KEYS = 64
+_SIGNING_KEY_ERROR_LOCK = Lock()
+_SIGNING_KEY_ERROR_STATE: dict[tuple[int, str], tuple[float, int]] = {}
+
+
+def _request_value(value: object, limit: int) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit and re.fullmatch(r"[A-Za-z0-9_.-]+", text) else "unknown"
+
+
+def _warning(event: str, classification: str, **fields: object) -> None:
+    if has_request_context():
+        seen = getattr(g, "darklab_auth_warning_events", None)
+        if seen is None:
+            seen = g.darklab_auth_warning_events = set()
+        if event in seen:
+            return
+        seen.add(event)
+    now = time.monotonic()
+    key = (event, classification)
+    with _WARNING_LOCK:
+        previous = _WARNING_STATE.get(key)
+        if previous is not None and now - previous[0] < _WARNING_INTERVAL:
+            _WARNING_STATE[key] = (previous[0], previous[1] + 1)
+            return
+        suppressed = previous[1] if previous is not None else 0
+        _WARNING_STATE[key] = (now, 0)
+    if has_request_context():
+        fields.update({
+            "request_id": _request_value(request.environ.get("darklab_request_id"), 64),
+            "endpoint": _request_value(request.endpoint, 160),
+        })
+    log.warning(event, extra={**fields, "suppressed_repeat_count": suppressed})
+
+
+def log_authentication_rejected(reason: str, *, http_status: int = 401) -> None:
+    code = reason if reason in _REASONS else "invalid_credential"
+    _warning("CREDENTIAL_AUTHENTICATION_REJECTED", code, reason=code, http_status=http_status)
+
+
+def log_credential_rate_limited(result: CredentialRateLimitResult) -> None:
+    if result.allowed:
+        return
+    policy = result.policy_code if result.policy_code in _POLICIES else "credential_limit"
+    _warning(
+        "CREDENTIAL_RATE_LIMITED", policy, policy=policy,
+        retry_after=result.retry_after, http_status=429,
+    )
+
+
+def log_browser_csrf_rejected(reason: str) -> None:
+    code = reason if reason in _CSRF_REASONS else "invalid_csrf"
+    _warning("BROWSER_CSRF_REJECTED", code, reason=code, http_status=403)
+
+
+def log_sign_in_form_rejected() -> None:
+    if not log.isEnabledFor(logging.DEBUG) or not has_request_context():
+        return
+    log.debug("BROWSER_SIGN_IN_FORM_REJECTED", extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64),
+        "endpoint": _request_value(request.endpoint, 160),
+        "reason": "invalid_nonce",
+        "http_status": 200,
+    })
+
+
+def log_authentication_resolved(result: AuthenticationResult, *, cookies_enabled: bool) -> None:
+    if not log.isEnabledFor(logging.DEBUG) or not has_request_context():
+        return
+    from services.auth.browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
+
+    transports = [
+        method for header, method in (
+            ("X-Darklab-Anonymous-ID", "anonymous_header"),
+            ("X-Darklab-Credential", "portable_header"),
+            ("Authorization", "pat_bearer"),
+        ) if header in request.headers
+    ]
+    if result.error_code == "legacy_identity_removed":
+        transports.append("legacy_header")
+    if request.cookies.get(BROWSER_SESSION_COOKIE):
+        transports.append("browser_cookie")
+    context = result.context
+    log.debug("AUTHENTICATION_RESOLVED", extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64),
+        "endpoint": _request_value(request.endpoint, 160),
+        "method": context.authentication_method if context else "rejected" if result.failed else "none",
+        "state": result.state.value,
+        "owner_kind": "personal" if result.is_valid else "anonymous" if context else "none",
+        "supplied_transports": ",".join(transports) or "none",
+        "browser_cookie_enabled": cookies_enabled,
+        "last_used_write_due": result.last_used_write_due,
+    })
+
+
+def _sanitized_storage_exc_info(
+    exc: BaseException,
+) -> tuple[type[RuntimeError], RuntimeError, TracebackType | None]:
+    frames = []
+    traceback = exc.__traceback__
+    while traceback is not None:
+        code = traceback.tb_frame.f_code
+        frames.append(f"{PurePath(code.co_filename).name}:{code.co_name}:{traceback.tb_lineno}")
+        traceback = traceback.tb_next
+    try:
+        raise RuntimeError("Authentication storage operation failed") from None
+    except RuntimeError as safe_error:
+        safe_error.add_note("Origin frames: " + " > ".join(frames[-12:])[:1000])
+        return RuntimeError, safe_error, safe_error.__traceback__
+
+
+def log_credential_lifecycle_failed(exc: BaseException) -> None:
+    endpoint = request.endpoint if has_request_context() else None
+    operation = str(endpoint or "").removeprefix("auth.")
+    if operation not in {
+        "create_principal", "credentials", "create_credential", "update_credential",
+        "credential_durable_work", "rotate_credential", "revoke_credential",
+    }:
+        operation = "unknown"
+    reason = (
+        "verifier_key_unavailable" if isinstance(exc, VerifierKeyError)
+        else "workspace_storage_unavailable" if isinstance(exc, WorkspaceStorageError)
+        else "identity_storage_failed"
+    )
+    log.error("CREDENTIAL_LIFECYCLE_FAILED", exc_info=_sanitized_storage_exc_info(exc), extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64) if has_request_context() else "unknown",
+        "operation": operation,
+        "reason": reason,
+        "error_class": _request_value(type(exc).__name__, 80),
+        "http_status": 500,
+    })
+
+
+def log_browser_signing_key_unavailable(version: int, exc: BaseException, *, reason: str) -> None:
+    """Coalesce faults only after a stored session has confirmed its key version."""
+    code = reason if reason in _SIGNING_KEY_ERROR_REASONS else "invalid_key"
+    key = (version, code)
+    now = time.monotonic()
+    with _SIGNING_KEY_ERROR_LOCK:
+        previous = _SIGNING_KEY_ERROR_STATE.pop(key, None)
+        if previous is not None and now - previous[0] < _WARNING_INTERVAL:
+            _SIGNING_KEY_ERROR_STATE[key] = (previous[0], previous[1] + 1)
+            return
+        suppressed = previous[1] if previous is not None else 0
+        if len(_SIGNING_KEY_ERROR_STATE) >= _SIGNING_KEY_ERROR_MAX_KEYS:
+            _SIGNING_KEY_ERROR_STATE.pop(next(iter(_SIGNING_KEY_ERROR_STATE)))
+        _SIGNING_KEY_ERROR_STATE[key] = (now, 0)
+    log.error("BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE", exc_info=_sanitized_storage_exc_info(exc), extra={
+        "key_version": version,
+        "reason": code,
+        "error_type": _request_value(type(exc).__name__, 80),
+        "suppressed_repeat_count": suppressed,
+    })

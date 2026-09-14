@@ -95,6 +95,7 @@ from . import (
     v0082_remove_legacy_session_identity,
     v0083_browser_sessions,
     v0084_oidc_identities,
+    v0085_background_pause_reasons,
 )
 
 _ = baseline
@@ -184,4 +185,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0082_remove_legacy_session_identity.MIGRATION,
     v0083_browser_sessions.MIGRATION,
     v0084_oidc_identities.MIGRATION,
+    v0085_background_pause_reasons.MIGRATION,
 )

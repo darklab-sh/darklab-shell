@@ -460,8 +460,22 @@ let exportedDarklabProjectPackages = null;
         hideWizardOverlay();
         return;
       }
+      const activeField = !focus && ctx.wizardBody.contains(document.activeElement)
+        ? document.activeElement.closest('input[data-project-package-field], textarea[data-project-package-field]')
+        : null;
+      const selection = activeField ? [activeField.selectionStart, activeField.selectionEnd] : null;
+      if (activeField) updateWizardField(activeField.dataset.projectPackageField, activeField.value);
       ctx.wizardBody.replaceChildren();
       renderWizard(ctx.wizardBody, projectId, summaryFor(projectId));
+      if (activeField) {
+        const replacement = Array.from(ctx.wizardBody.querySelectorAll('[data-project-package-field]'))
+          .find(field => field.dataset.projectPackageField === activeField.dataset.projectPackageField);
+        if (replacement) {
+          replacement.replaceWith(activeField);
+          activeField.focus({ preventScroll: true });
+          activeField.setSelectionRange(...selection);
+        }
+      }
       ctx.wizardOverlay.classList.remove('u-hidden');
       ctx.wizardOverlay.classList.add('open');
       ctx.wizardOverlay.setAttribute('aria-hidden', 'false');

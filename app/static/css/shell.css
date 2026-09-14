@@ -1588,6 +1588,11 @@ body.mobile-terminal-mode .output-follow-btn {
   display: none;
 }
 
+.options-access-permissions {
+  min-width: 0;
+  margin: 10px 0 0;
+}
+
 .options-access-editor-field {
   margin-top: 10px;
 }

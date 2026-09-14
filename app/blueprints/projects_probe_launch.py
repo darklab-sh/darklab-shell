@@ -75,18 +75,18 @@ def project_probe_launch(project_id):
     }
     from blueprints import run as run_routes  # noqa: PLC0415
 
-    team_role = ""
-    if team_id:
-        try:
-            scope = project_routes.current_request_scope(session_id, request)
-            team_role = str((scope.member or {}).get("role") or "")
-        except project_routes.RequestScopeError:
-            team_role = ""
+    try:
+        scope = project_routes.current_request_scope(session_id, request)
+    except project_routes.RequestScopeError as exc:
+        payload, status = project_routes.scope_error_payload(exc)
+        return jsonify(payload), status
+    team_role = str((scope.member or {}).get("role") or "") if scope.is_team else ""
     owner_tab_id = run_routes._active_run_owner_value(data.get("tab_id", ""))
     started_at = datetime.now(timezone.utc).isoformat()
     try:
         result = start_project_probe(
             session_id=session_id,
+            owner_context=scope.context,
             project_id=project_id,
             probe_request=probe_request,
             confirmation=confirmation,

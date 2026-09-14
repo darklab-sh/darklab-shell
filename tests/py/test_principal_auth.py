@@ -210,6 +210,7 @@ def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_pat
 
     first = resolve_authentication(headers, conn=auth_db, now=now)
     assert first.state == AuthenticationState.VALID
+    assert first.last_used_write_due is True
 
     statements: list[str] = []
     auth_db.set_trace_callback(statements.append)
@@ -219,6 +220,7 @@ def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_pat
         auth_db.set_trace_callback(None)
 
     assert second.state == AuthenticationState.VALID
+    assert second.last_used_write_due is False
     assert not any("UPDATE credentials SET last_used_at" in statement for statement in statements)
 
 
@@ -522,13 +524,14 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     )
     assert updated.status_code == 200
     assert updated.get_json()["credential"]["label"] == "Travel laptop"
+    future_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).replace(microsecond=0).isoformat()
     expiring = client.patch(
         f"/auth/credentials/{second_id}",
         headers=first_headers,
-        json={"expires_at": "2027-01-01T00:00:00+00:00"},
+        json={"expires_at": future_expiry},
     )
     assert expiring.status_code == 200
-    assert expiring.get_json()["credential"]["expires_at"] == "2027-01-01T00:00:00+00:00"
+    assert expiring.get_json()["credential"]["expires_at"] == future_expiry
 
     rotated = client.post(
         f"/auth/credentials/{second_id}/rotate",
@@ -537,6 +540,7 @@ def test_credential_lifecycle_routes_rotate_revoke_and_prevent_accidental_lockou
     )
     assert rotated.status_code == 201
     replacement = rotated.get_json()
+    assert replacement["credential"]["expires_at"] == future_expiry
     replacement_headers = {"X-Darklab-Credential": replacement["secret"]}
     assert client.get("/auth/principal", headers=replacement_headers).status_code == 200
     assert client.get(
@@ -633,6 +637,86 @@ def test_pat_scopes_are_enforced_on_identity_routes(anonymous_identity_factory):
     assert credentials.get_json()["error"] == "credential_forbidden"
 
 
+@pytest.mark.parametrize("profile", ["open", "token_required", "mixed", "oidc_required"])
+@pytest.mark.parametrize("scopes", [("identity:read",), tuple(sorted(PAT_SCOPES))])
+def test_pats_cannot_use_browser_routes(profile, scopes, anonymous_identity_factory, monkeypatch):
+    from conftest import make_test_app
+
+    flask_app = make_test_app()
+    flask_app.config["RATELIMIT_ENABLED"] = False
+    client = flask_app.test_client()
+    upgraded = client.post(
+        "/auth/principals",
+        headers=anonymous_identity_factory(f"pat-browser-boundary-{profile}-{len(scopes)}").headers,
+        json={},
+    ).get_json()
+    portable_headers = {"X-Darklab-Credential": upgraded["secret"]}
+    created = client.post(
+        "/auth/credentials",
+        headers=portable_headers,
+        json={"type": "pat", "scopes": list(scopes)},
+    ).get_json()
+    pat_headers = {"Authorization": f"Bearer {created['secret']}"}
+    monkeypatch.setitem(flask_app.config, "DARKLAB_CONFIG", {
+        **flask_app.config["DARKLAB_CONFIG"],
+        "access_profile": profile,
+    })
+
+    assert client.get("/api/v1/whoami", headers=pat_headers).status_code == 200
+    api_projects = client.get("/api/v1/projects", headers=pat_headers)
+    assert api_projects.status_code == (200 if "projects:read" in scopes else 403)
+    if "projects:read" not in scopes:
+        assert api_projects.get_json()["error"]["code"] == "insufficient_scope"
+
+    browser_requests = [
+        ("GET", "/"),
+        ("GET", "/config"),
+        ("GET", "/history"),
+        ("GET", "/session/starred"),
+        ("GET", "/workspace/files"),
+        ("GET", "/projects"),
+        ("GET", "/atlas/entities"),
+        ("GET", "/schedules"),
+        ("GET", "/watchers"),
+        ("GET", "/session/workflows"),
+        ("GET", "/session/secrets"),
+        ("GET", "/session/notification-channels"),
+        ("GET", "/runs/missing/stream"),
+        ("POST", "/runs"),
+        ("POST", "/projects"),
+        ("POST", "/session/starred"),
+        ("POST", "/workspace/files"),
+        ("POST", "/session/secrets"),
+        ("POST", "/schedules"),
+        ("POST", "/auth/credentials"),
+        ("POST", "/auth/sessions/revoke-all"),
+    ]
+    for method, path in browser_requests:
+        # Check actual registered routes, not rejection of nonexistent paths.
+        with flask_app.test_request_context(path, method=method):
+            from flask import request
+
+            assert request.url_rule is not None, (method, path)
+        response = client.open(path, method=method, headers=pat_headers, json={})
+        assert response.status_code == 403, (profile, method, path)
+        assert response.get_json()["error"] == "pat_route_forbidden", (method, path)
+
+    # PAT-safe identity handlers retain their narrower scope and self-only rules.
+    if profile != "oidc_required":
+        assert client.get("/auth/principal", headers=pat_headers).status_code == 200
+        metadata = client.get("/auth/credentials", headers=pat_headers).get_json()
+        assert [row["id"] for row in metadata["credentials"]] == [created["credential"]["id"]]
+        assert client.post(
+            f"/auth/credentials/{upgraded['credential']['id']}/revoke",
+            headers=pat_headers,
+            json={},
+        ).status_code == 403
+    assert client.post(
+        "/api/v1/credentials/current/revoke", headers=pat_headers, json={},
+    ).status_code == 200
+    assert client.get("/api/v1/whoami", headers=pat_headers).status_code == 401
+
+
 def test_secret_bearing_auth_routes_are_post_only():
     from conftest import make_test_app
     from blueprints.auth import SECRET_BEARING_ENDPOINTS
@@ -645,6 +729,16 @@ def test_secret_bearing_auth_routes_are_post_only():
     }
     assert methods.keys() == SECRET_BEARING_ENDPOINTS
     assert all(route_methods == {"OPTIONS", "POST"} for route_methods in methods.values())
+
+
+@pytest.mark.parametrize("headers", [{}, {"Origin": "https://unrelated.example", "Sec-Fetch-Site": "cross-site"}])
+def test_removed_local_storage_clear_route_cannot_erase_browser_identity(headers):
+    from conftest import make_test_app
+
+    client = make_test_app().test_client()
+    response = client.post("/auth/local-access/clear", headers=headers, base_url="https://localhost")
+    assert response.status_code == 404
+    assert "Clear-Site-Data" not in response.headers
 
 
 def test_anonymous_upgrade_rekeys_rows_in_place_and_preserves_fts_and_workspace(
@@ -1140,13 +1234,14 @@ def test_operator_lifecycle_covers_safe_lookup_and_recovery(ownership_cutover_db
         label="Operator-issued laptop",
         connect=connect,
     )
+    future_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).replace(microsecond=0).isoformat()
     expiring = lifecycle.operator_change_expiry(
         bundle.principal.id,
         second.metadata.id,
-        "2027-01-01T00:00:00+00:00",
+        future_expiry,
         connect=connect,
     )
-    assert expiring.expires_at == "2027-01-01T00:00:00+00:00"
+    assert expiring.expires_at == future_expiry
 
     rotated = lifecycle.operator_rotate(
         bundle.principal.id,
@@ -1155,6 +1250,7 @@ def test_operator_lifecycle_covers_safe_lookup_and_recovery(ownership_cutover_db
         connect=connect,
     )
     assert rotated.metadata.id != second.metadata.id
+    assert rotated.metadata.expires_at == future_expiry
     assert resolve_authentication(
         {"X-Darklab-Credential": second.secret},
         conn=conn,

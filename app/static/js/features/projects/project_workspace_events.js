@@ -21,6 +21,7 @@ let exportedDarklabProjectWorkspaceEvents = null;
 
   function createProjectWorkspaceEventsController(context) {
     const ctx = context || {};
+    const handledClicks = new WeakSet();
 
     function selectedProjectId() {
       return String(ctx.selectedProjectId?.() || '');
@@ -525,6 +526,9 @@ let exportedDarklabProjectWorkspaceEvents = null;
     }
 
     async function handleClick(event) {
+      // Mobile capture and modal bubbling can deliver the same click.
+      if (handledClicks.has(event)) return;
+      handledClicks.add(event);
       const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
       if (mobileDetailTab) {
         event.preventDefault();

@@ -174,6 +174,11 @@ class ModuleSizeBudget:
 
 
 _MODULE_SIZE_RATCHET = (
+    ModuleSizeBudget("app/blueprints/run_streaming.py", 30, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_run_streaming.py", 60, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/redis_streams.py", 16, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/pty/streaming.py", 41, "split-package-ratchet"),
+
     ModuleSizeBudget(
         "app/blueprints/assessment_batch_lifecycle.py", 53, "split-package-ratchet"
     ),
@@ -271,10 +276,10 @@ _MODULE_SIZE_RATCHET = (
         "app/services/commands/registry_workspace_policy.py", 45, "split-package-ratchet"
     ),
     ModuleSizeBudget("app/blueprints/run.py", 799, "split-target-phase2"),
-    ModuleSizeBudget("app/blueprints/run_broker.py", 149, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_broker.py", 140, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_client.py", 153, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_kill.py", 123, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/run_pty.py", 260, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/run_pty.py", 253, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/run_support.py", 119, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/projects.py", 577, "split-target-phase3"),
     ModuleSizeBudget(
@@ -377,7 +382,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/blueprints/api_v1_probes.py", 100, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_read.py", 401, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_run_evidence.py", 24, "split-package-ratchet"),
-    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 344, "split-package-ratchet"),
+    ModuleSizeBudget("app/blueprints/api_v1_runs.py", 312, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_schedules.py", 211, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_streaming.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/blueprints/api_v1_teams.py", 354, "split-package-ratchet"),
@@ -480,7 +485,8 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/core/output_structured_signals.py", 223, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_targets.py", 240, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_target_recon.py", 63, "split-package-ratchet"),
-    ModuleSizeBudget("app/core/output_whois_entities.py", 60, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_whois_entities.py", 42, "split-package-ratchet"),
+    ModuleSizeBudget("app/core/output_whois_response.py", 69, "split-package-ratchet"),
     ModuleSizeBudget("app/core/output_whois_target.py", 27, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_profile.py", 93, "split-package-ratchet"),
     ModuleSizeBudget("app/services/atlas/intel_evidence.py", 329, "split-package-ratchet"),
@@ -711,7 +717,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workspace/settings.py", 77, "split-package-ratchet"),
     ModuleSizeBudget("app/core/migrations/baseline.py", 1689, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/pty/runtime.py", 106, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/pty/service.py", 1198, "split-target-phase4"),
+    ModuleSizeBudget("app/services/pty/service.py", 1184, "split-target-phase4"),
     ModuleSizeBudget("app/services/pty/settings.py", 95, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/snapshots.py", 64, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/state.py", 155, "split-package-ratchet"),
@@ -1079,8 +1085,9 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/workflows/fanout.py", 52, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/execution_kinds.py", 30, "split-package-ratchet"),
     ModuleSizeBudget(
-        "app/services/workflows/execution_authorization.py", 106, "split-package-ratchet"
+        "app/services/workflows/execution_authorization.py", 87, "split-package-ratchet"
     ),
+    ModuleSizeBudget("app/services/workflows/execution_owner.py", 29, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_policy.py", 120, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_checkpoint.py", 150, "split-package-ratchet"),
     ModuleSizeBudget("app/services/workflows/fanout_summary.py", 120, "split-package-ratchet"),
@@ -1281,7 +1288,7 @@ _MODULE_SIZE_RATCHET = (
     ModuleSizeBudget("app/services/pty/capture.py", 422, "split-package-ratchet"),
     ModuleSizeBudget("app/services/pty/transcript.py", 73, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/__init__.py", 0, "split-package-ratchet"),
-    ModuleSizeBudget("app/services/runs/broker.py", 716, "split-package-ratchet"),
+    ModuleSizeBudget("app/services/runs/broker.py", 714, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/comparison.py", 1263, "cohesive-ratchet"),
     ModuleSizeBudget("app/services/runs/comparison_derived.py", 204, "split-package-ratchet"),
     ModuleSizeBudget("app/services/runs/comparison_findings.py", 238, "split-package-ratchet"),

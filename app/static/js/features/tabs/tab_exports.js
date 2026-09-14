@@ -499,10 +499,11 @@ function _shareSnapshotLabel(tab) {
 }
 
 function _canCreateShareSnapshot() {
-  return _tabExportActiveTeamScopeCan('manage_history');
+  return _tabExportConfig().public_shares_enabled !== false && _tabExportActiveTeamScopeCan('manage_history');
 }
 
 function _shareSnapshotDeniedMessage() {
+  if (_tabExportConfig().public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
   return _tabExportTeamScopeDeniedMessage('create team history snapshots')
     || "View-only team members can't create team history snapshots. Switch to Personal or ask for operator access.";
 }
@@ -546,15 +547,15 @@ async function permalinkTab(id) {
       run_id: String(t.historyRunId || ''),
     })
   }).then(async (r) => {
-    const data = await r.json();
+    const data = await r.json().catch(() => null);
     if (r.ok === false || !data || typeof data.url !== 'string') {
-      throw new Error((data && (data.error || data.message)) || 'share failed');
+      throw new Error((data && data.message) || 'Failed to create permalink');
     }
     return data;
   }).then(data => {
     const url = `${location.origin}${data.url}`;
     _tabExportShareUrl(url).catch(() => _tabExportShowToast('Failed to copy link', 'error'));
-  }).catch(() => _tabExportShowToast('Failed to create permalink', 'error'))
+  }).catch(error => _tabExportShowToast(error.message || 'Failed to create permalink', 'error'))
     .finally(() => {
       _refocusAfterTabAction();
     });

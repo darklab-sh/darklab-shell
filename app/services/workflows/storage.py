@@ -414,6 +414,30 @@ def get_execution_by_id(
     return result
 
 
+def execution_state_for_recovery(
+    execution_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Read the execution pointer and its current step from one database snapshot."""
+    with get_db_connect()() as conn:
+        row = conn.execute(
+            "SELECT e.*, s.step_id AS recovery_step_id, "
+            "s.status AS recovery_step_status, s.run_id AS recovery_run_id "
+            "FROM workflow_executions e LEFT JOIN workflow_execution_steps s "
+            "ON s.execution_id = e.id AND s.step_id = e.current_step_id "
+            "WHERE e.id = ? AND e.execution_kind = ?",
+            (execution_id, WORKFLOW_EXECUTION_KIND),
+        ).fetchone()
+    execution = _execution_from_row(row)
+    if execution is None:
+        return None, None
+    step = {
+        "step_id": execution.pop("recovery_step_id"),
+        "status": execution.pop("recovery_step_status"),
+        "run_id": execution.pop("recovery_run_id"),
+    }
+    return execution, step if step["step_id"] is not None else None
+
+
 def set_fanout_checkpoint(
     execution_id: str,
     step_id: str,

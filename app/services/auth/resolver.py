@@ -34,6 +34,7 @@ from .contracts import (
     validate_anonymous_uuid,
 )
 from .verifier_keys import credential_verifier_digest, load_verifier_root
+from .workspace_storage import anonymous_workspace_storage_key, workspace_storage_key_is_attached
 
 
 class AuthenticationState(str, Enum):
@@ -44,6 +45,7 @@ class AuthenticationState(str, Enum):
     EXPIRED_CREDENTIAL = "expired_credential"
     REVOKED_CREDENTIAL = "revoked_credential"
     DISABLED_PRINCIPAL = "disabled_principal"
+    RETIRED_ANONYMOUS_IDENTITY = "retired_anonymous_identity"
 
 
 AuthenticationMethod = Literal[
@@ -93,6 +95,7 @@ class AuthenticationResult:
     credential_supplied: bool = False
     error_code: str = ""
     message: str = ""
+    last_used_write_due: bool | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -319,7 +322,8 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
             )
     cutoff = now - timedelta(seconds=LAST_USED_WRITE_INTERVAL_SECONDS)
     context_last_used = _stored_context_timestamp(data.get("last_used_at"))
-    if touch_last_used and _last_used_write_is_due(data.get("last_used_at"), cutoff):
+    last_used_write_due = touch_last_used and _last_used_write_is_due(data.get("last_used_at"), cutoff)
+    if last_used_write_due:
         conn.execute(
             "UPDATE credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL "
             "AND (last_used_at IS NULL OR last_used_at <= ?)",
@@ -342,6 +346,7 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
             capabilities=frozenset(capabilities),
         ),
         credential_supplied=True,
+        last_used_write_due=last_used_write_due,
     )
 
 
@@ -362,6 +367,12 @@ def resolve_authentication(
     if parsed is None:
         return AuthenticationResult(state=AuthenticationState.NO_CREDENTIAL)
     if isinstance(parsed, AnonymousContext):
+        if workspace_storage_key_is_attached(anonymous_workspace_storage_key(parsed.anonymous_id), conn=conn, connect=connect):
+            return _failure(
+                AuthenticationState.RETIRED_ANONYMOUS_IDENTITY,
+                "anonymous_workspace_attached",
+                "This workspace was kept. Use its access credential.",
+            )
         return AuthenticationResult(state=AuthenticationState.NO_CREDENTIAL, context=parsed)
     active_now = now or datetime.now(timezone.utc)
     if active_now.tzinfo is None:

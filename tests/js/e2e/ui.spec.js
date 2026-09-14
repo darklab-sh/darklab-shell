@@ -1338,7 +1338,23 @@ test.describe('project workspace modal', () => {
     await waitForProjectTargetValue(page, projectId, 'manual-finding.playwright.example')
 
     await switchProjectTab(page, 'findings')
-    await page.locator('[data-project-action="create-manual-finding"]').click()
+    const createFinding = page.locator('[data-project-action="create-manual-finding"]')
+    // Let the locator wait for a stable, actionable replacement before pressing.
+    await createFinding.hover()
+    const pointerCapture = await page.evaluateHandle(() => {
+      const capture = { target: null }
+      document.addEventListener('pointerdown', event => {
+        capture.target = event.target.closest('[data-project-action="create-manual-finding"]')
+      }, { capture: true, once: true })
+      return capture
+    })
+    await page.mouse.down()
+    const openingControl = await pointerCapture.getProperty('target')
+    await page.evaluate(() => window.refreshProjectWorkspace())
+    expect(await openingControl.evaluate(element => element.isConnected)).toBe(true)
+    await page.mouse.up()
+    await openingControl.dispose()
+    await pointerCapture.dispose()
     const editor = page.locator('#finding-triage-overlay')
     await expect(editor).toHaveClass(/\bopen\b/)
     await expect(editor.locator('#finding-triage-title')).toHaveText('CREATE FINDING')
@@ -1760,6 +1776,13 @@ test.describe('project workspace modal', () => {
     const projectId = await createActiveProject(page, `Playwright Package ${Date.now()}`)
     await linkExternalRunToOpenProject(page, testInfo)
 
+    let releaseAssessments
+    const assessmentsHeld = new Promise((resolve) => { releaseAssessments = resolve })
+    await page.route(`**/projects/${projectId}/assessments?*`, async (route) => {
+      const response = await route.fetch()
+      await assessmentsHeld
+      await route.fulfill({ response })
+    })
     await switchProjectTab(page, 'packages')
     const packagePresetsResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -1771,7 +1794,14 @@ test.describe('project workspace modal', () => {
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preset')
     expect((await packagePresetsResponse).ok()).toBe(true)
     await page.locator('[data-project-package-field="labels"]').fill('handoff, e2e')
-    await page.locator('[data-project-package-field="notes"]').fill('Package notes from Playwright')
+    const packageNotes = page.locator('[data-project-package-field="notes"]')
+    await packageNotes.fill('Package notes')
+    const originalWizard = await wizard.locator('.project-package-wizard').elementHandle()
+    releaseAssessments()
+    await expect.poll(() => originalWizard.evaluate(element => element.isConnected)).toBe(false)
+    await expect(packageNotes).toBeFocused()
+    await packageNotes.pressSequentially(' from Playwright')
+    await expect(packageNotes).toHaveValue('Package notes from Playwright')
 
     await page.locator('[data-project-action="package-wizard-next"]').click()
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Include')

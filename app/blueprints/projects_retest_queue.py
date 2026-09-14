@@ -74,13 +74,12 @@ def project_assessment_retest_group_launch(project_id, assessment_id, group_id):
         response = jsonify({"error": reason, "code": "broker_unavailable"})
         response.headers["Retry-After"] = "5"
         return response, 503
-    team_role = ""
-    if team_id:
-        try:
-            scope = project_routes.current_request_scope(session_id, request)
-            team_role = str((scope.member or {}).get("role") or "")
-        except project_routes.RequestScopeError:
-            team_role = ""
+    try:
+        scope = project_routes.current_request_scope(session_id, request)
+    except project_routes.RequestScopeError as exc:
+        payload, status = project_routes.scope_error_payload(exc)
+        return jsonify(payload), status
+    team_role = str((scope.member or {}).get("role") or "") if scope.is_team else ""
     body = data if isinstance(data, dict) else {}
     started_at = datetime.now(timezone.utc).isoformat()
     try:
@@ -88,6 +87,7 @@ def project_assessment_retest_group_launch(project_id, assessment_id, group_id):
             original_command=plan["batch"]["display_command"],
             display_command=plan["batch"]["display_command"],
             session_id=session_id,
+            owner_context=scope.context,
             team_id=team_id,
             team_role=team_role,
             client_ip=project_routes.get_client_ip(),

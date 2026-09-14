@@ -37,7 +37,30 @@ async function createTeamFromOptions(page, { name, slug, displayName }) {
   await page.locator('#options-team-create-btn').click()
   const form = page.locator('[data-team-form="create"]')
   await expect(form).toBeVisible()
-  await form.locator('[name="name"]').fill(name)
+  const nameInput = form.locator('[name="name"]')
+  const split = Math.floor(name.length / 2)
+  await nameInput.fill(name.slice(0, split))
+  let releaseRefresh
+  const pendingRefresh = new Promise(resolve => { releaseRefresh = resolve })
+  const teamsGet = request => request.method() === 'GET' && new URL(request.url()).pathname === '/session/teams'
+  await page.route('**/session/teams', async route => {
+    if (teamsGet(route.request())) await pendingRefresh
+    await route.continue()
+  })
+  const requested = page.waitForRequest(teamsGet)
+  const completed = page.waitForResponse(response => teamsGet(response.request()))
+  try {
+    await page.evaluate(() => { void window.refreshOptionsTeams() })
+    await requested
+    await expect(nameInput).toBeEnabled()
+    await expect(nameInput).toBeFocused()
+    await nameInput.pressSequentially(name.slice(split))
+    await expect(nameInput).toHaveValue(name)
+  } finally {
+    releaseRefresh()
+    await completed
+    await page.unroute('**/session/teams')
+  }
   await form.locator('[name="slug"]').fill(slug)
   await form.locator('[name="display_name"]').fill(displayName)
   await form.locator('button[type="submit"]').click()
@@ -73,7 +96,11 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
   await expect(form).toBeVisible()
   await form.locator('[name="code"]').fill(code)
   await form.locator('[name="display_name"]').fill(displayName)
+  const joined = page.waitForResponse(response => (
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/session/teams/join'
+  ))
   await form.locator('button[type="submit"]').click()
+  expect((await joined).status()).toBe(201)
   await expect(page.locator('#options-teams-list')).toContainText(teamName, { timeout: 15_000 })
   await expect(page.locator('#options-team-detail')).toContainText(teamName)
 }

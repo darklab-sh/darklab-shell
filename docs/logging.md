@@ -8,13 +8,17 @@ The application uses a dedicated `shell` logger configured by `logging_setup.py`
 
 The container entrypoint runs before that logger exists, so its Nuclei cache bootstrap writes fixed plain-text markers to standard output. `NUCLEI_TEMPLATE_BOOTSTRAP_STARTED` begins an empty-cache install, `NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED` confirms that a manifest was created, and `NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED` records a disabled or already-populated cache. `NUCLEI_TEMPLATE_BOOTSTRAP_FAILED` reports only a fixed reason and, when the update process exits unsuccessfully, its numeric status. It never includes template contents, provider responses, commands, targets, credentials, or operator-authored values.
 
-Configuration loading starts before runtime bootstrap can build the final logger. `startup_logging.py` captures those records in memory without attaching a handler, and `configure_logging()` replays each one once through the selected formatter while applying the effective level. If configuration can't finish, the same boundary writes one safe `CONFIG_LOAD_FAILED` record in the most recent usable text or GELF format. That fallback includes only bounded phase, source, key, and error-type context; it doesn't include parser contents, configuration values, or a traceback. Ignored, dropped, defaulted, clamped, and truncated configuration values all contribute to the `warning_count` reported by `CONFIG_VALIDATED` and `CONFIG_LOADED`.
+Configuration loading starts before runtime bootstrap can build the final logger. `startup_logging.py` captures those records in memory without attaching a handler, and `configure_logging()` replays each one once through the selected formatter while applying the effective level. If configuration can't finish, the same boundary writes one safe `CONFIG_LOAD_FAILED` record in the most recent usable text or GELF format. OIDC policy, scope, allowlist, required-setting, and URL rejections use `phase=oidc_validation` with a fixed reason in `error`. Inconsistent browser-session durations use `phase=access_profile_validation` and `error=idle_exceeds_absolute`. That fallback includes only the bounded phase, source, key, and an error class or fixed reason; it doesn't include parser contents, configuration values, or a traceback. Ignored, dropped, defaulted, clamped, and truncated configuration values all contribute to the `warning_count` reported by `CONFIG_VALIDATED` and `CONFIG_LOADED`.
 
 Structured events use the `session` field for request correlation. It contains a validated anonymous UUID or personal-workspace id, never a submitted credential secret. Credential attribution uses the safe credential id and type when an event needs it.
 
 Restricted browser-session lifecycle records keep the principal id, parent credential id, fixed source or reason, and bounded revoke count. They never include a portable credential, cookie value, CSRF token, session id, signing-key bytes, or submitted sign-in value.
 
+Background package and report exports recheck access before building, during progress callbacks, and before publishing the archive. A denied check ends the job with one WARNING carrying its job, Project, and principal ids, the checkpoint, and the fixed authorization reason. A failed authorization lookup instead ends with one ERROR carrying a bounded exception class. These records don't include report or package contents, filesystem paths, credential material, exception messages, or tracebacks. Both outcomes leave the job failed; access denial keeps its 403 response, while an unavailable check uses a generic 500 response. If a denied archive can't be removed, `EXPORT_REVOKED_ARCHIVE_CLEANUP_FAILED` reports only the job id, fixed job kind and cleanup stage, exception class, and numeric errno. Missing files are already clean and produce no warning. The failed job retains the path privately for retention or discard retries; it remains unavailable to download, and retries keep the metadata until removal succeeds.
+
 Browser `/log` reports normalize `warn` to `warning`, preserve supported DEBUG/INFO/WARNING/ERROR levels, and count only warning/error reports in the client-error metric. Client details pass through an explicit bounded allowlist. Assessment reports retain their stable event plus bounded Project, assessment, check, correlation, job, and profile keys; expected 4xx and degraded-network failures use WARNING, while unexpected 5xx and client-code failures use ERROR. Targets, HTTP-profile names or headers, callback URLs, commands, response bodies, and finding text aren't accepted. Run-comparison reports accept bounded left/right ids, canonical route paths, response stage/status, and a comparison-request flag; manual search text, commands, and query strings aren't accepted. Atlas Quick Lookup reports accept only bounded modes, result states, scope kinds, request sequence numbers, counts, booleans, failure stages, and timings. Submitted drafts, normalized values, canonical values, URL paths or queries, and request bodies aren't accepted. Destructive History and Project cleanup logs use flags and counts only; cleanup samples, entity values, finding text, and arbitrary client detail keys stay out of structured and audit records.
+
+The Access provider panel reports identity-load failures with `ACCESS_OIDC_IDENTITY_LOAD_FAILED`. Network failures and expected request rejections use WARNING; server faults, malformed responses, and unexpected client failures use ERROR. Only the fixed action, stage, failure reason, and numeric status pass through the existing browser-report allowlist. A disabled-feature 404 is quiet, a 401 doesn't issue another authenticated log request, and superseded refreshes produce no diagnostic. The panel keeps a visible retry message for failures without copying provider values, response bodies, or the original exception into the UI or logs.
 
 Public CVE risk and advisory events log source names, feed versions, acquisition modes, outcomes, counts, timings, and error classes. Positive and negative NVD persistence events use counts only. They don't enumerate CVEs, package identities, targets, Projects, provider payloads, or finding evidence. Project acknowledgement logs keep only the escalation id, acknowledgement state, and bounded note length; the note itself stays in the database and out of logs.
 
@@ -92,6 +96,8 @@ The current event inventory is:
 | ------- | ------- | ------- | ----------------- |
 | DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
 | DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, http_status, size |
+| DEBUG | `BROWSER_SIGN_IN_FORM_REJECTED` | expired or mismatched standalone sign-in form nonce | request_id, endpoint, reason, http_status |
+| DEBUG | `AUTHENTICATION_RESOLVED` | first authentication resolution in a request | request_id, endpoint, method, state, owner_kind, supplied_transports, browser_cookie_enabled, last_used_write_due |
 | DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
@@ -147,7 +153,7 @@ The current event inventory is:
 | DEBUG | `ATLAS_QUICK_LOOKUP_REQUEST_STARTED` / `SETTLED` / `DISCARDED` | browser Quick Lookup state through `/log` | ip, session, context, client_details with lookup_mode, detected_type, match_state, scope_kind, project_scoped, candidate_count, parent_candidate, request_seq, reason, duration_ms |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, access_profile, oidc_configured, oidc_provisioning, public_shares_enabled, browser_session_idle_minutes, browser_session_absolute_hours, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
 | INFO | `APP_INITIALIZED` | app startup | app_version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
@@ -174,6 +180,8 @@ The current event inventory is:
 | INFO / WARN | `PROJECT_ASSESSMENT_BROKER_UNAVAILABLE` | browser/API Assessment launch routes | request_id, session, owner_kind, team_id, project_id, assessment_id, check_id, finding_id, action_kind, source, reason, broker_mode |
 | DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
 | INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
+| ERROR | `BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE` | stored browser session references unusable signing material | key_version, reason, error_type, suppressed_repeat_count; sanitized origin frames |
+| ERROR | `CREDENTIAL_LIFECYCLE_FAILED` | caught credential lifecycle storage failure | request_id, operation, reason, error_class, http_status; sanitized origin frames |
 | ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
 | WARNING | `ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED` | reviewed Dalfox XSS launch guardrail | project_id, assessment_id, check_id, check_key, reason |
 | WARNING | `ASSESSMENT_DALFOX_OAST_LAUNCH_CONTRACT_REJECTED` | reviewed private-OAST launch guardrail | project_id, assessment_id, check_id, check_key, reason |
@@ -274,10 +282,26 @@ The current event inventory is:
 | INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
+| INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
+| INFO | `CREDENTIAL_ROTATED` | committed immediate credential replacement | principal_id, credential_id, previous_credential_id, credential_type, scope_count, source, request_id |
+| INFO | `CREDENTIAL_REVOKED` | committed self-service or operator revocation and recovery | principal_id, credential_id, credential_type, scope_count, paused_work_count, source, request_id |
+| INFO | `PRINCIPAL_STATUS_CHANGED` | committed operator disable or enable transition | principal_id, status, source, request_id |
+| DEBUG | `OIDC_STAGE_COMPLETED` | discovery, flow, exchange, key retrieval, validation, binding, and session stages | stage, purpose, outcome, duration_ms, request_id |
+| DEBUG | `CREDENTIAL_RATE_LIMIT_BACKEND_SELECTED` | credential-counter reads and writes | namespace, operation, backend, reason |
+| WARNING | `CREDENTIAL_RATE_LIMIT_BACKEND_DEGRADED` | credential counters lose a Redis operation | backend, fallback, namespace, operation, error_type |
+| INFO | `CREDENTIAL_RATE_LIMIT_BACKEND_RECOVERED` | all failed operations for a credential-counter namespace succeed again | backend, namespace, failure_count, duration_ms |
+| WARNING | `OIDC_AUTH_FAILED` | rejected or expired OIDC sign-in and linking attempts | stage, reason, error_type, http_status, duration_ms, purpose, request_id, endpoint, suppressed_repeat_count |
+| ERROR | `OIDC_PROVIDER_FAILED` | unavailable or unusable OIDC dependency or local persistence | stage, reason, error_type, http_status, duration_ms, purpose, request_id |
+| INFO | `OIDC_BROWSER_SESSION_CREATED` | completed provider sign-in or linking | principal_id, purpose |
+| INFO | `OIDC_IDENTITY_UNLINKED` | completed provider unlink request | principal_id, changed |
 | INFO | `BROWSER_SESSION_CREATED` | restricted sign-in and credential redemption | principal_id, credential_id, source |
 | INFO | `BROWSER_SESSION_ROTATED` | successful Team privilege-change response | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSION_REVOKED` | browser logout | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSIONS_REVOKED` | browser principal-wide session revocation | principal_id, credential_id, count, reason |
+| INFO | `AUTH_STREAM_CLOSED` | established stream loses current authorization | run_id, team_id, principal_id, credential_id, reason, interactive |
+| ERROR | `AUTH_STREAM_CHECK_FAILED` | stream authorization storage check fails closed | run_id (+ traceback) |
+| ERROR | `AUTH_STREAM_PTY_STOP_FAILED` | revoked controlling PTY cannot be stopped | run_id (+ traceback) |
 | INFO | `SESSION_PREFERENCES_SAVED` | `session_preferences_save` | ip, session, session_kind, key_count |
 | INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
 | INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |
@@ -420,6 +444,9 @@ The current event inventory is:
 | WARN | `RAW_PACKET_SCANNING_UNAVAILABLE` | app startup | tool, reason, availability_reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, http_status |
+| WARN | `BROWSER_CSRF_REJECTED` | browser-cookie mutation CSRF rejection | request_id, endpoint, reason, http_status, suppressed_repeat_count |
+| WARN | `CREDENTIAL_AUTHENTICATION_REJECTED` | shared credential rejection, sign-in form, and redemption boundaries | request_id, endpoint, reason, http_status, suppressed_repeat_count |
+| WARN | `CREDENTIAL_RATE_LIMITED` | credential precheck, failed verification, sign-in, redemption, and anonymous issuance limits | request_id, endpoint, policy, retry_after, http_status, suppressed_repeat_count |
 | WARN | `PROJECT_HTTP_PROFILE_INVALID_TARGETS_SKIPPED` | Project HTTP-profile scope discovery | project_id, team_scope, invalid_target_count, invalid_target_types |
 | WARN / ERROR | `TEAM_ACTION_REJECTED` / `TEAM_ROUTE_FAILED` / `TEAM_ACTION_FAILED` | browser/API team management routes | action, team_id, session, ip, result, source, reason, error_code, http_status, route, method |
 | WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
@@ -597,6 +624,12 @@ The current event inventory is:
 | ERROR | `ASSESSMENT_BATCH_RETENTION_ERROR` | assessment-batch startup retention cleanup | stage, pid (+ traceback) |
 | ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
+| WARNING / ERROR | `ACCESS_OIDC_IDENTITY_LOAD_FAILED` | Access provider identity load through browser `/log` | action, stage, status, reason |
+| WARNING | `EXPORT_REVOKED_ARCHIVE_CLEANUP_FAILED` | denied archive removal during build, after build, retention, or discard | job_id, job_kind, stage, error_type, errno |
+| WARNING | `PACKAGE_BUILD_AUTHORIZATION_REJECTED` | package job authorization at pre_build, progress, or post_build | job_id, project_id, principal_id, stage, reason |
+| WARNING | `REPORT_EXPORT_JOB_AUTHORIZATION_REJECTED` | report job authorization at pre_build, progress, or post_build | job_id, project_id, principal_id, stage, reason |
+| ERROR | `PACKAGE_BUILD_AUTHORIZATION_CHECK_FAILED` | unavailable package job authorization check | job_id, project_id, principal_id, stage, reason, error_type |
+| ERROR | `REPORT_EXPORT_JOB_AUTHORIZATION_CHECK_FAILED` | unavailable report job authorization check | job_id, project_id, principal_id, stage, reason, error_type |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_BUILD_AUDIT_FAILED` / `REPORT_EXPORT_AUDIT_FAILED` | background export audit fallback | job_id, project_id, package_id when applicable, team_id, actor_member_id, job_status, reason, archive/count fields (+ traceback) |
 | ERROR | `PACKAGE_PRESETS_LOAD_FAILED` | Project package preset route | ip, session, error |
@@ -627,6 +660,24 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+Principal and credential lifecycle milestones reach INFO only after the enclosing transaction commits, even when database audit storage is disabled. Recovery reports each newly revoked credential and its replacement after the whole recovery commits. Preparing a rotation reports creation until the old credential is revoked; repeated revocation or status requests add no false transition. These records contain IDs, fixed classifications, and counts. Credential secrets, labels, reasons, workspace paths, and provider identities stay out of the application log.
+
+`BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE` distinguishes missing keys, unsupported wrappers, failed decryption, and invalid decoded keys after a stored session confirms the key version. Ordinary malformed, unknown, wrong-version, or incorrectly signed cookies do not create key-incident records. A 64-entry cache coalesces repeated failures by key version and reason for one minute and reports suppressed repeats on the next event. Client rejection stays generic; ERROR records retain safe origin frames without cookie, session-id, key, plaintext, or original-exception content.
+
+`BROWSER_CSRF_REJECTED` distinguishes a missing cookie, missing header, mismatched token pair, and failed stored-token validation. It uses the same per-process, per-reason warning sampler as credential rejections, including the count of suppressed repeats. An expired or mismatched standalone sign-in form instead emits `BROWSER_SIGN_IN_FORM_REJECTED` at DEBUG and keeps its normal refreshed-form response. Neither event records tokens, nonces, or browser-session ids.
+
+`CONFIG_LOADED` includes the validated sign-in profile, whether an OIDC provider is configured, provisioning mode, effective public-share availability, and browser-session idle and absolute limits. `public_shares_enabled` is true in open mode or when restricted sharing is explicitly enabled. These INFO fields contain only policy names, booleans, and durations; provider URLs, client identifiers, secrets, and subjects stay out of the summary.
+
+Credential-counter backend diagnostics distinguish intentional process-local operation from failed Redis reads, increments, count conversion, or expiry updates. Each fixed counter namespace emits one degradation warning, coalesces further failures, and reports recovery only after every failed operation has succeeded again. A successful read cannot hide a write or expiry fault. Recovery records the failure count and elapsed outage time; DEBUG identifies the backend used by each check. The small state map contains only fixed namespace and operation names. Redis URLs, keys, IP addresses, credential lookup IDs, subject hashes, and exception messages never enter these records.
+
+OIDC diagnostics identify discovery, flow creation or validation, callback validation, provider authorization, token exchange, signing-key retrieval, token validation, identity binding, and browser-session creation. `OIDC_PROVIDER_FAILED` records dependency and local storage failures at ERROR; `OIDC_AUTH_FAILED` records expected denials and validation failures at WARNING, sampled once per fixed stage/reason per minute. The next warning reports suppressed repeats. Fixed reasons distinguish CA-file faults, TLS and network failures, timeouts, HTTP errors, invalid JSON or metadata, client authentication failures, rejected codes, signature and claim failures, and unavailable workspace storage. `http_status` is the provider's numeric response status when known, otherwise null; duration is in milliseconds. DEBUG adds stage completion, outcome, purpose, and elapsed time, including cached provider lookups. Request IDs correlate stages within a request. No event uses OIDC state for correlation or includes provider URLs, subjects, codes, cookies, tokens, secrets, CA paths, response bodies, exception messages, or tracebacks.
+
+`CREDENTIAL_LIFECYCLE_FAILED` reports caught internal storage faults once at ERROR. Fixed reasons distinguish unavailable verifier keys, workspace storage, and other identity storage failures. The response is a generic HTTP 500. Records retain the original error class and bounded file/function/line locations, without the original message, source text, or exception chain. Invalid inputs and expected permission, missing-credential, and lockout responses keep their client status without this ERROR event.
+
+`AUTHENTICATION_RESOLVED` emits once when a request first resolves authentication, using that cached result. `method` names the selected method, `rejected`, or `none`; `supplied_transports` lists fixed transport names without their values. `browser_cookie_enabled` distinguishes a considered cookie from one ignored by the open access profile. `last_used_write_due` reports the existing credential timestamp-write decision; it's null for anonymous, browser-cookie, and rejected outcomes. These DEBUG records don't trigger another lookup and don't appear at INFO.
+
+Credential rejection warnings emit at most once per fixed reason per process each minute; throttle warnings use the same bound per fixed policy (`failed_credential_ip`, `failed_credential_lookup`, or `anonymous_issuance_ip`). The next warning for that classification includes the number of suppressed repeats. Its request id and endpoint identify the sampled request, while the repeat count covers that classification across endpoints. Duplicate warning calls within one request don't inflate the count. Submitted credentials, cookie values, lookup ids, fingerprints, IP addresses, and form contents stay out of these events and the sampling keys. A rejected sign-in form keeps its actual HTTP status in the event, and throttling reports 429.
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - GELF keeps its required top-level `version: "1.1"` field separate from the app release in `_app_version`. Structured context names that would become OpenSearch metadata fields are emitted under `_event_*` instead, such as `_event_version` and `_event_source`, so Graylog can index them without colliding with `_version` or `_source`

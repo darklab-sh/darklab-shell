@@ -37,6 +37,14 @@ class AuthenticationRejected(RuntimeError):
         self.message = message
 
 
+class CredentialAuthenticationRateLimited(AuthenticationRejected):
+    """A supplied credential is blocked before authentication work starts."""
+
+    def __init__(self, retry_after: int | None) -> None:
+        super().__init__("credential_authentication_rate_limited", "Too many sign-in attempts. Try again shortly.")
+        self.retry_after = retry_after
+
+
 def _coerce_exit_code(exit_code):
     if exit_code is None:
         return None
@@ -162,23 +170,39 @@ def get_client_ip():
 
 def get_authentication_result():
     """Return the request's cached, typed authentication result."""
-    from services.auth.resolver import resolve_authentication  # noqa: PLC0415
+    from services.auth.resolver import public_lookup_id_from_headers, resolve_authentication  # noqa: PLC0415
+    from services.auth.rate_limit import check_credential_redemption  # noqa: PLC0415
+    from services.auth.observability import log_authentication_resolved, log_credential_rate_limited  # noqa: PLC0415
+    from services.auth.browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
+    import core.process as process_state  # noqa: PLC0415
 
     existing = getattr(g, _AUTH_RESULT_KEY, None)
     if existing is not None:
         return existing
+    blocked = getattr(g, "darklab_credential_rate_limit", None)
+    if blocked is not None:
+        raise blocked
     active_cfg = current_app.config.get("DARKLAB_CONFIG", {}) if has_app_context() else {}
+    restricted = str(active_cfg.get("access_profile") or "open") in {"token_required", "oidc_required", "mixed"}
+    supplied = any(name in request.headers for name in ("X-Darklab-Credential", "Authorization"))
+    if supplied or (restricted and request.cookies.get(BROWSER_SESSION_COOKIE)):
+        limited = check_credential_redemption(
+            get_client_ip(), public_lookup_id_from_headers(request.headers), redis_client=process_state.redis_client,
+            enabled=bool(current_app.config.get("RATELIMIT_ENABLED", active_cfg.get("rate_limit_enabled", True))),
+        )
+        if not limited.allowed:
+            log_credential_rate_limited(limited)
+            blocked = CredentialAuthenticationRateLimited(limited.retry_after)
+            g.darklab_credential_rate_limit = blocked
+            raise blocked
     idle_seconds = int(active_cfg.get("browser_session_idle_minutes", 30)) * 60
     result = resolve_authentication(
         request.headers,
-        cookies=(
-            request.cookies
-            if str(active_cfg.get("access_profile") or "open") in {"token_required", "oidc_required", "mixed"}
-            else None
-        ),
+        cookies=request.cookies if restricted else None,
         browser_session_idle_seconds=idle_seconds,
     )
     setattr(g, _AUTH_RESULT_KEY, result)
+    log_authentication_resolved(result, cookies_enabled=restricted)
     return result
 
 

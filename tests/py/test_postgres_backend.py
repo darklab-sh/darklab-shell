@@ -32,6 +32,7 @@ import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
 from services.history.search import run_search_clause
+from test_oidc_link_boundaries import SOURCE_CHANGES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
@@ -108,8 +109,10 @@ def _postgres_plan_text(rows: list[Any]) -> str:
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("schema_head", ["0077", "0081"], ids=["v2.9.2", "prepared-v3"])
 def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     postgres_schema,
+    schema_head,
     tmp_path,
     monkeypatch,
 ):
@@ -123,8 +126,9 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(
         raw_conn,
-        tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
+        tuple(migration for migration in MIGRATIONS if migration.version <= schema_head),
     )
+    owner_column = "session_id" if schema_head < "0080" else "personal_workspace_id"
     conn = PostgresSqliteCompatConnection(raw_conn)
     legacy_credential = "tok_postgres_cutover_operator"
     created_at = "2026-09-10T01:00:00+00:00"
@@ -134,7 +138,7 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     )
     conn.execute(
         "INSERT INTO runs "
-        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+        f"(id, {owner_column}, team_id, run_kind, command, started, finished, "
         "exit_code, output_preview, output_search_text) "
         "VALUES ('run-postgres-cutover', ?, '', 'external', "
         "'printf postgres-cutover-marker', ?, ?, 0, '[]', 'postgres cutover marker')",
@@ -176,20 +180,24 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
         assert rolled_back_evidence.search_match_count == 1
         raw_conn.rollback()
 
-        assert "0082" not in applied_versions(conn)
+        assert max(applied_versions(conn)) == schema_head
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM session_tokens WHERE token = ?",
             (legacy_credential,),
         ).fetchone()["count"] == 1
         assert conn.execute(
-            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
-        ).fetchone()["personal_workspace_id"] == legacy_credential
-        assert conn.execute(
-            "SELECT COUNT(*) AS count FROM credentials WHERE principal_id = ?",
-            (rolled_back_bundle.principal.id,),
-        ).fetchone()["count"] == 0
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
+        if schema_head < "0078":
+            assert raw_conn.execute("SELECT to_regclass('credentials') AS name").fetchone()["name"] is None
+        else:
+            assert conn.execute(
+                "SELECT COUNT(*) AS count FROM credentials WHERE principal_id = ?",
+                (rolled_back_bundle.principal.id,),
+            ).fetchone()["count"] == 0
+        principal_column = "NULL" if schema_head < "0080" else "principal_id"
         rolled_back_member = conn.execute(
-            "SELECT principal_id, session_token_hash FROM team_members "
+            f"SELECT {principal_column} AS principal_id, session_token_hash FROM team_members "
             "WHERE id = 'member-postgres-cutover'"
         ).fetchone()
         assert rolled_back_member["principal_id"] is None
@@ -226,10 +234,37 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
                 workspace_root=str(workspace_root),
             )
         )
+        assert max(applied_versions(conn)) == schema_head
         assert preflight["recommended_action"] == "selected_conversion"
         assert preflight["inventory"]["database_backend"] == "postgres"
         assert preflight["inventory"]["team_members_without_principal"] == 1
         assert preflight["inventory"]["teams_without_creator_principal"] == 1
+        raw_conn.rollback()
+        conn.execute(
+            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+            ("tok_disposable_preview_only", created_at, created_at),
+        )
+        raw_conn.commit()
+        verified_managed_backup = cutover.verify_backup_archive
+        monkeypatch.setattr(
+            cutover, "verify_backup_archive",
+            lambda _path, **_kwargs: {"repository_free": False, "database_backend": "postgres"},
+        )
+        development_preview = cutover.run(SimpleNamespace(
+            command="preflight", backup=str(tmp_path / "development-backup.tar.gz"),
+            allow_development_backup=True, confirm_no_external_users=True,
+            expected_legacy_credentials=2, database="", workspace_root=str(workspace_root),
+            selected_credential_file=str(selected_file),
+        ))
+        assert development_preview["development_discard_review"]["credentials"] == 1
+        assert max(applied_versions(conn)) == schema_head
+        assert conn.execute(
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
+        raw_conn.rollback()
+        conn.execute("DELETE FROM session_tokens WHERE token = ?", ("tok_disposable_preview_only",))
+        raw_conn.commit()
+        monkeypatch.setattr(cutover, "verify_backup_archive", verified_managed_backup)
         conversion_args = SimpleNamespace(
             backup=str(tmp_path / "verified-backup.tar.gz"),
             confirm_no_external_users=True,
@@ -252,10 +287,10 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
         with pytest.raises(RuntimeError, match="injected failure before commit"):
             cutover._convert(conversion_args)
         assert not new_credential_file.exists()
-        assert "0082" not in applied_versions(conn)
+        assert max(applied_versions(conn)) == schema_head
         assert conn.execute(
-            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
-        ).fetchone()["personal_workspace_id"] == legacy_credential
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
         raw_conn.rollback()
 
         monkeypatch.setattr(cutover, "convert_selected_owner", original_convert)
@@ -1129,6 +1164,22 @@ def test_oidc_identity_and_browser_session_migrate_on_postgres(postgres_schema, 
     ).fetchone()
     assert row["credential_id"] is None
     assert row["oidc_identity_id"] == identity_id
+    deadline = datetime.fromisoformat(issued.absolute_expires_at)
+    replacement = create_browser_session(
+        principal_id=bundle.principal.id, oidc_identity_id=identity_id,
+        absolute_seconds=3600, absolute_expires_at=issued.absolute_expires_at,
+        authenticated_at=issued.created_at, replace_session_id=issued.id,
+        now=deadline - timedelta(seconds=10), conn=conn,
+    )
+    assert replacement.absolute_expires_at == issued.absolute_expires_at
+    assert resolve_browser_session(
+        replacement.cookie_value, idle_seconds=1800, touch=False,
+        now=deadline - timedelta(seconds=1), conn=conn,
+    ).valid is True
+    for cookie in (issued.cookie_value, replacement.cookie_value):
+        assert resolve_browser_session(
+            cookie, idle_seconds=1800, touch=False, now=deadline, conn=conn,
+        ).valid is False
     with pytest.raises(Exception):
         conn.execute(
             "INSERT INTO oidc_identities (id, principal_id, issuer, subject, created_at) "
@@ -1202,9 +1253,12 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
     stored_credentials = repr([
         dict(row) for row in conn.execute("SELECT * FROM credentials").fetchall()
     ])
-    for secret in (bundle.credential.secret, pat.secret):
+    for credential in (bundle.credential, pat):
+        secret = credential.secret
+        encoded_secret = secret.partition(f"{credential.metadata.id}_")[2]
+        assert len(encoded_secret) == 43
         assert secret not in stored_credentials
-        assert secret.rsplit("_", 1)[-1] not in stored_credentials
+        assert encoded_secret not in stored_credentials
     result["credential_row_disclosure_check"] = "passed"
 
     def last_used():
@@ -1331,12 +1385,59 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
         assert api_principal.status_code == 200
         assert api_principal.get_json()["principal"]["id"] == principal_id
         assert api_client.get("/api/v1/projects", base_url=ORIGIN, headers=pat_headers).status_code == 200
-        assert api_client.get("/projects", base_url=ORIGIN, headers=pat_headers).status_code == (
-            401 if profile == "oidc_required" else 200
-        )
+        for method in ("GET", "POST"):
+            browser_projects = api_client.open(
+                "/projects", method=method, base_url=ORIGIN, headers=pat_headers, json={},
+            )
+            assert browser_projects.status_code == 403
+            assert browser_projects.get_json()["error"] == "pat_route_forbidden"
     finally:
         close_postgres_pool()
         reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("change", SOURCE_CHANGES)
+def test_oidc_link_callback_rejections_preserve_postgres_bindings(
+    postgres_schema, postgres_dsn, tmp_path, monkeypatch, change,
+):
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from test_oidc_link_boundaries import assert_source_change_rejected
+    from test_oidc_sign_in import LocalProvider, _config
+
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    data_dir = tmp_path / "oidc-link-boundaries"
+    data_dir.mkdir()
+    cfg = _config(profile="mixed", provisioning="disabled").with_overrides({
+        "database_backend": "postgres", "database_url": isolated_dsn, "data_dir": str(data_dir),
+    })
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    provider = LocalProvider(monkeypatch)
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        assert_source_change_rejected(app, provider, monkeypatch, change)
+    finally:
+        close_postgres_pool()
 
 
 @pytest.mark.postgres
@@ -1431,6 +1532,7 @@ def test_principal_credential_persistence_matches_postgres_contract(
         rotate_signing_key,
     )
     from services.auth.contracts import WorkspaceAlreadyAttached
+    from services.auth.resolver import resolve_authentication
     from services.auth.workspace_storage import anonymous_workspace_storage_key
     from services.secrets.vault import reset_master_key_cache_for_tests
     from services.workspace.models import WorkspaceSettings
@@ -1505,6 +1607,9 @@ def test_principal_credential_persistence_matches_postgres_contract(
     raw_conn.commit()
 
     assert bundle.workspace.storage_key == preserved_key
+    assert resolve_authentication(
+        {"X-Darklab-Anonymous-ID": anonymous_id}, conn=conn,
+    ).error_code == "anonymous_workspace_attached"
     assert replacement.metadata.principal_id == bundle.principal.id
     assert raw_conn.execute(
         "SELECT personal_workspace_id FROM runs WHERE id = %s",
@@ -1551,7 +1656,54 @@ def test_principal_credential_persistence_matches_postgres_contract(
     assert raw_conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()["count"] == 1
     assert raw_conn.execute("SELECT COUNT(*) AS count FROM personal_workspaces").fetchone()["count"] == 1
     assert second_evidence.read_text(encoding="utf-8") == "untouched\n"
+    assert not resolve_authentication({"X-Darklab-Anonymous-ID": second_anonymous_id}, conn=conn).failed
     reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("lifecycle", ["active", "rotated", "revoked", "disabled"])
+def test_anonymous_workspace_retirement_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch, lifecycle):
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from test_anonymous_workspace_retirement import assert_kept_workspace_retirement
+
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    data_dir = tmp_path / "retirement-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    cfg = build_test_config({
+        "database_backend": "postgres", "database_url": isolated_dsn,
+        "data_dir": str(data_dir), "workspace_enabled": True,
+        "workspace_backend": "volume", "workspace_root": str(tmp_path / "retirement-files"),
+    })
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        assert_kept_workspace_retirement(app, lifecycle)
+    finally:
+        close_postgres_pool()
+        reset_master_key_cache_for_tests()
 
 
 @pytest.mark.postgres
@@ -1741,6 +1893,49 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
     assert unknown_tail not in json.dumps(dict(failure))
 
     raw_conn.commit()
+    reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema, tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle, storage
+    from services.auth.suspended_work import operator_suspended_work
+    from services.notifications import channels_store
+    from services.projects import digests
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from services.workspace.models import WorkspaceSettings
+    from test_suspended_work import _seed_work
+
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    reset_master_key_cache_for_tests()
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(channels_store.database, "db_connect", lambda: nullcontext(conn))
+    monkeypatch.setattr("services.auth.background_runtime.stop_principal_active_work", lambda _principal: ())
+    settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
+    bundle = storage.create_principal_with_credential(settings=settings, conn=conn)
+    _, channel, project = _seed_work(conn, bundle, "postgres")
+    _seed_work(conn, bundle, "manual", manually_paused=True, jobs=False)
+    conn.commit()
+    lifecycle.set_principal_enabled(bundle.principal.id, enabled=False, reason="review", connect=lambda: nullcontext(conn))
+    suspended = operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn))
+    assert suspended["count"] == 9 and suspended["resumable_count"] == 4
+    assert "manual" not in str(suspended)
+    lifecycle.set_principal_enabled(bundle.principal.id, enabled=True, connect=lambda: nullcontext(conn))
+    assert operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn)) == suspended
+    paused_digest = digests.get_digest_settings(bundle.workspace.id, project, conn=conn)
+    assert paused_digest is not None
+    assert paused_digest["paused_reason"] == "principal_disabled"
+    resumed = channels_store.update_notification_channel(bundle.workspace.id, channel["id"], {"muted": False})
+    assert not resumed["muted"] and resumed["muted_reason"] == ""
+    digest = digests.save_digest_settings(bundle.workspace.id, project,
+                                         {"enabled": True, "channel_ids": [channel["id"]]}, conn=conn)
+    assert digest["enabled"] and digest["paused_reason"] == ""
+    assert operator_suspended_work(bundle.principal.id, connect=lambda: nullcontext(conn))["count"] == 7
     reset_master_key_cache_for_tests()
 
 
@@ -2274,6 +2469,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0082",
         "0083",
         "0084",
+        "0085",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -5552,13 +5748,15 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
 
 
 @pytest.mark.postgres
-def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema):
+@pytest.mark.parametrize("registered", [True, False])
+def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema, registered):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core.output_signals import OutputSignalClassifier
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.atlas.materializer import materialize_run_entities
     from services.projects.links import link_active_project_run_entities
+    from services.runs.finalization_project_targets import discover_project_targets_for_finalize
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -5569,6 +5767,8 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
     transcript = (
         REPO_ROOT / "tests" / "py" / "fixtures" / "whois-arin-164.111.15.52.txt"
     ).read_text(encoding="utf-8")
+    if not registered:
+        transcript = "No match for 164.111.15.52\n% Query rate limit exceeded\n"
     classifier = OutputSignalClassifier("whois 164.111.15.52")
     entries = []
     for line_index, line in enumerate(transcript.splitlines()):
@@ -5608,6 +5808,9 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         seen_at=timestamp,
         command="whois 164.111.15.52",
     )
+    discovered = discover_project_targets_for_finalize(
+        compat_conn, session_id, run_id, "whois 164.111.15.52", {"project_id": project_id}, recorded,
+    )
     active_project_link = link_active_project_run_entities(
         compat_conn,
         session_id,
@@ -5630,19 +5833,17 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         (project_id,),
     ).fetchall()
 
-    assert [(row["type"], row["canonical_value"]) for row in recorded] == [
-        ("ip", "164.111.15.52"),
-    ]
-    assert [(row["type"], row["canonical_value"]) for row in entity_rows] == [
-        ("ip", "164.111.15.52"),
-    ]
+    expected_entities = [("ip", "164.111.15.52")] if registered else []
+    assert bool(discovered) is registered
+    assert [(row["type"], row["canonical_value"]) for row in recorded] == expected_entities
+    assert [(row["type"], row["canonical_value"]) for row in entity_rows] == expected_entities
     assert active_project_link is not None
-    assert active_project_link["available"] == 1
-    assert active_project_link["added"] == 1
+    assert active_project_link["available"] == int(registered)
+    assert active_project_link["added"] == 0  # Command discovery already added any confirmed target.
     assert [
         (row["type"], row["canonical_value"], row["source"])
         for row in project_entity_rows
-    ] == [("ip", "164.111.15.52", "active_project")]
+    ] == ([("ip", "164.111.15.52", "auto_command")] if registered else [])
 
 
 @pytest.mark.postgres
@@ -5780,6 +5981,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         bind_step_run,
         claim_step_for_launch,
         create_execution,
+        execution_state_for_recovery,
         finalize_run_step,
     )
     app = create_app()
@@ -5927,12 +6129,24 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     inspect_run_id = "run-pg-workflow-inspect-" + uuid.uuid4().hex
     assert claim_step_for_launch(execution["id"], "resolve") is not None
     assert bind_step_run(execution["id"], "resolve", execution_run_id) is True
+    recovery_execution, recovery_step = execution_state_for_recovery(execution["id"])
+    assert recovery_execution is not None
+    assert recovery_execution["current_step_id"] == "resolve"
+    assert isinstance(recovery_execution["definition_snapshot"], dict)
+    assert recovery_step == {"step_id": "resolve", "status": "running", "run_id": execution_run_id}
+    assert not any(key.startswith("recovery_") for key in recovery_execution)
+    assert execution_state_for_recovery("missing-workflow") == (None, None)
     finalized = finalize_run_step(
         execution_run_id,
         0,
         captures={"resolved_host": "darklab.sh"},
     )
     assert finalized is not None and finalized["destination"] == "inspect"
+    recovery_execution, recovery_step = execution_state_for_recovery(execution["id"])
+    assert recovery_execution is not None
+    assert recovery_execution["current_step_id"] == "inspect"
+    assert recovery_execution["variables"]["resolved_host"] == "darklab.sh"
+    assert recovery_step == {"step_id": "inspect", "status": "pending", "run_id": ""}
     assert finalize_run_step(execution_run_id, 0) is None
     assert claim_step_for_launch(execution["id"], "inspect") is not None
     assert bind_step_run(execution["id"], "inspect", inspect_run_id) is True
@@ -8623,3 +8837,72 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert search_row["id"] == "run-1"
     assert (tmp_path / "run-output" / artifact_row["rel_path"]).exists()
     assert (tmp_path / pointer["rel_path"]).exists()
+
+
+def test_postgres_lifecycle_milestones_wait_for_commit_and_deduplicate_revocation(
+    postgres_schema, postgres_dsn, tmp_path, monkeypatch,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    import logging
+    from threading import Barrier
+
+    import psycopg
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.auth import lifecycle, lifecycle_logging
+    from services.workspace.models import WorkspaceSettings
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    settings = WorkspaceSettings(True, "volume", tmp_path / "milestone-workspaces", 1024, 1024, 10, 1)
+    settings.root.mkdir()
+
+    class FailedCommit(PostgresSqliteCompatConnection):
+        def commit(self):
+            raise RuntimeError("injected commit failure")
+
+    @contextmanager
+    def connect(*, fail_commit=False):
+        with psycopg.Connection[dict[str, Any]].connect(isolated_dsn, row_factory=dict_row) as raw:
+            yield FailedCommit(raw) if fail_commit else PostgresSqliteCompatConnection(raw)
+
+    records = []
+
+    def capture(record):
+        with connect() as conn:
+            assert conn.execute("SELECT status FROM principals WHERE id = ?", (record.principal_id,)).fetchone()
+            if hasattr(record, "credential_id"):
+                row = conn.execute("SELECT revoked_at FROM credentials WHERE id = ?", (record.credential_id,)).fetchone()
+                assert row is not None
+                assert (row["revoked_at"] is not None) == (record.msg == "CREDENTIAL_REVOKED")
+        records.append(record)
+
+    handler = logging.Handler()
+    handler.emit = capture
+    logger = logging.Logger("postgres-lifecycle-milestones", logging.INFO)
+    logger.addHandler(handler)
+    monkeypatch.setattr(lifecycle_logging, "log", logger)
+    bundle = lifecycle.operator_bootstrap(settings=settings, connect=connect)
+    issued = lifecycle.operator_issue(bundle.principal.id, connect=connect)
+    barrier = Barrier(2)
+
+    def revoke(_index):
+        barrier.wait(timeout=10)
+        return lifecycle.operator_revoke(bundle.principal.id, issued.metadata.id, reason="retired device", connect=connect)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(revoke, range(2)))
+    assert all(metadata.revoked_at is not None for metadata, _ in results)
+    assert [record.msg for record in records] == [
+        "PRINCIPAL_CREATED", "CREDENTIAL_CREATED", "CREDENTIAL_CREATED", "CREDENTIAL_REVOKED",
+    ]
+    records.clear()
+    with pytest.raises(RuntimeError, match="injected commit failure"):
+        lifecycle.operator_recover(bundle.principal.id, connect=lambda: connect(fail_commit=True))
+    assert not records
+    with connect() as conn:
+        active = conn.execute("SELECT id FROM credentials WHERE revoked_at IS NULL").fetchall()
+    assert [row["id"] for row in active] == [bundle.credential.metadata.id]

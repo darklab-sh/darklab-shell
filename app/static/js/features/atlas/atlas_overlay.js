@@ -272,8 +272,6 @@ let exportedCycleAtlasTab = null;
     requestedFindingId: '',
     requestedView: '',
     requestedViewStarted: 0,
-    refreshIntelOnSelect: false,
-    addActiveProjectOnSelect: false,
     detail: null,
     detailFinding: null,
     detailFindingReturnScroll: { profile: 0, findingId: '' },
@@ -752,8 +750,6 @@ let exportedCycleAtlasTab = null;
     state.entityProfileMode = false;
     state.entityProfileView = 'overview';
     state.entityProfileFindingBucket = 'direct';
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     resetAtlasDetailState();
     if (typeof importedResetAtlasMobileTransientState === 'function') importedResetAtlasMobileTransientState();
     show();
@@ -810,8 +806,6 @@ let exportedCycleAtlasTab = null;
       : 'direct';
     state.entityProfileStack = [];
     state.entityProfileReturnScroll = { list: 0, detail: 0 };
-    state.refreshIntelOnSelect = !!(options && options.refreshIntel);
-    state.addActiveProjectOnSelect = !!(options && options.addActiveProject);
     if (state.requestedEntityValue) {
       state.query = state.requestedEntityValue;
       if (searchInput) searchInput.value = state.query;
@@ -1002,8 +996,6 @@ let exportedCycleAtlasTab = null;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     state.detail = null;
     state.detailFinding = null;
     state.entityProfileMode = false;
@@ -2059,8 +2051,6 @@ let exportedCycleAtlasTab = null;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     render();
     loadRunOptions({ force: true }).catch((err) => {
       logImportClientError('failed to load atlas run filters', err);
@@ -2620,8 +2610,6 @@ let exportedCycleAtlasTab = null;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
     state.detail = null;
     state.detailFinding = null;
@@ -2662,8 +2650,6 @@ let exportedCycleAtlasTab = null;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     renderRunFilterControls();
     refreshAtlas({ resetOffset: true });
   }
@@ -2689,8 +2675,6 @@ let exportedCycleAtlasTab = null;
     state.requestedEntityValue = '';
     state.requestedView = '';
     state.requestedViewStarted = 0;
-    state.refreshIntelOnSelect = false;
-    state.addActiveProjectOnSelect = false;
     renderProjectFilterControls();
     refreshAtlas({ resetOffset: true });
   }
@@ -2909,10 +2893,6 @@ let exportedCycleAtlasTab = null;
             state.selectedId = match.id;
             state.detailOffsets = { runs: 0, findings: 0, related_urls: 0, related_ports: 0 };
           }
-          else {
-            state.refreshIntelOnSelect = false;
-            state.addActiveProjectOnSelect = false;
-          }
         }
         if (!state.selectedId && !state.requestedEntityValue && state.entities[0]) {
           state.selectedId = state.entities[0].id;
@@ -2933,14 +2913,6 @@ let exportedCycleAtlasTab = null;
       render();
       if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
       else state.detail = null;
-      if (state.selectedId && state.refreshIntelOnSelect) {
-        state.refreshIntelOnSelect = false;
-        await refreshIntel();
-      }
-      if (state.selectedId && state.addActiveProjectOnSelect) {
-        state.addActiveProjectOnSelect = false;
-        await addToActiveProject();
-      }
     } catch (err) {
       if (isAbortError(err)) return;
       logImportClientError('failed to load /atlas', err);
@@ -4017,8 +3989,6 @@ let exportedCycleAtlasTab = null;
     searchInput?.addEventListener('input', () => {
       state.query = String(searchInput.value || '').trim();
       state.requestedEntityValue = '';
-      state.refreshIntelOnSelect = false;
-      state.addActiveProjectOnSelect = false;
       state.selectedFindingIds.clear();
       state.selectedEntityIds.clear();
       clearTimeout(state.searchTimer);

@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
-from flask import Response, jsonify, request
+from flask import jsonify, request
 from blueprints import run as run_routes
+from blueprints.run_streaming import browser_stream_response
 
 
 @run_routes.run_bp.route("/runs", methods=["POST"])
@@ -33,12 +34,12 @@ def start_brokered_run():
         return jsonify({"error": "No command provided"}), 400
     team_id = ""
     team_role = ""
-    if run_routes.requested_team_id(request):
-        try:
-            owner_scope = run_routes.current_request_scope(session_id, request)
-        except run_routes.RequestScopeError as exc:
-            payload, status = run_routes.scope_error_payload(exc)
-            return jsonify(payload), status
+    try:
+        owner_scope = run_routes.current_request_scope(session_id, request)
+    except run_routes.RequestScopeError as exc:
+        payload, status = run_routes.scope_error_payload(exc)
+        return jsonify(payload), status
+    if owner_scope.is_team:
         capability_response = run_routes._require_team_capability(owner_scope, run_routes.Capability.RUN_COMMANDS)
         if capability_response:
             return capability_response
@@ -65,6 +66,7 @@ def start_brokered_run():
         started = run_routes._start_brokered_run_service(
             original_command=original_command,
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=team_id,
             team_role=team_role,
             client_ip=client_ip,
@@ -132,21 +134,8 @@ def stream_brokered_run(run_id):
     after_id = str(request.args.get("after", "0-0") or "0-0")
     owner_client_id = run_routes._active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = run_routes._active_run_owner_value(request.args.get("tab_id", ""))
-
-    def generate():
-        last_touch_monotonic = None
-        for item in run_routes.stream_run_events(run_id, after_id=after_id):
-            if owner_client_id:
-                last_touch_monotonic = run_routes._maybe_touch_active_run_owner(
-                    run_id,
-                    owner_client_id,
-                    owner_tab_id,
-                    last_touch_monotonic=last_touch_monotonic,
-                )
-            yield item
-
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    return browser_stream_response(
+        run_routes.stream_run_events(run_id, after_id=after_id),
+        run_id=run_id, team_id=owner_scope.team_id,
+        owner_client_id=owner_client_id, owner_tab_id=owner_tab_id,
     )

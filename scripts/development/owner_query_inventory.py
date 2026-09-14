@@ -244,7 +244,7 @@ NAMED_SOURCE_HASH_EXCEPTIONS = {
     (
         "app/services/projects/digests.py",
         "get_digest_settings",
-        "7e5d5e7dde",
+        "2b8bf5a6cd",
     ): "digest settings retain their exact project, workspace, and team key",
     (
         "app/services/projects/digests.py",

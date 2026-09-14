@@ -21398,9 +21398,10 @@ class TestWorkspaceRoutes:
 
 
 class TestRunRoute:
-    def test_workspace_path_output_filter_masks_absolute_session_paths(self):
+    def test_workspace_path_output_filter_masks_absolute_session_paths(self, tmp_path, monkeypatch):
         from blueprints.run import _WorkspacePathOutputFilter
 
+        monkeypatch.setattr(database, "DB_PATH", str(copy_pristine_sqlite_database(tmp_path / "filter.db")))
         with tempfile.TemporaryDirectory() as tmp:
             cfg = TestWorkspaceRoutes()._cfg(tmp)
             session = anonymous_session_id("workspace-filter-" + uuid.uuid4().hex[:8])
@@ -21580,6 +21581,7 @@ class TestRunRoute:
 
     def test_brokered_run_starts_real_process_and_registers_active_run(self, caplog):
         from blueprints import run as run_routes
+        from services.teams.scope import anonymous_owner_context
 
         client = get_client()
         fake_proc = _RouteFakeProc(pid=8765)
@@ -21633,6 +21635,7 @@ class TestRunRoute:
                 original_command=raw_workflow_command,
                 display_command=display_workflow_command,
                 session_id=anonymous_session_id("session-1"),
+                owner_context=anonymous_owner_context(anonymous_session_id("session-1")),
                 client_ip="127.0.0.1",
                 handlers=workflow_handlers,
                 owner_client_id="client-workflow",

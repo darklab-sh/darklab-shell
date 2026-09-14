@@ -8,10 +8,11 @@ from __future__ import annotations
 import subprocess
 import time
 
-from flask import Response, jsonify, request
+from flask import jsonify, request
 
 from blueprints import api_v1 as api_routes
 from core.helpers import get_client_ip, get_log_session_id
+from blueprints.api_v1_run_streaming import api_stream_response
 from services.ai.assists import AIAssistRouteError, enqueue_next_commands_assist, enqueue_summary_assist, list_run_assists
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.links import link_project_entity, unlink_project_entity
@@ -77,6 +78,7 @@ def api_runs_start():
         started = api_routes._start_brokered_run_service(
             original_command=original_command,
             session_id=session_id,
+            owner_context=owner_scope.context,
             team_id=owner_scope.team_id,
             team_role=team_role,
             client_ip=client_ip,
@@ -261,43 +263,7 @@ def api_run_stream(run_id):
     owner_scope = api_routes._api_request_scope()
     if api_routes._run_status_from_active_or_row(run_id, session_id, owner_scope.team_id) is None:
         return api_routes._api_json_error("not_found", "Run not found.", 404)
-    after_id = api_routes._sse_after_id()
-    api_routes.log.debug("API_RUN_STREAM_ATTACHED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "run_id": run_id,
-        "team_id": owner_scope.team_id,
-        "after_id": after_id,
-        "format": str(request.args.get("format") or "sse"),
-    })
-    stream_log_fields = {
-        "ip": get_client_ip(),
-        "route": str(request.path or ""),
-        "method": str(request.method or ""),
-    }
-    if str(request.args.get("format") or "").lower() == "ndjson":
-        return Response(
-            api_routes._ndjson_from_sse_chunks(
-                api_routes.stream_run_events(run_id, after_id=after_id),
-                run_id=run_id,
-                session_id=session_id,
-                team_id=owner_scope.team_id,
-                **stream_log_fields,
-            ),
-            mimetype="application/x-ndjson",
-            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
-        )
-    return Response(
-        api_routes._sse_chunks_with_error_logging(
-            api_routes.stream_run_events(run_id, after_id=after_id),
-            run_id=run_id,
-            session_id=session_id,
-            team_id=owner_scope.team_id,
-            **stream_log_fields,
-        ),
-        mimetype="text/event-stream",
-        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
-    )
+    return api_stream_response(run_id, session_id, owner_scope.team_id)
 
 
 @api_routes.api_v1_bp.route("/runs/<run_id>/cancel", methods=["POST"])

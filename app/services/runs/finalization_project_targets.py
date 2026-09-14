@@ -22,12 +22,12 @@ from services.runs.persistence import run_finalize_savepoint
 log = logging.getLogger("shell")
 
 
-def _output_confirmed_dns_target_inputs(
+def _output_confirmed_lookup_target_inputs(
     command: str,
     target_inputs: Sequence[Mapping[str, object]],
     recorded_entities: Sequence[object],
 ) -> list[dict[str, object]]:
-    if command_root(command) not in DNS_COMMAND_ROOTS:
+    if command_root(command) not in {*DNS_COMMAND_ROOTS, "whois"}:
         return [dict(item) for item in target_inputs]
     observed = {
         (str(item.get("type") or "").strip().lower(), str(item.get("canonical_value") or "").strip())
@@ -70,7 +70,7 @@ def discover_project_targets_for_finalize(
             command,
             cfg=app_config.CFG if cfg is None else cfg,
         )
-        target_inputs = _output_confirmed_dns_target_inputs(command, target_inputs, recorded_entities)
+        target_inputs = _output_confirmed_lookup_target_inputs(command, target_inputs, recorded_entities)
         return run_finalize_savepoint(
             conn,
             "project_target_discovery",
