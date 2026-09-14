@@ -213,6 +213,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 `test_credential_session_replacement.py` replays prior cookies after same-account and cross-account credential sign-in through both routes. It checks that other devices remain signed in and that invalid credentials, failed request proofs, or failed session creation preserve the current session.
 
+`test_anonymous_workspace_retirement.py` and the PostgreSQL counterpart exercise anonymous file reads, writes, downloads, deletion, existing download tickets, and stale owner contexts after attachment. They cover credential rotation and revocation, principal disablement, failed-attachment rollback, and credential-based browser recovery. Rejected retired-identity requests do not consume the allowance for actual credential attempts; the Access browser journey restores an old anonymous ID and proves recovery in both asset modes.
+
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.
 
 Restricted Access browser checks exercise the local and session-wide sign-out buttons, including rejection of a second browser after session-wide sign-out. Unit checks cover provider-specific copy, recency-based provider controls, and recovery when link or unlink outlives the authentication window. Python request tests age the real session and verify reauthentication; the local-provider browser journey uses an older-session response fixture, then verifies real credential sign-in and return to Access.

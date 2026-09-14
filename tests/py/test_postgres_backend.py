@@ -1434,6 +1434,7 @@ def test_principal_credential_persistence_matches_postgres_contract(
         rotate_signing_key,
     )
     from services.auth.contracts import WorkspaceAlreadyAttached
+    from services.auth.resolver import resolve_authentication
     from services.auth.workspace_storage import anonymous_workspace_storage_key
     from services.secrets.vault import reset_master_key_cache_for_tests
     from services.workspace.models import WorkspaceSettings
@@ -1508,6 +1509,9 @@ def test_principal_credential_persistence_matches_postgres_contract(
     raw_conn.commit()
 
     assert bundle.workspace.storage_key == preserved_key
+    assert resolve_authentication(
+        {"X-Darklab-Anonymous-ID": anonymous_id}, conn=conn,
+    ).error_code == "anonymous_workspace_attached"
     assert replacement.metadata.principal_id == bundle.principal.id
     assert raw_conn.execute(
         "SELECT personal_workspace_id FROM runs WHERE id = %s",
@@ -1554,7 +1558,54 @@ def test_principal_credential_persistence_matches_postgres_contract(
     assert raw_conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()["count"] == 1
     assert raw_conn.execute("SELECT COUNT(*) AS count FROM personal_workspaces").fetchone()["count"] == 1
     assert second_evidence.read_text(encoding="utf-8") == "untouched\n"
+    assert not resolve_authentication({"X-Darklab-Anonymous-ID": second_anonymous_id}, conn=conn).failed
     reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("lifecycle", ["active", "rotated", "revoked", "disabled"])
+def test_anonymous_workspace_retirement_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch, lifecycle):
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.secrets.vault import reset_master_key_cache_for_tests
+    from test_anonymous_workspace_retirement import assert_kept_workspace_retirement
+
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    data_dir = tmp_path / "retirement-data"
+    data_dir.mkdir()
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    reset_master_key_cache_for_tests()
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    cfg = build_test_config({
+        "database_backend": "postgres", "database_url": isolated_dsn,
+        "data_dir": str(data_dir), "workspace_enabled": True,
+        "workspace_backend": "volume", "workspace_root": str(tmp_path / "retirement-files"),
+    })
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        assert_kept_workspace_retirement(app, lifecycle)
+    finally:
+        close_postgres_pool()
+        reset_master_key_cache_for_tests()
 
 
 @pytest.mark.postgres

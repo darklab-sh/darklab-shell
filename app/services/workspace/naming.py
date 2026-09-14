@@ -9,7 +9,7 @@ import hashlib
 from typing import Any
 
 from services.teams.scope import OwnerContext
-from services.workspace.models import WorkspaceError
+from services.workspace.models import WorkspaceError, WorkspacePermissionDenied
 
 
 def session_workspace_name(session_id: str) -> str:
@@ -22,15 +22,18 @@ def owner_workspace_name(owner: OwnerContext | Any) -> str:
     if not isinstance(context, OwnerContext):
         raise WorkspaceError("workspace owner context is required")
     if not context.is_team and context.owner_id.startswith("wsp_"):
-        storage_key = str(context.workspace_storage_key or "").strip()
-        if not storage_key:
-            from services.auth.storage import personal_workspace_storage_key  # noqa: PLC0415
+        from services.auth.storage import personal_workspace_storage_key  # noqa: PLC0415
 
-            storage_key = personal_workspace_storage_key(context.owner_id)
-        return storage_key
+        return str(context.workspace_storage_key or "").strip() or personal_workspace_storage_key(context.owner_id)
     digest = hashlib.sha256(context.owner_id.encode("utf-8")).hexdigest()
     prefix = "team" if context.is_team else "sess"
-    return f"{prefix}_{digest[:32]}"
+    storage_key = f"{prefix}_{digest[:32]}"
+    if not context.is_team:
+        from services.auth.workspace_storage import workspace_storage_key_is_attached  # noqa: PLC0415
+
+        if workspace_storage_key_is_attached(storage_key):
+            raise WorkspacePermissionDenied("This workspace was kept. Use its access credential.")
+    return storage_key
 
 
 __all__ = ["owner_workspace_name", "session_workspace_name"]

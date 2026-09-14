@@ -1540,7 +1540,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 **Behavior:**
 
 - A new browser starts with an anonymous UUID workspace. It can use normal personal features locally without creating a principal or durable credential.
-- Open **Options → Access** and choose **Keep this workspace** when you want the workspace to survive browser changes. The app keeps all of its files, history, Projects, preferences, workflows, and other personal data together, creates a pseudonymous principal, and asks for an optional label for the first credential. No username, email address, or password is required.
+- Open **Options → Access** and choose **Keep this workspace** when you want the workspace to survive browser changes. The app keeps all of its files, history, Projects, preferences, workflows, and other personal data together, creates a pseudonymous principal, and asks for an optional label for the first credential. Its old anonymous identity and download links stop working; use the saved credential to reopen the workspace. No username, email address, or password is required.
 - A credential is shown once and masked by default. Use **Reveal** or **Copy**, save it in a password manager, then close the reveal. The app removes the reusable value from the page and cannot show it again.
 - **Use an existing credential** opens the same kept workspace on another browser. One credential can be reused, but a separately labeled credential per device makes a lost device easier to revoke without interrupting the others.
 - Credential rows show only a label, safe prefix, type, creation and last-used dates, expiry, state, and a **Current** badge. Existing reusable values are never returned by list or status requests.

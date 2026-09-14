@@ -90,6 +90,26 @@ async function expectRedemptionSpacing(page) {
 test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => resetAnonymousBrowser(page))
 
+  test('restores a kept workspace from a browser holding its retired anonymous identity', async ({ page }) => {
+    const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
+    const credentialId = await keepBrowserWorkspace(page, { label: 'Restored browser' })
+    const savedCredential = await page.evaluate(() => localStorage.getItem('access_credential'))
+    await page.evaluate((retiredId) => {
+      localStorage.removeItem('access_credential')
+      localStorage.setItem('anonymous_id', retiredId)
+    }, anonymousId)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await ensurePromptReady(page)
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(401)
+    await openAccess(page)
+    await page.locator('#options-access-use-btn').click()
+    await page.locator('#options-access-redemption-input').fill(savedCredential)
+    await page.locator('#options-access-redemption-apply').click()
+    await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
+    await expect(page.locator(`[data-credential-id="${credentialId}"]`)).toContainText('Current')
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+  })
+
   for (const width of [1280, 375]) test.describe(`API tokens at ${width}px`, () => {
     test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
 

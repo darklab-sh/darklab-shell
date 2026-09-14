@@ -34,6 +34,7 @@ from .contracts import (
     validate_anonymous_uuid,
 )
 from .verifier_keys import credential_verifier_digest, load_verifier_root
+from .workspace_storage import anonymous_workspace_storage_key, workspace_storage_key_is_attached
 
 
 class AuthenticationState(str, Enum):
@@ -44,6 +45,7 @@ class AuthenticationState(str, Enum):
     EXPIRED_CREDENTIAL = "expired_credential"
     REVOKED_CREDENTIAL = "revoked_credential"
     DISABLED_PRINCIPAL = "disabled_principal"
+    RETIRED_ANONYMOUS_IDENTITY = "retired_anonymous_identity"
 
 
 AuthenticationMethod = Literal[
@@ -362,6 +364,12 @@ def resolve_authentication(
     if parsed is None:
         return AuthenticationResult(state=AuthenticationState.NO_CREDENTIAL)
     if isinstance(parsed, AnonymousContext):
+        if workspace_storage_key_is_attached(anonymous_workspace_storage_key(parsed.anonymous_id), conn=conn, connect=connect):
+            return _failure(
+                AuthenticationState.RETIRED_ANONYMOUS_IDENTITY,
+                "anonymous_workspace_attached",
+                "This workspace was kept. Use its access credential.",
+            )
         return AuthenticationResult(state=AuthenticationState.NO_CREDENTIAL, context=parsed)
     active_now = now or datetime.now(timezone.utc)
     if active_now.tzinfo is None:

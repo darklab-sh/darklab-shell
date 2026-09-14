@@ -412,6 +412,12 @@ def _enforce_authentication_resolution():
     result = get_authentication_result()
     if not result.failed:
         return None
+    if result.error_code == "anonymous_workspace_attached":
+        if request.endpoint == "auth.redeem":
+            # Redemption proves a new credential before changing the browser's identity.
+            return None
+        # Rejected reads from a restored anonymous browser are not credential guesses.
+        raise AuthenticationRejected(result.error_code, result.message)
     if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
         return None
     limited = check_failed_redemption(
