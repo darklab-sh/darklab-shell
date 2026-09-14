@@ -96,13 +96,11 @@ async function joinTeamFromOptions(page, { code, displayName, teamName }) {
   await expect(form).toBeVisible()
   await form.locator('[name="code"]').fill(code)
   await form.locator('[name="display_name"]').fill(displayName)
-  // A background list refresh can finish between press and release. Exercise
-  // that race with real pointer input so replacing the Submit node is caught.
-  const submit = form.locator('button[type="submit"]')
-  await submit.hover()
-  await page.mouse.down()
-  await page.evaluate(() => window.refreshOptionsTeams())
-  await page.mouse.up()
+  const joined = page.waitForResponse(response => (
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/session/teams/join'
+  ))
+  await form.locator('button[type="submit"]').click()
+  expect((await joined).status()).toBe(201)
   await expect(page.locator('#options-teams-list')).toContainText(teamName, { timeout: 15_000 })
   await expect(page.locator('#options-team-detail')).toContainText(teamName)
 }
