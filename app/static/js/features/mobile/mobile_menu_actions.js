@@ -40,6 +40,7 @@ import {
   togglePanelOverlay,
 } from '../../ui/ui_helpers.js';
 import { getLineNumberMode as importedGetLineNumberMode } from '../../output.js';
+import { confirmBrowserLogOut } from '../preferences/browser_logout.js';
 
 const MOBILE_MENU_ACTIONS_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
 
@@ -128,6 +129,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   }
   if (action === 'options') _mobileMenuImportedCall(importedOpenOptions, 'openOptions');
   if (action === 'access') _mobileMenuImportedCall(importedOpenOptions, 'openOptions', { tab: 'access' });
+  if (action === 'logout') void confirmBrowserLogOut(document.getElementById('hamburger-btn'));
   if (action === 'scope' && typeof openTeamScopeSelector === 'function') openTeamScopeSelector();
   if (action === 'projects') void _mobileMenuImportedCall(importedOpenProjectWorkspace, 'openProjectWorkspace');
   if (action === 'atlas') void _mobileMenuImportedCall(importedOpenAtlas, 'openAtlas', { source: 'mobile-menu' });

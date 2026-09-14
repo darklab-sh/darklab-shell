@@ -90,7 +90,20 @@ describe('showConfirm', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     document.body.innerHTML = ''
+  })
+
+  it('does not steal restored focus when a dialog closes before its deferred focus callback', async () => {
+    vi.useFakeTimers()
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    const confirmed = g.showConfirm({ actions: KILL_ACTIONS, refocusOnResolve: false })
+    g.cancelConfirm()
+    await confirmed
+    trigger.focus()
+    vi.runOnlyPendingTimers()
+    expect(document.activeElement).toBe(trigger)
   })
 
   describe('guards', () => {

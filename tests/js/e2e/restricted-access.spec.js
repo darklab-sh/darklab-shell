@@ -120,6 +120,38 @@ test.describe('restricted access profile', () => {
     }
   })
 
+  test('retries a failed rail logout and leaves another browser signed in', async ({ page, browser, context, request }) => {
+    await openSignIn(page)
+    await signIn(page)
+    const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+    const peer = await peerContext.newPage()
+    try {
+      await openSignIn(peer)
+      await signIn(peer)
+      const session = (await context.cookies()).find(cookie => cookie.name === 'darklab_browser_session')
+      expect(session).toBeTruthy()
+      await page.route('**/auth/logout', route => route.fulfill({ status: 503 }), { times: 1 })
+      await openRailAction(page, 'logout')
+      await page.locator('#confirm-host').getByRole('button', { name: 'Log out', exact: true }).click()
+      await expect(page.locator('#permalink-toast')).toHaveText('Could not log out. Try again.')
+      await expect(page.locator('#rail-more-btn')).toBeFocused()
+      expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+      await openRailAction(page, 'logout')
+      await page.locator('#confirm-host').getByRole('button', { name: 'Log out', exact: true }).click()
+      await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+      expect((await context.cookies()).some(cookie => cookie.name === 'darklab_browser_session')).toBe(false)
+      const replay = await request.get(new URL('/projects', page.url()).href, {
+        headers: { Cookie: `darklab_browser_session=${session.value}` },
+      })
+      expect(replay.status()).toBe(401)
+      expect(await peer.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+      await signIn(page)
+      expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+    } finally {
+      await peerContext.close()
+    }
+  })
+
   for (const width of [1280, 375]) test.describe(`private sharing at ${width}px`, () => {
     test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
     test('disables public snapshot controls and explains keyboard denial', async ({ page }) => {

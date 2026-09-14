@@ -17,6 +17,7 @@ import { clearCredentialReveal, showCredentialReveal } from './credential_reveal
 import { credentialState, renderCredentialRows } from './credential_rows.js';
 import { buildCredentialCreationFields } from './credential_creation.js';
 import { loadOIDCIdentity } from './access_oidc.js';
+import { logOutCurrentBrowser } from './browser_logout.js';
 
 const elements = {
   panel: document.getElementById('options-panel-access'),
@@ -624,14 +625,13 @@ async function _removeLocalAccess({ invalid = false } = {}) {
   if (choice !== 'remove') return;
   if (identity.kind === 'browser_session') {
     try {
-      await _request('/auth/logout', { method: 'POST' });
-      importedRedirectToSignIn();
+      await logOutCurrentBrowser();
     } catch (error) {
       _setMessage(error.message || 'Could not sign out. Try again.', 'error');
     }
     return;
   }
-  importedClearAccessCredential();
+  await logOutCurrentBrowser();
   _closeEditor({ restoreFocus: false });
   _closeRedemption({ restoreFocus: false });
   clearCredentialReveal({ restoreFocus: false });
