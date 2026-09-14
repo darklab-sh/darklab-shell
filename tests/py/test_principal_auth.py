@@ -210,6 +210,7 @@ def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_pat
 
     first = resolve_authentication(headers, conn=auth_db, now=now)
     assert first.state == AuthenticationState.VALID
+    assert first.last_used_write_due is True
 
     statements: list[str] = []
     auth_db.set_trace_callback(statements.append)
@@ -219,6 +220,7 @@ def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_pat
         auth_db.set_trace_callback(None)
 
     assert second.state == AuthenticationState.VALID
+    assert second.last_used_write_due is False
     assert not any("UPDATE credentials SET last_used_at" in statement for statement in statements)
 
 

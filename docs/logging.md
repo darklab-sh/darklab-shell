@@ -92,6 +92,7 @@ The current event inventory is:
 | ------- | ------- | ------- | ----------------- |
 | DEBUG | `REQUEST` | `before_request` | ip, request_id, method, path, qs |
 | DEBUG | `RESPONSE` | `after_request` | ip, request_id, method, path, http_status, size |
+| DEBUG | `AUTHENTICATION_RESOLVED` | first authentication resolution in a request | request_id, endpoint, method, state, owner_kind, supplied_transports, browser_cookie_enabled, last_used_write_due |
 | DEBUG | `REQUEST_SESSION_RESOLUTION_FAILED` | `errorhandler(500)` | method, path, request_id (+ traceback) |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_STARTED` | runtime bootstrap | step, runtime |
 | DEBUG | `RUNTIME_BOOTSTRAP_STEP_COMPLETED` | runtime bootstrap | step, runtime |
@@ -632,6 +633,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+`AUTHENTICATION_RESOLVED` emits once when a request first resolves authentication, using that cached result. `method` names the selected method, `rejected`, or `none`; `supplied_transports` lists fixed transport names without their values. `browser_cookie_enabled` distinguishes a considered cookie from one ignored by the open access profile. `last_used_write_due` reports the existing credential timestamp-write decision; it's null for anonymous, browser-cookie, and rejected outcomes. These DEBUG records don't trigger another lookup and don't appear at INFO.
 
 Credential rejection warnings emit at most once per fixed reason per process each minute; throttle warnings use the same bound per fixed policy (`failed_credential_ip`, `failed_credential_lookup`, or `anonymous_issuance_ip`). The next warning for that classification includes the number of suppressed repeats. Its request id and endpoint identify the sampled request, while the repeat count covers that classification across endpoints. Duplicate warning calls within one request don't inflate the count. Submitted credentials, cookie values, lookup ids, fingerprints, IP addresses, and form contents stay out of these events and the sampling keys. A rejected sign-in form keeps its actual HTTP status in the event, and throttling reports 429.
 

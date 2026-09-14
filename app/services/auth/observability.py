@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Sample authentication warnings without retaining submitted identities."""
+"""Bounded authentication diagnostics without submitted identities."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from flask import g, has_request_context, request
 
 if TYPE_CHECKING:
     from services.auth.rate_limit import CredentialRateLimitResult
+    from services.auth.resolver import AuthenticationResult
 
 
 log = logging.getLogger("shell")
@@ -76,3 +77,32 @@ def log_credential_rate_limited(result: CredentialRateLimitResult) -> None:
         "CREDENTIAL_RATE_LIMITED", policy, policy=policy,
         retry_after=result.retry_after, http_status=429,
     )
+
+
+def log_authentication_resolved(result: AuthenticationResult, *, cookies_enabled: bool) -> None:
+    if not log.isEnabledFor(logging.DEBUG) or not has_request_context():
+        return
+    from services.auth.browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
+
+    transports = [
+        method for header, method in (
+            ("X-Darklab-Anonymous-ID", "anonymous_header"),
+            ("X-Darklab-Credential", "portable_header"),
+            ("Authorization", "pat_bearer"),
+        ) if header in request.headers
+    ]
+    if result.error_code == "legacy_identity_removed":
+        transports.append("legacy_header")
+    if request.cookies.get(BROWSER_SESSION_COOKIE):
+        transports.append("browser_cookie")
+    context = result.context
+    log.debug("AUTHENTICATION_RESOLVED", extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64),
+        "endpoint": _request_value(request.endpoint, 160),
+        "method": context.authentication_method if context else "rejected" if result.failed else "none",
+        "state": result.state.value,
+        "owner_kind": "personal" if result.is_valid else "anonymous" if context else "none",
+        "supplied_transports": ",".join(transports) or "none",
+        "browser_cookie_enabled": cookies_enabled,
+        "last_used_write_due": result.last_used_write_due,
+    })

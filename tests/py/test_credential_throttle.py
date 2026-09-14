@@ -54,6 +54,7 @@ def reset_limits(tmp_path, monkeypatch):
 def warning_records(monkeypatch):
     records = []
     handler = logging.Handler()
+    handler.setLevel(logging.WARNING)
     handler.emit = records.append
     logger = logging.Logger("auth-warning-test", logging.DEBUG)
     logger.addHandler(handler)

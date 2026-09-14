@@ -172,7 +172,7 @@ def get_authentication_result():
     """Return the request's cached, typed authentication result."""
     from services.auth.resolver import public_lookup_id_from_headers, resolve_authentication  # noqa: PLC0415
     from services.auth.rate_limit import check_credential_redemption  # noqa: PLC0415
-    from services.auth.observability import log_credential_rate_limited  # noqa: PLC0415
+    from services.auth.observability import log_authentication_resolved, log_credential_rate_limited  # noqa: PLC0415
     from services.auth.browser_sessions import BROWSER_SESSION_COOKIE  # noqa: PLC0415
     import core.process as process_state  # noqa: PLC0415
 
@@ -202,6 +202,7 @@ def get_authentication_result():
         browser_session_idle_seconds=idle_seconds,
     )
     setattr(g, _AUTH_RESULT_KEY, result)
+    log_authentication_resolved(result, cookies_enabled=restricted)
     return result
 
 

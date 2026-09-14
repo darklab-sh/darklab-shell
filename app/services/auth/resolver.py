@@ -95,6 +95,7 @@ class AuthenticationResult:
     credential_supplied: bool = False
     error_code: str = ""
     message: str = ""
+    last_used_write_due: bool | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -321,7 +322,8 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
             )
     cutoff = now - timedelta(seconds=LAST_USED_WRITE_INTERVAL_SECONDS)
     context_last_used = _stored_context_timestamp(data.get("last_used_at"))
-    if touch_last_used and _last_used_write_is_due(data.get("last_used_at"), cutoff):
+    last_used_write_due = touch_last_used and _last_used_write_is_due(data.get("last_used_at"), cutoff)
+    if last_used_write_due:
         conn.execute(
             "UPDATE credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL "
             "AND (last_used_at IS NULL OR last_used_at <= ?)",
@@ -344,6 +346,7 @@ def _resolve_credential(conn: Any, parsed: _ParsedCredential, *, now: datetime, 
             capabilities=frozenset(capabilities),
         ),
         credential_supplied=True,
+        last_used_write_due=last_used_write_due,
     )
 
 
