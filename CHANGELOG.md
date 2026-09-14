@@ -59,7 +59,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Branch images now pick up fixed Debian glibc packages.** The runtime install explicitly refreshes `libc6` and `libc-bin`, and branch CI can bypass the runtime cache for a security recheck without rebuilding the compiled tool stages.
 
-- **WHOIS lookups save the queried target only after a matching registration record.** No-match responses, rate-limit notices, errors, and unrelated records create no Atlas entity. Registration ranges, registry and registrar hosts, nameservers, contact handles, RDAP and referral links, and policy URLs remain in the transcript without becoming Atlas records or Project targets. Existing noisy WHOIS entities remain until you suppress them.
+- **WHOIS lookups save the queried target only after a matching registration record.** No-match responses, rate-limit notices, errors, and unrelated records create no Atlas entity. Registration ranges, registry and registrar hosts, nameservers, contact handles, RDAP and referral links, and policy URLs remain in the transcript without becoming Atlas records or Project targets. Existing noisy WHOIS entities remain until you suppress them. See [entity recognition](FEATURES.md#command-findings) for the separate generic, DNS, and WHOIS rules.
 
 - **JavaScript tooling dependencies include the reviewed security fixes.**
   - **Markdown linting:** the scoped override uses `smol-toml` 1.8.0.
