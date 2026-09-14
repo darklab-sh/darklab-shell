@@ -917,6 +917,8 @@ Team list refreshes preserve the top form's controls and focus; form submissions
 
 Assessment lifecycle confirmations resolve the current opening control after a refresh before returning focus. Later Assessment redraws preserve a focused lifecycle control.
 
+Package wizard redraws reuse a focused text field when it remains on the current step, preserving its live value and cursor selection while background presets or Assessment choices load.
+
 ### Frontend Composition
 
 ```mermaid

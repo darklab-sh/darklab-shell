@@ -106,6 +106,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.
+
 - **Assessment confirmations restore focus after a refresh.** Canceling a lifecycle action returns to the current opening button when a background update replaced the original control, and later Assessment updates preserve that focus.
 
 - **Mobile Project actions run once per tap.** Linking a run no longer reopens its confirmation after succeeding; the same dispatch guard covers other shared Project actions.

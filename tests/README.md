@@ -366,6 +366,8 @@ The shared Assessment controller coverage also sets and clears reason-required m
 
 Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/` so high-change areas such as app chrome, session identity, and Files/workspace behavior can share setup without growing individual spec files.
 
+Package wizard tests delay preset and Assessment reads while a user types, then check field continuity, focus, cursor selection, and saved notes through the real browser creation flow.
+
 ### Playwright
 
 Use Playwright for browser-visible behavior where focus, layout, navigation, or live server state is part of the contract:

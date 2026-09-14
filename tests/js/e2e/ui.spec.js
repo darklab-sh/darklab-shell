@@ -1760,6 +1760,13 @@ test.describe('project workspace modal', () => {
     const projectId = await createActiveProject(page, `Playwright Package ${Date.now()}`)
     await linkExternalRunToOpenProject(page, testInfo)
 
+    let releaseAssessments
+    const assessmentsHeld = new Promise((resolve) => { releaseAssessments = resolve })
+    await page.route(`**/projects/${projectId}/assessments?*`, async (route) => {
+      const response = await route.fetch()
+      await assessmentsHeld
+      await route.fulfill({ response })
+    })
     await switchProjectTab(page, 'packages')
     const packagePresetsResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -1771,7 +1778,14 @@ test.describe('project workspace modal', () => {
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preset')
     expect((await packagePresetsResponse).ok()).toBe(true)
     await page.locator('[data-project-package-field="labels"]').fill('handoff, e2e')
-    await page.locator('[data-project-package-field="notes"]').fill('Package notes from Playwright')
+    const packageNotes = page.locator('[data-project-package-field="notes"]')
+    await packageNotes.fill('Package notes')
+    const originalWizard = await wizard.locator('.project-package-wizard').elementHandle()
+    releaseAssessments()
+    await expect.poll(() => originalWizard.evaluate(element => element.isConnected)).toBe(false)
+    await expect(packageNotes).toBeFocused()
+    await packageNotes.pressSequentially(' from Playwright')
+    await expect(packageNotes).toHaveValue('Package notes from Playwright')
 
     await page.locator('[data-project-action="package-wizard-next"]').click()
     await expect(wizard.locator('.project-package-step.is-active')).toContainText('Include')
