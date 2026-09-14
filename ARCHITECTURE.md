@@ -2490,7 +2490,7 @@ This section groups log emission, health/status surfaces, and the operator diagn
 
 ### Logging
 
-The application uses a dedicated `shell` logger configured during runtime bootstrap. Configuration loading starts before the final logger exists, so `startup_logging.py` buffers records without attaching a handler; `configure_logging()` replays them once through the effective level and formatter. Fatal config failures use one bounded fallback record without file contents, values, parser details, or a traceback.
+The application uses a dedicated `shell` logger configured during runtime bootstrap. Access-policy normalization reports invalid OIDC settings and inconsistent session limits through the same single fatal configuration event before startup stops. Configuration loading starts before the final logger exists, so `startup_logging.py` buffers records without attaching a handler; `configure_logging()` replays them once through the effective level and formatter. Fatal config failures use one bounded fallback record without file contents, values, parser details, or a traceback.
 
 Authentication rejection and credential-limit boundaries share a warning sampler keyed only by fixed reasons or policies. It retains no submitted identities, reuses the existing authentication outcome, and deduplicates calls within a request; audit records remain separate from sampled operational warnings. A DEBUG outcome describes the cached authentication branch and existing credential-use write decision without another lookup.
 

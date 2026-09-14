@@ -249,6 +249,8 @@ The OIDC cases use a deterministic local provider in `test_oidc_sign_in.py`. `te
 
 `test_credential_lifecycle_errors.py` retires or corrupts real verifier roots before anonymous upgrades and browser-session issuance. It checks generic server errors, transaction rollback, one sanitized ERROR record, exception-chain privacy in text and GELF, and unchanged client validation responses.
 
+`test_logging.py` imports configuration in fresh processes to verify one fatal startup record for invalid OIDC policy, scopes, allowlists, required settings, URLs, and inconsistent browser-session limits. Text and GELF cases check fixed reasons and source attribution while keeping private configuration values out of the output.
+
 #### Core backend, Atlas, and CVE risk
 
 Cutover backup checks keep managed archives as the default, allow an explicit development archive only in the cutover tool, and still reject it for managed restore.

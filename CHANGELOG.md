@@ -108,7 +108,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Concurrent workflow recovery keeps completed steps from failing healthy work.** Recovery reads each execution and its current step together, then advances a completed run only once.
 
-- **Credential failures and throttling appear in operational logs.** Sampled warnings identify the rejected authentication reason or limiting policy across browser sign-in, API requests, credential redemption, and workspace creation, without recording submitted identities or secrets. Internal credential-storage faults return a generic server error and emit a sanitized ERROR record, while invalid requests keep their client status. DEBUG logging also explains the selected authentication method, cookie/header conflicts, and credential-use tracking without repeating the lookup.
+- **Access failures produce useful operational logs.** Sampled warnings identify rejected credentials and throttling policies without submitted identities or secrets, while DEBUG explains the cached authentication decision. Internal credential-storage faults return a generic server error and emit a sanitized ERROR; invalid requests keep their client status. Invalid OIDC settings and inconsistent browser-session limits emit a structured startup failure without disclosing their values.
 
 - **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.
 
