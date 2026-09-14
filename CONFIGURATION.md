@@ -170,9 +170,39 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py revoke
 docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
 ```
 
-`status` includes a `suspended_work` list with the affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
+`status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. `recover` also requires `--confirm-principal` to exactly match the target principal. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done.
+### Issuing credentials and recovering access
+
+`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the intended principal ID from `status` or **Options → Access**.
+
+To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  issue prn_example --type portable --label "Additional device" \
+  --secret-file /data/additional-device.credential
+```
+
+**Recovery revokes every portable credential, PAT, and browser session for the principal.** It also pauses schedules and watchers, mutes notification channels, and disables Project digests created or last changed with those newly revoked credentials. This happens automatically; `recover` has no option to keep that work running. Existing provider links and workspace data stay in place.
+
+Before recovery, review the principal's credentials and related work in **Options → Access**, Schedules, Watchers, **Options → Notifications**, and **Project → Monitoring**, including Team scope where applicable. The operator `status` command's `suspended_work` list covers principal disablement; it isn't a recovery-work inventory. If work must be stopped as part of an incident, use the principal's `disable` operation; recovery isn't a global stop for already accepted work.
+
+For a full access reset, replace both occurrences of `prn_example` with the intended principal ID and choose a new output filename:
+
+```bash
+docker compose exec -T shell python /app/tools/manage_principal_access.py \
+  recover prn_example --confirm-principal prn_example \
+  --label "Recovered access" --secret-file /data/recovered-access.credential
+
+umask 077
+docker compose cp shell:/data/recovered-access.credential ./recovered-access.credential
+chmod 600 ./recovered-access.credential
+```
+
+Save and verify the copied credential in the operator's secret store, then remove both temporary copies. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
+
+For provider-only deployments, enable `mixed` before using a portable credential to sign in. Use `issue` when the purpose is only to regain a browser path for repairing a provider link; use `recover` when all existing credentials and sessions must be invalidated.
 
 Failed credential attempts are limited to 30 per client IP and 10 per public credential lookup ID in each minute. Once either allowance is used, further attempts wait until the window resets, including attempts with a correct credential. Rejected requests return HTTP 429 with `Retry-After`; successful sign-ins don't consume the failure allowance.
 
@@ -223,7 +253,7 @@ For provider sign-in, register a confidential OpenID Connect client with the aut
 
 `OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
 
-In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. **Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old. For a provider-only workspace, an operator can issue a recovery credential with `manage_principal_access.py recover`, then use `mixed` to sign in and manage the link. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
+In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. **Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
 
 The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed. If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup. Validated discovery metadata and signing keys are cached for five minutes. A token naming an unknown signing key triggers one key refresh; each sign-in still needs a successful code exchange with the provider. CA changes replace one private combined bundle per worker, which is removed when that worker exits normally.
 
