@@ -176,6 +176,7 @@ The current event inventory is:
 | INFO / WARN | `PROJECT_ASSESSMENT_BROKER_UNAVAILABLE` | browser/API Assessment launch routes | request_id, session, owner_kind, team_id, project_id, assessment_id, check_id, finding_id, action_kind, source, reason, broker_mode |
 | DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
 | INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
+| ERROR | `BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE` | stored browser session references unusable signing material | key_version, reason, error_type, suppressed_repeat_count; sanitized origin frames |
 | ERROR | `CREDENTIAL_LIFECYCLE_FAILED` | caught credential lifecycle storage failure | request_id, operation, reason, error_class, http_status; sanitized origin frames |
 | ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
 | WARNING | `ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED` | reviewed Dalfox XSS launch guardrail | project_id, assessment_id, check_id, check_key, reason |
@@ -636,6 +637,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+`BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE` distinguishes missing keys, unsupported wrappers, failed decryption, and invalid decoded keys after a stored session confirms the key version. Ordinary malformed, unknown, wrong-version, or incorrectly signed cookies do not create key-incident records. A 64-entry cache coalesces repeated failures by key version and reason for one minute and reports suppressed repeats on the next event. Client rejection stays generic; ERROR records retain safe origin frames without cookie, session-id, key, plaintext, or original-exception content.
 
 `BROWSER_CSRF_REJECTED` distinguishes a missing cookie, missing header, mismatched token pair, and failed stored-token validation. It uses the same per-process, per-reason warning sampler as credential rejections, including the count of suppressed repeats. An expired or mismatched standalone sign-in form instead emits `BROWSER_SIGN_IN_FORM_REJECTED` at DEBUG and keeps its normal refreshed-form response. Neither event records tokens, nonces, or browser-session ids.
 

@@ -37,6 +37,10 @@ _WARNING_INTERVAL = 60.0
 _WARNING_LOCK = Lock()
 # Keys come only from the fixed event/reason/policy sets, never from requests.
 _WARNING_STATE: dict[tuple[str, str], tuple[float, int]] = {}
+_SIGNING_KEY_ERROR_REASONS = frozenset({"missing_key", "unsupported_wrapper", "decryption_failed", "invalid_key"})
+_SIGNING_KEY_ERROR_MAX_KEYS = 64
+_SIGNING_KEY_ERROR_LOCK = Lock()
+_SIGNING_KEY_ERROR_STATE: dict[tuple[int, str], tuple[float, int]] = {}
 
 
 def _request_value(value: object, limit: int) -> str:
@@ -129,7 +133,7 @@ def log_authentication_resolved(result: AuthenticationResult, *, cookies_enabled
     })
 
 
-def _sanitized_lifecycle_exc_info(
+def _sanitized_storage_exc_info(
     exc: BaseException,
 ) -> tuple[type[RuntimeError], RuntimeError, TracebackType | None]:
     frames = []
@@ -139,7 +143,7 @@ def _sanitized_lifecycle_exc_info(
         frames.append(f"{PurePath(code.co_filename).name}:{code.co_name}:{traceback.tb_lineno}")
         traceback = traceback.tb_next
     try:
-        raise RuntimeError("Credential lifecycle operation failed") from None
+        raise RuntimeError("Authentication storage operation failed") from None
     except RuntimeError as safe_error:
         safe_error.add_note("Origin frames: " + " > ".join(frames[-12:])[:1000])
         return RuntimeError, safe_error, safe_error.__traceback__
@@ -158,10 +162,32 @@ def log_credential_lifecycle_failed(exc: BaseException) -> None:
         else "workspace_storage_unavailable" if isinstance(exc, WorkspaceStorageError)
         else "identity_storage_failed"
     )
-    log.error("CREDENTIAL_LIFECYCLE_FAILED", exc_info=_sanitized_lifecycle_exc_info(exc), extra={
+    log.error("CREDENTIAL_LIFECYCLE_FAILED", exc_info=_sanitized_storage_exc_info(exc), extra={
         "request_id": _request_value(request.environ.get("darklab_request_id"), 64) if has_request_context() else "unknown",
         "operation": operation,
         "reason": reason,
         "error_class": _request_value(type(exc).__name__, 80),
         "http_status": 500,
+    })
+
+
+def log_browser_signing_key_unavailable(version: int, exc: BaseException, *, reason: str) -> None:
+    """Coalesce faults only after a stored session has confirmed its key version."""
+    code = reason if reason in _SIGNING_KEY_ERROR_REASONS else "invalid_key"
+    key = (version, code)
+    now = time.monotonic()
+    with _SIGNING_KEY_ERROR_LOCK:
+        previous = _SIGNING_KEY_ERROR_STATE.pop(key, None)
+        if previous is not None and now - previous[0] < _WARNING_INTERVAL:
+            _SIGNING_KEY_ERROR_STATE[key] = (previous[0], previous[1] + 1)
+            return
+        suppressed = previous[1] if previous is not None else 0
+        if len(_SIGNING_KEY_ERROR_STATE) >= _SIGNING_KEY_ERROR_MAX_KEYS:
+            _SIGNING_KEY_ERROR_STATE.pop(next(iter(_SIGNING_KEY_ERROR_STATE)))
+        _SIGNING_KEY_ERROR_STATE[key] = (now, 0)
+    log.error("BROWSER_SESSION_SIGNING_KEY_UNAVAILABLE", exc_info=_sanitized_storage_exc_info(exc), extra={
+        "key_version": version,
+        "reason": code,
+        "error_type": _request_value(type(exc).__name__, 80),
+        "suppressed_repeat_count": suppressed,
     })

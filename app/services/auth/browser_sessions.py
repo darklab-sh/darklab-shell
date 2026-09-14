@@ -22,6 +22,7 @@ from services.secrets.vault import decrypt_secret, encrypt_secret
 from services.storage.transactions import run_read, run_transaction
 
 from .contracts import CREDENTIAL_WRAP_ALGORITHM, IdentityStorageError, timestamp
+from .observability import log_browser_signing_key_unavailable
 
 BROWSER_SESSION_COOKIE = "darklab_browser_session"
 BROWSER_CSRF_COOKIE = "darklab_csrf"
@@ -34,6 +35,14 @@ _COOKIE_RE = re.compile(
 
 class BrowserSessionError(IdentityStorageError):
     """Raised when persisted browser-session state is unsafe or invalid."""
+
+
+class BrowserSessionSigningKeyError(BrowserSessionError):
+    """A stored signing key is unavailable for a fixed, safe failure reason."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -175,10 +184,12 @@ def load_signing_key(conn: Any, version: int) -> bytes:
         (int(version),),
     ).fetchone()
     if row is None:
-        raise BrowserSessionError("browser-session signing key was not found")
+        raise BrowserSessionSigningKeyError("missing_key", "browser-session signing key was not found")
     data = _row_dict(row)
     if str(data["wrap_algorithm"]) != CREDENTIAL_WRAP_ALGORITHM:
-        raise BrowserSessionError("stored browser-session signing key uses an unsupported wrapper")
+        raise BrowserSessionSigningKeyError(
+            "unsupported_wrapper", "stored browser-session signing key uses an unsupported wrapper",
+        )
     try:
         plaintext = decrypt_secret(
             bytes(data["wrapped_key"]),
@@ -186,8 +197,11 @@ def load_signing_key(conn: Any, version: int) -> bytes:
             associated_data=_associated_data(int(version)),
         )
     except Exception as exc:
-        raise BrowserSessionError("browser-session signing key cannot be decrypted") from exc
-    return _decode_key(plaintext)
+        raise BrowserSessionSigningKeyError("decryption_failed", "browser-session signing key cannot be decrypted") from exc
+    try:
+        return _decode_key(plaintext)
+    except BrowserSessionError as exc:
+        raise BrowserSessionSigningKeyError("invalid_key", "stored browser-session signing key is invalid") from exc
 
 
 def _signature(key: bytes, session_id: str, version: int) -> str:
@@ -391,7 +405,8 @@ def resolve_browser_session(
         data = _row_dict(row)
         try:
             key = load_signing_key(active_conn, version)
-        except BrowserSessionError:
+        except BrowserSessionError as exc:
+            log_browser_signing_key_unavailable(version, exc, reason=getattr(exc, "reason", "invalid_key"))
             return _failure("unknown", "unknown_browser_session", "The browser session is no longer available.")
         if not hmac.compare_digest(_signature(key, session_id, version), supplied_signature):
             return _failure("unknown", "unknown_browser_session", "The browser session is no longer available.")
