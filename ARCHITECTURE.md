@@ -919,6 +919,8 @@ Assessment lifecycle confirmations resolve the current opening control after a r
 
 Package wizard redraws reuse a focused text field when it remains on the current step, preserving its live value and cursor selection while background presets or Assessment choices load.
 
+Autocomplete startup allows one retry after a failed network request or server error, with a 250 ms delay and no overlapping requests. Authorization, malformed JSON, and unexpected client errors remain terminal. A completed catalog is published through the shared autocomplete state before dependent workspace hints load; browser readiness checks observe that state.
+
 ### Frontend Composition
 
 ```mermaid

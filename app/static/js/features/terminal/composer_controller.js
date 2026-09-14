@@ -600,7 +600,25 @@ if (typeof document !== 'undefined') {
 
 const _composerApiFetch = (typeof importedApiFetch === 'function' && importedApiFetch)
   || _composerFn('apiFetch');
-if (typeof _composerApiFetch === 'function') _composerApiFetch('/autocomplete').then(r => r.json()).then(data => {
+async function _loadComposerAutocompleteCatalog() {
+  for (let attempt = 0; ; attempt += 1) {
+    let response;
+    try {
+      response = await _composerApiFetch('/autocomplete');
+    } catch (error) {
+      if (attempt || !['TypeError', 'NetworkError'].includes(error?.name)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+      continue;
+    }
+    if (response.ok === false) {
+      if (attempt || response.status < 500) throw new Error('Autocomplete request failed.');
+      await new Promise(resolve => setTimeout(resolve, 250));
+      continue;
+    }
+    return response.json();
+  }
+}
+if (typeof _composerApiFetch === 'function') _loadComposerAutocompleteCatalog().then(data => {
   _writeComposerAutocompleteCatalog(data);
   _composerImportedFn(importedLoadSessionVariables, 'loadSessionVariables')?.()?.catch?.(() => {});
   _composerImportedFn(importedLoadRecentValues, 'loadRecentValues')?.()?.catch?.(() => {});

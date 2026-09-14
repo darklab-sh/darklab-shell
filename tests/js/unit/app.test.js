@@ -4101,6 +4101,42 @@ describe('app helpers', () => {
     expect(tsBtn.getAttribute('aria-pressed')).toBe('false')
   })
 
+  it.each(['network', 'server'])('recovers autocomplete after a transient %s startup failure', async kind => {
+    let finishFirstRequest
+    const firstRequest = new Promise(resolve => { finishFirstRequest = resolve })
+    const catalog = { suggestions: ['nmap -sT'], context: { nmap: { flags: ['-sT'] } } }
+    const fetchCatalog = vi.fn()
+      .mockImplementationOnce(() => firstRequest.then(() => {
+        if (kind === 'network') throw new TypeError('Failed to fetch')
+        return { ok: false, status: 503, json: () => Promise.resolve({ error: 'unavailable' }) }
+      }))
+      .mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve(catalog) })
+    const apiFetch = vi.fn(url => url === '/autocomplete'
+      ? fetchCatalog() : Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    const { logClientError } = await loadAppFns({ apiFetch })
+    expect(fetchCatalog).toHaveBeenCalledOnce()
+    finishFirstRequest()
+    await vi.waitFor(() => expect(window.acSuggestions).toEqual(catalog.suggestions))
+    expect(fetchCatalog).toHaveBeenCalledTimes(2)
+    expect(logClientError.mock.calls.filter(([context]) => context === 'failed to load /autocomplete')).toHaveLength(0)
+  })
+
+  it.each(['network', 'server', 'authorization', 'parse'])('bounds autocomplete retries for a persistent %s failure', async kind => {
+    const error = kind === 'network' ? new TypeError('Failed to fetch') : new SyntaxError('Invalid JSON')
+    const fetchCatalog = vi.fn(() => {
+      if (kind === 'network') return Promise.reject(error)
+      return Promise.resolve({
+        ok: kind === 'parse', status: kind === 'server' ? 503 : kind === 'authorization' ? 401 : 200,
+        json: () => kind === 'parse' ? Promise.reject(error) : Promise.resolve({ error: 'unavailable' }),
+      })
+    })
+    const apiFetch = vi.fn(url => url === '/autocomplete'
+      ? fetchCatalog() : Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    const { logClientError } = await loadAppFns({ apiFetch })
+    await vi.waitFor(() => expect(logClientError.mock.calls.filter(([context]) => context === 'failed to load /autocomplete')).toHaveLength(1))
+    expect(fetchCatalog).toHaveBeenCalledTimes(['network', 'server'].includes(kind) ? 2 : 1)
+  })
+
   it('bootstraps cleanly when config and allowed-commands fetches fail', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config' || url === '/allowed-commands' || url === '/autocomplete') {

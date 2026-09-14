@@ -4,6 +4,20 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, setComposerValueForTest } from './helpers.js'
 
+test('autocomplete recovers after a failed startup request', async ({ page }) => {
+  let catalogRequests = 0
+  await page.route('**/autocomplete', route => {
+    catalogRequests += 1
+    return catalogRequests === 1 ? route.abort('failed') : route.continue()
+  })
+  await page.goto('/')
+  await ensurePromptReady(page, { waitForAutocomplete: true })
+  await page.locator('#cmd').pressSequentially('nmap ')
+  await expect(page.locator('#ac-dropdown')).toContainText('<target>')
+  await expect(page.locator('#ac-dropdown')).toContainText('-sT')
+  expect(catalogRequests).toBe(2)
+})
+
 test.describe('autocomplete', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')

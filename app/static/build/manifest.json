@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.7a12add4afbe.js",
-      "hash": "a1410e0acd42cbd58b795c8ece1220fce3c39d57b49ebf2be22a4f776a2d9dea",
+      "path": "/static/build/shell-bootstrap.b47ae04ff9c6.js",
+      "hash": "bb71a310d3499bafa4ad424f858fd0cde39556382f7ea8a6a7f209d5384d3f44",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -237,7 +237,7 @@
         "/static/js/features/tabs/tab_exports.js": "b0d4ffd5ff23fb03b664df4f82829f660c82fc5587263ca7e83561d82980291c",
         "/static/js/features/tabs/tab_session_state.js": "c800b3980e210b0b23d0f57bd510c466f32a819a136885aa00f6ce867846911f",
         "/static/js/features/team_scope.js": "013a781c042fc5deb9643cb76737d0e4cdabfd2a289acf37b98ed87a5d6a0682",
-        "/static/js/features/terminal/composer_controller.js": "72399ef832ec167528fa76a616a1d690df1d2dae6ecccc01666efd1f000b48b7",
+        "/static/js/features/terminal/composer_controller.js": "900372818acadc7b57eaa3396e4bf2f331f51cf965d3d99aee9c3529b2c82464",
         "/static/js/features/terminal/composer_editing.js": "6d79863272567f4e918c23a6d4aa78b66748a38c192deed4cf24159f10198497",
         "/static/js/features/terminal/composer_prompt_bridge.js": "489ef73a2cda4da73bdb4f55ae5e483afbd3deba390de87e39a5a4531128b4e8",
         "/static/js/features/terminal/local_commands.js": "caba731bd6b13f15701099c2730f49798a896e12c41f5d002fe2c9b47181ca68",
