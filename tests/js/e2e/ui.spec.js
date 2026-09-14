@@ -1341,17 +1341,20 @@ test.describe('project workspace modal', () => {
     const createFinding = page.locator('[data-project-action="create-manual-finding"]')
     // Let the locator wait for a stable, actionable replacement before pressing.
     await createFinding.hover()
-    const pressedControl = page.evaluateHandle(() => new Promise(resolve => {
+    const pointerCapture = await page.evaluateHandle(() => {
+      const capture = { target: null }
       document.addEventListener('pointerdown', event => {
-        resolve(event.target.closest('[data-project-action="create-manual-finding"]'))
+        capture.target = event.target.closest('[data-project-action="create-manual-finding"]')
       }, { capture: true, once: true })
-    }))
+      return capture
+    })
     await page.mouse.down()
-    const openingControl = await pressedControl
+    const openingControl = await pointerCapture.getProperty('target')
     await page.evaluate(() => window.refreshProjectWorkspace())
     expect(await openingControl.evaluate(element => element.isConnected)).toBe(true)
     await page.mouse.up()
     await openingControl.dispose()
+    await pointerCapture.dispose()
     const editor = page.locator('#finding-triage-overlay')
     await expect(editor).toHaveClass(/\bopen\b/)
     await expect(editor.locator('#finding-triage-title')).toHaveText('CREATE FINDING')
