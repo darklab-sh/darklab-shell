@@ -18,6 +18,8 @@ from .observability import _request_value
 class ExportAuthorizationError(RuntimeError):
     """An archive cannot be delivered under the current authorization state."""
 
+    cleanup_archive_path: str = ""
+
 
 class ExportAuthorizationRejected(ExportAuthorizationError):
     def __init__(self, authorization: BackgroundAuthorization) -> None:

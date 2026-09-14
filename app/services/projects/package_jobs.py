@@ -26,6 +26,7 @@ from services.metrics_lazy import app_metrics
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
+from services.projects.export_cleanup import remove_revoked_archive
 from services.projects.package_archive import build_evidence_package_archive
 
 _JOB_ID_RE = re.compile(r"^epj_[a-f0-9]{24}$")
@@ -128,7 +129,12 @@ def cleanup_evidence_package_archive_jobs():
             continue
         job = _read_job(path.stem) or {}
         archive_path = job.get("archive_path")
-        if archive_path:
+        if archive_path and job.get("authorization_cleanup_pending"):
+            if not remove_revoked_archive(
+                str(archive_path), job_id=path.stem, job_kind="package", stage="retention_authorization",
+            ):
+                continue
+        elif archive_path:
             try:
                 Path(archive_path).unlink()
             except OSError:
@@ -183,7 +189,12 @@ def evidence_package_archive_for_job(session_id, project_id, package_id, job_id,
 
 def discard_evidence_package_archive_job(job_id, *, archive=True):
     job = _read_job(job_id)
-    if archive and isinstance(job, dict) and job.get("archive_path"):
+    if isinstance(job, dict) and job.get("authorization_cleanup_pending") and job.get("archive_path"):
+        if not remove_revoked_archive(
+            str(job["archive_path"]), job_id=str(job_id), job_kind="package", stage="discard_authorization",
+        ):
+            return
+    elif archive and isinstance(job, dict) and job.get("archive_path"):
         try:
             Path(str(job["archive_path"])).unlink()
         except OSError:
@@ -286,6 +297,8 @@ def _run_job(job_id, cfg_snapshot):
             error_code="authorization_revoked" if rejected else "authorization_unavailable",
             error_status=403 if rejected else 500,
             authorization_reason=exc.reason,
+            archive_path=exc.cleanup_archive_path,
+            authorization_cleanup_pending=bool(exc.cleanup_archive_path),
         )
         fields = {
             "job_id": job_id, "project_id": job.get("project_id"),
@@ -360,11 +373,10 @@ def _run_job(job_id, cfg_snapshot):
         _require_job_authorization(job)
     except ExportAuthorizationError as exc:
         archive_path = str(archive.get("path") or "")
-        if archive_path:
-            try:
-                Path(archive_path).unlink()
-            except OSError:
-                pass
+        if archive_path and not remove_revoked_archive(
+            archive_path, job_id=job_id, job_kind="package", stage="post_build_authorization",
+        ):
+            exc.cleanup_archive_path = archive_path
         _authorization_failed(exc, "post_build")
         return
     destination = _archive_path(job_id)

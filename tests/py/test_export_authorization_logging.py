@@ -4,8 +4,11 @@
 """Archive authorization stops have one safe terminal outcome at every stage."""
 
 from contextlib import nullcontext
+import errno
 import json
 import logging
+import os
+from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -18,7 +21,7 @@ from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields
 from identity_helpers import principal_identity
 from services.auth import export_authorization
 from services.auth.background_authorization import BackgroundAuthorization, BackgroundAuthorizationState
-from services.projects import package_archive, package_jobs
+from services.projects import export_cleanup, package_archive, package_jobs
 from services.reports import jobs as report_jobs
 
 
@@ -55,6 +58,7 @@ def worker(request, tmp_path, monkeypatch):
     logger.addHandler(handler)
     monkeypatch.setattr(module, "log", logger)
     monkeypatch.setattr(package_archive, "log", logger)
+    monkeypatch.setattr(export_cleanup, "log", logger)
     builder_name = "build_evidence_package_archive" if kind == "package" else "build_report_export_archive"
     return SimpleNamespace(
         kind=kind,
@@ -68,12 +72,13 @@ def worker(request, tmp_path, monkeypatch):
     )
 
 
-def _assert_terminal(worker, *, stage, reason, unavailable=False):
+def _assert_terminal(worker, *, stage, reason, unavailable=False, retained_archive=False):
     stored = worker.module._read_job(worker.job["id"])
     assert stored["status"] == "failed" and stored["phase"] == "authorization"
     assert stored["error_status"] == (500 if unavailable else 403)
     assert stored["authorization_reason"] == reason
-    assert not stored.get("archive_path")
+    assert bool(stored.get("archive_path")) is retained_archive
+    assert bool(stored.get("authorization_cleanup_pending")) is retained_archive
     assert worker.audit.call_count == 1
     suffix = "CHECK_FAILED" if unavailable else "REJECTED"
     events = [record for record in worker.records if record.msg == worker.prefix + "_AUTHORIZATION_" + suffix]
@@ -263,3 +268,160 @@ def test_live_principal_disablement_stops_the_real_package_worker_once(worker, t
     worker.module._run_job(worker.job["id"], {})
     _assert_terminal(worker, stage="progress", reason="principal_disabled")
     assert not list(worker.module._JOB_DIR.glob("*.zip"))
+
+
+def _cleanup_events(worker, stage, error_type, error_number):
+    events = [record for record in worker.records if record.msg == "EXPORT_REVOKED_ARCHIVE_CLEANUP_FAILED"]
+    assert len(events) == 1
+    record = events[0]
+    assert record.levelno == logging.WARNING and not record.exc_info
+    assert _extra_fields(record) == {
+        "job_id": worker.job["id"], "job_kind": worker.kind, "stage": stage,
+        "error_type": error_type, "errno": error_number,
+    }
+    rendered = _TextFormatter().format(record) + GELFFormatter().format(record)
+    assert "private" not in rendered
+    assert str(worker.archive) not in rendered
+
+
+def _download_result(worker):
+    if worker.kind == "package":
+        return worker.module.evidence_package_archive_for_job(
+            worker.job["personal_workspace_id"], worker.job["project_id"], worker.job["package_id"], worker.job["id"],
+        )
+    return worker.module.report_export_archive_for_job(
+        worker.job["personal_workspace_id"], worker.job["project_id"], worker.job["id"],
+    )
+
+
+def _cleanup_retry(worker, *, discard=False):
+    if discard:
+        method = "discard_evidence_package_archive_job" if worker.kind == "package" else "discard_report_export_job"
+        getattr(worker.module, method)(worker.job["id"])
+    else:
+        method = "cleanup_evidence_package_archive_jobs" if worker.kind == "package" else "cleanup_report_export_jobs"
+        old = worker.module._now().timestamp() - worker.module._JOB_TTL.total_seconds() - 60
+        os.utime(worker.module._job_path(worker.job["id"]), (old, old))
+        getattr(worker.module, method)()
+
+
+@pytest.mark.parametrize("failure", ["missing", "permission", "io", "success"])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_post_build_cleanup_reports_real_failures_and_retains_private_retry_metadata(
+    worker, monkeypatch, failure, unavailable,
+):
+    calls = 0
+
+    def authorize(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            if unavailable:
+                raise sqlite3.OperationalError("private-database-query")
+            return BackgroundAuthorization(BackgroundAuthorizationState.PRINCIPAL_DISABLED)
+        return BackgroundAuthorization(BackgroundAuthorizationState.AUTHORIZED)
+
+    def build(*_args, **_kwargs):
+        if failure != "missing":
+            worker.archive.write_bytes(b"private-report-body")
+        return {"path": str(worker.archive), "byte_size": 19}
+
+    original_unlink = Path.unlink
+    fail_removal = failure in {"permission", "io"}
+    error_type, error_number = (PermissionError, errno.EACCES) if failure == "permission" else (OSError, errno.EIO)
+
+    def unlink(path, *args, **kwargs):
+        if path == worker.archive and fail_removal:
+            raise error_type(error_number, "private-cleanup-error", str(path))
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(export_authorization, "resolve_background_authorization", authorize)
+    monkeypatch.setattr(worker.module, worker.builder_name, build)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    worker.module._run_job(worker.job["id"], {})
+    _assert_terminal(
+        worker, stage="post_build", reason="authorization_check_failed" if unavailable else "principal_disabled",
+        unavailable=unavailable, retained_archive=fail_removal,
+    )
+    public = worker.module._public_job(worker.module._read_job(worker.job["id"]))
+    assert "archive_path" not in public and "authorization_cleanup_pending" not in public
+    download = _download_result(worker)
+    assert download["status"] == "failed" and "path" not in download
+    if not fail_removal:
+        assert not worker.archive.exists()
+        assert not any(r.msg == "EXPORT_REVOKED_ARCHIVE_CLEANUP_FAILED" for r in worker.records)
+        return
+    _cleanup_events(worker, "post_build_authorization", error_type.__name__, error_number)
+    stored = worker.module._read_job(worker.job["id"])
+    assert stored["archive_path"] == str(worker.archive)
+    assert worker.archive.exists()
+
+    # Both cleanup entry points preserve the association while removal still fails.
+    for discard in (False, True):
+        worker.records.clear()
+        _cleanup_retry(worker, discard=discard)
+        _cleanup_events(
+            worker, "discard_authorization" if discard else "retention_authorization", error_type.__name__, error_number,
+        )
+        assert worker.module._read_job(worker.job["id"])["archive_path"] == str(worker.archive)
+        assert worker.archive.exists()
+    fail_removal = False
+    worker.records.clear()
+    _cleanup_retry(worker)
+    assert not worker.archive.exists()
+    assert worker.module._read_job(worker.job["id"]) is None
+    assert not worker.records
+
+
+@pytest.mark.parametrize("worker", ["package"], indirect=True)
+@pytest.mark.parametrize("phase", ["core", "complete"])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_real_package_progress_cleanup_failure_is_retained_for_a_later_retry(
+    worker, tmp_path, monkeypatch, phase, unavailable,
+):
+    from core.database_access import get_db_connect
+    from services.auth import storage
+
+    identity, project, package = _create_real_package(tmp_path, monkeypatch)
+    monkeypatch.setattr(export_authorization, "get_db_connect", get_db_connect)
+    worker.job.update({
+        "principal_id": identity.principal_id, "personal_workspace_id": identity.personal_workspace_id,
+        "project_id": project["id"], "package_id": package["id"],
+    })
+    worker.module._write_job(worker.job)
+    worker.records.clear()
+
+    original_unlink = Path.unlink
+    fail_removal = True
+
+    def unlink(path, *args, **kwargs):
+        if path.parent == worker.module._JOB_DIR and path.suffix == ".zip" and fail_removal:
+            raise PermissionError(errno.EACCES, "private-cleanup-error", str(path))
+        return original_unlink(path, *args, **kwargs)
+
+    def build(*args, progress_callback, **kwargs):
+        def progress(current_phase, message):
+            if current_phase == phase:
+                if unavailable:
+                    raise export_authorization.ExportAuthorizationUnavailable("OperationalError")
+                storage.disable_principal(identity.principal_id, reason="operator stop")
+            progress_callback(current_phase, message)
+        return package_archive.build_evidence_package_archive(*args, progress_callback=progress, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(worker.module, worker.builder_name, build)
+    worker.module._run_job(worker.job["id"], {})
+    _assert_terminal(
+        worker, stage="progress", reason="authorization_check_failed" if unavailable else "principal_disabled",
+        unavailable=unavailable, retained_archive=True,
+    )
+    _cleanup_events(worker, "progress_authorization", "PermissionError", errno.EACCES)
+    archive = Path(worker.module._read_job(worker.job["id"])["archive_path"])
+    assert archive.is_file()
+    assert _download_result(worker)["status"] == "failed"
+    fail_removal = False
+    worker.records.clear()
+    _cleanup_retry(worker, discard=True)
+    assert not archive.exists()
+    assert worker.module._read_job(worker.job["id"]) is None
+    assert not worker.records

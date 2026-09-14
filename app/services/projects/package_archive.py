@@ -22,6 +22,7 @@ from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules, line_entries_from_events, line_events_from_entries, redact_line_entries
 from services.assessments.export_context import get_project_assessment_context
 from services.auth.export_authorization import ExportAuthorizationError
+from services.projects.export_cleanup import remove_revoked_archive
 from services.runs.output_model import LineEvent, is_noise_event
 from services.projects.artifacts import (
     artifact_owner_context as _artifact_owner_context,
@@ -761,7 +762,13 @@ def build_evidence_package_archive(
         if max_compressed_archive_bytes and final_archive_bytes > max_compressed_archive_bytes:
             raise EvidencePackageTooLarge("evidence package ZIP exceeds configured size limit")
         _progress("complete", "Archive ready")
-    except (EvidencePackageTooLarge, ExportAuthorizationError):
+    except ExportAuthorizationError as exc:
+        if not remove_revoked_archive(
+            archive_path, job_id=str(build_job_id or ""), job_kind="package", stage="progress_authorization",
+        ):
+            exc.cleanup_archive_path = archive_path
+        raise
+    except EvidencePackageTooLarge:
         try:
             os.unlink(archive_path)
         except OSError:
