@@ -209,7 +209,7 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 `test_credential_throttle.py` covers failure limits before verification for portable credentials, PATs, browser cookies, redemption, and the sign-in form. It checks independent IP and lookup limits, reset windows, Redis and local counters, and successful requests that leave the allowance intact.
 
-`test_principal_active_runs.py` starts real local processes through browser and API routes in personal and Team scope. It verifies actor attribution, principal-disable cancellation, isolation from another principal's running work, and continued execution after credential revocation. Workflow launch checks retain attribution and reject disabled principals or downgraded Team roles.
+`test_principal_active_runs.py` starts real local processes through browser and API routes in personal and Team scope. It verifies actor attribution, principal-disable cancellation, isolation from another principal's running work, and continued execution after credential revocation. Workflow launch checks retain attribution and reject disabled principals or downgraded Team roles. Direct broker fixtures pass the same explicit owner context as production callers; the standalone path-filter fixture supplies its own current ownership schema.
 
 `test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
 
