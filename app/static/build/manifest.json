@@ -578,8 +578,8 @@
       "hash": "d6a729a69c825d505e1154f996754d8f349bb2270e6d9340ca3af2b7f8adcbb5"
     },
     "/static/js/features/projects/project_workspace_renderer.js": {
-      "path": "/static/build/static-project-workspace-renderer.c9e7ee2747dd.js",
-      "hash": "91fe821494676079d14770a03ef768bf44c083a7d13734bd2babcf0f97dd38ea"
+      "path": "/static/build/static-project-workspace-renderer.ff21be9917e7.js",
+      "hash": "6dd02b9244929985963cc81932c1c59d46caa37e1c7ec2cc40d10895fc585f3d"
     },
     "/static/js/features/projects/project_workspace_shell.js": {
       "path": "/static/build/static-project-workspace-shell.df182b0aaf10.js",
