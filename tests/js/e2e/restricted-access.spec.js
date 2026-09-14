@@ -153,7 +153,9 @@ test.describe('restricted access profile', () => {
     await context.addCookies([session, csrf])
 
     // The still-open app meets a real revoked-session response, with no reload.
-    await page.evaluate(() => { void apiFetch('/projects') })
+    const denied = page.waitForResponse(response => new URL(response.url()).pathname === '/projects' && response.status() === 401)
+    await openRailAction(page, 'projects')
+    expect((await denied).status()).toBe(401)
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
     await expect(page.getByLabel('Access credential')).toBeVisible()
     const logout = await page.evaluate(async () => (await fetch('/auth/logout', { method: 'POST' })).status)
