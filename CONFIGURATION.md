@@ -257,7 +257,7 @@ After redemption, the browser holds a signed server-side session instead of the 
 
 **Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old.
 
-The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed.
+**Log out** in the desktop rail's **more** menu or the mobile menu revokes only this app's current browser session and returns to sign-in. It uses the same operation as **Sign out** in Access, preserves other devices and saved credentials, and doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed.
 
 Open run streams recheck access within 15 seconds, even while output is idle. These checks don't extend session activity. Losing access disconnects the stream and stops a controlling interactive PTY; an ordinary command already accepted can finish and be viewed through another valid credential.
 
