@@ -172,6 +172,7 @@
     "/static/js/features/preferences/credential_reveal.js",
     "/static/js/features/preferences/credential_rows.js",
     "/static/js/features/preferences/credential_creation.js",
+    "/static/js/features/preferences/access_oidc.js",
     "/static/js/features/workspace/workspace_viewer_formats.js",
     "/vendor/ansi_up.js"
   ]

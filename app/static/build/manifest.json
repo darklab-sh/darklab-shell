@@ -394,8 +394,8 @@
       "hash": "c5bac9ec1de8739c1272771d9ad5333bfe7a2a534f1b0b697f6c25227390bf42"
     },
     "/static/js/features/preferences/access_panel.js": {
-      "path": "/static/build/static-access-panel.2b91f45ef64d.js",
-      "hash": "9b7b7815a20349eb2d91f200cbdca27dcadd4261313a3246abae6da5e8b23395"
+      "path": "/static/build/static-access-panel.2683c3cecca9.js",
+      "hash": "7cd5d308f62c89ca4172852fb68dd716737bd6a319863763744ea4004f4afba0"
     },
     "/static/js/features/preferences/notification_channels.js": {
       "path": "/static/build/static-notification-channels.c1e8144bb306.js",
@@ -740,6 +740,10 @@
     "/static/js/features/findings/finding_record_context.js": {
       "path": "/static/build/static-finding-record-context.d2bf5421310d.js",
       "hash": "d2bf5421310d68c6d4368fadc00bbfed45ce0fb2f74dafe51eb299c11f7dd239"
+    },
+    "/static/js/features/preferences/access_oidc.js": {
+      "path": "/static/build/static-access-oidc.6807ff1ba8b1.js",
+      "hash": "6807ff1ba8b17e43c83b9fcc335ce90d5e8227de339b4ddc9458dc27660ac78c"
     },
     "/static/js/features/preferences/credential_creation.js": {
       "path": "/static/build/static-credential-creation.12fd360f5909.js",

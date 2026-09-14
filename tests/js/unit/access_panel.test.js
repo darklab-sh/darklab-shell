@@ -35,6 +35,10 @@ vi.mock('../../../app/static/js/core/config.js', () => ({
   getAppConfig: () => globalThis.__accessPanelTest.appConfig || {},
 }))
 
+vi.mock('../../../app/static/js/runtime_bridge.js', () => ({
+  logClientError: (...args) => globalThis.__accessPanelTest.logClientError(...args),
+}))
+
 const SECRET = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
 const CURRENT_ID = `crd_${'a'.repeat(32)}`
 const REPLACEMENT_SECRET = `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`
@@ -115,6 +119,7 @@ describe('Access panel', () => {
       showConfirm: vi.fn().mockResolvedValue('cancel'),
       copy: vi.fn().mockResolvedValue(undefined),
       toast: vi.fn(),
+      logClientError: vi.fn(),
       appConfig: {},
     }
   })
@@ -469,6 +474,90 @@ describe('Access panel', () => {
     } else {
       await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
     }
+  })
+
+  it.each([
+    ['disabled', 404, '', '', ''],
+    ['authentication', 401, '', '', ''],
+    ['forbidden', 403, 'response', 'request_rejected', 'warning'],
+    ['server', 503, 'response', 'server_failed', 'error'],
+    ['network', 0, 'request', 'network_unavailable', 'warning'],
+    ['abort', 0, 'request', 'network_unavailable', 'warning'],
+    ['client', 0, 'request', 'client_failed', 'error'],
+    ['json', 200, 'parse', 'invalid_json', 'error'],
+    ['null', 200, 'response', 'invalid_payload', 'error'],
+    ['array', 200, 'response', 'invalid_payload', 'error'],
+    ['missing', 200, 'response', 'invalid_payload', 'error'],
+    ['string', 200, 'response', 'invalid_payload', 'error'],
+  ])('keeps provider load failure %s safe, visible, and retryable', async (kind, status, stage, reason, level) => {
+    const state = globalThis.__accessPanelTest
+    state.appConfig = { access_profile: 'mixed' }
+    state.identity = { kind: 'browser_session', validFormat: true }
+    const privateText = 'private-provider-response issuer=https://private.example subject=private-user credential=private-secret'
+    let failing = true
+    const errorBody = vi.fn().mockResolvedValue({ error: privateText })
+    state.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { recent_credential_session: true } })
+      if (url === '/auth/credentials') return response({ credentials: [credential()] })
+      if (!failing) return response({ linked: true, issuer: 'https://private.example', subject: 'private-user' })
+      if (['network', 'abort', 'client'].includes(kind)) {
+        const error = kind === 'network' ? new TypeError(privateText) : new Error(privateText)
+        if (kind === 'abort') error.name = 'AbortError'
+        throw error
+      }
+      if (kind === 'json') return Promise.resolve({ ok: true, status, json: () => Promise.reject(new SyntaxError(privateText)) })
+      if (status >= 400) return Promise.resolve({ ok: false, status, json: errorBody })
+      return response({ null: null, array: [], missing: {}, string: { linked: 'false' } }[kind])
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel({ force: true })
+    expect(document.getElementById('options-access-summary').textContent).toBe('Authenticated workspace')
+    expect(document.getElementById('options-access-credentials-section').hidden).toBe(false)
+    expect(document.getElementById('options-access-oidc-section').hidden).toBe(kind === 'disabled')
+    expect(errorBody).not.toHaveBeenCalled()
+    if (kind !== 'disabled') {
+      expect(document.getElementById('options-access-oidc-status').textContent).toContain('Select Refresh to try again')
+      expect(document.getElementById('options-access-msg').textContent).not.toContain('up to date')
+      for (const action of ['link', 'unlink', 'reauth']) expect(document.getElementById(`options-access-oidc-${action}`).hidden).toBe(true)
+    }
+    if (level) {
+      expect(state.logClientError).toHaveBeenCalledExactlyOnceWith('ACCESS_OIDC_IDENTITY_LOAD_FAILED', null, {
+        event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level, action: 'load_identity', stage, status, reason,
+      })
+      expect(JSON.stringify(state.logClientError.mock.calls)).not.toContain('private')
+    } else {
+      expect(state.logClientError).not.toHaveBeenCalled()
+    }
+    failing = false
+    state.logClientError.mockClear()
+    document.getElementById('options-access-refresh-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(false))
+    expect(document.getElementById('options-access-msg').textContent).toBe('Access is up to date.')
+    expect(state.logClientError).not.toHaveBeenCalled()
+  })
+
+  it('ignores a provider failure from an older refresh', async () => {
+    const state = globalThis.__accessPanelTest
+    state.appConfig = { access_profile: 'mixed' }
+    state.identity = { kind: 'browser_session', validFormat: true }
+    let finishOldRequest
+    const oldRequest = new Promise(resolve => { finishOldRequest = resolve })
+    let identityCalls = 0
+    state.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { recent_credential_session: true } })
+      if (url === '/auth/credentials') return response({ credentials: [] })
+      identityCalls += 1
+      return identityCalls === 1 ? oldRequest : response({ linked: true })
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    const oldRefresh = refreshAccessPanel({ force: true })
+    await vi.waitFor(() => expect(identityCalls).toBe(1))
+    await refreshAccessPanel({ force: true })
+    finishOldRequest(await response({}, 503))
+    await oldRefresh
+    expect(state.logClientError).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(false)
+    expect(document.getElementById('options-access-msg').textContent).toBe('Access is up to date.')
   })
 
   it.each([false, true])('offers credential sign-in for an older session, linked: %s', async linked => {

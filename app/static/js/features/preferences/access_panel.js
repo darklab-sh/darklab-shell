@@ -3,6 +3,7 @@
 
 import { showToast as importedShowToast } from '../../core/utils.js';
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
 import {
   activateAccessCredential as importedActivateAccessCredential,
   apiFetch as importedApiFetch,
@@ -15,6 +16,7 @@ import { applyMobileTextInputDefaults as importedApplyMobileTextInputDefaults } 
 import { clearCredentialReveal, showCredentialReveal } from './credential_reveal.js';
 import { credentialState, renderCredentialRows } from './credential_rows.js';
 import { buildCredentialCreationFields } from './credential_creation.js';
+import { loadOIDCIdentity } from './access_oidc.js';
 
 const elements = {
   panel: document.getElementById('options-panel-access'),
@@ -198,8 +200,14 @@ async function refreshAccessPanel({ force = false } = {}) {
       && importedGetAppConfig?.()?.access_profile !== 'oidc_required';
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
-    await _refreshOIDC(sequence);
-    if (force) _setMessage('Access is up to date.', 'success');
+    const oidcReady = await _refreshOIDC(sequence);
+    if (sequence !== refreshSequence) return null;
+    if (force) {
+      _setMessage(
+        oidcReady === false ? 'Access refreshed, but provider sign-in details are unavailable.' : 'Access is up to date.',
+        oidcReady === false ? 'error' : 'success',
+      );
+    }
     return { identity, credentials };
   } catch (error) {
     if (sequence !== refreshSequence) return null;
@@ -216,22 +224,33 @@ async function _refreshOIDC(sequence) {
     elements.oidcSection.hidden = true;
     return;
   }
-  try {
-    const data = await _request('/auth/oidc/identity');
-    if (sequence !== refreshSequence) return;
-    elements.oidcSection.hidden = false;
-    if (elements.oidcStatus) {
-      elements.oidcStatus.textContent = data.linked
-        ? 'This workspace can be opened through your identity provider.'
-        : 'This workspace is not linked to an identity provider yet.';
+  const data = await loadOIDCIdentity();
+  if (sequence !== refreshSequence) return;
+  elements.oidcSection.hidden = data.disabled === true;
+  if (data.disabled) return;
+  if (!data.ok) {
+    if (elements.oidcStatus) elements.oidcStatus.textContent = "Provider sign-in details couldn't be loaded. Select Refresh to try again.";
+    [elements.oidcLink, elements.oidcUnlink, elements.oidcReauth].forEach(control => {
+      if (control) control.hidden = true;
+    });
+    if (data.status !== 401) {
+      importedLogClientError('ACCESS_OIDC_IDENTITY_LOAD_FAILED', null, {
+        event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level: data.level,
+        action: 'load_identity', stage: data.stage, status: data.status, reason: data.reason,
+      });
     }
-    const canManage = recentCredentialSession && profile !== 'oidc_required';
-    if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !canManage;
-    if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !canManage;
-    if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || canManage;
-  } catch (error) {
-    if (sequence === refreshSequence) elements.oidcSection.hidden = true;
+    return false;
   }
+  if (elements.oidcStatus) {
+    elements.oidcStatus.textContent = data.linked
+      ? 'This workspace can be opened through your identity provider.'
+      : 'This workspace is not linked to an identity provider yet.';
+  }
+  const canManage = recentCredentialSession && profile !== 'oidc_required';
+  if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !canManage;
+  if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !canManage;
+  if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || canManage;
+  return true;
 }
 
 function _offerCredentialReauthentication(error) {

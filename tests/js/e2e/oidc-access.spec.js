@@ -24,6 +24,66 @@ async function openAccess(page) {
 
 
 test.describe('managed sign-in with a local HTTPS provider', () => {
+  test('keeps provider load failures visible and recovers with Refresh', async ({ page }) => {
+    await page.goto('/')
+    await page.getByLabel('Access credential').fill(operatorCredential())
+    await Promise.all([
+      page.waitForURL(url => url.pathname === '/'),
+      page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+    ])
+    await ensurePromptReady(page)
+    await openAccess(page)
+    await expect(page.locator('#options-access-oidc-link')).toBeVisible()
+    const diagnostics = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname !== '/log' || request.method() !== 'POST') return
+      const body = request.postDataJSON()
+      if (body?.event === 'ACCESS_OIDC_IDENTITY_LOAD_FAILED') diagnostics.push(body)
+    })
+    let outcome = 'server'
+    await page.route('**/auth/oidc/identity', route => {
+      if (outcome === 'network') return route.abort('failed')
+      if (outcome === 'json') return route.fulfill({ status: 200, contentType: 'text/html', body: 'private-provider-response' })
+      if (outcome === 'shape') return route.fulfill({ json: { issuer: 'https://private.example', subject: 'private-user' } })
+      if (outcome === 'disabled') return route.fulfill({ status: 404, json: { error: 'oidc_disabled' } })
+      if (outcome === 'server') return route.fulfill({ status: 503, json: { error: 'private-provider-response' } })
+      return route.continue()
+    })
+    const refresh = page.locator('#options-access-refresh-btn')
+    const status = page.locator('#options-access-oidc-status')
+    for (const [kind, level, stage, code, reason] of [
+      ['server', 'error', 'response', 503, 'server_failed'],
+      ['json', 'error', 'parse', 200, 'invalid_json'],
+      ['shape', 'error', 'response', 200, 'invalid_payload'],
+      ['network', 'warning', 'request', 0, 'network_unavailable'],
+    ]) {
+      outcome = kind
+      if (kind === 'network') await page.setViewportSize({ width: 390, height: 844 })
+      const delivery = page.waitForResponse(response => new URL(response.url()).pathname === '/log'
+        && response.request().postDataJSON()?.event === 'ACCESS_OIDC_IDENTITY_LOAD_FAILED')
+      await refresh.click()
+      await expect(status).toHaveText("Provider sign-in details couldn't be loaded. Select Refresh to try again.")
+      await expect(page.locator('#options-access-oidc-link')).toBeHidden()
+      await expect(page.locator('#options-access-oidc-unlink')).toBeHidden()
+      await expect(page.locator('#options-access-credentials-section')).toBeVisible()
+      expect((await delivery).ok()).toBe(true)
+      expect(diagnostics.at(-1)).toEqual({
+        context: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', message: '', event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level,
+        details: { event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level, action: 'load_identity', stage, status: code, reason },
+      })
+      expect(JSON.stringify(diagnostics)).not.toContain('private')
+      outcome = 'success'
+      await refresh.click()
+      await expect(page.locator('#options-access-oidc-link')).toBeVisible()
+      await expect(page.locator('#options-access-msg')).toHaveText('Access is up to date.')
+    }
+    outcome = 'disabled'
+    await refresh.click()
+    await expect(page.locator('#options-access-oidc-section')).toBeHidden()
+    await expect(page.locator('#options-access-msg')).toHaveText('Access is up to date.')
+    expect(diagnostics).toHaveLength(4)
+  })
+
   test('links after both proofs, unlinks with revocation, then signs in through the provider', async ({ page, context }) => {
     await page.goto('/')
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
