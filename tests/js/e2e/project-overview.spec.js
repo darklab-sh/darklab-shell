@@ -204,7 +204,7 @@ async function openMobileProjects(page) {
   await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
   await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
   await expect(page.locator('#project-mobile-root')).toBeVisible()
-  await expect(page.locator('#project-mobile-body')).not.toContainText('Loading projects...')
+  await expect(page.locator('#project-mobile-body .project-mobile-row').first()).toBeVisible({ timeout: 15_000 })
 }
 
 async function createRealOverviewProject(page, testInfo) {
