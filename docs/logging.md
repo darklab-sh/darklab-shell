@@ -148,7 +148,7 @@ The current event inventory is:
 | DEBUG | `ATLAS_QUICK_LOOKUP_REQUEST_STARTED` / `SETTLED` / `DISCARDED` | browser Quick Lookup state through `/log` | ip, session, context, client_details with lookup_mode, detected_type, match_state, scope_kind, project_scoped, candidate_count, parent_candidate, request_seq, reason, duration_ms |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CONFIG_VALIDATED` | config loading | schema_field_count, derived_keys, warning_count |
-| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
+| INFO | `CONFIG_LOADED` | app startup | conf_dir, local_conf_dir, local_overlay, supported_local_overlays, overlays, database_backend, access_profile, oidc_configured, oidc_provisioning, public_shares_enabled, browser_session_idle_minutes, browser_session_absolute_hours, workspace_enabled, raw_packet_scanning_configured, raw_packet_scanning_state, raw_packet_scanning_active_tools, raw_packet_scanning_unavailable_tools, per-tool raw_packet_*_active/reason, log_level, log_format, warning_count, schema_field_count, env_key_count, legacy_key_migrated |
 | INFO | `APP_INITIALIZED` | app startup | app_version, database_backend, workspace_enabled, pid, app_name, blueprint_count, before_request_handlers, after_request_handlers, limiter_storage, duration_ms |
 | INFO | `RUNTIME_BOOTSTRAP_COMPLETED` | runtime bootstrap | runtime, init_metrics, init_logging, init_process, init_db, cleanup_active_runs, duration_ms |
 | INFO | `METRICS_ENVIRONMENT_CONFIGURED` | metrics startup | prometheus_multiproc_dir, source, app_start_time_set |
@@ -634,6 +634,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+`CONFIG_LOADED` includes the validated sign-in profile, whether an OIDC provider is configured, provisioning mode, effective public-share availability, and browser-session idle and absolute limits. `public_shares_enabled` is true in open mode or when restricted sharing is explicitly enabled. These INFO fields contain only policy names, booleans, and durations; provider URLs, client identifiers, secrets, and subjects stay out of the summary.
 
 `CREDENTIAL_LIFECYCLE_FAILED` reports caught internal storage faults once at ERROR. Fixed reasons distinguish unavailable verifier keys, workspace storage, and other identity storage failures. The response is a generic HTTP 500. Records retain the original error class and bounded file/function/line locations, without the original message, source text, or exception chain. Invalid inputs and expected permission, missing-credential, and lockout responses keep their client status without this ERROR event.
 

@@ -594,6 +594,59 @@ class TestConfigureLogging:
 
 class TestConfigStartupLogging:
     @pytest.mark.parametrize("log_format", ["text", "gelf"])
+    @pytest.mark.parametrize("profile,provider,provisioning,shares,expected_shares", [
+        ("open", False, "disabled", False, True),
+        ("open", True, "disabled", False, True),
+        ("token_required", False, "disabled", False, False),
+        ("token_required", False, "disabled", True, True),
+        ("oidc_required", True, "disabled", False, False),
+        ("oidc_required", True, "automatic", False, False),
+        ("mixed", True, "automatic", False, False),
+        ("mixed", True, "allowlist", True, True),
+    ])
+    def test_loaded_config_reports_safe_access_policy(
+        self, tmp_path, log_format, profile, provider, provisioning, shares, expected_shares,
+    ):
+        values = {
+            "access_profile": profile,
+            "oidc_provisioning": provisioning,
+            "restricted_public_shares_enabled": shares,
+            "browser_session_idle_minutes": 45,
+            "browser_session_absolute_hours": 24,
+        }
+        if provider:
+            values.update({
+                "oidc_issuer": "https://private-provider.example",
+                "oidc_client_id": "private-client-canary",
+                "oidc_client_secret": "private-secret-canary",
+                "oidc_redirect_uri": "https://private-app.example/auth/oidc/callback",
+            })
+        if provisioning == "allowlist":
+            values["oidc_allowed_subjects"] = ["private-subject-canary"]
+        result = _run_config_startup(
+            tmp_path, base_config=f"app_name: startup-test\nlog_level: INFO\nlog_format: {log_format}\n",
+            local_config=json.dumps(values), configure_twice=True,
+        )
+        assert result.returncode == 0
+        assert result.stderr.count("CONFIG_LOADED") == 1
+        assert "private-" not in result.stderr + result.stdout
+        expected = {
+            "access_profile": profile, "oidc_configured": provider, "oidc_provisioning": provisioning,
+            "public_shares_enabled": expected_shares,
+            "browser_session_idle_minutes": 45, "browser_session_absolute_hours": 24,
+        }
+        if log_format == "gelf":
+            loaded = next(item for item in _gelf_records(result.stderr) if item["short_message"] == "CONFIG_LOADED")
+            assert loaded["level"] == 6
+            for key, value in expected.items():
+                assert loaded[f"_{key}"] == value
+        else:
+            loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
+            assert "[INFO ]" in loaded
+            for key, value in expected.items():
+                assert f"{key}={value}" in loaded
+
+    @pytest.mark.parametrize("log_format", ["text", "gelf"])
     @pytest.mark.parametrize("overrides,key,reason,provider", [
         ({"oidc_provisioning": "private-invalid-policy"}, "oidc_provisioning", "unsupported_provisioning", True),
         ({"oidc_scopes": {"private-scope": True}}, "oidc_scopes", "invalid_list", True),

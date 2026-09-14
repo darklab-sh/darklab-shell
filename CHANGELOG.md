@@ -108,7 +108,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Concurrent workflow recovery keeps completed steps from failing healthy work.** Recovery reads each execution and its current step together, then advances a completed run only once.
 
-- **Access failures produce useful operational logs.** Sampled warnings identify rejected credentials and throttling policies without submitted identities or secrets, while DEBUG explains the cached authentication decision. Internal credential-storage faults return a generic server error and emit a sanitized ERROR; invalid requests keep their client status. Invalid OIDC settings and inconsistent browser-session limits emit a structured startup failure without disclosing their values.
+- **Access diagnostics explain configuration and failures.** Sampled warnings identify rejected credentials and throttling policies without submitted identities or secrets, while DEBUG explains the cached authentication decision. Internal credential-storage faults return a generic server error and emit a sanitized ERROR; invalid requests keep their client status. Startup logging shows sign-in and sharing policies and session limits, and emits a structured failure for invalid settings without disclosing private values.
 
 - **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.
 

@@ -87,6 +87,15 @@ def log_loaded_config(cfg: Mapping[str, Any] | None = None) -> None:
                 if isinstance(item, Mapping)
             ),
             "database_backend": str(active_cfg.get("database_backend") or ""),
+            "access_profile": str(active_cfg.get("access_profile") or "open"),
+            "oidc_configured": bool(active_cfg.get("oidc_issuer")),
+            "oidc_provisioning": str(active_cfg.get("oidc_provisioning") or "disabled"),
+            "public_shares_enabled": (
+                str(active_cfg.get("access_profile") or "open") == "open"
+                or bool(active_cfg.get("restricted_public_shares_enabled", False))
+            ),
+            "browser_session_idle_minutes": int(active_cfg.get("browser_session_idle_minutes", 30)),
+            "browser_session_absolute_hours": int(active_cfg.get("browser_session_absolute_hours", 12)),
             "workspace_enabled": bool(active_cfg.get("workspace_enabled")),
             "assessment_intrusive_actions_enabled": bool(
                 active_cfg.get("assessment_intrusive_actions_enabled")
