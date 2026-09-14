@@ -38,11 +38,11 @@ def _load_cutover_script():
     return module
 
 
-def _legacy_database(path: Path, *, owner: str = LEGACY_CREDENTIAL) -> int:
+def _legacy_database(path: Path, *, owner: str = LEGACY_CREDENTIAL, schema_head: str = "0081") -> int:
     with connect_sqlite(str(path)) as conn:
         run_migrations(
             conn,
-            tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
+            tuple(migration for migration in MIGRATIONS if migration.version <= schema_head),
             backend=DatabaseBackend.SQLITE,
         )
         conn.execute(
@@ -51,7 +51,7 @@ def _legacy_database(path: Path, *, owner: str = LEGACY_CREDENTIAL) -> int:
         )
         conn.execute(
             "INSERT INTO runs "
-            "(id, personal_workspace_id, command, started, output_search_text) "
+            f"(id, {'session_id' if schema_head < '0080' else 'personal_workspace_id'}, command, started, output_search_text) "
             "VALUES ('run_offline_cutover', ?, 'printf operator-cutover-marker', ?, "
             "'operator cutover marker')",
             (owner, "2026-09-10T01:00:00+00:00"),
@@ -80,8 +80,8 @@ def _conversion_args(tmp_path: Path, database: Path, workspace_root: Path) -> Si
     )
 
 
-@pytest.fixture
-def cutover_environment(tmp_path, monkeypatch):
+@pytest.fixture(params=("0077", "0081"), ids=("v2.9.2", "prepared-v3"))
+def cutover_environment(tmp_path, monkeypatch, request):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     workspace_root = tmp_path / "workspaces"
@@ -89,7 +89,7 @@ def cutover_environment(tmp_path, monkeypatch):
     database = data_dir / "history.db"
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    rowid = _legacy_database(database)
+    rowid = _legacy_database(database, schema_head=request.param)
     storage_key = session_workspace_name(LEGACY_CREDENTIAL)
     workspace_path = workspace_root / storage_key
     workspace_path.mkdir()
@@ -101,6 +101,8 @@ def cutover_environment(tmp_path, monkeypatch):
         workspace_path=workspace_path,
         evidence=evidence,
         rowid=rowid,
+        schema_head=request.param,
+        owner_column="session_id" if request.param < "0080" else "personal_workspace_id",
     )
     reset_master_key_cache_for_tests()
 
@@ -131,7 +133,11 @@ def test_preflight_reports_safe_counts_and_recommends_a_fresh_reset(
         workspace_root=str(cutover_environment.workspace_root),
     )
 
+    with connect_sqlite(str(cutover_environment.database)) as conn:
+        before = tuple(conn.iterdump())
     payload = module.run(args)
+    with connect_sqlite(str(cutover_environment.database)) as conn:
+        assert tuple(conn.iterdump()) == before
 
     assert payload["recommended_action"] == "fresh_reset"
     assert payload["deployment_assumption_confirmed"] is True
@@ -228,19 +234,51 @@ def test_selected_conversion_failure_rolls_back_schema_data_fts_and_secret_file(
     assert not Path(args.new_credential_file).exists()
     assert cutover_environment.workspace_path.is_dir()
     with connect_sqlite(str(cutover_environment.database)) as conn:
-        assert "0082" not in applied_versions(conn)
+        assert max(applied_versions(conn)) == cutover_environment.schema_head
         assert conn.execute(
             "SELECT COUNT(*) FROM session_tokens WHERE token = ?",
             (LEGACY_CREDENTIAL,),
         ).fetchone()[0] == 1
         run = conn.execute(
-            "SELECT rowid, personal_workspace_id FROM runs WHERE id = 'run_offline_cutover'"
+            f"SELECT rowid, {cutover_environment.owner_column} AS owner FROM runs WHERE id = 'run_offline_cutover'"
         ).fetchone()
         assert int(run["rowid"]) == cutover_environment.rowid
-        assert run["personal_workspace_id"] == LEGACY_CREDENTIAL
+        assert run["owner"] == LEGACY_CREDENTIAL
         assert conn.execute(
             "SELECT COUNT(*) FROM runs_fts WHERE runs_fts MATCH 'operator'"
         ).fetchone()[0] == 1
+
+
+
+def test_selected_conversion_rechecks_the_reviewed_count_after_taking_the_write_lock(
+    cutover_environment, tmp_path, monkeypatch,
+):
+    module = _load_cutover_script()
+    monkeypatch.setattr(
+        module, "verify_backup_archive",
+        lambda _path: {"repository_free": True, "database_backend": "sqlite"},
+    )
+    original_inventory = module._inventory
+
+    def credential_arrives_after_inventory(args):
+        result = original_inventory(args)
+        with connect_sqlite(str(cutover_environment.database)) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created) VALUES (?, ?)",
+                ("tok_arrived_after_review", "2026-09-14T00:00:00+00:00"),
+            )
+            conn.commit()
+        return result
+
+    monkeypatch.setattr(module, "_inventory", credential_arrives_after_inventory)
+    args = _conversion_args(tmp_path, cutover_environment.database, cutover_environment.workspace_root)
+    with pytest.raises(RuntimeError, match="credential count changed since review"):
+        module._convert(args)
+    assert not Path(args.new_credential_file).exists()
+    with connect_sqlite(str(cutover_environment.database)) as conn:
+        assert max(applied_versions(conn)) == cutover_environment.schema_head
+        assert conn.execute("SELECT COUNT(*) FROM session_tokens").fetchone()[0] == 2
+    assert cutover_environment.evidence.read_text() == "do not move this workspace\n"
 
 
 def test_shared_anonymous_workspace_requires_an_explicit_disposition(

@@ -265,7 +265,9 @@ Public share permalinks are disabled by default in every restricted profile: sna
 
 ### v3 identity cutover
 
-The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before upgrading an existing SQLite or Postgres deployment, verify a backup of the current stopped-state data and run the cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before starting v3 against an existing SQLite or Postgres database, verify a backup of the current stopped-state data and run the new image's cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
+
+#### Development checkout
 
 For a development checkout using the bundled Postgres service, run the backup helper on the Docker host before stopping the stack. It uses `docker compose exec` for `pg_dump`, so Postgres must be running. Use the Python environment that has the app's requirements installed, and pass your actual `.env` and Compose paths if they differ. If you don't have an `.env`, omit that option and export the same `DATABASE_BACKEND` and `DATABASE_URL` used by the stack:
 
@@ -314,6 +316,8 @@ docker compose -f compose.dev.yaml run --rm --no-deps \
   --selected-credential-file /cutover/selected-credential.txt
 ```
 
+The selected development preflight holds the Postgres migration lock while calculating its review and rolls back any temporary schema updates before returning; it leaves the saved database state unchanged.
+
 The `development_discard_review` counts separate the other credentials, their owned rows, Team snapshots, Team recent values, and Team memberships without printing credential values. The discard path accepts only personal History runs, snapshots, recent values, preferences, and starred commands by default. If a Team snapshot belongs to a disposable test credential, inspect its metadata and links first. Once you've confirmed it can go, add `--reviewed-team-snapshot-id <snapshot-id>` to both the selected preflight above and the conversion below, repeating the flag for every Team snapshot you reviewed. Team recent-value suggestions have no standalone ID; inspect their Team, member role, kind, and count without printing the saved values, then add `--expected-discard-team-recent-values <reviewed-count>` to both commands. Both exceptions require an active Team owned by the selected operator and an active membership for the test credential. The snapshot IDs must match exactly and have no Project links, labels, or notes. The tool still refuses other Team-scoped data, unknown owner tables, linked runs or snapshots, Team owners, and memberships referenced elsewhere. Keep the backup if any check stops the conversion; don't delete token rows or History rows manually.
 
 For a development conversion, stop every application writer but leave Postgres running. Put the selected credential in an owner-only file, then use the same source mount and backup with the conversion confirmations:
@@ -354,12 +358,59 @@ Omit the Team-snapshot and Team-recent-value flags when those records aren't pre
 
 If the old workspace is on a separate volume or bind mount, mount that same location in the one-off container as well. The development-backup opt-in is not needed for managed archives and must not be used as a substitute for a managed production backup.
 
-For managed installations, run the tool only in a one-off application container. For Postgres, the database service must be running even if the app can't start. Mount the verified backup read-only and use a private operator directory for any selected credential input or one-time output:
+#### Managed upgrade from v2.9.2
+
+The v2.9.2 image doesn't contain `/app/tools/cutover_principal_identity.py`. Stage and verify the reviewed v3 release before running that tool, while keeping the application stopped. `darklab-deploy upgrade` updates managed files and selects the new image in `.env`; it doesn't start the application. Rehearse the chosen reset or conversion on a private copy of the old installation and its backup before changing the live installation.
+
+Run these commands from the managed installation directory. Keep the same Compose project name, `.env`, data, configuration, and workspace mounts throughout. This helper includes the operator override when present:
+
+```bash
+cutover_compose() {
+  if [ -f compose.operator.yaml ]; then
+    docker compose --env-file .env -f compose.yaml -f compose.operator.yaml "$@"
+  else
+    docker compose --env-file .env -f compose.yaml "$@"
+  fi
+}
+```
+
+1. **Stop application writers and back up the old state using v2.9.2.** Stop any external database or workspace writers too. Keep the existing Postgres service available; don't use `down` or remove its volume. If bundled Postgres is stopped, start only that service with `cutover_compose --profile postgres up -d --no-deps --wait postgres` before taking the backup.
+
+   ```bash
+   ./darklab-deploy status
+   cutover_compose stop shell zap-worker oast-worker
+   ./darklab-deploy backup
+   ```
+
+   The backup command verifies the managed archive and prints its path. Review its warnings and confirm it includes the database, private configuration, vault key, and the workspace files being preserved. Keep that exact archive and the old deployment files for recovery; no writers may change the backed-up state before cutover.
+
+2. **Stage the reviewed v3 release without starting it.** Replace the backup filename with the path printed above; use the exact reviewed v3 version if it differs from this example.
+
+   ```bash
+   ./darklab-deploy upgrade 3.0.0 \
+     --backup "$PWD/backups/darklab-backup-<timestamp>.tar.gz"
+   ./darklab-deploy status
+   ```
+
+   This verifies the supplied backup and release material, installs the v3 managed files, and updates `DARKLAB_IMAGE` in `.env`. Review new settings in `.env.example` and preserve the existing database and workspace configuration. Remove any exported `DARKLAB_IMAGE` override, and ensure `compose.operator.yaml` doesn't select a different application image. **Don't run the restart command printed by `upgrade` yet.**
+
+3. **Pull and verify the selected v3 application image.** These commands use the new `.env` and release manifest. Pulling the image and overriding its entrypoint for a one-off tool run don't start the application or its startup migrations.
+
+   ```bash
+   cutover_compose pull shell
+   ./verify-release-image.sh
+   cutover_compose run --rm --no-deps --entrypoint python shell \
+     /app/tools/cutover_principal_identity.py --help
+   ```
+
+4. **Run v3 preflight, then the selected reset or conversion below.** Keep Postgres running and every application writer stopped. The one-off `shell` service inherits the installation's data, config, and workspace mounts, including `compose.operator.yaml`; add any separately managed workspace mount if it isn't in that service definition. Mount the verified backup read-only and use a private operator directory for credential input and one-time output.
+
+For an initial inventory, omit `--expected-legacy-credentials` from the preflight command. Review the reported count, then supply it on the repeated preflight and chosen cutover command. A changed count stops the operation:
 
 ```bash
 mkdir -p cutover
 chmod 700 cutover
-docker compose run --rm --no-deps \
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   -v "$PWD/cutover:/cutover" \
   --entrypoint python shell \
@@ -372,8 +423,8 @@ docker compose run --rm --no-deps \
 For SQLite, the preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
 
 ```bash
-docker compose stop
-docker compose run --rm --no-deps \
+cutover_compose stop
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   --entrypoint python shell \
   /app/tools/cutover_principal_identity.py reset \
@@ -387,7 +438,7 @@ docker compose run --rm --no-deps \
 The reset prints database and workspace rollback directories. Keep both until the upgraded application is healthy. Before creating any new application state, you can restore the staged data with `rollback-reset`; the command refuses to overwrite a non-empty destination:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint python shell \
+cutover_compose run --rm --no-deps --entrypoint python shell \
   /app/tools/cutover_principal_identity.py rollback-reset \
   --database-rollback-path <printed-database-path> \
   --workspace-rollback-path <printed-workspace-path> \
@@ -401,17 +452,17 @@ For SQLite, stop the complete Compose project. For Postgres, leave the `postgres
 
 ```bash
 # SQLite
-docker compose stop
+cutover_compose stop
 
 # Postgres
-docker compose stop shell zap-worker oast-worker
+cutover_compose stop shell zap-worker oast-worker
 ```
 
 Then run the conversion:
 
 ```bash
 chmod 600 cutover/selected-credential.txt
-docker compose run --rm --no-deps \
+cutover_compose run --rm --no-deps \
   -v "$PWD/backups:/cutover-backups:ro" \
   -v "$PWD/cutover:/cutover" \
   --entrypoint python shell \
@@ -425,9 +476,18 @@ docker compose run --rm --no-deps \
   --confirm-selected-conversion convert-the-selected-operator
 ```
 
-The conversion keeps the existing workspace directory name, updates database ownership in one transaction, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
+Preflight can read an untouched v2.9.2 database. The conversion applies its required schema updates together with ownership conversion in one transaction, keeps the existing workspace directory name, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
 
 If conversion fails, the transaction rolls back, the old database and workspace remain in place, and the incomplete output file is removed. Keep the verified backup and don't restart the application until the command succeeds and the replacement credential is stored securely. After a successful conversion, the old credentials are invalid and normal startup can apply later migrations. SQLite reset and reset rollback aren't available for Postgres; production installations use managed backup and restore for recovery, while development checkouts restore their separately rehearsed Postgres dump and files.
+
+After the chosen cutover succeeds and the replacement credential is saved, start the selected v3 deployment and check its health:
+
+```bash
+cutover_compose up -d
+cutover_compose ps
+```
+
+For a conversion, sign in with the replacement and verify the preserved workspace, History search, and Files. For a reset, verify the intended fresh-access profile and bootstrap restricted access when required. Keep the verified pre-upgrade backup and any reset rollback directories until those checks succeed. A failed cutover leaves application writers stopped; don't start either release against an unreviewed partial state.
 
 ---
 

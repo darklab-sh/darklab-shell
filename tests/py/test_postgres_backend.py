@@ -109,8 +109,10 @@ def _postgres_plan_text(rows: list[Any]) -> str:
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("schema_head", ["0077", "0081"], ids=["v2.9.2", "prepared-v3"])
 def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     postgres_schema,
+    schema_head,
     tmp_path,
     monkeypatch,
 ):
@@ -124,8 +126,9 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     raw_conn = postgres_schema.conn
     run_migrations_with_advisory_lock(
         raw_conn,
-        tuple(migration for migration in MIGRATIONS if migration.version < "0082"),
+        tuple(migration for migration in MIGRATIONS if migration.version <= schema_head),
     )
+    owner_column = "session_id" if schema_head < "0080" else "personal_workspace_id"
     conn = PostgresSqliteCompatConnection(raw_conn)
     legacy_credential = "tok_postgres_cutover_operator"
     created_at = "2026-09-10T01:00:00+00:00"
@@ -135,7 +138,7 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
     )
     conn.execute(
         "INSERT INTO runs "
-        "(id, personal_workspace_id, team_id, run_kind, command, started, finished, "
+        f"(id, {owner_column}, team_id, run_kind, command, started, finished, "
         "exit_code, output_preview, output_search_text) "
         "VALUES ('run-postgres-cutover', ?, '', 'external', "
         "'printf postgres-cutover-marker', ?, ?, 0, '[]', 'postgres cutover marker')",
@@ -177,20 +180,24 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
         assert rolled_back_evidence.search_match_count == 1
         raw_conn.rollback()
 
-        assert "0082" not in applied_versions(conn)
+        assert max(applied_versions(conn)) == schema_head
         assert conn.execute(
             "SELECT COUNT(*) AS count FROM session_tokens WHERE token = ?",
             (legacy_credential,),
         ).fetchone()["count"] == 1
         assert conn.execute(
-            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
-        ).fetchone()["personal_workspace_id"] == legacy_credential
-        assert conn.execute(
-            "SELECT COUNT(*) AS count FROM credentials WHERE principal_id = ?",
-            (rolled_back_bundle.principal.id,),
-        ).fetchone()["count"] == 0
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
+        if schema_head < "0078":
+            assert raw_conn.execute("SELECT to_regclass('credentials') AS name").fetchone()["name"] is None
+        else:
+            assert conn.execute(
+                "SELECT COUNT(*) AS count FROM credentials WHERE principal_id = ?",
+                (rolled_back_bundle.principal.id,),
+            ).fetchone()["count"] == 0
+        principal_column = "NULL" if schema_head < "0080" else "principal_id"
         rolled_back_member = conn.execute(
-            "SELECT principal_id, session_token_hash FROM team_members "
+            f"SELECT {principal_column} AS principal_id, session_token_hash FROM team_members "
             "WHERE id = 'member-postgres-cutover'"
         ).fetchone()
         assert rolled_back_member["principal_id"] is None
@@ -227,10 +234,37 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
                 workspace_root=str(workspace_root),
             )
         )
+        assert max(applied_versions(conn)) == schema_head
         assert preflight["recommended_action"] == "selected_conversion"
         assert preflight["inventory"]["database_backend"] == "postgres"
         assert preflight["inventory"]["team_members_without_principal"] == 1
         assert preflight["inventory"]["teams_without_creator_principal"] == 1
+        raw_conn.rollback()
+        conn.execute(
+            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+            ("tok_disposable_preview_only", created_at, created_at),
+        )
+        raw_conn.commit()
+        verified_managed_backup = cutover.verify_backup_archive
+        monkeypatch.setattr(
+            cutover, "verify_backup_archive",
+            lambda _path, **_kwargs: {"repository_free": False, "database_backend": "postgres"},
+        )
+        development_preview = cutover.run(SimpleNamespace(
+            command="preflight", backup=str(tmp_path / "development-backup.tar.gz"),
+            allow_development_backup=True, confirm_no_external_users=True,
+            expected_legacy_credentials=2, database="", workspace_root=str(workspace_root),
+            selected_credential_file=str(selected_file),
+        ))
+        assert development_preview["development_discard_review"]["credentials"] == 1
+        assert max(applied_versions(conn)) == schema_head
+        assert conn.execute(
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
+        raw_conn.rollback()
+        conn.execute("DELETE FROM session_tokens WHERE token = ?", ("tok_disposable_preview_only",))
+        raw_conn.commit()
+        monkeypatch.setattr(cutover, "verify_backup_archive", verified_managed_backup)
         conversion_args = SimpleNamespace(
             backup=str(tmp_path / "verified-backup.tar.gz"),
             confirm_no_external_users=True,
@@ -253,10 +287,10 @@ def test_postgres_selected_principal_cutover_is_atomic_and_preserves_search(
         with pytest.raises(RuntimeError, match="injected failure before commit"):
             cutover._convert(conversion_args)
         assert not new_credential_file.exists()
-        assert "0082" not in applied_versions(conn)
+        assert max(applied_versions(conn)) == schema_head
         assert conn.execute(
-            "SELECT personal_workspace_id FROM runs WHERE id = 'run-postgres-cutover'"
-        ).fetchone()["personal_workspace_id"] == legacy_credential
+            f"SELECT {owner_column} AS owner FROM runs WHERE id = 'run-postgres-cutover'"
+        ).fetchone()["owner"] == legacy_credential
         raw_conn.rollback()
 
         monkeypatch.setattr(cutover, "convert_selected_owner", original_convert)
