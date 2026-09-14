@@ -19,10 +19,13 @@ test('autocomplete recovers after a failed startup request', async ({ page }) =>
 })
 
 test.describe('autocomplete', () => {
+  test.describe.configure({ timeout: 60_000 })
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
-    await ensurePromptReady(page, { waitForAutocomplete: true })
+    // CI can complete the catalog request after 19 seconds under load.
+    // Allow startup to settle before testing the normal interaction deadlines.
+    await ensurePromptReady(page, { waitForAutocomplete: true, timeout: 30_000 })
   })
 
   test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({

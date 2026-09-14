@@ -62,7 +62,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Team form refreshes preserve typing and clicks.** Refreshing the Team list keeps the current create, join, or recovery form mounted and usable, so an update cannot disable a focused field or replace the Submit button during a click. Pending-refresh tests cover real typing and preserved controls; the Team-join journey clicks Submit and verifies its server response.
 
-- **Autocomplete recovers when its first catalog request fails.** Startup retries once after a network or server failure, without overlapping requests. Authorization and malformed-response failures stop immediately. Browser checks observe the shared catalog without starting competing requests; regression coverage exercises delayed startup, retry bounds, and recovery after an aborted request.
+- **Autocomplete recovers when its first catalog request fails.** Startup retries once after a network or server failure, without overlapping requests. Authorization and malformed-response failures stop immediately. Browser checks observe the shared catalog without starting competing requests; regression coverage exercises delayed startup, retry bounds, and recovery after an aborted request. The interaction suite allows a slow successful catalog request to finish before exercising its normal assertion deadlines.
 
 - **The browser access-profile qualification has enough time to complete its full journey on CI.** Its per-test budget covers sign-in, protected reads, personal and Team writes, and session recovery; individual assertions keep their existing deadlines.
 
