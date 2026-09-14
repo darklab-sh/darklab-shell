@@ -26162,14 +26162,14 @@ class TestOutputSignals:
             if metadata.get("entities"):
                 entity_metadata.append((source_line, metadata))
         assert len(entity_metadata) == 1
-        assert entity_metadata[0][0] == 0
+        assert entity_metadata[0][0] == 11
         assert entity_metadata[0][1]["entities"] == [
             {
                 "type": "ip",
                 "value": "164.111.15.52",
                 "canonical_value": "164.111.15.52",
                 "confidence": "high",
-                "source_line": 0,
+                "source_line": 11,
             }
         ]
         assert _transcript_entity_values("whois AS13335", "origin: AS13335\nsource: RADB") == set()

@@ -5597,13 +5597,15 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
 
 
 @pytest.mark.postgres
-def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema):
+@pytest.mark.parametrize("registered", [True, False])
+def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema, registered):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core.output_signals import OutputSignalClassifier
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.atlas.materializer import materialize_run_entities
     from services.projects.links import link_active_project_run_entities
+    from services.runs.finalization_project_targets import discover_project_targets_for_finalize
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -5614,6 +5616,8 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
     transcript = (
         REPO_ROOT / "tests" / "py" / "fixtures" / "whois-arin-164.111.15.52.txt"
     ).read_text(encoding="utf-8")
+    if not registered:
+        transcript = "No match for 164.111.15.52\n% Query rate limit exceeded\n"
     classifier = OutputSignalClassifier("whois 164.111.15.52")
     entries = []
     for line_index, line in enumerate(transcript.splitlines()):
@@ -5653,6 +5657,9 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         seen_at=timestamp,
         command="whois 164.111.15.52",
     )
+    discovered = discover_project_targets_for_finalize(
+        compat_conn, session_id, run_id, "whois 164.111.15.52", {"project_id": project_id}, recorded,
+    )
     active_project_link = link_active_project_run_entities(
         compat_conn,
         session_id,
@@ -5675,19 +5682,17 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
         (project_id,),
     ).fetchall()
 
-    assert [(row["type"], row["canonical_value"]) for row in recorded] == [
-        ("ip", "164.111.15.52"),
-    ]
-    assert [(row["type"], row["canonical_value"]) for row in entity_rows] == [
-        ("ip", "164.111.15.52"),
-    ]
+    expected_entities = [("ip", "164.111.15.52")] if registered else []
+    assert bool(discovered) is registered
+    assert [(row["type"], row["canonical_value"]) for row in recorded] == expected_entities
+    assert [(row["type"], row["canonical_value"]) for row in entity_rows] == expected_entities
     assert active_project_link is not None
-    assert active_project_link["available"] == 1
-    assert active_project_link["added"] == 1
+    assert active_project_link["available"] == int(registered)
+    assert active_project_link["added"] == 0  # Command discovery already added any confirmed target.
     assert [
         (row["type"], row["canonical_value"], row["source"])
         for row in project_entity_rows
-    ] == [("ip", "164.111.15.52", "active_project")]
+    ] == ([("ip", "164.111.15.52", "auto_command")] if registered else [])
 
 
 @pytest.mark.postgres
