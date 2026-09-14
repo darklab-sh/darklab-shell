@@ -1253,9 +1253,12 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
     stored_credentials = repr([
         dict(row) for row in conn.execute("SELECT * FROM credentials").fetchall()
     ])
-    for secret in (bundle.credential.secret, pat.secret):
+    for credential in (bundle.credential, pat):
+        secret = credential.secret
+        encoded_secret = secret.partition(f"{credential.metadata.id}_")[2]
+        assert len(encoded_secret) == 43
         assert secret not in stored_credentials
-        assert secret.rsplit("_", 1)[-1] not in stored_credentials
+        assert encoded_secret not in stored_credentials
     result["credential_row_disclosure_check"] = "passed"
 
     def last_used():

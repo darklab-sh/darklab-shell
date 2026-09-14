@@ -32,7 +32,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Access-profile qualification covers every sign-in policy on both databases, asset modes, and viewport sizes.**
   - **Before:** Focused access checks didn't exercise the complete browser grid.
   - **After:** Isolated SQLite and disposable-schema PostgreSQL servers run the same desktop and mobile browser journey for `open`, `token_required`, `oidc_required`, and `mixed` in source and bundled asset modes. The journey checks sign-in choices, protected reads and cookies, personal and Team scope, file round trips, reload, and logout. CI runs both PostgreSQL browser asset modes.
-  - **Tests:** PostgreSQL request-policy cases check scoped PAT access. SQLite and PostgreSQL measurements record concurrent portable/PAT lookup latency, enforce bounded last-used writes, and reject stored reusable credential material. The testing handbook maps the grid to deeper product, recovery, and migration suites.
+  - **Tests:** PostgreSQL request-policy cases check scoped PAT access. SQLite and PostgreSQL measurements record concurrent portable/PAT lookup latency, enforce bounded last-used writes, and reject stored reusable credential material. Disclosure checks compare the complete secret payload, including underscores. The testing handbook maps the grid to deeper product, recovery, and migration suites.
 
 - **SQLite fixture reuse reduces local pytest runtime without weakening database qualification.**
   - **Before:** Ordinary isolated route and backend tests rebuilt the complete current SQLite schema for each case, so a clean fast-lane run grew to roughly six and a half minutes even though most of those tests weren't exercising initialization.
