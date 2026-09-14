@@ -201,15 +201,17 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 | Contract | Focused evidence |
 | --- | --- |
-| Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_auth_redirects.py`, `test_browser_session_recovery.py`, `test_pat_issuance.py`, `auth-profile-qualification.spec.js` |
-
-`test_credential_throttle.py` covers failure limits before verification for portable credentials, PATs, browser cookies, redemption, and the sign-in form. It checks independent IP and lookup limits, reset windows, Redis and local counters, and successful requests that leave the allowance intact.
-
-`test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
+| Anonymous, portable credential, browser session, OIDC, and fail-closed routing | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_auth_redirects.py`, `test_browser_session_recovery.py`, `test_credential_session_replacement.py`, `test_pat_issuance.py`, `auth-profile-qualification.spec.js` |
 | PAT scopes, API, CLI, and redaction | `test_principal_auth.py`, `test_api_v1.py`, `test_postgres_backend.py`, `test_logging.py` |
 | Personal and Team ownership; Files, Projects, Assessments, Atlas, History, and shares | `test_postgres_backend.py`, `test_api_v1.py`, `test_run_history_share.py`, `team-mode.spec.js`, `assessment.spec.js`, `share.spec.js` |
 | PTY, streams, schedules, watchers, workflows, notifications, and Secrets | `test_stream_authorization.py`, `test_postgres_backend.py`, `test_workflows_v2.py`, `test_notifications_channels.py`, `test_notifications_hooks.py`, `test_api_v1.py`, `output.spec.js` |
 | Disablement, credential/session revocation, Team-role changes, backup/restore, SQLite-to-Postgres copy, and restart recovery | `test_principal_auth.py`, `test_restricted_access_profile.py`, `test_oidc_sign_in.py`, `test_backup_system.py`, `test_postgres_backend.py` |
+
+`test_credential_throttle.py` covers failure limits before verification for portable credentials, PATs, browser cookies, redemption, and the sign-in form. It checks independent IP and lookup limits, reset windows, Redis and local counters, and successful requests that leave the allowance intact.
+
+`test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
+
+`test_credential_session_replacement.py` replays prior cookies after same-account and cross-account credential sign-in through both routes. It checks that other devices remain signed in and that invalid credentials, failed request proofs, or failed session creation preserve the current session.
 
 The Team panel unit suite checks that a list refresh preserves the active form, focused field, text selection, and Submit button; `team-mode.spec.js` exercises invite creation and redemption through the browser.
 

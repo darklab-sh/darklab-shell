@@ -127,18 +127,21 @@ def _clear_browser_session_cookies(response) -> None:
         response.delete_cookie(name, secure=True, httponly=httponly, samesite="Strict", path="/")
 
 
-def _issue_browser_session(
-    context: AuthenticatedContext,
-    *,
-    replace_session_id: str = "",
-) -> object:
-    return create_browser_session(
+def _issue_browser_session(context: AuthenticatedContext) -> object:
+    previous = get_authentication_result().context
+    replace_id = previous.browser_session_id if isinstance(previous, AuthenticatedContext) else ""
+    issued = create_browser_session(
         principal_id=context.principal_id,
         credential_id=context.credential_id,
         oidc_identity_id=context.oidc_identity_id,
         absolute_seconds=_session_cookie_seconds(),
-        replace_session_id=replace_session_id or context.browser_session_id,
+        replace_session_id=replace_id,
     )
+    # Storage only rotates sessions owned by the new principal. Account switches
+    # must also retire the session authenticated by this request's old cookie.
+    if replace_id and isinstance(previous, AuthenticatedContext) and previous.principal_id != context.principal_id:
+        revoke_browser_session(replace_id, reason="credential sign-in rotation")
+    return issued
 
 
 def _new_sign_in_nonce() -> str:
@@ -169,12 +172,7 @@ def sign_in():
             result = redeem_portable_credential(secret) if limited.allowed else None
             if result is not None and not result.failed and isinstance(result.context, AuthenticatedContext):
                 lifecycle.record_redemption(result.context, request_fields=_request_fields())
-                request_context = get_authentication_result().context
-                replace_id = (
-                    request_context.browser_session_id
-                    if isinstance(request_context, AuthenticatedContext) else ""
-                )
-                issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+                issued = _issue_browser_session(result.context)
                 log.info(
                     "BROWSER_SESSION_CREATED",
                     extra={
@@ -477,12 +475,7 @@ def redeem():
     lifecycle.record_redemption(result.context, request_fields=_request_fields())
     response = _no_store(jsonify({"authentication": _context_payload(result.context)}))
     if is_restricted():
-        request_context = get_authentication_result().context
-        replace_id = (
-            request_context.browser_session_id
-            if isinstance(request_context, AuthenticatedContext) else ""
-        )
-        issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+        issued = _issue_browser_session(result.context)
         _set_browser_session_cookies(response, issued)
         log.info(
             "BROWSER_SESSION_CREATED",
