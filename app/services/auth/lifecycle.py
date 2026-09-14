@@ -17,7 +17,7 @@ from services.workspace.models import WorkspaceSettings
 from . import storage
 from .contracts import (
     CredentialMetadata,
-    IdentityStorageError,
+    InvalidIdentityValue,
     IssuedCredential,
     PrincipalBundle,
     PrincipalRecord,
@@ -98,7 +98,7 @@ def operator_bootstrap(
         count_row = conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()
         count = int(dict(count_row).get("count") or 0)
         if count:
-            raise IdentityStorageError(
+            raise InvalidIdentityValue(
                 "restricted bootstrap is available only before the first principal exists"
             )
         bundle = storage.create_principal_with_credential(

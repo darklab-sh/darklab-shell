@@ -45,13 +45,23 @@ from services.auth.contracts import (
     PAT_MAX_EXPIRY_DAYS,
     PAT_MIN_EXPIRY_DAYS,
     PAT_SCOPES,
+    CredentialExpired,
     CredentialNotFound,
+    CredentialRevoked,
     IdentityStorageError,
+    InvalidCredentialScope,
+    InvalidIdentityValue,
     LastCredentialLockout,
     PrincipalDisabled,
+    PrincipalNotFound,
+    WorkspaceAlreadyAttached,
 )
 from services.auth.rate_limit import check_anonymous_issuance, check_credential_redemption, check_failed_redemption
-from services.auth.observability import log_authentication_rejected, log_credential_rate_limited
+from services.auth.observability import (
+    log_authentication_rejected,
+    log_credential_lifecycle_failed,
+    log_credential_rate_limited,
+)
 from services.auth import oidc
 from services.auth.resolver import (
     AnonymousContext,
@@ -88,7 +98,7 @@ def _payload() -> dict:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise IdentityStorageError("request body must be a JSON object")
+        raise InvalidIdentityValue("request body must be a JSON object")
     return value
 
 
@@ -400,8 +410,17 @@ def _error(exc: BaseException):
         status, code = 403, "principal_disabled"
     elif isinstance(exc, PermissionError):
         status, code = 403, "credential_forbidden"
-    else:
+    elif isinstance(exc, (
+        InvalidIdentityValue, InvalidCredentialScope, CredentialExpired,
+        CredentialRevoked, PrincipalNotFound, WorkspaceAlreadyAttached,
+    )):
         status, code = 400, "invalid_credential_request"
+    else:
+        log_credential_lifecycle_failed(exc)
+        return jsonify({
+            "error": "credential_lifecycle_failed",
+            "message": "Credential management is temporarily unavailable. Try again later.",
+        }), 500
     return jsonify({"error": code, "message": str(exc)}), status
 
 
@@ -641,7 +660,7 @@ def update_credential(credential_id: str):
         data = _payload()
         allowed = set(data).intersection({"label", "expires_at"})
         if len(allowed) != 1 or set(data) != allowed:
-            raise IdentityStorageError("supply exactly one of label or expires_at")
+            raise InvalidIdentityValue("supply exactly one of label or expires_at")
         if "label" in data:
             metadata = lifecycle.rename(
                 context,

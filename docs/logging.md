@@ -175,6 +175,7 @@ The current event inventory is:
 | INFO / WARN | `PROJECT_ASSESSMENT_BROKER_UNAVAILABLE` | browser/API Assessment launch routes | request_id, session, owner_kind, team_id, project_id, assessment_id, check_id, finding_id, action_kind, source, reason, broker_mode |
 | DEBUG | `ASSESSMENT_PROFILE_CATALOG_CACHE_HIT` | assessment profile catalog | profile_count, check_count |
 | INFO | `ASSESSMENT_PROFILE_CATALOG_LOADED` | assessment profile catalog initial load and hot reload | load_kind, profile_count, check_count, local_overlay, duration_ms |
+| ERROR | `CREDENTIAL_LIFECYCLE_FAILED` | caught credential lifecycle storage failure | request_id, operation, reason, error_class, http_status; sanitized origin frames |
 | ERROR | `ASSESSMENT_PROFILE_CATALOG_LOAD_FAILED` | required shipped assessment profile catalog | source_kind, error_code, error_class, traceback; catalog contents and paths are excluded |
 | WARNING | `ASSESSMENT_DALFOX_XSS_LAUNCH_CONTRACT_REJECTED` | reviewed Dalfox XSS launch guardrail | project_id, assessment_id, check_id, check_key, reason |
 | WARNING | `ASSESSMENT_DALFOX_OAST_LAUNCH_CONTRACT_REJECTED` | reviewed private-OAST launch guardrail | project_id, assessment_id, check_id, check_key, reason |
@@ -633,6 +634,8 @@ The current event inventory is:
 | CRITICAL | `REDIS_REQUIRED_FOR_MULTI_WORKER` | process tracking startup | workers, redis_configured |
 
 ## Logging Shape Notes
+
+`CREDENTIAL_LIFECYCLE_FAILED` reports caught internal storage faults once at ERROR. Fixed reasons distinguish unavailable verifier keys, workspace storage, and other identity storage failures. The response is a generic HTTP 500. Records retain the original error class and bounded file/function/line locations, without the original message, source text, or exception chain. Invalid inputs and expected permission, missing-credential, and lockout responses keep their client status without this ERROR event.
 
 `AUTHENTICATION_RESOLVED` emits once when a request first resolves authentication, using that cached result. `method` names the selected method, `rejected`, or `none`; `supplied_transports` lists fixed transport names without their values. `browser_cookie_enabled` distinguishes a considered cookie from one ignored by the open access profile. `last_used_write_due` reports the existing credential timestamp-write decision; it's null for anonymous, browser-cookie, and rejected outcomes. These DEBUG records don't trigger another lookup and don't appear at INFO.
 

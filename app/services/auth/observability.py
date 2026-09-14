@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import logging
+from pathlib import PurePath
 import re
 from threading import Lock
 import time
+from types import TracebackType
 from typing import TYPE_CHECKING
 
 from flask import g, has_request_context, request
+
+from services.auth.contracts import VerifierKeyError, WorkspaceStorageError
 
 if TYPE_CHECKING:
     from services.auth.rate_limit import CredentialRateLimitResult
@@ -105,4 +109,42 @@ def log_authentication_resolved(result: AuthenticationResult, *, cookies_enabled
         "supplied_transports": ",".join(transports) or "none",
         "browser_cookie_enabled": cookies_enabled,
         "last_used_write_due": result.last_used_write_due,
+    })
+
+
+def _sanitized_lifecycle_exc_info(
+    exc: BaseException,
+) -> tuple[type[RuntimeError], RuntimeError, TracebackType | None]:
+    frames = []
+    traceback = exc.__traceback__
+    while traceback is not None:
+        code = traceback.tb_frame.f_code
+        frames.append(f"{PurePath(code.co_filename).name}:{code.co_name}:{traceback.tb_lineno}")
+        traceback = traceback.tb_next
+    try:
+        raise RuntimeError("Credential lifecycle operation failed") from None
+    except RuntimeError as safe_error:
+        safe_error.add_note("Origin frames: " + " > ".join(frames[-12:])[:1000])
+        return RuntimeError, safe_error, safe_error.__traceback__
+
+
+def log_credential_lifecycle_failed(exc: BaseException) -> None:
+    endpoint = request.endpoint if has_request_context() else None
+    operation = str(endpoint or "").removeprefix("auth.")
+    if operation not in {
+        "create_principal", "credentials", "create_credential", "update_credential",
+        "credential_durable_work", "rotate_credential", "revoke_credential",
+    }:
+        operation = "unknown"
+    reason = (
+        "verifier_key_unavailable" if isinstance(exc, VerifierKeyError)
+        else "workspace_storage_unavailable" if isinstance(exc, WorkspaceStorageError)
+        else "identity_storage_failed"
+    )
+    log.error("CREDENTIAL_LIFECYCLE_FAILED", exc_info=_sanitized_lifecycle_exc_info(exc), extra={
+        "request_id": _request_value(request.environ.get("darklab_request_id"), 64) if has_request_context() else "unknown",
+        "operation": operation,
+        "reason": reason,
+        "error_class": _request_value(type(exc).__name__, 80),
+        "http_status": 500,
     })

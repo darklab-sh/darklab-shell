@@ -247,6 +247,8 @@ npm run test:pytest
 
 The OIDC cases use a deterministic local provider in `test_oidc_sign_in.py`. `test_oidc_cache.py` checks expiry, issuer and trust separation, key rotation, invalid signatures and metadata, concurrent refreshes, bounded storage, and private CA-file replacement and cleanup. They exercise authorization-code sign-in, state/nonce/PKCE and signed-token checks, provisioning policies, provider outages, credential-to-provider linking, unlinking, and session rotation without depending on a public identity provider. `test_postgres_backend.py` checks the same identity and browser-session schema on an isolated Postgres schema; use the Postgres helper above for that lane.
 
+`test_credential_lifecycle_errors.py` retires or corrupts real verifier roots before anonymous upgrades and browser-session issuance. It checks generic server errors, transaction rollback, one sanitized ERROR record, exception-chain privacy in text and GELF, and unchanged client validation responses.
+
 #### Core backend, Atlas, and CVE risk
 
 Cutover backup checks keep managed archives as the default, allow an explicit development archive only in the cutover tool, and still reject it for managed restore.
