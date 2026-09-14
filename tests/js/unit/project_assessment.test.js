@@ -2586,8 +2586,14 @@ describe('project assessment controller', () => {
     expect(state.detail.assessment.status).toBe('completed')
   })
 
-  it('cancels lifecycle transitions without sending a mutation', async () => {
-    const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+  it.each([[false, false], [true, false], [true, true]])('cancels lifecycle transitions with pending reload %s and moved focus %s', async (pendingReload, movedFocus) => {
+    let holdReload = false
+    let releaseReload
+    const pending = new Promise(resolve => { releaseReload = resolve })
+    const projectWorkspaceRequest = vi.fn(async (url, options) => {
+      if (holdReload) await pending
+      return responseFor(url, options)
+    })
     let cancel
     const ctx = makeContext(projectWorkspaceRequest, {
       showConfirm: vi.fn(() => new Promise(resolve => { cancel = resolve })),
@@ -2602,16 +2608,29 @@ describe('project assessment controller', () => {
     const original = surface.querySelector(selector)
     original.focus()
     const transition = controller.transitionCycle('prj_1', 'completed', original)
+    let reload
+    if (pendingReload) {
+      holdReload = true
+      controller.invalidate('prj_1')
+      reload = controller.load('prj_1')
+    }
     // A background refresh replaces the opening button while the confirm is open.
     controller.renderAssessment(surface, 'prj_1')
-    const replacement = surface.querySelector(selector)
-    expect(replacement).not.toBe(original)
+    expect(surface.querySelector(selector)).not.toBe(original)
+    if (pendingReload) expect(surface.querySelector(selector)).toBeNull()
     cancel('cancel')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const otherControl = document.createElement('button')
+    document.body.appendChild(otherControl)
+    if (movedFocus) otherControl.focus()
+    releaseReload()
+    await reload
     expect(await transition).toBe(false)
-    expect(document.activeElement).toBe(replacement)
+    expect(document.activeElement).toBe(movedFocus ? otherControl : surface.querySelector(selector))
     await controller.load('prj_1', { force: true })
-    expect(document.activeElement).toBe(surface.querySelector(selector))
+    expect(document.activeElement).toBe(movedFocus ? otherControl : surface.querySelector(selector))
     surface.remove()
+    otherControl.remove()
     expect(projectWorkspaceRequest.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false)
   })
 })

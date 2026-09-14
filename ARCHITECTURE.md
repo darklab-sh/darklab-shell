@@ -915,7 +915,7 @@ Project click delegation marks each event before asynchronous handlers run, so m
 
 Team list refreshes preserve the top form's controls and focus; form submissions still disable them while the change is saved.
 
-Assessment lifecycle confirmations resolve the current opening control after a refresh before returning focus. Later Assessment redraws preserve a focused lifecycle control.
+Assessment lifecycle confirmations resolve the current opening control after a refresh before returning focus. If that control is absent during an Assessment reload, restoration waits for the existing load and respects focus moved elsewhere in the meantime. Replacement controls must belong to the same Project. Later Assessment redraws preserve a focused lifecycle control.
 
 Package wizard redraws reuse a focused text field when it remains on the current step, preserving its live value and cursor selection while background presets or Assessment choices load.
 

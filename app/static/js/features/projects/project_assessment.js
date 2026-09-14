@@ -7,7 +7,7 @@ import { createProjectAssessmentRenderer } from './project_assessment_renderer.j
 import { createProjectAssessmentBatchManager } from './project_assessment_batch.js';
 import { openAssessmentCheckStateEditor } from './project_assessment_check_state.js';
 import { openAssessmentEvidenceEditor } from './project_assessment_evidence.js';
-import { launchAssessmentAction } from './project_assessment_actions.js';
+import { launchAssessmentAction, restoreFocus } from './project_assessment_actions.js';
 import {
   createProjectAssessmentOastManager,
   isPrivateOastCheck,
@@ -415,16 +415,7 @@ function createProjectAssessmentController(context) {
     return cycleSelection(stateFor(projectId));
   }
 
-  function restoreFocus(target) {
-    if (!target?.isConnected || target.disabled || typeof target.focus !== 'function') return;
-    try {
-      target.focus({ preventScroll: true });
-    } catch (_) {
-      target.focus();
-    }
-  }
-
-  async function confirmLifecycle(options, returnFocus = null) {
+  async function confirmLifecycle(options, returnFocus = null, projectId = '') {
     if (typeof ctx.showConfirm !== 'function') {
       const err = new Error('Assessment lifecycle confirmations are unavailable.');
       ctx.setProjectWorkspaceMessage?.(err.message, { error: true });
@@ -434,7 +425,13 @@ function createProjectAssessmentController(context) {
     const { confirmId, ...confirmOptions } = options;
     try {
       const choice = await ctx.showConfirm({ ...confirmOptions, refocusOnResolve: false });
-      restoreFocus(liveLifecycleFocusTarget(returnFocus));
+      const focused = typeof document !== 'undefined' ? document.activeElement : null;
+      if (returnFocus && choice !== confirmId && !liveLifecycleFocusTarget(returnFocus)?.isConnected) {
+        await stateFor(projectId).loadPromise;
+      }
+      if (typeof document !== 'undefined' && document.activeElement === focused) {
+        restoreFocus(liveLifecycleFocusTarget(returnFocus));
+      }
       return choice === confirmId;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open the assessment confirmation.', { error: true });
@@ -447,8 +444,10 @@ function createProjectAssessmentController(context) {
     if (returnFocus?.isConnected) return returnFocus;
     const key = String(returnFocus?.dataset?.projectAssessmentReturnFocus || '');
     if (!key || typeof document === 'undefined') return returnFocus;
+    const projectId = returnFocus.closest('[data-project-assessment-root]')?.dataset.projectAssessmentRoot;
     return [...document.querySelectorAll('[data-project-assessment-return-focus]')]
-      .find(node => node.dataset.projectAssessmentReturnFocus === key) || returnFocus;
+      .find(node => node.dataset.projectAssessmentReturnFocus === key
+        && node.closest('[data-project-assessment-root]')?.dataset.projectAssessmentRoot === projectId) || returnFocus;
   }
 
   async function mutateCycle(projectId, action, request, successMessage, { resetSelection = false } = {}) {
@@ -510,7 +509,7 @@ function createProjectAssessmentController(context) {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: nextStatus, label: actionLabel, tone: 'warning' },
       ],
-    }, returnFocus);
+    }, returnFocus, projectId);
     if (!confirmed) return false;
     return mutateCycle(projectId, completing ? 'complete' : 'archive', async () => {
       const resp = await ctx.projectWorkspaceRequest(
@@ -568,7 +567,7 @@ function createProjectAssessmentController(context) {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'delete', label: 'Delete assessment', role: 'destructive' },
       ],
-    }, returnFocus);
+    }, returnFocus, projectId);
     if (!confirmed) return false;
     return mutateCycle(projectId, 'delete', async () => {
       const resp = await ctx.projectWorkspaceRequest(

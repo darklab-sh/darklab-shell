@@ -368,6 +368,8 @@ Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/`
 
 Package wizard tests delay preset and Assessment reads while a user types, then check field continuity, focus, cursor selection, and saved notes through the real browser creation flow.
 
+Assessment lifecycle focus tests cancel during a held reload, check restoration when the current button returns, and preserve a user's intervening focus change.
+
 ### Playwright
 
 Use Playwright for browser-visible behavior where focus, layout, navigation, or live server state is part of the contract:

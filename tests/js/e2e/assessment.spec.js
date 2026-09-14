@@ -810,11 +810,20 @@ test.describe('project assessment qualification', () => {
     await complete.click()
     const confirm = page.locator('#confirm-host')
     await expect(confirm).toContainText('Complete cycle: Network assessment?')
+    let releaseAssessmentReload
+    const assessmentReloadHeld = new Promise((resolve) => { releaseAssessmentReload = resolve })
+    await page.route(`**/projects/${created.project.id}/assessments?*`, async (route) => {
+      const response = await route.fetch()
+      await assessmentReloadHeld
+      await route.fulfill({ response })
+    })
     const openingButton = await complete.elementHandle()
     await page.evaluate(() => window.refreshProjectWorkspace())
     expect(await openingButton.evaluate(node => node.isConnected)).toBe(false)
     await openingButton.dispose()
+    await expect(complete).toHaveCount(0)
     await confirmAssessmentAction(page, 'cancel')
+    releaseAssessmentReload()
     await expect(complete).toBeFocused()
     await complete.click()
     await confirmAssessmentAction(page, 'completed')
