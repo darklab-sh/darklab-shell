@@ -434,8 +434,7 @@ test.describe('? keyboard-shortcuts overlay', () => {
     await page.locator('#cmd').evaluate(el => el.blur())
     await page.keyboard.press('?')
     await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
-    const rowCount = await page.locator('#shortcuts-list .shortcut-key').count()
-    expect(rowCount).toBeGreaterThan(10)
+    await expect.poll(() => page.locator('#shortcuts-list .shortcut-key').count()).toBeGreaterThan(10)
     // Self-documenting: the overlay lists its own `?` trigger.
     await expect(page.locator('#shortcuts-list')).toContainText('?')
   })
