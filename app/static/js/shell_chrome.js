@@ -107,6 +107,7 @@ import {
   showWorkflowsOverlay as importedShowWorkflowsOverlay,
 } from './ui/ui_helpers.js';
 import { useMobileTerminalViewportMode as importedUseMobileTerminalViewportMode } from './features/mobile/mobile_shell_layout.js';
+import { confirmBrowserLogOut } from './features/preferences/browser_logout.js';
 
 let importedOpenStatusMonitor = importedRuntimeOpenStatusMonitor;
 let importedProjectActivity;
@@ -941,6 +942,10 @@ let importedProjectWorkspaceShell;
       return;
     }
     closeRailMoreMenu();
+    if (action === 'logout') {
+      void confirmBrowserLogOut(railMoreBtn);
+      return;
+    }
     if (action === 'history' && typeof importedToggleHistoryPanelSurface === 'function') {
       importedToggleHistoryPanelSurface();
       return;
@@ -1726,6 +1731,11 @@ let importedProjectWorkspaceShell;
     const identity = typeof importedGetBrowserIdentitySnapshot === 'function'
       ? importedGetBrowserIdentitySnapshot()
       : { kind: 'anonymous', credentialId: '' };
+    const canLogOut = identity.kind === 'browser_session'
+      || (identity.kind === 'credential' && identity.validFormat);
+    document.querySelectorAll('[data-action="logout"], [data-menu-action="logout"]').forEach(button => {
+      button.classList.toggle('u-hidden', !canLogOut);
+    });
     if (identity.kind === 'credential') {
       const label = identity.credentialId ? `${identity.credentialId.slice(0, 12)}••••` : 'INVALID';
       if (hudSessionEl) {

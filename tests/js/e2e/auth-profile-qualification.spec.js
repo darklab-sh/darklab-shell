@@ -43,6 +43,37 @@ async function readStatuses(page) {
   }, protectedReads)
 }
 
+async function logOutFromMenu(page) {
+  const mobile = await page.locator('#hamburger-btn').isVisible();
+  const trigger = page.locator(mobile ? '#hamburger-btn' : '#rail-more-btn');
+  const action = page.locator(mobile
+    ? '#mobile-menu-sheet [data-menu-action="logout"]'
+    : '#rail-more-menu [data-action="logout"]');
+  const open = async () => {
+    if (mobile) {
+      await trigger.click();
+      await expect(action).toBeVisible();
+      expect((await action.boundingBox()).height).toBeGreaterThanOrEqual(40);
+      await action.click();
+    } else {
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#rail-more-menu [data-action="options"]')).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(action).toBeFocused();
+      await page.keyboard.press('Enter');
+    }
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/\bopen\b/);
+    await expect(page.locator('#confirm-host')).toContainText('Your workspace stays saved');
+  };
+  await open();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  expect((await readStatuses(page))['/projects']).toBe(200);
+  await open();
+  await page.locator('#confirm-host').getByRole('button', { name: 'Log out', exact: true }).click();
+}
+
 async function qualifyPersonalAndTeamScope(page) {
   return page.evaluate(async () => {
     const suffix = crypto.randomUUID().slice(0, 8)
@@ -103,11 +134,25 @@ async function qualifyBrowser(page, context, projectName) {
   if (profile === 'open') {
     await ensurePromptReady(page)
     await expect(page.locator('#hud-session')).toHaveText('ANON')
+    await expect(page.locator('[data-action="logout"]')).toHaveClass(/\bu-hidden\b/)
+    await expect(page.locator('[data-menu-action="logout"]')).toHaveClass(/\bu-hidden\b/)
     expect((await readStatuses(page))['/projects']).toBe(200)
     await keepBrowserWorkspace(page)
     await expect(page.locator('#hud-session')).toContainText('crd_')
     expect((await readStatuses(page))['/projects']).toBe(200)
-    await qualifyPersonalAndTeamScope(page)
+    const scope = await qualifyPersonalAndTeamScope(page)
+    const credential = await page.evaluate(() => localStorage.getItem('access_credential'))
+    await logOutFromMenu(page)
+    await expect(page.locator('#hud-session')).toHaveText('ANON')
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+    await expect(page.locator('[data-action="logout"]')).toHaveClass(/\bu-hidden\b/)
+    await expect(page.locator('[data-menu-action="logout"]')).toHaveClass(/\bu-hidden\b/)
+    expect(await page.evaluate(async id => (await apiFetch(`/projects/${id}`)).status, scope.personalId)).toBe(404)
+    const kept = await page.request.get(`/projects/${scope.personalId}`, { headers: { 'X-Darklab-Credential': credential } })
+    expect(kept.status()).toBe(200)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await ensurePromptReady(page)
+    await expect(page.locator('#hud-session')).toHaveText('ANON')
     return
   }
 
@@ -179,10 +224,10 @@ async function qualifyBrowser(page, context, projectName) {
   await expect(page).toHaveURL(url => url.pathname === '/')
   expect((await readStatuses(page))['/projects']).toBe(200)
 
-  const logoutStatus = await page.evaluate(async () => (await apiFetch('/auth/logout', { method: 'POST' })).status)
-  expect(logoutStatus).toBe(204)
+  const loggedOut = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/logout')
+  await logOutFromMenu(page)
+  expect((await loggedOut).status()).toBe(204)
   expect((await page.request.get('/projects')).status()).toBe(401)
-  await page.evaluate(() => { void apiFetch('/projects') })
   await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   if (profile === 'mixed') {
     await page.getByRole('link', { name: 'Continue with identity provider' }).click()
@@ -192,6 +237,8 @@ async function qualifyBrowser(page, context, projectName) {
       (await (await apiFetch('/auth/principal')).json()).authentication)
     expect(providerAuthentication.credential_type).toBe('oidc')
     expect((await readStatuses(page))['/projects']).toBe(200)
+    await logOutFromMenu(page)
+    await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   }
 }
 

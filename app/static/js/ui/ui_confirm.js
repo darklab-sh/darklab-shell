@@ -356,6 +356,7 @@ import {
     if (!focusTarget && buttons.length) focusTarget = buttons[0].btn;
     if (focusTarget && typeof focusTarget.focus === 'function') {
       const applyFocus = () => {
+        if (_activeState !== state || !focusTarget.isConnected) return;
         const active = document.activeElement;
         if (active && active !== focusTarget && typeof active.blur === 'function') {
           try { active.blur(); } catch (_) { /* non-critical */ }

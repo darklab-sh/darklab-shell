@@ -181,6 +181,8 @@ These summaries explain what belongs in each layer. Use the live-listing command
 
 ### Access Profile Qualification
 
+`auth-profile-qualification.spec.js` exercises **Log out** from the extended rail menu by keyboard and the mobile menu by touch across all four access profiles. It checks cancellation and focus restoration, fresh anonymous access in open deployments, and return to sign-in for managed sessions. `restricted-access.spec.js` checks failed logout and retry, rejects the old session cookie, and verifies that another browser and the saved credential remain usable. `browser_logout.test.js` covers the shared operation, duplicate activation, identity changes during confirmation, and safe error feedback.
+
 The principal-auth regressions also check that minimal and full-scope PATs can't read or write through browser routes in any profile. API scope checks and the explicitly permitted identity and self-revocation handlers remain covered separately.
 
 The access checks use the same four policy choices on both databases. The browser matrix gives each profile an isolated server and checks source and bundled assets at desktop and mobile widths on both SQLite and PostgreSQL. PostgreSQL request-policy checks also repeat the profile gate and PAT access without relying on a browser cookie.

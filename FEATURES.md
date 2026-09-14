@@ -1574,6 +1574,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ### Sign-out and expiry
 
+- Choose **Log out** in the desktop rail's **more** menu or the mobile menu to leave the current workspace without opening Options. It appears when you're signed in and asks you to confirm. Open deployments return to a fresh anonymous workspace; restricted deployments return to sign-in. Your saved workspace, credentials, and access on other devices stay intact. If logout fails, you can try again from the same menu.
 - A restricted browser session ends when it reaches either its idle limit or maximum lifetime. If it expires or is revoked while the app is open, the next protected request returns you to sign-in.
 - **Sign out** closes this browser session. **Sign out everywhere** closes every browser session for the workspace while keeping saved credentials and PATs usable. If a fresh sign-in is required, Access provides a **Sign in again** link. Neither action ends the identity provider's own sign-in session.
 - Revoking or rotating a portable credential also closes sessions opened with it. Access warns before signing out the current browser, and rotation gives you time to save the replacement first.
