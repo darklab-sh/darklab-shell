@@ -105,8 +105,10 @@ function createProjectAssessmentController(context) {
   }
 
   function renderViews() {
+    const focused = typeof document !== 'undefined' ? document.activeElement : null;
     ctx.renderProjectExplorer?.();
     if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+    if (focused?.dataset?.projectAssessmentReturnFocus) restoreFocus(liveLifecycleFocusTarget(focused));
   }
 
   const httpProfileManager = createProjectHttpProfileManager(ctx, { renderViews });
@@ -432,7 +434,7 @@ function createProjectAssessmentController(context) {
     const { confirmId, ...confirmOptions } = options;
     try {
       const choice = await ctx.showConfirm({ ...confirmOptions, refocusOnResolve: false });
-      restoreFocus(returnFocus);
+      restoreFocus(liveLifecycleFocusTarget(returnFocus));
       return choice === confirmId;
     } catch (err) {
       ctx.setProjectWorkspaceMessage?.(err?.message || 'Could not open the assessment confirmation.', { error: true });

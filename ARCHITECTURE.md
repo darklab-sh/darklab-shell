@@ -915,6 +915,8 @@ Project click delegation marks each event before asynchronous handlers run, so m
 
 Team list refreshes preserve the top form's controls and focus; form submissions still disable them while the change is saved.
 
+Assessment lifecycle confirmations resolve the current opening control after a refresh before returning focus. Later Assessment redraws preserve a focused lifecycle control.
+
 ### Frontend Composition
 
 ```mermaid

@@ -2588,13 +2588,30 @@ describe('project assessment controller', () => {
 
   it('cancels lifecycle transitions without sending a mutation', async () => {
     const projectWorkspaceRequest = vi.fn(async (url, options) => responseFor(url, options))
+    let cancel
     const ctx = makeContext(projectWorkspaceRequest, {
-      showConfirm: vi.fn(async () => 'cancel'),
+      showConfirm: vi.fn(() => new Promise(resolve => { cancel = resolve })),
     })
     const controller = DarklabProjectAssessment.createProjectAssessmentController(ctx)
     await controller.load('prj_1', { render: false })
-
-    expect(await controller.transitionCycle('prj_1', 'completed')).toBe(false)
+    const surface = document.createElement('div')
+    document.body.appendChild(surface)
+    ctx.renderProjectExplorer.mockImplementation(() => controller.renderAssessment(surface, 'prj_1'))
+    controller.renderAssessment(surface, 'prj_1')
+    const selector = '[data-project-assessment-return-focus="desktop-complete-cycle"]'
+    const original = surface.querySelector(selector)
+    original.focus()
+    const transition = controller.transitionCycle('prj_1', 'completed', original)
+    // A background refresh replaces the opening button while the confirm is open.
+    controller.renderAssessment(surface, 'prj_1')
+    const replacement = surface.querySelector(selector)
+    expect(replacement).not.toBe(original)
+    cancel('cancel')
+    expect(await transition).toBe(false)
+    expect(document.activeElement).toBe(replacement)
+    await controller.load('prj_1', { force: true })
+    expect(document.activeElement).toBe(surface.querySelector(selector))
+    surface.remove()
     expect(projectWorkspaceRequest.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false)
   })
 })
