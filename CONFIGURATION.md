@@ -251,7 +251,22 @@ Open run streams recheck access within 15 seconds, even while output is idle. Th
 
 The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
 
+#### Provider compatibility
+
 For provider sign-in, register a confidential OpenID Connect client with the authorization-code flow and PKCE S256 enabled. Set its exact redirect URI to `https://<your-shell-host>/auth/oidc/callback`. The issuer must match the provider's discovery document exactly. Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URI` in `.env`; `OIDC_SCOPES` defaults to `openid`. The app asks the provider to authenticate the browser, verifies its signed ID token, and stores only the issuer and provider subject as the stable link. It doesn't require or store an email address, name, groups, provider access token, or refresh token.
+
+The provider client must meet these requirements:
+
+| Setting | Required behavior |
+| --- | --- |
+| Client and flow | Confidential client using authorization code and PKCE `S256`. |
+| Token endpoint authentication | `client_secret_basic`; other client-secret or private-key authentication methods aren't supported. |
+| Discovery | HTTPS at `<OIDC_ISSUER>/.well-known/openid-configuration`, with an exact matching `issuer` and HTTPS `authorization_endpoint`, `token_endpoint`, and `jwks_uri`. Discovery, token, and signing-key requests don't follow redirects. |
+| Callback | Register exactly `https://<your-shell-host>/auth/oidc/callback` and use the same value for `OIDC_REDIRECT_URI`. The callback request must reach the configured origin. |
+| ID-token signing | `RS256`, `PS256`, or `ES256`, with the matching public key in the provider's JWKS. |
+| Identity and audience | A stable, non-empty `sub` of at most 512 characters, the configured issuer, the client ID in `aud`, and the requested nonce. When `aud` contains multiple audiences, `azp` must equal the client ID. |
+| Token times | Include `iat` and `exp`; keep the provider and app clocks synchronized. Validation allows 30 seconds of clock skew. |
+| Linking freshness | Honor the linking request's `max_age=300` and include an integer `auth_time` in the ID token. At callback it must be no more than five minutes old or 30 seconds ahead of the app clock. The source credential sign-in must also be within five minutes and still valid. |
 
 `OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
 
@@ -259,7 +274,14 @@ In **Options → Access**, an existing portable-credential user can link the pro
 
 The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed. If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup. Validated discovery metadata and signing keys are cached for five minutes. A token naming an unknown signing key triggers one key refresh; each sign-in still needs a successful code exchange with the provider. CA changes replace one private combined bundle per worker, which is removed when that worker exits normally.
 
-For failed provider sign-ins, check `OIDC_PROVIDER_FAILED` for unavailable dependencies or local storage and `OIDC_AUTH_FAILED` for rejected attempts. The records identify the failed stage and a fixed reason without provider responses or credentials. Enable DEBUG for stage timings; see the [Logging Reference](docs/logging.md) for the fields.
+For failed provider sign-ins, check `OIDC_PROVIDER_FAILED` for unavailable dependencies or local storage and `OIDC_AUTH_FAILED` for rejected attempts. The records identify the failed stage and a fixed reason without provider responses or credentials. Enable DEBUG for stage timings; see the [Logging Reference](docs/logging.md) for the fields. Check these stage and reason combinations first:
+
+- `discovery` with `issuer_mismatch`, `invalid_endpoint`, or `pkce_unsupported`: compare the provider's discovery settings with the table above.
+- `token_exchange` with `client_authentication_failed` or `client_not_authorized`: check the client ID, secret, allowed flow, and `client_secret_basic` setting.
+- `signing_keys` or `token_validation`: check the published signing key and supported algorithm; `audience_mismatch` and `authorized_party_mismatch` point to client audience settings.
+- `token_validation` with `recent_provider_required`: require a fresh provider sign-in that returns `auth_time`, then retry linking. Check both clocks if fresh sign-in is still rejected.
+
+The browser shows a generic failure message; the safe server records distinguish these setup problems from a provider outage.
 
 Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
 
