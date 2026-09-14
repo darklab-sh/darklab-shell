@@ -5897,6 +5897,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         bind_step_run,
         claim_step_for_launch,
         create_execution,
+        execution_state_for_recovery,
         finalize_run_step,
     )
     app = create_app()
@@ -6044,12 +6045,24 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     inspect_run_id = "run-pg-workflow-inspect-" + uuid.uuid4().hex
     assert claim_step_for_launch(execution["id"], "resolve") is not None
     assert bind_step_run(execution["id"], "resolve", execution_run_id) is True
+    recovery_execution, recovery_step = execution_state_for_recovery(execution["id"])
+    assert recovery_execution is not None
+    assert recovery_execution["current_step_id"] == "resolve"
+    assert isinstance(recovery_execution["definition_snapshot"], dict)
+    assert recovery_step == {"step_id": "resolve", "status": "running", "run_id": execution_run_id}
+    assert not any(key.startswith("recovery_") for key in recovery_execution)
+    assert execution_state_for_recovery("missing-workflow") == (None, None)
     finalized = finalize_run_step(
         execution_run_id,
         0,
         captures={"resolved_host": "darklab.sh"},
     )
     assert finalized is not None and finalized["destination"] == "inspect"
+    recovery_execution, recovery_step = execution_state_for_recovery(execution["id"])
+    assert recovery_execution is not None
+    assert recovery_execution["current_step_id"] == "inspect"
+    assert recovery_execution["variables"]["resolved_host"] == "darklab.sh"
+    assert recovery_step == {"step_id": "inspect", "status": "pending", "run_id": ""}
     assert finalize_run_step(execution_run_id, 0) is None
     assert claim_step_for_launch(execution["id"], "inspect") is not None
     assert bind_step_run(execution["id"], "inspect", inspect_run_id) is True

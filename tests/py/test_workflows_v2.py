@@ -10,7 +10,9 @@ import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable, cast
 
 import pytest
@@ -55,6 +57,7 @@ from services.workflows.storage import (
     claim_step_for_launch,
     create_execution,
     execution_for_run,
+    execution_state_for_recovery,
     fail_execution_for_run,
     finalize_run_step,
     get_execution,
@@ -1680,6 +1683,7 @@ def test_execution_routes_are_scoped_and_launch_server_execution(monkeypatch):
     assert batch["execution_kind"] == ASSESSMENT_BATCH_EXECUTION_KIND
     assert public_execution(batch) == {}
     assert get_execution_by_id(batch_id) is None
+    assert execution_state_for_recovery(batch_id) == (None, None)
     assert active_execution_count(session_id) == 1
     assert active_execution_count_for_actor(session_id) == 2
     assert batch_id not in {item[0] for item in active_execution_page_for_recovery()}
@@ -3256,49 +3260,84 @@ def test_recovery_reclaims_stale_states_and_advances_completed_step_once(monkeyp
             ],
         }
     )
-    racing = create_execution(
-        session_id=session_id,
-        team_id="",
-        workflow_id="recovery_capture",
-        workflow_source="config",
-        definition=capture_definition,
-        inputs={},
-    )
-    racing_run_id = "run-racing-" + uuid.uuid4().hex
-    assert claim_step_for_launch(racing["id"], "resolve") is not None
-    assert bind_step_run(racing["id"], "resolve", racing_run_id)
-    with get_db_connect()() as conn:
-        conn.execute(
-            "INSERT INTO runs "
-            "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, output_line_count) "
-            "VALUES (?, ?, 'echo 192.0.2.55', ?, ?, 0, ?, 1)",
-            (
-                racing_run_id,
-                session_id,
-                finished,
-                finished,
-                json.dumps([{"text": "192.0.2.55", "cls": ""}]),
-            ),
+    for interleave_state_read in (False, True):
+        racing = create_execution(
+            session_id=session_id,
+            team_id="",
+            workflow_id="recovery_capture",
+            workflow_source="config",
+            definition=capture_definition,
+            inputs={},
         )
-        conn.commit()
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(
-            pool.map(
-                lambda _index: executions.recover_workflow_execution(racing["id"]),
-                range(2),
+        racing_run_id = "run-racing-" + uuid.uuid4().hex
+        assert claim_step_for_launch(racing["id"], "resolve") is not None
+        assert bind_step_run(racing["id"], "resolve", racing_run_id)
+        with get_db_connect()() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, personal_workspace_id, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, 'echo 192.0.2.55', ?, ?, 0, ?, 1)",
+                (
+                    racing_run_id,
+                    session_id,
+                    finished,
+                    finished,
+                    json.dumps([{"text": "192.0.2.55", "cls": ""}]),
+                ),
             )
-        )
+            conn.commit()
 
-    racing_stored = get_execution(session_id, racing["id"])
-    assert racing_stored is not None
-    assert "recovered" in outcomes
-    assert set(outcomes) <= {"recovered", "left_running"}
-    assert racing_stored["variables"]["resolved_ip"] == "192.0.2.55"
-    assert [item for item in launched if item == (racing["id"], "inspect")] == [(racing["id"], "inspect")]
+        if interleave_state_read:
+            # Advance from another connection after the first recovery worker reads
+            # its execution row, before it can consume the current step's state.
+            connect = get_db_connect()
+            armed = True
+            outcomes = []
+
+            class InterleavedConnection:
+                def __init__(self, conn):
+                    self.conn = conn
+
+                def __getattr__(self, name):
+                    return getattr(self.conn, name)
+
+                def execute(self, sql, params=()):
+                    nonlocal armed
+                    cursor = self.conn.execute(sql, params)
+                    if armed and "FROM workflow_executions" in sql and racing["id"] in params:
+                        row = cursor.fetchone()
+                        armed = False
+                        outcomes.append(executions.recover_workflow_execution(racing["id"]))
+                        return SimpleNamespace(fetchone=lambda: row)
+                    return cursor
+
+            @contextmanager
+            def interleaved_connect():
+                with connect() as conn:
+                    yield InterleavedConnection(conn)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(executions.storage, "get_db_connect", lambda: interleaved_connect)
+                outcomes.append(executions.recover_workflow_execution(racing["id"]))
+            assert not armed
+        else:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = list(
+                    pool.map(
+                        lambda _index: executions.recover_workflow_execution(racing["id"]),
+                        range(2),
+                    )
+                )
+
+        racing_stored = get_execution(session_id, racing["id"])
+        assert racing_stored is not None
+        assert "recovered" in outcomes
+        assert set(outcomes) <= {"recovered", "left_running"}
+        assert racing_stored["variables"]["resolved_ip"] == "192.0.2.55"
+        assert [item for item in launched if item == (racing["id"], "inspect")] == [(racing["id"], "inspect")]
+        assert executions.storage.fail_execution(racing["id"], "test_cleanup", "")
     assert executions.storage.fail_execution(stale["id"], "test_cleanup", "")
     assert executions.storage.fail_execution(pending["id"], "test_cleanup", "")
-    assert executions.storage.fail_execution(racing["id"], "test_cleanup", "")
 
     collection_definition = compile_execution_definition(
         {

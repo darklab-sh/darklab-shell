@@ -665,17 +665,10 @@ def _recover_fanout_step(
 
 
 def recover_workflow_execution(execution_id: str) -> str:
-    execution = storage.get_execution_by_id(execution_id)
+    execution, step = storage.execution_state_for_recovery(execution_id)
     if not execution or str(execution.get("status") or "") not in storage.ACTIVE_EXECUTION_STATUSES:
         return "ignored"
     step_id = str(execution.get("current_step_id") or "")
-    steps = execution.get("steps")
-    step = next(
-        (
-            item for item in steps if isinstance(item, Mapping) and item.get("step_id") == step_id
-        ),
-        None,
-    ) if isinstance(steps, list) else None
     if not step:
         changed = storage.fail_execution(
             execution_id,

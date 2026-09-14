@@ -106,6 +106,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Concurrent workflow recovery keeps completed steps from failing healthy work.** Recovery reads each execution and its current step together, then advances a completed run only once.
+
 - **Credential failures and throttling appear in operational logs.** Sampled warnings identify the rejected authentication reason or limiting policy across browser sign-in, API requests, credential redemption, and workspace creation, without recording submitted identities or secrets.
 
 - **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.

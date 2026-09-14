@@ -271,6 +271,8 @@ External CLI coverage also creates and edits assessor-authored findings, manages
 
 HTTP-profile CLI coverage resolves active Project slugs, exercises text, JSON, and NDJSON reads, and pins exact create, optimistic-update, and confirmed-delete requests. File and stdin authoring stay within the shared byte limit; update revisions remain explicit; unknown fields, inline Secret material, credential-bearing proxy URLs, and unsafe Files paths fail before mutation. Viewer-shaped responses remain useful without protected fields, human-readable output stays on public summaries and composition counts, JSON never contains Secret values, and focused architecture budgets keep the parser, handler, formatter, mutation, and protected-input modules bounded. The PostgreSQL route test sends the same API create, update, and delete requests used by the CLI.
 
+Workflow recovery coverage runs concurrent workers and forces a second worker to advance between the first worker's execution read and step handling. It checks one next-step launch, retained captures, and healthy execution state. PostgreSQL coverage checks the same joined recovery read before and after a completed-step transition.
+
 #### Imports and reviewed scanning
 
 Atlas import coverage also streams native Greenbone GMP XML through the bounded parser, rejects unsafe DTD/entity input and incomplete results, keeps NVT OIDs as stable rule identity across changing result UUIDs and report text, and verifies normal Atlas deduplication and Project mapping without contacting a scanner.
