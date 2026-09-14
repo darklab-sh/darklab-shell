@@ -23,6 +23,7 @@ let exportedRefreshOptionsTeams = null;
   let _selectedTeamId = '';
   let _activeDetailTab = 'overview';
   let _loading = false;
+  let _formBusy = false;
   let _formMode = '';
   let _oneTimeCode = null;
   let _bound = false;
@@ -89,8 +90,9 @@ let exportedRefreshOptionsTeams = null;
     return null;
   }
 
-  function _setBusy(busy) {
+  function _setBusy(busy, { preserveForm = false } = {}) {
     _loading = !!busy;
+    if (!preserveForm) _formBusy = _loading;
     [
       'options-teams-refresh-btn',
       'options-team-create-btn',
@@ -104,6 +106,7 @@ let exportedRefreshOptionsTeams = null;
     if (panel) {
       panel.querySelectorAll('button, input, select').forEach((control) => {
         if (control.id && control.id.startsWith('options-team-')) return;
+        if (preserveForm && control.closest('[data-team-form]')) return;
         control.disabled = _loading;
       });
     }
@@ -410,7 +413,7 @@ let exportedRefreshOptionsTeams = null;
     fields.appendChild(actions);
     form.appendChild(fields);
     form.querySelectorAll('button, input, select').forEach((control) => {
-      control.disabled = _loading;
+      control.disabled = _formBusy;
     });
     host.appendChild(form);
   }
@@ -1077,7 +1080,7 @@ let exportedRefreshOptionsTeams = null;
       _syncScopeSelector();
       return _teams;
     }
-    _setBusy(true);
+    _setBusy(true, { preserveForm: true });
     try {
       const payload = await _jsonRequest('/session/teams');
       _teams = Array.isArray(payload.teams) ? payload.teams : [];
@@ -1093,7 +1096,7 @@ let exportedRefreshOptionsTeams = null;
       _msg(error.message || 'Failed to load teams', { error: true });
       return [];
     } finally {
-      _setBusy(false);
+      _setBusy(false, { preserveForm: true });
       _render();
     }
   }

@@ -413,7 +413,22 @@ describe('Options Teams permissions UI', () => {
     name.setSelectionRange(2, 7)
     const submit = form.querySelector('button[type="submit"]')
 
-    await harness.refreshOptionsTeams()
+    let releaseRefresh
+    const pending = new Promise(resolve => { releaseRefresh = resolve })
+    const originalRequest = apiFetch.getMockImplementation()
+    apiFetch.mockImplementation(async (...args) => {
+      await pending
+      return originalRequest(...args)
+    })
+    const refreshing = harness.refreshOptionsTeams()
+    try {
+      expect(name.disabled).toBe(false)
+      expect(submit.disabled).toBe(false)
+      expect(document.activeElement).toBe(name)
+    } finally {
+      releaseRefresh()
+      await refreshing
+    }
 
     const refreshedForm = document.querySelector('[data-team-form="create"]')
     expect(refreshedForm).toBe(form)

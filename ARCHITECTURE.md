@@ -913,6 +913,8 @@ The Project Assessment browser modules are also covered by exact module-size bud
 
 Project click delegation marks each event before asynchronous handlers run, so mobile capture and modal bubbling cannot execute the same action twice. Subsequent taps remain independent.
 
+Team list refreshes preserve the top form's controls and focus; form submissions still disable them while the change is saved.
+
 ### Frontend Composition
 
 ```mermaid
