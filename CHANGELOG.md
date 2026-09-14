@@ -32,57 +32,38 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Access-profile qualification covers every sign-in policy on both databases, asset modes, and viewport sizes.**
   - **Before:** Focused access checks didn't exercise the complete browser grid.
   - **After:** Isolated SQLite and disposable-schema PostgreSQL servers run the same desktop and mobile browser journey for `open`, `token_required`, `oidc_required`, and `mixed` in source and bundled asset modes. The journey checks sign-in choices, protected reads and cookies, personal and Team scope, file round trips, reload, and logout. CI runs both PostgreSQL browser asset modes.
-  - **Tests:** PostgreSQL request-policy cases check scoped PAT access. SQLite and PostgreSQL measurements record concurrent portable/PAT lookup latency, enforce bounded last-used writes, and reject stored reusable credential material. The testing handbook maps the grid to deeper product, recovery, and migration suites. The retired-anonymous restore journey allows one minute for creation, reloads, and recovery without extending individual assertion deadlines. Revoked-tab browser coverage starts its protected request before revocation and accepts a background request as the first denial. Markdown lint ignores generated browser reports, and the authored-finding browser test waits for its target to be saved before opening the editor.
+  - **Tests:** PostgreSQL request-policy cases check scoped PAT access. SQLite and PostgreSQL measurements record concurrent portable/PAT lookup latency, enforce bounded last-used writes, and reject stored reusable credential material. The testing handbook maps the grid to deeper product, recovery, and migration suites.
 
-- **The local pytest fast lane is back below three minutes without weakening database qualification.**
+- **SQLite fixture reuse reduces local pytest runtime without weakening database qualification.**
   - **Before:** Ordinary isolated route and backend tests rebuilt the complete current SQLite schema for each case, so a clean fast-lane run grew to roughly six and a half minutes even though most of those tests weren't exercising initialization.
   - **After:** Each pytest process now builds one pristine database through the production initialization path, packages and validates a sidecar-free source, and copies it to a unique path for ordinary empty-schema tests. Migration, schema reconciliation, startup, cutover, failure, rollback, retention, and backend-parity coverage still uses the real initialization path.
-  - **Tests:** New guards cover migration head, integrity, foreign keys, FTS, principal-only schema, sidecars, overwrite refusal, and cross-copy isolation. Three idle-host fast-lane runs completed in 174.86-174.99 seconds of pytest time with a 176.04-second median wall time; each collected the same 3,089 cases, selected 3,052, passed 2,776, skipped 276, and deselected the same 37 release-integration cases. The complete SQLite suite passed 2,813 tests with 276 skips in 203.70 seconds, down from 414.35 seconds, and the PostgreSQL qualification passed all 138 tests.
-
-- **Security lint output is clean for reviewed dynamic SQL.** Bandit suppressions now use its unqualified marker, avoiding misleading warnings about comment text and stale test identifiers while keeping the existing reviewed queries unchanged.
-
-- **Assessment worklist scrolling now survives background refreshes.** A late scroll event from a replaced list can no longer erase the saved position while the Project workspace rerenders, so lifecycle confirmations keep both the expanded target and the reader's place.
+  - **Tests:** New guards cover migration head, integrity, foreign keys, FTS, principal-only schema, sidecars, overwrite refusal, and cross-copy isolation. Recorded benchmarks completed three fast-lane runs in 174.86–174.99 seconds; the complete SQLite run fell from 414.35 to 203.70 seconds, and PostgreSQL qualification passed.
 
 - **Shell-output entities now open a compact action menu for investigation and reuse.**
   - **Before:** Activating an entity opened Atlas immediately, while a separate long-press or right-click menu exposed a larger set of output-only actions. That made it easy to navigate away when the intent was to select or reuse the value.
-  - **After:** A deliberate click, tap, or keyboard activation offers **Open in Atlas**, **Copy to Clipboard**, and **Insert into command**. The menu uses the entity's canonical value, respects the desktop or mobile command selection without running anything, preserves normal text selection and native right-click behavior, and closes when its context changes. While output follows new lines, the menu stays open and repositions; its removal observer runs only while the menu is open.
+  - **After:** A deliberate click, tap, or keyboard activation offers **Open in Atlas**, **Copy to Clipboard**, and **Insert into command**. The menu uses the entity's canonical value, respects the desktop or mobile command selection without running anything, preserves normal text selection and native right-click behavior, and closes when its context changes. While output follows new lines, the menu stays open and repositions.
   - **Tests:** Vitest covers supported entity types, selection suppression, action wiring, keyboard navigation, viewport placement, clipboard outcomes, and every dismissal path. Playwright exercises live output in source and bundle modes, including real pointer insertion, streaming output scrolling, keyboard use, Atlas handoff, exact composer insertion, shell typing, and a narrow touch viewport.
 
 ### Fixed
 
+- **Project workspaces preserve typing, focus, and actions during background refreshes.**
+  - **Assessments:** expanded worklists keep their scroll position. Canceling a confirmation returns focus to the current opening control, while choosing another control keeps that choice through later updates.
+  - **Package drafts:** loading presets or Assessment choices preserves the focused field, its text, and cursor selection.
+  - **Actions:** linking a run keeps its completed confirmation closed. Refreshes don't swallow the click that opens a finding editor, and shared actions run once per click.
+
 - **Concurrent workflow recovery keeps completed steps from failing healthy work.** Recovery reads each execution and its current step together, then advances a completed run only once.
 
-- **Package drafts keep the field you're typing in during background updates.** Loading presets or Assessment choices preserves the focused text field, its content, and its cursor selection.
+- **Team form refreshes preserve typing and clicks.** Refreshing the Team list keeps the current create, join, or recovery form mounted and usable, so an update cannot disable a focused field or replace the Submit button during a click.
 
-- **Assessment confirmations restore focus after a refresh.** Canceling a lifecycle action returns to the current opening button when a background update replaced the original control, including a still-pending reload, and later Assessment updates preserve that focus. Moving to another control while the reload finishes keeps your chosen focus.
-
-- **Project actions run once and keep working during refreshes.** Linking a run no longer reopens its confirmation after succeeding; the same dispatch guard covers other shared Project actions. Desktop explorer updates wait for a pressed action's click or cancellation, so a refresh can't swallow the click that opens a finding editor. Browser coverage waits for an actionable button and confirms its pointer listener is installed before pressing, then tracks that control through the refresh.
-
-- **Stream revocation handling stays within the module-size limits.** Shared browser delivery, API response construction, local PTY reads, and Redis timeout classification have focused helpers; route permissions, stream cleanup, and revocation behavior stay covered by the existing regressions.
-
-- **Team form refreshes preserve typing and clicks.** Refreshing the Team list keeps the current create, join, or recovery form mounted and usable, so an update cannot disable a focused field or replace the Submit button during a click. Pending-refresh tests cover real typing and preserved controls; the Team-join journey clicks Submit and verifies its server response.
-
-- **Autocomplete recovers when its first catalog request fails.** Startup retries once after a network or server failure, without overlapping requests. Authorization and malformed-response failures stop immediately. Browser checks observe the shared catalog without starting competing requests; regression coverage exercises delayed startup, retry bounds, and recovery after an aborted request. The interaction suite allows a slow successful catalog request to finish before exercising its normal assertion deadlines.
-
-- **The browser access-profile qualification has enough time to complete its full journey on CI.** Its per-test budget covers sign-in, protected reads, personal and Team writes, and session recovery; individual assertions keep their existing deadlines.
-
-- **The PostgreSQL credential-resolution test now uses an explicitly typed dict-row connection.** This clears its editor diagnostic without changing the query or result handling.
-
-- **PostgreSQL access-profile browser startup no longer imports unrelated CVE feeds.** Isolated Playwright servers skip that work, and the PostgreSQL browser job allows more time for fresh-schema startup.
+- **Autocomplete recovers when its first catalog request fails.** Startup retries once after a network or server failure, without overlapping requests. Authorization and malformed-response failures stop immediately.
 
 - **Branch images now pick up fixed Debian glibc packages.** The runtime install explicitly refreshes `libc6` and `libc-bin`, and branch CI can bypass the runtime cache for a security recheck without rebuilding the compiled tool stages.
 
-- **OIDC browser checks no longer stall after provider linking.** The test waits for the provider redirect to load the application before checking the linked workspace, avoiding an unnecessary second navigation that could time out on CI.
-
-- **Markdown linting no longer pulls in a vulnerable TOML parser.** The existing markdownlint toolchain now resolves patched `smol-toml` 1.8.0 through a scoped dependency override.
-
-- **JavaScript dependency audits no longer flag vulnerable `colord` or `js-yaml` releases.** The Stylelint toolchain now resolves `colord` 2.10.0 and patched `js-yaml` 4.3.2 without changing the parent tooling versions.
-
 - **WHOIS lookups save the queried target only after a matching registration record.** No-match responses, rate-limit notices, errors, and unrelated records create no Atlas entity. Registration ranges, registry and registrar hosts, nameservers, contact handles, RDAP and referral links, and policy URLs remain in the transcript without becoming Atlas records or Project targets. Existing noisy WHOIS entities remain until you suppress them.
 
-- **Diagnostic audit-route tests no longer expire as the calendar advances.** The test app now recognizes the real migration table instead of rerunning database maintenance for every client, and audit fixtures initialize their database first and use retention-safe timestamps.
-
-- **JavaScript dependency audits no longer flag known `fast-uri` request-parsing vulnerabilities.** The development-only dependency used through the Stylelint toolchain is now locked to version 3.1.7.
+- **JavaScript tooling dependencies include the reviewed security fixes.**
+  - **Markdown linting:** the scoped override uses `smol-toml` 1.8.0.
+  - **Stylelint tooling:** the resolved dependencies use `colord` 2.10.0, `js-yaml` 4.3.2, and `fast-uri` 3.1.7 without changing the parent tooling versions.
 
 - **Container vulnerability scans no longer flag the bundled OpenSSL build.** OpenSSL is updated to the 3.6.4 security patch release with its source archive still protected by a pinned SHA-256 checksum.
 
