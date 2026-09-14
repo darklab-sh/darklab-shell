@@ -1339,14 +1339,13 @@ test.describe('project workspace modal', () => {
 
     await switchProjectTab(page, 'findings')
     const createFinding = page.locator('[data-project-action="create-manual-finding"]')
-    await expect(createFinding).toBeVisible()
+    // Let the locator wait for a stable, actionable replacement before pressing.
+    await createFinding.hover()
     const pressedControl = page.evaluateHandle(() => new Promise(resolve => {
       document.addEventListener('pointerdown', event => {
         resolve(event.target.closest('[data-project-action="create-manual-finding"]'))
       }, { capture: true, once: true })
     }))
-    const openingBox = await createFinding.boundingBox()
-    await page.mouse.move(openingBox.x + openingBox.width / 2, openingBox.y + openingBox.height / 2)
     await page.mouse.down()
     const openingControl = await pressedControl
     await page.evaluate(() => window.refreshProjectWorkspace())
