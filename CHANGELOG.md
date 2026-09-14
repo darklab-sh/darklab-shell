@@ -108,7 +108,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Credential throttling rejects excess attempts before verification.**
   - **Root cause:** Limits were checked only after a failed verification, so blocked clients still caused authentication work and correct credentials bypassed the limit.
-  - **Fix:** Header and browser-session authentication, credential redemption, and the sign-in form check the current allowance first and return HTTP 429 with a retry delay when it is exhausted. Only failed verifications consume the allowance.
+  - **Fix:** Header and browser-session authentication, credential redemption, and the sign-in form check the current allowance first and return HTTP 429 with a retry delay when it is exhausted. Only failed verifications consume the allowance. Unsupported legacy headers stay at the resolver rejection boundary and never enter credential verification.
   - **Tests:** Requests with correct credentials are blocked without a database lookup or session verification, then succeed after the window resets. Coverage includes IP and lookup limits, Redis and local counters, and disabling the limiter.
 
 - **Work paused by an operator can be reviewed before it resumes.**
