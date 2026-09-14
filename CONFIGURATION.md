@@ -206,6 +206,8 @@ Save and verify the copied credential in the operator's secret store, then remov
 
 For provider-only deployments, enable `mixed` before using a portable credential to sign in. Use `issue` when the purpose is only to regain a browser path for repairing a provider link; use `recover` when all existing credentials and sessions must be invalidated.
 
+### Credential-attempt limits
+
 Failed credential attempts are limited to 30 per client IP and 10 per public credential lookup ID in each minute. Once either allowance is used, further attempts wait until the window resets, including attempts with a correct credential. Rejected requests return HTTP 429 with `Retry-After`; successful sign-ins don't consume the failure allowance.
 
 ### Restricted browser access
@@ -216,6 +218,8 @@ Failed credential attempts are limited to 30 per client IP and 10 per public cre
 - `token_required` shows a standalone credential screen before the application. Anonymous workspaces and unauthenticated credential issuance are disabled.
 - `oidc_required` signs browsers in with an OpenID Connect provider. It doesn't accept portable credentials at the browser sign-in screen.
 - `mixed` offers both provider sign-in and portable-credential sign-in. It's also the place to link an existing workspace to a provider identity before switching to `oidc_required`.
+
+#### HTTPS and session settings
 
 Restricted access is intended for HTTPS deployments. Its browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`. The short-lived provider state cookie is `Secure`, `HttpOnly`, and `SameSite=Lax` so it returns on the provider's redirect. Sign-in won't work over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
 
@@ -229,6 +233,8 @@ BROWSER_SESSION_ABSOLUTE_HOURS=12
 
 docker compose up -d --force-recreate shell
 ```
+
+#### Bootstrap credential-required access
 
 A fresh restricted deployment has no public bootstrap endpoint. Create the first principal from inside the running application container and write the one-time credential to a new path under the private `/data` mount:
 
@@ -245,9 +251,19 @@ docker compose exec -T shell rm /data/initial-operator.credential
 
 The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the copied credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
 
+#### Session lifetime and sign-out
+
 After redemption, the browser holds a signed server-side session instead of the portable credential. The session ends at the configured idle or absolute deadline. Sign-out revokes the current session; `/auth/sessions/revoke-all` and the operator `revoke-all-sessions` command close every browser session for one principal. Revoking or rotating a portable credential also closes sessions redeemed from that credential, and disabling a principal closes all of its sessions. Team membership and role changes rotate the acting browser's session and revoke a removed member's sessions.
 
+**Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old.
+
+The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed.
+
 Open run streams recheck access within 15 seconds, even while output is idle. These checks don't extend session activity. Losing access disconnects the stream and stops a controlling interactive PTY; an ordinary command already accepted can finish and be viewed through another valid credential.
+
+Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
+
+#### Session signing keys
 
 The signing key is generated inside the database and encrypted with the same vault master key used for other protected app material. That lets all Gunicorn workers verify the same cookies and keeps sessions valid across ordinary restarts. `rotate-session-signing-key` makes a new key active for future sessions while retained keys continue validating their unexpired sessions. For a suspected key compromise, rotate the key and revoke affected principals' sessions. Backups and restores must keep the database and its matching vault master key together; restoring only one side fails closed.
 
@@ -268,11 +284,19 @@ The provider client must meet these requirements:
 | Token times | Include `iat` and `exp`; keep the provider and app clocks synchronized. Validation allows 30 seconds of clock skew. |
 | Linking freshness | Honor the linking request's `max_age=300` and include an integer `auth_time` in the ID token. At callback it must be no more than five minutes old or 30 seconds ahead of the app clock. The source credential sign-in must also be within five minutes and still valid. |
 
+#### Provider provisioning
+
 `OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
 
-In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. **Sign out everywhere** in Access revokes every browser session. In `oidc_required` or `mixed`, it requires a recent sign-in and offers a **Sign in again** link when the current session is too old. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
+#### Provider linking and recovery
 
-The local **Sign out** action revokes this app's browser session; it doesn't sign out of the provider's own single-sign-on session. Sign out there separately if needed. If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup. Validated discovery metadata and signing keys are cached for five minutes. A token naming an unknown signing key triggers one key refresh; each sign-in still needs a successful code exchange with the provider. CA changes replace one private combined bundle per worker, which is removed when that worker exits normally.
+In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
+
+#### Provider availability and trust
+
+If the provider is unavailable, new sign-ins and linking fail closed, while already valid app sessions continue until their normal expiry or revocation. An optional PEM CA bundle can be placed under the installation's private `conf/` directory and selected with `OIDC_CA_BUNDLE=oidc/ca.pem`; the app adds it to system roots at runtime, so the image doesn't need rebuilding. Keep the `.env` client secret and custom CA file with the deployment's private configuration and its backup. Validated discovery metadata and signing keys are cached for five minutes. A token naming an unknown signing key triggers one key refresh; each sign-in still needs a successful code exchange with the provider. CA changes replace one private combined bundle per worker, which is removed when that worker exits normally.
+
+#### Provider troubleshooting
 
 For failed provider sign-ins, check `OIDC_PROVIDER_FAILED` for unavailable dependencies or local storage and `OIDC_AUTH_FAILED` for rejected attempts. The records identify the failed stage and a fixed reason without provider responses or credentials. Enable DEBUG for stage timings; see the [Logging Reference](docs/logging.md) for the fields. Check these stage and reason combinations first:
 
@@ -283,7 +307,7 @@ For failed provider sign-ins, check `OIDC_PROVIDER_FAILED` for unavailable depen
 
 The browser shows a generic failure message; the safe server records distinguish these setup problems from a provider outage.
 
-Cookie-authenticated writes require the matching CSRF cookie value in `X-Darklab-CSRF`. The browser client adds it automatically. API and CLI callers continue to use scoped PAT bearer authentication and don't receive browser-session cookies.
+#### Public shares
 
 Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 

@@ -1537,23 +1537,44 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 **Purpose:** use an anonymous-first workspace on trusted networks, or sign in with a credential, identity provider, or both on a private deployment.
 
-**Behavior:**
+**Behavior:** the deployment's access profile determines how you open a workspace. **Options → Access** keeps credential management, provider linking, and sign-out together on desktop and mobile.
 
-- A new browser starts with an anonymous UUID workspace. It can use normal personal features locally without creating a principal or durable credential.
-- Open **Options → Access** and choose **Keep this workspace** when you want the workspace to survive browser changes. The app keeps all of its files, history, Projects, preferences, workflows, and other personal data together, creates a pseudonymous principal, and asks for an optional label for the first credential. Its old anonymous identity and download links stop working; use the saved credential to reopen the workspace. No username, email address, or password is required.
-- A credential is shown once and masked by default. Use **Reveal** or **Copy**, save it in a password manager, then close the reveal. The app removes the reusable value from the page and cannot show it again.
-- **Use an existing credential** opens the same kept workspace on another browser. One credential can be reused, but a separately labeled credential per device makes a lost device easier to revoke without interrupting the others.
-- Credential rows show only a label, safe prefix, type, creation and last-used dates, expiry, state, and a **Current** badge. Existing reusable values are never returned by list or status requests.
-- You can add browser access or an **API token (PAT)**, rename a credential, change its expiry, rotate it, or revoke it. API tokens have selected permissions and a lifetime of 1–365 days; the defaults let the CLI identify the workspace, read run history, and run commands. Rotation preserves the label, permissions, and expiry, then reveals the replacement before asking to revoke the old credential. Revocation previews future work associated with that credential and can pause eligible schedules or watchers.
-- **Remove from browser** forgets the local credential and creates a fresh anonymous workspace in that browser. The kept workspace and credentials on other devices remain unchanged.
-- **Options → Access** shows only the actions that apply: anonymous browsers can keep or open a workspace, invalid saved credentials can be removed, and kept workspaces can manage their credentials or remove access from this browser.
-- Access changes propagate to other tabs. History, autocomplete, preferences, Files, Teams, automation, and identity summaries refresh around the new workspace, while an invalid or revoked credential fails closed and must be removed or replaced deliberately.
-- The desktop HUD shows **ANON**, a safe `crd_…` hint after credential sign-in, or **OIDC** after provider sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without exposing a principal id or raw credential.
-- In the `token_required` profile, the application opens on a focused credential screen instead of creating an anonymous workspace. A successful sign-in replaces the portable value with an HttpOnly browser session and removes any old credential or anonymous identity from browser storage before the main application starts.
-- In `oidc_required`, the sign-in screen sends you to the configured identity provider and opens the linked workspace after you return. `mixed` offers that choice alongside portable-credential sign-in. A new provider identity gets a workspace only when the operator's provisioning policy allows it; no email or real name is required. Provider-only deployments offer API tokens in **Add credential**. Existing recovery credentials explain that an operator must enable credential sign-in before use.
-- **Options → Access** shows whether this workspace is linked to the provider. If those details can't be loaded, the panel explains the problem and **Refresh** lets you try again. A recent credential sign-in and a fresh provider sign-in are both required to link it. If your credential sign-in is too old, **Sign in again with a credential** takes you through sign-in and returns you to Access. Unlinking requires a usable portable credential and signs out every browser session for the workspace. Provider-only users can ask an operator for recovery access if their provider identity changes.
-- Restricted deployments disable public snapshot sharing by default. Desktop and mobile snapshot controls explain when sharing is disabled.
-- Restricted browser sessions expire after both an idle limit and an absolute limit. If a session expires or is revoked while the app is open, the next protected request returns you to sign-in. **Sign out** closes that browser session; **Sign out everywhere** closes every browser session for the workspace. If a fresh sign-in is needed first, Access provides a **Sign in again** link. Neither control signs out the identity provider itself. Revoking or rotating a portable credential also closes sessions that came from it. Access warns before signing out the current browser, and rotation gives you time to save the replacement first. Open streams disconnect within 15 seconds of losing access, and a controlling interactive PTY stops. Ordinary commands already running can still finish and be viewed through another valid credential.
+### Open-profile workspaces
+
+- In the `open` profile, a new browser starts with an anonymous workspace. You can use personal features without creating an account or saving a credential.
+- Choose **Keep this workspace** when you want to reopen it after a browser change. Files, History, Projects, preferences, workflows, and other personal data stay together. You can label the first credential; no username, email address, or password is required. The old anonymous identity and its download links stop working, so use the saved credential to return.
+- **Use an existing credential** opens a kept workspace on another browser. **Remove from browser** forgets this browser's saved access and starts a fresh anonymous workspace; it doesn't delete the kept workspace or revoke other devices.
+- Anonymous browsers see keep and open actions, an invalid saved credential shows its removal action, and kept workspaces show credential management. Other tabs and panels refresh when access changes. Invalid or revoked credentials show an access warning until you remove or replace them.
+
+### Credentials for devices and integrations
+
+- A new credential is shown once and masked by default. Use **Reveal** or **Copy**, save it in a password manager, and close the reveal. The app removes the value from the page and can't show it again.
+- A separate label and credential for each device makes lost access easier to revoke without interrupting other devices. Rows show a safe prefix, type, label, creation and last-used dates, expiry, state, and a **Current** badge.
+- You can add a portable browser credential in open, credential-required, or mixed deployments. Every profile supports **API token (PAT)** creation for an authenticated workspace. Provider-only deployments offer PATs in **Add credential**; a recovery credential needs an operator to enable credential sign-in before it can be used.
+- PATs have selected permissions and a lifetime of 1–365 days, defaulting to 90. The default permissions let the CLI identify the workspace, read History, and run commands. See [Create a PAT](docs/api.md#create-a-pat) for setup and verification.
+- Rename a credential, change its expiry, rotate it, or revoke it from its row. Rotation keeps its label, permissions, and expiry and shows the replacement before asking to revoke the old credential. Revocation previews related work and can pause eligible schedules, watchers, notification channels, and Project digests.
+- The desktop HUD shows **ANON**, a safe `crd_…` hint after credential sign-in, or **OIDC** after provider sign-in. The mobile menu shows **Anonymous**, **Kept**, or **Check** without displaying a raw credential or principal ID.
+
+### Restricted sign-in
+
+- Restricted profiles require sign-in instead of starting anonymously. In `token_required`, enter a portable credential on the sign-in screen. The browser then uses a temporary session, so the reusable credential doesn't need to remain saved in browser storage.
+- In `oidc_required`, sign in through the configured identity provider to open the linked workspace. `mixed` offers both provider and portable-credential sign-in. A new provider identity receives a workspace only when the operator allows it; the app doesn't require an email address or real name.
+- Restricted deployments disable public snapshot sharing by default. Desktop and mobile controls explain when sharing is disabled.
+
+### Provider linking and recovery
+
+- Access shows whether the workspace is linked to the provider. If those details can't load, it explains the problem and offers **Refresh** to try again.
+- Linking requires a recent credential sign-in and a fresh provider sign-in. If the credential sign-in is too old, **Sign in again with a credential** returns you to Access after signing in.
+- Unlinking requires a usable portable credential and signs out every browser session for the workspace. If a provider identity changes or access is lost, ask the deployment operator for [recovery access](CONFIGURATION.md#issuing-credentials-and-recovering-access).
+
+### Sign-out and expiry
+
+- A restricted browser session ends when it reaches either its idle limit or maximum lifetime. If it expires or is revoked while the app is open, the next protected request returns you to sign-in.
+- **Sign out** closes this browser session. **Sign out everywhere** closes every browser session for the workspace while keeping saved credentials and PATs usable. If a fresh sign-in is required, Access provides a **Sign in again** link. Neither action ends the identity provider's own sign-in session.
+- Revoking or rotating a portable credential also closes sessions opened with it. Access warns before signing out the current browser, and rotation gives you time to save the replacement first.
+- Open streams disconnect within 15 seconds of losing access, and a controlling interactive terminal stops. Ordinary commands already running can finish and be viewed through another valid credential.
+
+### Commands and limits
 
 **Terminal commands:**
 
@@ -1561,9 +1582,9 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - `credential list` shows safe credential metadata.
 - `credential create`, `credential use`, `credential expiry`, `credential rotate`, `credential revoke`, and `credential recover` open **Options → Access** for the matching action. Extra values are rejected and removed before command history is saved.
 
-**Limits:** anyone holding a portable credential can open its principal's workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require local operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until they are kept. Restricted access needs HTTPS; its Secure session cookie won't be sent over ordinary HTTP. Local sign-out doesn't end the identity provider's separate single-sign-on session.
+**Limits:** anyone holding a portable credential can open its workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until kept. Restricted sign-in requires HTTPS.
 
-**Configuration:** no user profile or email settings are needed. `ACCESS_PROFILE=open` is the default. See [Restricted browser access](CONFIGURATION.md#restricted-browser-access) for bootstrap, session lifetime, public shares, signing-key rotation, and recovery. Operators can use the container-only principal access command described in [CONFIGURATION.md](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
+**Configuration:** no user profile or email settings are needed. `ACCESS_PROFILE=open` is the default. See [Restricted browser access](CONFIGURATION.md#restricted-browser-access) for bootstrap, session lifetime, public shares, signing-key rotation, and recovery. Operators use [Principal Access Operations](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
 
 ---
 
