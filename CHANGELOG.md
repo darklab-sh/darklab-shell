@@ -109,7 +109,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Work paused by an operator can be reviewed before it resumes.**
   - **Root cause:** Account disablement hid the affected work from operator status and left muted channels and disabled digests without an explanation.
   - **Fix:** Operator status lists suspended definitions and stopped jobs with their workspace and review location. Schedules, Watchers, notification channels, and Project digests share a pause explanation. Existing manual pauses stay intact, and restoring access never resumes work automatically. Explicit digest resumption also uses the correct boolean parameters on PostgreSQL.
-  - **Tests:** Regression coverage checks all nine work kinds, account isolation, incremental migration, preserved manual pauses, explicit resumption, and the four browser explanations.
+  - **Tests:** Regression coverage checks all nine work kinds, account isolation, incremental migration, preserved manual pauses, explicit resumption, ownership-query review coverage, and the four browser explanations.
 
 - **Provider-only deployments offer credentials that their access policy permits.** Access creates API tokens under `oidc_required`; self-service browser-credential creation and rotation are refused. Existing operator recovery credentials explain that an operator must enable credential sign-in before use.
 - **Disabled public sharing is reflected in desktop, mobile, and keyboard actions.** Snapshot controls explain the deployment policy, and a refused share request shows the server's explanation. Malformed responses keep a friendly fallback message.
