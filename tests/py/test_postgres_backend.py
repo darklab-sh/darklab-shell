@@ -32,6 +32,7 @@ import core.database as core_database
 from core.database_backend import DatabaseBackend
 from core.database_backend import PostgresSqliteCompatConnection
 from services.history.search import run_search_clause
+from test_oidc_link_boundaries import SOURCE_CHANGES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "operations" / "migrate_sqlite_to_postgres.py"
@@ -1356,6 +1357,50 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
     finally:
         close_postgres_pool()
         reset_master_key_cache_for_tests()
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("change", SOURCE_CHANGES)
+def test_oidc_link_callback_rejections_preserve_postgres_bindings(
+    postgres_schema, postgres_dsn, tmp_path, monkeypatch, change,
+):
+    import app as application_module
+    import config as shell_config
+    from core.database_backend import close_postgres_pool
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from test_oidc_link_boundaries import assert_source_change_rejected
+    from test_oidc_sign_in import LocalProvider, _config
+
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.rows import dict_row
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    data_dir = tmp_path / "oidc-link-boundaries"
+    data_dir.mkdir()
+    cfg = _config(profile="mixed", provisioning="disabled").with_overrides({
+        "database_backend": "postgres", "database_url": isolated_dsn, "data_dir": str(data_dir),
+    })
+    monkeypatch.setattr(shell_config, "CFG", cfg)
+    monkeypatch.setattr(application_module, "CFG", cfg)
+    monkeypatch.setattr(core_database, "CFG", cfg)
+    monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    @contextmanager
+    def isolated_connect():
+        with psycopg.connect(isolated_dsn, row_factory=dict_row) as raw_conn:
+            yield PostgresSqliteCompatConnection(raw_conn)
+
+    monkeypatch.setattr(core_database, "db_connect", isolated_connect)
+    provider = LocalProvider(monkeypatch)
+    app = application_module.create_app(cfg)
+    app.config["TESTING"] = True
+    app.config["RATELIMIT_ENABLED"] = False
+    try:
+        assert_source_change_rejected(app, provider, monkeypatch, change)
+    finally:
+        close_postgres_pool()
 
 
 @pytest.mark.postgres

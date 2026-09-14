@@ -2622,6 +2622,8 @@ This split exists to keep each risk at the cheapest useful layer:
     - command-root-aware flag/value suggestions
     - the allowlisted built-in pipe-helper context after `command |`, including chained helper stages
 
+OIDC linking tests use signed tokens, the real callback route, and one controlled clock across the request resolver and session store. They verify state-cookie matching, proof freshness and expiry boundaries, and unchanged identity, session, credential, and workspace records after rejected callbacks. SQLite and PostgreSQL share the callback-time authorization and binding-conflict cases.
+
 The browser test harness mirrors production constraints rather than abstracting them away:
 
 - the frontend uses committed CSS and ES module bundles; `Vitest` uses direct imports for converted modules while extraction helpers remain only where a focused legacy harness is still cheaper than rewriting the test

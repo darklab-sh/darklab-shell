@@ -47,6 +47,7 @@ class LocalProvider:
         self.nonce = ""
         self.verifier = ""
         self.claim_overrides = {}
+        self.claim_omissions = set()
         self.available = True
         self.get_calls = []
         metadata = {
@@ -88,6 +89,8 @@ class LocalProvider:
                 "nonce": self.nonce,
                 **self.claim_overrides,
             }
+            for claim in self.claim_omissions:
+                claims.pop(claim, None)
             return {"id_token": jwt.encode({"alg": "RS256", "kid": self.signing_key.kid}, claims, self.signing_key)}
 
         monkeypatch.setattr(oidc.requests, "get", get)
