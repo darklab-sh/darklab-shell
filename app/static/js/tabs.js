@@ -619,12 +619,14 @@ function _createTabActionButton(id, action, label, { hidden = false, danger = fa
 }
 
 function _canCreateTabShareSnapshot() {
+  if (_appConfig().public_shares_enabled === false) return false;
   return typeof importedActiveTeamScopeCan === 'function'
     ? importedActiveTeamScopeCan('manage_history')
     : true;
 }
 
 function _tabShareSnapshotDeniedTitle() {
+  if (_appConfig().public_shares_enabled === false) return 'Public share links are disabled for this deployment.';
   const deniedMessage = typeof importedTeamScopeDeniedMessage === 'function'
     ? importedTeamScopeDeniedMessage
     : null;

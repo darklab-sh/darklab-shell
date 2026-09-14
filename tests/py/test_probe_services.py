@@ -17,6 +17,7 @@ import uuid
 import pytest
 from flask import Request
 from identity_helpers import anonymous_session_id
+from services.teams.scope import anonymous_owner_context
 
 from core.database import db_connect, db_init
 from core.logging_setup import GELFFormatter, _TextFormatter
@@ -419,7 +420,8 @@ def test_probe_broker_cleans_material_when_start_raises(monkeypatch, failure):
     with pytest.raises(type(failure), match=str(failure)):
         launch_confirmed_probe(
             {"display_command": "httpx -u example.test"},
-            session_id="session-probe", project_id="prj_probe", team_id="",
+            session_id=anonymous_session_id("probe"), project_id="prj_probe", team_id="",
+            owner_context=anonymous_owner_context(anonymous_session_id("probe")),
             team_role="", actor_member_id="", client_ip="127.0.0.1",
             owner_client_id="client-probe", owner_tab_id="tab-probe",
             workspace_cwd="", handlers={}, start_run=failed_start,
@@ -447,7 +449,8 @@ def test_probe_broker_preserves_start_failure_when_cleanup_is_incomplete(monkeyp
     with pytest.raises(RunSpawnError, match="primary spawn failure"):
         launch_confirmed_probe(
             {"display_command": "httpx -u example.test"},
-            session_id="session-probe", project_id="prj_probe", team_id="",
+            session_id=anonymous_session_id("probe"), project_id="prj_probe", team_id="",
+            owner_context=anonymous_owner_context(anonymous_session_id("probe")),
             team_role="", actor_member_id="", client_ip="127.0.0.1",
             owner_client_id="client-probe", owner_tab_id="tab-probe",
             workspace_cwd="", handlers={}, start_run=failed_start,

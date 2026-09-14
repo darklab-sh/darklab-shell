@@ -9002,6 +9002,10 @@
           "muted": {
             "type": "boolean"
           },
+          "muted_reason": {
+            "description": "Reason for an operator mute; empty for a manual mute.",
+            "type": "string"
+          },
           "secret_fields": {
             "items": {
               "$ref": "#/components/schemas/NotificationSecretField"
@@ -11698,7 +11702,7 @@
       },
       "RunStreamEvent": {
         "additionalProperties": true,
-        "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. High-volume live streams may emit output_batch rows with a lines array of line events. Idle streams may emit type=heartbeat events.",
+        "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. High-volume live streams may emit output_batch rows with a lines array of line events. Idle streams may emit type=heartbeat events. Authorization loss closes the stream with type=error, code=1 and a string error_code without stopping an accepted ordinary run.",
         "properties": {
           "cls": {
             "type": "string"
@@ -11714,6 +11718,10 @@
               "$ref": "#/components/schemas/RunStreamEntity"
             },
             "type": "array"
+          },
+          "error_code": {
+            "description": "Authorization failure on an established stream.",
+            "type": "string"
           },
           "event": {
             "type": "string"

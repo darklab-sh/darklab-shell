@@ -18,13 +18,14 @@ from typing import Any, cast
 
 from config import resolve_data_dir, resolve_effective_cfg
 from core.helpers import get_log_session_id
-from core.database_access import get_db_connect
-from services.auth.background_authorization import resolve_background_authorization
+from services.auth.export_authorization import (
+    ExportAuthorizationError, ExportAuthorizationRejected, require_export_authorization as _require_job_authorization,
+)
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.projects.contracts import EvidencePackageTooLarge
+from services.projects.export_cleanup import remove_revoked_archive
 from services.projects.queries import get_project
-from services.teams.capabilities import Capability
 
 from .export import build_report_export_archive
 
@@ -177,7 +178,12 @@ def cleanup_report_export_jobs():
             continue
         job = _read_job(path.stem) or {}
         archive_path = job.get("archive_path")
-        if archive_path:
+        if archive_path and job.get("authorization_cleanup_pending"):
+            if not remove_revoked_archive(
+                str(archive_path), job_id=path.stem, job_kind="report", stage="retention_authorization",
+            ):
+                continue
+        elif archive_path:
             try:
                 Path(archive_path).unlink()
             except OSError as exc:
@@ -246,7 +252,12 @@ def report_export_archive_for_job(session_id, project_id, job_id, *, team_id="")
 
 def discard_report_export_job(job_id, *, archive=True):
     job = _read_job(job_id)
-    if archive and isinstance(job, dict) and job.get("archive_path"):
+    if isinstance(job, dict) and job.get("authorization_cleanup_pending") and job.get("archive_path"):
+        if not remove_revoked_archive(
+            str(job["archive_path"]), job_id=str(job_id), job_kind="report", stage="discard_authorization",
+        ):
+            return
+    elif archive and isinstance(job, dict) and job.get("archive_path"):
         try:
             Path(str(job["archive_path"])).unlink()
         except OSError as exc:
@@ -399,22 +410,34 @@ def _run_job(job_id, cfg_snapshot):
         current.update(extra)
         _write_job(current)
 
+    def _authorization_failed(exc, stage):
+        rejected = isinstance(exc, ExportAuthorizationRejected)
+        _record_job_audit(job, status="failed", reason="authorization")
+        _update(
+            "failed", "authorization", str(exc), error=str(exc),
+            error_code="authorization_revoked" if rejected else "authorization_unavailable",
+            error_status=403 if rejected else 500,
+            authorization_reason=exc.reason,
+            archive_path=exc.cleanup_archive_path,
+            authorization_cleanup_pending=bool(exc.cleanup_archive_path),
+        )
+        fields = {
+            "job_id": job_id, "project_id": job.get("project_id"),
+            "principal_id": str(job.get("principal_id") or ""), "stage": stage, "reason": exc.reason,
+        }
+        if rejected:
+            log.warning("REPORT_EXPORT_JOB_AUTHORIZATION_REJECTED", extra=fields)
+        else:
+            log.error("REPORT_EXPORT_JOB_AUTHORIZATION_CHECK_FAILED", extra={**fields, "error_type": exc.error_type})
+
     def _progress(phase, message):
         _require_job_authorization(job)
         _update("running", phase, message)
 
     try:
         _require_job_authorization(job)
-    except RuntimeError as exc:
-        _record_job_audit(job, status="failed", reason="authorization")
-        _update(
-            "failed",
-            "authorization",
-            str(exc),
-            error=str(exc),
-            error_code="authorization_revoked",
-            error_status=403,
-        )
+    except ExportAuthorizationError as exc:
+        _authorization_failed(exc, "pre_build")
         return
     _update("running", "loading", "Loading report inputs")
     try:
@@ -446,6 +469,9 @@ def _run_job(job_id, cfg_snapshot):
             progress_callback=_progress,
             build_job_id=str(job.get("id") or ""),
         )
+    except ExportAuthorizationError as exc:
+        _authorization_failed(exc, "progress")
+        return
     except EvidencePackageTooLarge as exc:
         error = _job_error("size_limit")
         log.warning("REPORT_EXPORT_JOB_TOO_LARGE", extra={
@@ -491,22 +517,13 @@ def _run_job(job_id, cfg_snapshot):
         return
     try:
         _require_job_authorization(job)
-    except RuntimeError as exc:
+    except ExportAuthorizationError as exc:
         archive_path = str(archive.get("path") or "")
-        if archive_path:
-            try:
-                Path(archive_path).unlink()
-            except OSError:
-                pass
-        _record_job_audit(job, status="failed", reason="authorization")
-        _update(
-            "failed",
-            "authorization",
-            str(exc),
-            error=str(exc),
-            error_code="authorization_revoked",
-            error_status=403,
-        )
+        if archive_path and not remove_revoked_archive(
+            archive_path, job_id=job_id, job_kind="report", stage="post_build_authorization",
+        ):
+            exc.cleanup_archive_path = archive_path
+        _authorization_failed(exc, "post_build")
         return
     destination = _archive_path(job_id)
     if destination is None:
@@ -546,20 +563,6 @@ def _run_job(job_id, cfg_snapshot):
         archive_bytes=archive_bytes,
         metrics=metrics,
     )
-
-
-def _require_job_authorization(job):
-    with get_db_connect()() as conn:
-        authorization = resolve_background_authorization(
-            conn,
-            principal_id=str(job.get("principal_id") or ""),
-            personal_workspace_id=str(job.get("personal_workspace_id") or ""),
-            team_id=str(job.get("team_id") or ""),
-            originating_credential_id=str(job.get("originating_credential_id") or ""),
-            required_capability=Capability.MUTATE_PROJECTS,
-        )
-    if not authorization.allowed:
-        raise RuntimeError(authorization.message)
 
 
 def start_report_export_job(

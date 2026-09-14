@@ -25,6 +25,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from config import SCANNER_PREFIX, resolve_effective_cfg
+from services.auth.contracts import STREAM_AUTH_POLL_SECONDS
 from core.process import (
     active_run_claim_owner_transition,
     active_run_owned_by,
@@ -40,7 +41,8 @@ from services.pty.capture import (
     PtyTerminalCapture as _BasePtyTerminalCapture,
     _terminal_history_line_limit,
 )
-from services.runs.broker import _is_redis_idle_timeout_error
+from core.redis_streams import is_redis_idle_timeout_error as _is_redis_idle_timeout_error
+from services.pty.streaming import stream_local_pty_events
 from services.metrics_lazy import app_metrics
 from services.pty.runtime import (
     KILL_BIN as KILL_BIN,
@@ -1113,29 +1115,7 @@ def resize_pty(
 
 
 def _stream_local_pty_events(run: PtyRun, after: str = "0-0") -> Iterator[str]:
-    try:
-        cursor = max(0, int(after or 0))
-    except ValueError:
-        cursor = 0
-    while True:
-        with run.condition:
-            events = [event for event in run.events if event.seq > cursor]
-            if not events and run.closed:
-                return
-            if not events:
-                run.condition.wait(timeout=_pty_heartbeat_seconds())
-                events = [event for event in run.events if event.seq > cursor]
-            if not events:
-                yield "event: heartbeat\ndata: {}\n\n"
-                continue
-        for event in events:
-            cursor = event.seq
-            payload = dict(event.payload)
-            payload["type"] = event.type
-            payload["event_id"] = str(event.seq)
-            yield f"id: {event.seq}\ndata: {json.dumps(payload)}\n\n"
-        if run.closed and events and events[-1].type == "exit":
-            return
+    return stream_local_pty_events(run, after=after, heartbeat_seconds=_pty_heartbeat_seconds())
 
 
 def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_id: str = "") -> Iterator[str]:
@@ -1153,7 +1133,10 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0", *, team_
         return
 
     current_id = _normalize_event_id(after)
-    block_ms = max(1, int(float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
+    block_ms = min(
+        int(STREAM_AUTH_POLL_SECONDS * 1000),
+        max(1, int(float(resolve_effective_cfg().get("run_broker_subscriber_block_seconds", 15) or 15) * 1000)),
+    )
     first_read = True
     while True:
         try:

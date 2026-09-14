@@ -23,6 +23,7 @@ let exportedRefreshOptionsTeams = null;
   let _selectedTeamId = '';
   let _activeDetailTab = 'overview';
   let _loading = false;
+  let _formBusy = false;
   let _formMode = '';
   let _oneTimeCode = null;
   let _bound = false;
@@ -89,8 +90,9 @@ let exportedRefreshOptionsTeams = null;
     return null;
   }
 
-  function _setBusy(busy) {
+  function _setBusy(busy, { preserveForm = false } = {}) {
     _loading = !!busy;
+    if (!preserveForm) _formBusy = _loading;
     [
       'options-teams-refresh-btn',
       'options-team-create-btn',
@@ -104,6 +106,7 @@ let exportedRefreshOptionsTeams = null;
     if (panel) {
       panel.querySelectorAll('button, input, select').forEach((control) => {
         if (control.id && control.id.startsWith('options-team-')) return;
+        if (preserveForm && control.closest('[data-team-form]')) return;
         control.disabled = _loading;
       });
     }
@@ -194,14 +197,6 @@ let exportedRefreshOptionsTeams = null;
     input.value = value || '';
     input.required = !!required;
     return input;
-  }
-
-  function _formValues(form) {
-    const values = {};
-    form?.querySelectorAll?.('input[name], select[name], textarea[name]').forEach((field) => {
-      values[field.name] = field.value;
-    });
-    return values;
   }
 
   function _numberInput(name, value = '1') {
@@ -380,9 +375,9 @@ let exportedRefreshOptionsTeams = null;
     const host = _el('options-team-form');
     const existingForm = host?.querySelector?.('[data-team-form]');
     const existingMode = existingForm?.dataset?.teamForm || '';
-    const existingValues = existingMode === _formMode && existingForm
-      ? _formValues(existingForm)
-      : {};
+    // Refreshing lists must not replace a form while someone is typing or
+    // pressing Submit. Its fields only change when the form mode changes.
+    if (existingForm && existingMode === _formMode) return;
     _clear(host);
     if (!host || !_formMode) return;
 
@@ -398,15 +393,15 @@ let exportedRefreshOptionsTeams = null;
     const fields = _node('div', 'options-team-fields');
     if (_formMode === 'create') {
       fields.append(
-        _field('Team name', _input('name', 'Darklab ops', existingValues.name || '', { required: true })),
-        _field('Slug', _input('slug', 'darklab-ops', existingValues.slug || '')),
-        _field('Your display name', _input('display_name', 'nona', existingValues.display_name || ''))
+        _field('Team name', _input('name', 'Darklab ops', '', { required: true })),
+        _field('Slug', _input('slug', 'darklab-ops', '')),
+        _field('Your display name', _input('display_name', 'nona', ''))
       );
     } else {
       const codeLabel = _formMode === 'recover' ? 'Recovery code' : 'Invite code';
       fields.append(
-        _field(codeLabel, _input('code', _formMode === 'recover' ? 'trec_...' : 'tinv_...', existingValues.code || '', { required: true })),
-        _field('Your display name', _input('display_name', 'nona', existingValues.display_name || ''))
+        _field(codeLabel, _input('code', _formMode === 'recover' ? 'trec_...' : 'tinv_...', '', { required: true })),
+        _field('Your display name', _input('display_name', 'nona', ''))
       );
     }
     const actions = _node('div', 'options-access-actions options-team-field-full');
@@ -417,6 +412,9 @@ let exportedRefreshOptionsTeams = null;
     actions.append(submit, _button('Cancel', 'cancel-form', { role: 'ghost' }));
     fields.appendChild(actions);
     form.appendChild(fields);
+    form.querySelectorAll('button, input, select').forEach((control) => {
+      control.disabled = _formBusy;
+    });
     host.appendChild(form);
   }
 
@@ -1082,7 +1080,7 @@ let exportedRefreshOptionsTeams = null;
       _syncScopeSelector();
       return _teams;
     }
-    _setBusy(true);
+    _setBusy(true, { preserveForm: true });
     try {
       const payload = await _jsonRequest('/session/teams');
       _teams = Array.isArray(payload.teams) ? payload.teams : [];
@@ -1098,7 +1096,7 @@ let exportedRefreshOptionsTeams = null;
       _msg(error.message || 'Failed to load teams', { error: true });
       return [];
     } finally {
-      _setBusy(false);
+      _setBusy(false, { preserveForm: true });
       _render();
     }
   }

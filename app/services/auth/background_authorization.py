@@ -390,20 +390,22 @@ def suspend_principal_background_work(conn: Any, principal_id: str, *, now: str)
     """Apply the persistent half of the principal-disable global stop."""
     conn.execute(
         "UPDATE schedules SET enabled = FALSE, paused_reason = 'principal_disabled', updated = ? "
-        "WHERE principal_id = ?",
+        "WHERE principal_id = ? AND enabled = TRUE",
         (now, principal_id),
     )
     conn.execute(
         "UPDATE watchers SET state = 'paused', state_reason = 'principal_disabled', updated = ? "
-        "WHERE principal_id = ?",
+        "WHERE principal_id = ? AND state <> 'paused'",
         (now, principal_id),
     )
     conn.execute(
-        "UPDATE notification_channels SET muted = TRUE, updated = ? WHERE principal_id = ?",
+        "UPDATE notification_channels SET muted = TRUE, muted_reason = 'principal_disabled', updated = ? "
+        "WHERE principal_id = ? AND muted = FALSE",
         (now, principal_id),
     )
     conn.execute(
-        "UPDATE project_digest_settings SET enabled = FALSE, updated = ? WHERE principal_id = ?",
+        "UPDATE project_digest_settings SET enabled = FALSE, paused_reason = 'principal_disabled', updated = ? "
+        "WHERE principal_id = ? AND enabled = TRUE",
         (now, principal_id),
     )
     conn.execute(

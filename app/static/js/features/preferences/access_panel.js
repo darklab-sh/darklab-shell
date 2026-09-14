@@ -3,16 +3,20 @@
 
 import { showToast as importedShowToast } from '../../core/utils.js';
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
+import { logClientError as importedLogClientError } from '../../runtime_bridge.js';
 import {
   activateAccessCredential as importedActivateAccessCredential,
   apiFetch as importedApiFetch,
   clearAccessCredential as importedClearAccessCredential,
   getBrowserIdentitySnapshot as importedGetBrowserIdentitySnapshot,
+  redirectToSignIn as importedRedirectToSignIn,
 } from '../../session.js';
 import { showConfirm as importedShowConfirm } from '../../ui/ui_confirm.js';
 import { applyMobileTextInputDefaults as importedApplyMobileTextInputDefaults } from '../../ui/ui_helpers.js';
 import { clearCredentialReveal, showCredentialReveal } from './credential_reveal.js';
 import { credentialState, renderCredentialRows } from './credential_rows.js';
+import { buildCredentialCreationFields } from './credential_creation.js';
+import { loadOIDCIdentity } from './access_oidc.js';
 
 const elements = {
   panel: document.getElementById('options-panel-access'),
@@ -27,6 +31,8 @@ const elements = {
   discardInvalid: document.getElementById('options-access-discard-invalid-btn'),
   add: document.getElementById('options-access-add-btn'),
   remove: document.getElementById('options-access-remove-btn'),
+  removeAll: document.getElementById('options-access-remove-all-btn'),
+  sessionReauth: document.getElementById('options-access-session-reauth'),
   refresh: document.getElementById('options-access-refresh-btn'),
   credentialsSection: document.getElementById('options-access-credentials-section'),
   credentials: document.getElementById('options-access-credentials'),
@@ -44,12 +50,15 @@ const elements = {
 };
 
 let credentials = [];
+let patPolicy = null;
+let portableCredentialsEnabled = true;
 let refreshSequence = 0;
 let pendingAction = '';
 let editorReturnFocus = null;
 let redemptionReturnFocus = null;
 let currentCredentialId = '';
 let currentAuthenticationType = '';
+let recentCredentialSession = false;
 
 function _markAccessPanelReady() {
   [
@@ -58,6 +67,7 @@ function _markAccessPanelReady() {
     elements.discardInvalid,
     elements.add,
     elements.remove,
+    elements.removeAll,
     elements.refresh,
   ].forEach((control) => {
     if (control) control.disabled = false;
@@ -120,6 +130,10 @@ async function _request(url, options = {}) {
 }
 
 function _setIdentityLayout(authenticated) {
+  const browserSession = importedGetBrowserIdentitySnapshot().kind === 'browser_session';
+  if (elements.remove) elements.remove.textContent = browserSession ? 'Sign out' : 'Remove from browser';
+  if (elements.removeAll) elements.removeAll.hidden = !authenticated || !browserSession;
+  if (!authenticated && elements.sessionReauth) elements.sessionReauth.hidden = true;
   if (elements.anonymousActions) elements.anonymousActions.hidden = authenticated;
   if (elements.authenticatedActions) elements.authenticatedActions.hidden = !authenticated;
   if (elements.credentialsSection) elements.credentialsSection.hidden = !authenticated;
@@ -154,6 +168,7 @@ function _renderAuthenticated() {
   if (elements.credentials) {
     renderCredentialRows(elements.credentials, credentials, {
       currentCredentialId: currentId,
+      portableCredentialsEnabled,
       onAction: _handleCredentialAction,
     });
   }
@@ -175,14 +190,24 @@ async function refreshAccessPanel({ force = false } = {}) {
   if (force) _setMessage('Refreshing access…');
   try {
     const principalPayload = await _request('/auth/principal');
-    currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
-    currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
     const credentialsPayload = await _request('/auth/credentials');
     if (sequence !== refreshSequence) return null;
+    currentCredentialId = String(principalPayload?.authentication?.credential_id || '');
+    currentAuthenticationType = String(principalPayload?.authentication?.credential_type || '');
+    recentCredentialSession = principalPayload?.authentication?.recent_credential_session === true;
+    patPolicy = credentialsPayload.pat_policy || null;
+    portableCredentialsEnabled = credentialsPayload.portable_credentials_enabled !== false
+      && importedGetAppConfig?.()?.access_profile !== 'oidc_required';
     credentials = Array.isArray(credentialsPayload.credentials) ? credentialsPayload.credentials : [];
     _renderAuthenticated();
-    await _refreshOIDC(sequence);
-    if (force) _setMessage('Access is up to date.', 'success');
+    const oidcReady = await _refreshOIDC(sequence);
+    if (sequence !== refreshSequence) return null;
+    if (force) {
+      _setMessage(
+        oidcReady === false ? 'Access refreshed, but provider sign-in details are unavailable.' : 'Access is up to date.',
+        oidcReady === false ? 'error' : 'success',
+      );
+    }
     return { identity, credentials };
   } catch (error) {
     if (sequence !== refreshSequence) return null;
@@ -199,34 +224,61 @@ async function _refreshOIDC(sequence) {
     elements.oidcSection.hidden = true;
     return;
   }
-  try {
-    const data = await _request('/auth/oidc/identity');
-    if (sequence !== refreshSequence) return;
-    elements.oidcSection.hidden = false;
-    if (elements.oidcStatus) {
-      elements.oidcStatus.textContent = data.linked
-        ? 'This workspace can be opened through your identity provider.'
-        : 'This workspace is not linked to an identity provider yet.';
+  const data = await loadOIDCIdentity();
+  if (sequence !== refreshSequence) return;
+  elements.oidcSection.hidden = data.disabled === true;
+  if (data.disabled) return;
+  if (!data.ok) {
+    if (elements.oidcStatus) elements.oidcStatus.textContent = "Provider sign-in details couldn't be loaded. Select Refresh to try again.";
+    [elements.oidcLink, elements.oidcUnlink, elements.oidcReauth].forEach(control => {
+      if (control) control.hidden = true;
+    });
+    if (data.status !== 401) {
+      importedLogClientError('ACCESS_OIDC_IDENTITY_LOAD_FAILED', null, {
+        event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level: data.level,
+        action: 'load_identity', stage: data.stage, status: data.status, reason: data.reason,
+      });
     }
-    const credentialSession = currentAuthenticationType === 'portable';
-    if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !credentialSession;
-    if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !credentialSession;
-    if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || credentialSession;
-  } catch (error) {
-    if (sequence === refreshSequence) elements.oidcSection.hidden = true;
+    return false;
+  }
+  if (elements.oidcStatus) {
+    elements.oidcStatus.textContent = data.linked
+      ? 'This workspace can be opened through your identity provider.'
+      : 'This workspace is not linked to an identity provider yet.';
+  }
+  const canManage = recentCredentialSession && profile !== 'oidc_required';
+  if (elements.oidcLink) elements.oidcLink.hidden = data.linked || !canManage;
+  if (elements.oidcUnlink) elements.oidcUnlink.hidden = !data.linked || !canManage;
+  if (elements.oidcReauth) elements.oidcReauth.hidden = profile === 'oidc_required' || canManage;
+  return true;
+}
+
+function _offerCredentialReauthentication(error) {
+  if (error.code !== 'recent_credential_required') return;
+  recentCredentialSession = false;
+  if (elements.oidcLink) elements.oidcLink.hidden = true;
+  if (elements.oidcUnlink) elements.oidcUnlink.hidden = true;
+  if (elements.oidcReauth) {
+    elements.oidcReauth.hidden = false;
+    elements.oidcReauth.focus({ preventScroll: true });
   }
 }
 
 async function _linkOIDC() {
   if (elements.oidcLink) elements.oidcLink.disabled = true;
   try {
-    const data = await _request('/auth/oidc/link', { method: 'POST' });
+    const data = await _request('/auth/oidc/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ next: '/?options=access' }),
+    });
     const destination = new URL(data.authorization_url, window.location.href);
     if (destination.protocol !== 'https:') throw new Error('The provider URL is invalid.');
     window.location.assign(destination.href);
   } catch (error) {
     _setMessage(error.message || 'Could not start provider linking.', 'error');
     if (elements.oidcLink) elements.oidcLink.disabled = false;
+    _offerCredentialReauthentication(error);
   }
 }
 
@@ -236,7 +288,7 @@ async function _unlinkOIDC() {
     tone: 'warning',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'unlink', label: 'Unlink provider', role: 'danger' },
+      { id: 'unlink', label: 'Unlink provider', role: 'destructive' },
     ],
     refocusOnResolve: false,
   });
@@ -246,6 +298,7 @@ async function _unlinkOIDC() {
     window.location.assign('/auth/sign-in');
   } catch (error) {
     _setMessage(error.message || 'Could not unlink the identity provider.', 'error');
+    _offerCredentialReauthentication(error);
   }
 }
 
@@ -295,17 +348,22 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   const title = document.createElement('strong');
   title.textContent = mode === 'keep'
     ? 'Keep this workspace'
-    : mode === 'create' ? 'Add an access credential' : mode === 'rename' ? 'Rename credential' : 'Change expiry';
+    : mode === 'create' ? 'Add a credential' : mode === 'rename' ? 'Rename credential' : 'Change expiry';
   const description = document.createElement('p');
   description.className = 'options-access-description';
-  description.textContent = mode === 'keep'
+    description.textContent = mode === 'keep'
     ? 'Give this browser an optional label. Your current files and history will stay in the same workspace.'
     : mode === 'create'
-      ? 'Create a credential for another browser or device. You will see the full value once.'
-      : mode === 'rename' ? 'Labels help you recognize where a credential is used.' : 'Leave the expiry blank for no expiry.';
+      ? portableCredentialsEnabled
+        ? 'Create browser access or an API token. You will see the full value once.'
+        : 'Browser sign-in uses your identity provider. Create an API token for the CLI or integrations; you will see it once.'
+      : mode === 'rename' ? 'Labels help you recognize where a credential is used.'
+        : credential?.credential_type === 'pat' ? 'API tokens need an expiry between 1 and 365 days from now.'
+          : 'Leave the expiry blank for no expiry.';
   elements.editor.append(title, description);
   let labelInput = null;
   let expiryInput = null;
+  let creationFields = null;
   if (mode !== 'expiry') {
     labelInput = _input('text', credential?.label || (mode === 'keep' ? 'This browser' : ''));
     labelInput.maxLength = 64;
@@ -314,7 +372,14 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   }
   if (mode === 'create' || mode === 'expiry') {
     expiryInput = _input('datetime-local', _localExpiry(credential?.expires_at));
-    elements.editor.append(_field('Expiry', expiryInput));
+    const expiryField = _field('Expiry', expiryInput);
+    if (mode === 'create') {
+      creationFields = buildCredentialCreationFields({
+        policy: patPolicy, portableCredentialsEnabled, field: _field, input: _input, expiryField, expiryInput,
+      });
+      elements.editor.append(creationFields.host);
+    }
+    elements.editor.append(expiryField);
   }
   const error = document.createElement('div');
   error.className = 'options-access-message is-error';
@@ -335,8 +400,8 @@ function _showEditor(mode, credential = null, returnFocus = null) {
   save.addEventListener('click', async () => {
     save.disabled = true;
     error.hidden = true;
-    const expiresAt = expiryInput?.value ? new Date(expiryInput.value).toISOString() : null;
     try {
+      const expiresAt = expiryInput?.value ? new Date(expiryInput.value).toISOString() : null;
       if (mode === 'keep') {
         const payload = await _request('/auth/principals', {
           method: 'POST',
@@ -353,7 +418,7 @@ function _showEditor(mode, credential = null, returnFocus = null) {
         const payload = await _request('/auth/credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'portable', label: labelInput?.value.trim() || '', expires_at: expiresAt }),
+          body: JSON.stringify({ ...creationFields.readOptions(), label: labelInput?.value.trim() || '' }),
         });
         _closeEditor({ restoreFocus: false });
         await refreshAccessPanel();
@@ -457,13 +522,15 @@ function _durableWorkContent(disposition) {
 }
 
 async function _revokeCredential(credential, { rotationReplacement = null } = {}) {
-  const currentId = importedGetBrowserIdentitySnapshot().credentialId;
+  const identity = importedGetBrowserIdentitySnapshot();
+  const currentId = currentCredentialId || identity.credentialId;
+  const signsOut = identity.kind === 'browser_session' && credential.id === currentId;
   const activePortable = credentials.filter(item => item.credential_type === 'portable' && credentialState(item) === 'Active');
   const isLastPortable = credential.credential_type === 'portable' && activePortable.length === 1;
   const payload = await _request(`/auth/credentials/${encodeURIComponent(credential.id)}/durable-work`);
   const content = _durableWorkContent(payload.durable_work || {});
   const choice = await importedShowConfirm({
-    body: `${credential.id === currentId ? 'This credential is active in this browser. ' : ''}${isLastPortable ? 'This is the last active access credential. Operator recovery will be required after revocation. ' : ''}Revocation cannot be undone.`,
+    body: `${signsOut ? 'This will sign out this browser. Sign in again with an active credential to continue. ' : credential.id === currentId ? 'This credential is active in this browser. ' : ''}${isLastPortable ? 'This is the last active access credential. Operator recovery will be required after revocation. ' : ''}Revocation cannot be undone.`,
     content: content.wrapper,
     tone: 'danger',
     actions: [
@@ -482,6 +549,11 @@ async function _revokeCredential(credential, { rotationReplacement = null } = {}
       pause_related_work: content.pause.checked,
     }),
   });
+  if (signsOut) {
+    clearCredentialReveal({ restoreFocus: false });
+    importedRedirectToSignIn();
+    return true;
+  }
   if (credential.id === currentId) {
     if (rotationReplacement) importedActivateAccessCredential(rotationReplacement);
     else importedClearAccessCredential();
@@ -495,8 +567,10 @@ async function _revokeCredential(credential, { rotationReplacement = null } = {}
 }
 
 async function _rotateCredential(credential) {
+  const signsOut = importedGetBrowserIdentitySnapshot().kind === 'browser_session'
+    && credential.id === currentCredentialId;
   const choice = await importedShowConfirm({
-    body: 'A replacement will be created and shown once. The old credential stays active until you confirm that the replacement is saved.',
+    body: `A replacement will be created and shown once. The old credential stays active until you confirm that the replacement is saved.${signsOut ? ' Revoking the old credential will sign out this browser. Use the saved replacement to sign in again.' : ''}`,
     tone: 'warning',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
@@ -505,16 +579,10 @@ async function _rotateCredential(credential) {
     refocusOnResolve: false,
   });
   if (choice !== 'continue') return;
-  const requestBody = {
-    type: credential.credential_type,
-    label: credential.label ? `${credential.label} replacement` : 'Replacement credential',
-    scopes: credential.scopes || undefined,
-  };
-  if (credential.credential_type === 'portable') requestBody.expires_at = credential.expires_at || null;
-  const response = await _request('/auth/credentials', {
+  const response = await _request(`/auth/credentials/${encodeURIComponent(credential.id)}/rotate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({ defer_revocation: true }),
   });
   await refreshAccessPanel();
   showCredentialReveal({
@@ -540,21 +608,27 @@ async function _handleCredentialAction(action, credential, returnFocus = null) {
 }
 
 async function _removeLocalAccess({ invalid = false } = {}) {
+  const identity = importedGetBrowserIdentitySnapshot();
+  const browserSession = identity.kind === 'browser_session';
   const choice = await importedShowConfirm({
-    body: invalid
-      ? 'Remove the invalid credential saved in this browser and continue with a new anonymous workspace?'
+    body: browserSession
+      ? `Sign out this browser? Your workspace stays saved.${currentAuthenticationType === 'oidc' ? ' Your identity provider stays signed in.' : ''}`
+      : invalid ? 'Remove the invalid credential saved in this browser and continue with a new anonymous workspace?'
       : 'Remove this credential from this browser? The credential will remain active on other devices until you revoke it.',
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'remove', label: 'Remove from browser', role: 'danger' },
+      { id: 'remove', label: browserSession ? 'Sign out' : 'Remove from browser', role: 'destructive' },
     ],
     refocusOnResolve: false,
   });
   if (choice !== 'remove') return;
-  const identity = importedGetBrowserIdentitySnapshot();
   if (identity.kind === 'browser_session') {
-    await _request('/auth/logout', { method: 'POST' });
-    window.location.assign('/auth/sign-in');
+    try {
+      await _request('/auth/logout', { method: 'POST' });
+      importedRedirectToSignIn();
+    } catch (error) {
+      _setMessage(error.message || 'Could not sign out. Try again.', 'error');
+    }
     return;
   }
   importedClearAccessCredential();
@@ -568,6 +642,33 @@ async function _removeLocalAccess({ invalid = false } = {}) {
   );
   elements.keep?.focus?.({ preventScroll: true });
   importedShowToast?.('Access removed from this browser');
+}
+
+async function _signOutEverywhere() {
+  const choice = await importedShowConfirm({
+    body: `Sign out every browser using this workspace, including this one? Saved credentials and API tokens remain usable.${currentAuthenticationType === 'oidc' ? ' Your identity provider stays signed in.' : ''}`,
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'sign-out-all', label: 'Sign out everywhere', role: 'destructive' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'sign-out-all') return;
+  elements.removeAll.disabled = true;
+  if (elements.sessionReauth) elements.sessionReauth.hidden = true;
+  try {
+    await _request('/auth/sessions/revoke-all', { method: 'POST' });
+    importedRedirectToSignIn();
+  } catch (error) {
+    _setMessage(error.message || 'Could not sign out every browser. Try again.', 'error');
+    if (error.code === 'recent_authentication_required' && elements.sessionReauth) {
+      elements.sessionReauth.hidden = false;
+      elements.sessionReauth.focus({ preventScroll: true });
+    }
+  } finally {
+    elements.removeAll.disabled = false;
+  }
 }
 
 async function openAccessAction(action = '') {
@@ -589,6 +690,7 @@ elements.use?.addEventListener('click', () => _openRedemption(elements.use));
 elements.discardInvalid?.addEventListener('click', () => void _removeLocalAccess({ invalid: true }));
 elements.add?.addEventListener('click', () => _showEditor('create', null, elements.add));
 elements.remove?.addEventListener('click', () => void _removeLocalAccess());
+elements.removeAll?.addEventListener('click', () => void _signOutEverywhere());
 elements.refresh?.addEventListener('click', () => void refreshAccessPanel({ force: true }));
 elements.redemptionApply?.addEventListener('click', () => void _redeemCredential());
 elements.oidcLink?.addEventListener('click', () => void _linkOIDC());

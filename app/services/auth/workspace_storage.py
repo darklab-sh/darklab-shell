@@ -8,8 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import secrets
-from typing import Any
+from typing import Any, Callable
 
+from services.storage.transactions import run_read
 from services.workspace.models import WorkspaceSettings
 from services.workspace.settings import session_workspace_name, workspace_root
 
@@ -25,6 +26,22 @@ def new_workspace_storage_key() -> str:
 
 def anonymous_workspace_storage_key(anonymous_id: str) -> str:
     return session_workspace_name(validate_anonymous_uuid(anonymous_id))
+
+
+def workspace_storage_key_is_attached(
+    storage_key: str,
+    *,
+    conn: Any | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> bool:
+    """The unique workspace row retires its anonymous alias in the attachment transaction."""
+    def operation(active_conn: Any) -> bool:
+        return active_conn.execute(
+            "SELECT id FROM personal_workspaces WHERE storage_key = ?",
+            (storage_key,),
+        ).fetchone() is not None
+
+    return operation(conn) if conn is not None else run_read(operation, connect=connect)
 
 
 def validate_workspace_storage_key(
@@ -81,4 +98,3 @@ def resolve_workspace_storage_path(storage_key: str, settings: WorkspaceSettings
         settings,
         allow_existing_directory=True,
     )
-

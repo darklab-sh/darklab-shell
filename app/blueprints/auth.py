@@ -40,13 +40,31 @@ from services.auth.browser_sessions import (
     revoke_principal_browser_sessions,
 )
 from services.auth.contracts import (
+    DEFAULT_PAT_SCOPES,
+    PAT_DEFAULT_EXPIRY_DAYS,
+    PAT_MAX_EXPIRY_DAYS,
+    PAT_MIN_EXPIRY_DAYS,
+    PAT_SCOPES,
+    CredentialExpired,
     CredentialNotFound,
+    CredentialRevoked,
     IdentityStorageError,
+    InvalidCredentialScope,
+    InvalidIdentityValue,
     LastCredentialLockout,
     PrincipalDisabled,
+    PrincipalNotFound,
+    WorkspaceAlreadyAttached,
 )
-from services.auth.rate_limit import check_anonymous_issuance, check_failed_redemption
+from services.auth.rate_limit import check_anonymous_issuance, check_credential_redemption, check_failed_redemption
+from services.auth.observability import (
+    log_authentication_rejected,
+    log_credential_lifecycle_failed,
+    log_credential_rate_limited,
+    log_sign_in_form_rejected,
+)
 from services.auth import oidc
+from services.auth.oidc_diagnostics import log_oidc_failure, oidc_stage
 from services.auth.resolver import (
     AnonymousContext,
     AuthenticatedContext,
@@ -82,7 +100,7 @@ def _payload() -> dict:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise IdentityStorageError("request body must be a JSON object")
+        raise InvalidIdentityValue("request body must be a JSON object")
     return value
 
 
@@ -100,7 +118,7 @@ def _set_browser_session_cookies(response, issued) -> None:
     response.set_cookie(
         BROWSER_SESSION_COOKIE,
         issued.cookie_value,
-        max_age=_session_cookie_seconds(),
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=True,
         samesite="Strict",
@@ -109,7 +127,7 @@ def _set_browser_session_cookies(response, issued) -> None:
     response.set_cookie(
         BROWSER_CSRF_COOKIE,
         issued.csrf_token,
-        max_age=_session_cookie_seconds(),
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=False,
         samesite="Strict",
@@ -122,18 +140,21 @@ def _clear_browser_session_cookies(response) -> None:
         response.delete_cookie(name, secure=True, httponly=httponly, samesite="Strict", path="/")
 
 
-def _issue_browser_session(
-    context: AuthenticatedContext,
-    *,
-    replace_session_id: str = "",
-) -> object:
-    return create_browser_session(
+def _issue_browser_session(context: AuthenticatedContext) -> object:
+    previous = get_authentication_result().context
+    replace_id = previous.browser_session_id if isinstance(previous, AuthenticatedContext) else ""
+    issued = create_browser_session(
         principal_id=context.principal_id,
         credential_id=context.credential_id,
         oidc_identity_id=context.oidc_identity_id,
         absolute_seconds=_session_cookie_seconds(),
-        replace_session_id=replace_session_id or context.browser_session_id,
+        replace_session_id=replace_id,
     )
+    # Storage only rotates sessions owned by the new principal. Account switches
+    # must also retire the session authenticated by this request's old cookie.
+    if replace_id and isinstance(previous, AuthenticatedContext) and previous.principal_id != context.principal_id:
+        revoke_browser_session(replace_id, reason="credential sign-in rotation")
+    return issued
 
 
 def _new_sign_in_nonce() -> str:
@@ -150,23 +171,22 @@ def sign_in():
     if not is_restricted():
         return redirect("/")
     next_path = safe_next_path(request.values.get("next"))
+    force_credential = _credential_sign_in_enabled() and request.values.get("force") == "credential"
     error = "Provider sign-in couldn't be completed. Please try again." if request.args.get("oidc_error") else ""
+    limited = None
     if request.method == "POST":
         if not _credential_sign_in_enabled():
             return current_app.response_class(status=404)
         if not _valid_sign_in_nonce(str(request.form.get("sign_in_nonce") or "")):
+            log_sign_in_form_rejected()
             error = "The sign-in page expired. Reload it and try again."
         else:
             secret = str(request.form.get("credential") or "")
-            result = redeem_portable_credential(secret)
-            if not result.failed and isinstance(result.context, AuthenticatedContext):
+            limited = _redemption_limit(secret)
+            result = redeem_portable_credential(secret) if limited.allowed else None
+            if result is not None and not result.failed and isinstance(result.context, AuthenticatedContext):
                 lifecycle.record_redemption(result.context, request_fields=_request_fields())
-                request_context = get_authentication_result().context
-                replace_id = (
-                    request_context.browser_session_id
-                    if isinstance(request_context, AuthenticatedContext) else ""
-                )
-                issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+                issued = _issue_browser_session(result.context)
                 log.info(
                     "BROWSER_SESSION_CREATED",
                     extra={
@@ -185,16 +205,13 @@ def sign_in():
                     path="/auth/sign-in",
                 )
                 return response
-            limited = check_failed_redemption(
-                get_client_ip(),
-                public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
-                redis_client=process_state.redis_client,
-                enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
-            )
-            if not limited.allowed:
+            if result is not None:
+                limited = _redemption_limit(secret, failed=True)
+            if result is None or not limited.allowed:
                 error = "Too many sign-in attempts. Wait a moment and try again."
             else:
                 lifecycle.record_authentication_failure(result, request_fields=_request_fields())
+                log_authentication_rejected(result.error_code, http_status=200)
                 error = "That access credential isn't valid."
     nonce = _new_sign_in_nonce()
     current_theme = get_theme_entry(
@@ -210,7 +227,8 @@ def sign_in():
         sign_in_nonce=nonce,
         error=error,
         credential_sign_in_enabled=_credential_sign_in_enabled(),
-        oidc_sign_in_enabled=_oidc_sign_in_enabled(),
+        oidc_sign_in_enabled=_oidc_sign_in_enabled() and not force_credential,
+        force_credential=force_credential,
     )))
     response.set_cookie(
         _SIGN_IN_NONCE_COOKIE,
@@ -221,6 +239,9 @@ def sign_in():
         samesite="Strict",
         path="/auth/sign-in",
     )
+    if limited is not None and not limited.allowed:
+        response.status_code = 429
+        response.headers["Retry-After"] = str(limited.retry_after)
     return response
 
 
@@ -238,8 +259,12 @@ def _clear_oidc_state_cookie(response) -> None:
     )
 
 
-def _oidc_error_response(exc: BaseException):
-    log.warning("OIDC_AUTH_FAILED", extra={"reason": type(exc).__name__, "stage": request.endpoint or ""})
+def _oidc_error_response(exc: BaseException, *, purpose: str | None = None):
+    if not isinstance(exc, oidc.OIDCError):
+        exc = oidc.OIDCUnavailable(
+            "Sign-in is temporarily unavailable.", reason="storage_failed", error_type=type(exc).__name__,
+        )
+    log_oidc_failure(exc, purpose=purpose)
     response = _no_store(redirect("/auth/sign-in?oidc_error=1"))
     _clear_oidc_state_cookie(response)
     return response
@@ -272,31 +297,40 @@ def oidc_callback():
         return current_app.response_class(status=404)
     expected = urlsplit(str(active_config().get("oidc_redirect_uri") or ""))
     if request.host.lower() != expected.netloc.lower() or request.path != expected.path:
-        return _oidc_error_response(oidc.OIDCError("The callback origin did not match the configured redirect."))
+        return _oidc_error_response(oidc.OIDCError(
+            "The callback origin did not match the configured redirect.",
+            stage="callback_validation", reason="callback_origin_mismatch",
+        ))
+    flow: oidc.OIDCFlow | None = None
     try:
         flow = oidc.consume_flow(
             str(request.args.get("state") or ""),
             str(request.cookies.get(oidc.OIDC_STATE_COOKIE) or ""),
         )
         if request.args.get("error"):
-            raise oidc.OIDCError("The provider declined the sign-in request.")
+            raise oidc.OIDCError(
+                "The provider declined the sign-in request.", stage="provider_authorization", reason="provider_denied",
+            )
         issuer, subject = oidc.exchange_code(active_config(), flow, str(request.args.get("code") or ""))
         identity = oidc.complete_identity(active_config(), flow, issuer, subject)
         credential_id = ""
         oidc_identity_id = identity.id
         authenticated_at: str | None = None
+        absolute_expires_at: str | None = None
         if flow.purpose == "link":
-            credential_id, authenticated_at = oidc.linked_credential_source(flow)
+            credential_id, authenticated_at, absolute_expires_at = oidc.linked_credential_source(flow)
             oidc_identity_id = ""
-        issued = create_browser_session(
-            principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
-            replace_session_id=flow.browser_session_id, credential_id=credential_id,
-            oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
-        )
-        if flow.purpose == "sign_in" and flow.browser_session_id:
-            revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
+        with oidc_stage("session_creation", purpose=flow.purpose):
+            issued = create_browser_session(
+                principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
+                replace_session_id=flow.browser_session_id, credential_id=credential_id,
+                oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
+                absolute_expires_at=absolute_expires_at,
+            )
+            if flow.purpose == "sign_in" and flow.browser_session_id:
+                revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
     except IdentityStorageError as exc:
-        return _oidc_error_response(exc)
+        return _oidc_error_response(exc, purpose=flow.purpose if flow is not None else None)
     log.info("OIDC_BROWSER_SESSION_CREATED", extra={"principal_id": identity.principal_id, "purpose": flow.purpose})
     response = _no_store(redirect(safe_next_path(flow.next_path)))
     _set_browser_session_cookies(response, issued)
@@ -324,6 +358,9 @@ def oidc_link():
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
+        log_oidc_failure(oidc.OIDCError(
+            "A recent credential session is required.", stage="identity_binding", reason="recent_credential_required",
+        ), purpose="link")
         return jsonify({
             "error": "recent_credential_required",
             "message": "Sign in again with your credential before linking.",
@@ -332,10 +369,13 @@ def oidc_link():
         url, state = oidc.start_flow(
             active_config(), purpose="link", principal_id=context.principal_id,
             browser_session_id=context.browser_session_id,
+            next_path=safe_next_path(_payload().get("next")),
         )
     except oidc.OIDCError as exc:
-        log.warning("OIDC_LINK_START_FAILED", extra={"reason": type(exc).__name__})
+        log_oidc_failure(exc, purpose="link")
         return jsonify({"error": "oidc_unavailable", "message": "The identity provider is unavailable."}), 503
+    except IdentityStorageError as exc:
+        return _error(exc)
     response = _no_store(jsonify({"authorization_url": url}))
     _set_oidc_state_cookie(response, state)
     return response
@@ -356,6 +396,9 @@ def oidc_unlink():
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
+        log_oidc_failure(oidc.OIDCError(
+            "A recent credential session is required.", stage="identity_binding", reason="recent_credential_required",
+        ), purpose="unlink")
         return jsonify({
             "error": "recent_credential_required",
             "message": "Sign in again with your credential before unlinking.",
@@ -363,6 +406,9 @@ def oidc_unlink():
     try:
         changed = oidc.unlink_identity(context.principal_id, str(active_config()["oidc_issuer"]))
     except oidc.OIDCError as exc:
+        log_oidc_failure(exc, purpose="unlink")
+        if isinstance(exc, oidc.OIDCUnavailable):
+            return jsonify({"error": "oidc_unavailable", "message": "Sign-in settings are temporarily unavailable."}), 503
         return jsonify({"error": "oidc_unlink_blocked", "message": str(exc)}), 409
     log.info("OIDC_IDENTITY_UNLINKED", extra={"principal_id": context.principal_id, "changed": changed})
     response = _no_store(jsonify({"unlinked": changed, "sessions_revoked": changed}))
@@ -387,8 +433,17 @@ def _error(exc: BaseException):
         status, code = 403, "principal_disabled"
     elif isinstance(exc, PermissionError):
         status, code = 403, "credential_forbidden"
-    else:
+    elif isinstance(exc, (
+        InvalidIdentityValue, InvalidCredentialScope, CredentialExpired,
+        CredentialRevoked, PrincipalNotFound, WorkspaceAlreadyAttached,
+    )):
         status, code = 400, "invalid_credential_request"
+    else:
+        log_credential_lifecycle_failed(exc)
+        return jsonify({
+            "error": "credential_lifecycle_failed",
+            "message": "Credential management is temporarily unavailable. Try again later.",
+        }), 500
     return jsonify({"error": code, "message": str(exc)}), status
 
 
@@ -407,6 +462,7 @@ def create_principal():
     if result.failed:
         raise AuthenticationRejected(result.error_code, result.message)
     if not isinstance(result.context, AnonymousContext):
+        log_authentication_rejected("anonymous_identity_required")
         return jsonify({
             "error": "anonymous_identity_required",
             "message": "A validated anonymous identity is required for an upgrade.",
@@ -417,6 +473,7 @@ def create_principal():
         enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
     )
     if not limited.allowed:
+        log_credential_rate_limited(limited)
         return jsonify({
             "error": "credential_issuance_rate_limited",
             "retry_after": limited.retry_after,
@@ -436,33 +493,40 @@ def create_principal():
     return _no_store(response), 201
 
 
+def _redemption_limit(secret: str, *, failed: bool = False):
+    check = check_failed_redemption if failed else check_credential_redemption
+    result = check(
+        get_client_ip(), public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
+        redis_client=process_state.redis_client,
+        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
+    )
+    log_credential_rate_limited(result)
+    return result
+
+
 @auth_bp.post("/credentials/redeem")
 def redeem():
     if active_profile() == "oidc_required":
         return jsonify({"error": "credential_sign_in_disabled", "message": "Use provider sign-in."}), 403
     secret = str(_payload().get("secret") or "")
+    limited = _redemption_limit(secret)
+    if not limited.allowed:
+        response = _no_store(jsonify({"error": "credential_redemption_rate_limited", "retry_after": limited.retry_after}))
+        response.headers["Retry-After"] = str(limited.retry_after)
+        return response, 429
     result = redeem_portable_credential(secret)
     if result.failed or not isinstance(result.context, AuthenticatedContext):
-        limited = check_failed_redemption(
-            get_client_ip(),
-            public_lookup_id_from_headers({"X-Darklab-Credential": secret}),
-            redis_client=process_state.redis_client,
-            enabled=bool(current_app.config.get("RATELIMIT_ENABLED", True)),
-        )
+        limited = _redemption_limit(secret, failed=True)
         if limited.allowed:
             lifecycle.record_authentication_failure(result, request_fields=_request_fields())
         if not limited.allowed:
             return jsonify({"error": "credential_redemption_rate_limited", "retry_after": limited.retry_after}), 429
+        log_authentication_rejected(result.error_code)
         return jsonify({"error": result.error_code or "invalid_credential", "message": result.message}), 401
     lifecycle.record_redemption(result.context, request_fields=_request_fields())
     response = _no_store(jsonify({"authentication": _context_payload(result.context)}))
     if is_restricted():
-        request_context = get_authentication_result().context
-        replace_id = (
-            request_context.browser_session_id
-            if isinstance(request_context, AuthenticatedContext) else ""
-        )
-        issued = _issue_browser_session(result.context, replace_session_id=replace_id)
+        issued = _issue_browser_session(result.context)
         _set_browser_session_cookies(response, issued)
         log.info(
             "BROWSER_SESSION_CREATED",
@@ -484,6 +548,7 @@ def _context_payload(context: AuthenticatedContext) -> dict:
         "authentication_method": context.authentication_method,
         "browser_session": context.authentication_method == "browser_cookie",
         "browser_session_expires_at": context.browser_session_absolute_expires_at,
+        "recent_credential_session": _recent_credential_session(context),
         "selected_team_id": context.selected_team_id or None,
         "role": context.role or None,
         "capabilities": sorted(context.capabilities),
@@ -514,18 +579,20 @@ def current_principal():
     })
 
 
-@auth_bp.post("/local-access/clear")
-def clear_local_access():
-    """Ask the browser to clear local identity and credential storage."""
-    response = current_app.response_class(status=204)
-    response.headers["Clear-Site-Data"] = '"storage"'
-    return _no_store(response)
-
-
 @auth_bp.post("/logout")
 def logout():
-    context = require_authenticated_context()
-    if context.browser_session_id:
+    context = get_authentication_result().context
+    if not isinstance(context, AuthenticatedContext):
+        if not is_restricted():
+            require_authenticated_context()
+        # Invalid sessions cannot pass the normal session-backed CSRF check.
+        # Only a same-origin browser POST may clear their leftover cookies.
+        if request.headers.get("Origin") != request.host_url.rstrip("/"):
+            return jsonify({
+                "error": "csrf_validation_failed",
+                "message": "The request couldn't be verified. Refresh the page and try again.",
+            }), 403
+    if isinstance(context, AuthenticatedContext) and context.browser_session_id:
         revoke_browser_session(context.browser_session_id, reason="logout")
         log.info(
             "BROWSER_SESSION_REVOKED",
@@ -572,7 +639,15 @@ def credentials():
             items = [item for item in lifecycle.list_safe_credentials(context) if item.id == context.credential_id]
         else:
             items = lifecycle.list_safe_credentials(context)
-        return jsonify({"credentials": [item.to_safe_dict() for item in items]})
+        return jsonify({
+            "credentials": [item.to_safe_dict() for item in items],
+            "portable_credentials_enabled": active_profile() != "oidc_required",
+            "pat_policy": {
+                "scopes": sorted(PAT_SCOPES), "default_scopes": sorted(DEFAULT_PAT_SCOPES),
+                "default_expiry_days": PAT_DEFAULT_EXPIRY_DAYS,
+                "min_expiry_days": PAT_MIN_EXPIRY_DAYS, "max_expiry_days": PAT_MAX_EXPIRY_DAYS,
+            },
+        })
     except (AuthenticationRejected, IdentityStorageError, PermissionError) as exc:
         if isinstance(exc, AuthenticationRejected):
             return jsonify({"error": exc.code, "message": exc.message}), 401
@@ -589,6 +664,8 @@ def create_credential():
             credential_type=str(data.get("type") or "portable"),
             label=str(data.get("label") or ""),
             expires_at=data.get("expires_at"),
+            expires_in_days=data.get("expires_in_days"),
+            portable_credentials_enabled=active_profile() != "oidc_required",
             scopes=data.get("scopes"),
             request_fields=_request_fields(),
         )
@@ -606,7 +683,7 @@ def update_credential(credential_id: str):
         data = _payload()
         allowed = set(data).intersection({"label", "expires_at"})
         if len(allowed) != 1 or set(data) != allowed:
-            raise IdentityStorageError("supply exactly one of label or expires_at")
+            raise InvalidIdentityValue("supply exactly one of label or expires_at")
         if "label" in data:
             metadata = lifecycle.rename(
                 context,
@@ -651,6 +728,8 @@ def rotate_credential(credential_id: str):
             credential_id,
             label=data.get("label"),
             expires_at=data.get("expires_at"),
+            defer_revocation=data.get("defer_revocation", False),
+            portable_credentials_enabled=active_profile() != "oidc_required",
             request_fields=_request_fields(),
         )
         return _secret_response(issued)

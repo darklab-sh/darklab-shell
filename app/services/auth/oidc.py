@@ -7,43 +7,41 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import ssl
-import tempfile
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, cast
 from urllib.parse import urlsplit
 
 import requests
 from authlib.integrations.requests_client import OAuth2Session
-from certifi import where as requests_ca_bundle
+from authlib.integrations.base_client.errors import OAuthError
 from joserfc import jwk, jwt
+from joserfc.errors import (
+    BadSignatureError, ClaimError, ExpiredTokenError, InvalidKeyIdError, JoseError, MissingClaimError,
+)
 
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
 from services.storage.transactions import run_read, run_transaction
 from services.workspace.settings import workspace_settings
 
-from .contracts import IdentityStorageError, new_identifier, timestamp
+from .contracts import new_identifier, timestamp
+from .oidc_diagnostics import (
+    OIDCError, OIDCUnavailable, exception_reason, observe_oidc, oidc_purpose, provider_status,
+)
+from .lifecycle_logging import LifecycleEvents
+from .storage import get_principal
 from .workspace_storage import new_workspace_storage_key, validate_workspace_storage_key
+from .oidc_cache import cached_provider_value, combined_trust_bundle, trust_cache_key
 
 FLOW_SECONDS = 300
 RECENT_AUTH_SECONDS = 300
 OIDC_STATE_COOKIE = "darklab_oidc_state"
 _ALGORITHMS = ("RS256", "PS256", "ES256")
-
-
-class OIDCError(IdentityStorageError):
-    """A provider response or identity binding cannot be trusted."""
-
-
-class OIDCUnavailable(OIDCError):
-    """The configured provider could not be reached safely."""
 
 
 @dataclass(frozen=True)
@@ -115,36 +113,21 @@ def _trust(config: Mapping[str, Any]) -> str | bool:
         root = app_config.APP_LOCAL_CONF_DIR or app_config.APP_CONF_DIR
         path = Path(root) / path
     if not path.is_file():
-        raise OIDCUnavailable("The configured OIDC CA bundle is unavailable.")
+        raise OIDCUnavailable("The configured OIDC CA bundle is unavailable.", reason="ca_bundle_unavailable")
     try:
         stat = path.stat()
-        return _combined_trust_bundle(str(path), stat.st_mtime_ns, stat.st_size)
+        return combined_trust_bundle(str(path), stat.st_mtime_ns, stat.st_size)
     except (OSError, ssl.SSLError, ValueError) as exc:
-        raise OIDCUnavailable("The configured OIDC CA bundle is invalid.") from exc
-
-
-@lru_cache(maxsize=4)
-def _combined_trust_bundle(path: str, mtime_ns: int, size: int) -> str:
-    del mtime_ns
-    if not 0 < size <= 262_144:
-        raise ValueError("OIDC CA bundle size is invalid")
-    custom = Path(path).read_bytes()
-    if not custom.strip():
-        raise ValueError("OIDC CA bundle is empty")
-    ssl.create_default_context(cadata=custom.decode("ascii"))
-    system = Path(requests_ca_bundle()).read_bytes()
-    handle, combined_path = tempfile.mkstemp(prefix="darklab-oidc-trust-", suffix=".pem")
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(system.rstrip(b"\n") + b"\n" + custom)
-        return combined_path
-    except BaseException:
-        Path(combined_path).unlink(missing_ok=True)
-        raise
+        raise OIDCUnavailable(
+            "The configured OIDC CA bundle is invalid.", reason="ca_bundle_invalid", error_type=type(exc).__name__,
+        ) from None
 
 
 def _valid_endpoint(endpoint: str) -> bool:
-    selected = urlsplit(endpoint)
+    try:
+        selected = urlsplit(endpoint)
+    except ValueError:
+        return False
     return (
         selected.scheme == "https"
         and bool(selected.netloc)
@@ -156,32 +139,84 @@ def _valid_endpoint(endpoint: str) -> bool:
 
 def _json_get(url: str, issuer: str, config: Mapping[str, Any]) -> dict[str, Any]:
     if not _valid_endpoint(url):
-        raise OIDCError("OIDC metadata contains an invalid HTTPS endpoint.")
+        raise OIDCUnavailable("OIDC metadata contains an invalid HTTPS endpoint.", reason="invalid_endpoint")
     try:
         response = requests.get(url, timeout=5, verify=_trust(config), allow_redirects=False)
-        if response.status_code != 200 or len(response.content) > 262_144:
-            raise OIDCUnavailable("The OIDC provider returned an unusable response.")
+    except requests.RequestException as exc:
+        raise OIDCUnavailable(
+            "The OIDC provider is unavailable.", reason=exception_reason(exc), error_type=type(exc).__name__,
+            http_status=provider_status(getattr(getattr(exc, "response", None), "status_code", None)),
+        ) from None
+    status = provider_status(response.status_code)
+    if status != 200:
+        raise OIDCUnavailable(
+            "The OIDC provider returned an unusable response.",
+            reason="provider_http_error", http_status=status
+        )
+    if len(response.content) > 262_144:
+        raise OIDCUnavailable("The OIDC provider returned an unusable response.", reason="response_too_large", http_status=status)
+    try:
         result = response.json()
-    except (requests.RequestException, ValueError) as exc:
-        raise OIDCUnavailable("The OIDC provider is unavailable.") from exc
+    except ValueError as exc:
+        raise OIDCUnavailable(
+            "The OIDC provider is unavailable.", reason="invalid_json", error_type=type(exc).__name__, http_status=status,
+        ) from None
     if not isinstance(result, dict):
-        raise OIDCUnavailable("The OIDC provider returned invalid metadata.")
+        raise OIDCUnavailable("The OIDC provider returned invalid metadata.", reason="invalid_response_shape", http_status=status)
     return result
 
 
-def provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
+def _load_provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
     issuer = str(config["oidc_issuer"])
     metadata = _json_get(f"{issuer}/.well-known/openid-configuration", issuer, config)
     if metadata.get("issuer") != issuer:
-        raise OIDCError("The OIDC issuer did not match the configured issuer.")
+        raise OIDCUnavailable("The OIDC issuer did not match the configured issuer.", reason="issuer_mismatch", http_status=200)
     for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
         value = metadata.get(key)
         if not isinstance(value, str) or not _valid_endpoint(value):
-            raise OIDCError(f"The OIDC {key} is invalid.")
+            raise OIDCUnavailable(f"The OIDC {key} is invalid.", reason="invalid_endpoint", http_status=200)
     methods = metadata.get("code_challenge_methods_supported", ["S256"])
     if not isinstance(methods, list) or "S256" not in methods:
-        raise OIDCError("The OIDC provider does not support PKCE S256.")
+        raise OIDCUnavailable("The OIDC provider does not support PKCE S256.", reason="pkce_unsupported", http_status=200)
     return metadata
+
+
+@observe_oidc("discovery")
+def provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
+    key = ("metadata", str(config["oidc_issuer"]), *trust_cache_key(_trust(config)))
+    # Callers receive a copy so one flow cannot mutate later flows' endpoints.
+    from copy import deepcopy  # noqa: PLC0415
+
+    return deepcopy(cached_provider_value(key, lambda: _load_provider_metadata(config)))
+
+
+@observe_oidc("signing_keys")
+def _provider_keys(config: Mapping[str, Any], metadata: Mapping[str, Any], *, replace: Any = None) -> jwk.KeySet:
+    issuer = str(config["oidc_issuer"])
+    key = ("keys", issuer, str(metadata["jwks_uri"]), *trust_cache_key(_trust(config)))
+
+    def load() -> jwk.KeySet:
+        keys = _json_get(str(metadata["jwks_uri"]), issuer, config)
+        if not isinstance(keys.get("keys"), list) or not keys["keys"]:
+            raise OIDCUnavailable(
+                "The OIDC provider returned an invalid signing key set.",
+                reason="invalid_signing_keys", http_status=200
+            )
+        try:
+            keyset = jwk.KeySet.import_key_set(cast(jwk.KeySetSerialization, keys))
+        except (JoseError, ValueError, TypeError, KeyError) as exc:
+            raise OIDCUnavailable(
+                "The OIDC provider returned an invalid signing key set.",
+                reason="invalid_signing_keys", error_type=type(exc).__name__, http_status=200,
+            ) from None
+        if not keyset.keys:
+            raise OIDCUnavailable(
+                "The OIDC provider returned an invalid signing key set.",
+                reason="invalid_signing_keys", http_status=200
+            )
+        return keyset
+
+    return cached_provider_value(key, load, replace=replace)
 
 
 def _client(config: Mapping[str, Any]) -> OAuth2Session:
@@ -195,14 +230,15 @@ def _client(config: Mapping[str, Any]) -> OAuth2Session:
     )
 
 
+@observe_oidc("flow_creation")
 def start_flow(
     config: Mapping[str, Any], *, purpose: str, principal_id: str = "",
     browser_session_id: str = "", next_path: str = "/",
 ) -> tuple[str, str]:
     if purpose not in {"sign_in", "link"}:
-        raise OIDCError("Unsupported OIDC flow.")
+        raise OIDCError("Unsupported OIDC flow.", reason="invalid_purpose")
     if purpose == "link" and (not principal_id or not browser_session_id):
-        raise OIDCError("A current credential session is required to link OIDC.")
+        raise OIDCError("A current credential session is required to link OIDC.", reason="recent_credential_required")
     metadata = provider_metadata(config)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
@@ -232,9 +268,10 @@ def start_flow(
     return authorization_url, state
 
 
+@observe_oidc("flow_validation")
 def consume_flow(state: str, cookie_state: str) -> OIDCFlow:
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", state) or not hmac.compare_digest(state, cookie_state):
-        raise OIDCError("The OIDC sign-in attempt expired. Please start again.")
+        raise OIDCError("The OIDC sign-in attempt expired. Please start again.", reason="flow_expired")
     digest = hashlib.sha256(state.encode("utf-8")).digest()
 
     def operation(conn: Any) -> OIDCFlow:
@@ -243,7 +280,7 @@ def consume_flow(state: str, cookie_state: str) -> OIDCFlow:
         ).fetchone()
         data = _row(row)
         if not data or _as_utc(data["expires_at"]) <= _now():
-            raise OIDCError("The OIDC sign-in attempt expired. Please start again.")
+            raise OIDCError("The OIDC sign-in attempt expired. Please start again.", reason="flow_expired")
         return OIDCFlow(
             state=state,
             nonce=str(data["nonce"]),
@@ -257,28 +294,82 @@ def consume_flow(state: str, cookie_state: str) -> OIDCFlow:
     return run_transaction(operation)
 
 
-def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple[str, str]:
-    if not code or len(code) > 4096:
-        raise OIDCError("The OIDC provider did not return an authorization code.")
-    metadata = provider_metadata(config)
+@observe_oidc("token_exchange")
+def _exchange_token(config: Mapping[str, Any], flow: OIDCFlow, code: str, metadata: Mapping[str, Any]) -> str:
     client = _client(config)
+    status: int | None = None
+
+    def capture_status(response):
+        nonlocal status
+        status = provider_status(response.status_code)
+        return response
+
+    client.register_compliance_hook("access_token_response", capture_status)
     try:
         token = client.fetch_token(
             metadata["token_endpoint"], code=code, code_verifier=flow.code_verifier,
             redirect_uri=str(config["oidc_redirect_uri"]),
             allow_redirects=False, timeout=10, verify=_trust(config),
         )
+    except OIDCError:
+        raise
+    except OAuthError as exc:
+        reason = {
+            "invalid_grant": "code_rejected", "access_denied": "provider_denied",
+            "invalid_client": "client_authentication_failed", "unauthorized_client": "client_not_authorized",
+            "server_error": "provider_unavailable", "temporarily_unavailable": "provider_unavailable",
+        }.get(exc.error, "token_exchange_failed")
+        error = OIDCError if reason in {"code_rejected", "provider_denied"} else OIDCUnavailable
+        raise error("The OIDC code exchange failed.", reason=reason, error_type=type(exc).__name__, http_status=status) from None
     except Exception as exc:
-        raise OIDCUnavailable("The OIDC code exchange failed.") from exc
+        reason = (
+            "invalid_json" if isinstance(exc, requests.exceptions.JSONDecodeError)
+            else "invalid_response_shape" if isinstance(exc, (ValueError, TypeError))
+            else exception_reason(exc, fallback="token_exchange_failed")
+        )
+        raise OIDCUnavailable(
+            "The OIDC code exchange failed.", reason=reason, error_type=type(exc).__name__, http_status=status,
+        ) from None
+    if status is not None and status != 200:
+        raise OIDCUnavailable("The OIDC code exchange failed.", reason="provider_http_error", http_status=status)
+    if not isinstance(token, dict):
+        raise OIDCUnavailable(
+            "The OIDC provider returned an invalid token response.",
+            reason="invalid_response_shape", http_status=status
+        )
     id_token = token.get("id_token")
     if not isinstance(id_token, str) or len(id_token) > 32_768:
-        raise OIDCError("The OIDC provider did not return a valid ID token.")
-    keys = _json_get(metadata["jwks_uri"], str(config["oidc_issuer"]), config)
+        raise OIDCUnavailable("The OIDC provider did not return a valid ID token.", reason="id_token_missing", http_status=status)
+    return id_token
+
+
+def _token_rejection_reason(exc: BaseException) -> str:
+    if isinstance(exc, ExpiredTokenError):
+        return "token_expired"
+    if isinstance(exc, BadSignatureError):
+        return "signature_invalid"
+    if isinstance(exc, InvalidKeyIdError):
+        return "signing_key_unknown"
+    if isinstance(exc, MissingClaimError):
+        return "claim_missing"
+    if isinstance(exc, ClaimError):
+        return {
+            "iss": "issuer_mismatch", "aud": "audience_mismatch", "nonce": "nonce_mismatch",
+            "sub": "subject_invalid", "iat": "issued_at_invalid",
+        }.get(exc.claim, "token_claim_invalid")
+    return "token_invalid"
+
+
+@observe_oidc("token_validation")
+def _verify_id_token(
+    config: Mapping[str, Any], flow: OIDCFlow, id_token: str, keyset: jwk.KeySet, metadata: Mapping[str, Any],
+) -> str:
     try:
-        if not isinstance(keys.get("keys"), list):
-            raise OIDCError("The OIDC provider returned an invalid signing key set.")
-        keyset = jwk.KeySet.import_key_set(cast(jwk.KeySetSerialization, keys))
-        verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
+        try:
+            verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
+        except InvalidKeyIdError:
+            keyset = _provider_keys(config, metadata, replace=keyset)
+            verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
         claims = verified.claims
         now = int(_now().timestamp())
         jwt.JWTClaimsRegistry(
@@ -292,21 +383,35 @@ def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple
         ).validate(claims)
         audience = claims["aud"]
         if isinstance(audience, list) and len(audience) > 1 and claims.get("azp") != config["oidc_client_id"]:
-            raise OIDCError("The OIDC authorized party did not match this client.")
+            raise OIDCError("The OIDC authorized party did not match this client.", reason="authorized_party_mismatch")
         if claims["iat"] > now + 30:
-            raise OIDCError("The OIDC ID token was issued in the future.")
+            raise OIDCError("The OIDC ID token was issued in the future.", reason="issued_at_invalid")
         subject = claims["sub"]
         if not isinstance(subject, str) or not 0 < len(subject) <= 512:
-            raise OIDCError("The OIDC subject is invalid.")
+            raise OIDCError("The OIDC subject is invalid.", reason="subject_invalid")
         if flow.purpose == "link":
             auth_time = claims.get("auth_time")
             if not isinstance(auth_time, int) or auth_time < now - RECENT_AUTH_SECONDS or auth_time > now + 30:
-                raise OIDCError("Recent provider authentication is required to link OIDC.")
+                raise OIDCError("Recent provider authentication is required to link OIDC.", reason="recent_provider_required")
     except OIDCError:
         raise
-    except Exception as exc:
-        raise OIDCError("The OIDC ID token could not be verified.") from exc
-    return str(config["oidc_issuer"]), subject
+    except (JoseError, ValueError, TypeError, KeyError) as exc:
+        raise OIDCError(
+            "The OIDC ID token could not be verified.", reason=_token_rejection_reason(exc), error_type=type(exc).__name__,
+        ) from None
+    return subject
+
+
+def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple[str, str]:
+    with oidc_purpose(flow.purpose):
+        if not code or len(code) > 4096:
+            raise OIDCError(
+                "The OIDC provider did not return an authorization code.", stage="token_exchange", reason="code_missing",
+            )
+        metadata = provider_metadata(config)
+        id_token = _exchange_token(config, flow, code, metadata)
+        keyset = _provider_keys(config, metadata)
+        return str(config["oidc_issuer"]), _verify_id_token(config, flow, id_token, keyset, metadata)
 
 
 def _create_principal(conn: Any) -> str:
@@ -349,25 +454,29 @@ def find_identity(principal_id: str, issuer: str) -> OIDCIdentity | None:
     return run_read(operation)
 
 
-def linked_credential_source(flow: OIDCFlow) -> tuple[str, str]:
-    """Return the recently proved credential and its original authentication time."""
+@observe_oidc("identity_binding")
+def linked_credential_source(flow: OIDCFlow) -> tuple[str, str, str]:
+    """Return the proved credential, authentication time, and absolute deadline."""
     if flow.purpose != "link":
-        raise OIDCError("A credential source is required for provider linking.")
+        raise OIDCError("A credential source is required for provider linking.", reason="recent_credential_required")
 
-    def operation(conn: Any) -> tuple[str, str]:
+    def operation(conn: Any) -> tuple[str, str, str]:
         data = _row(conn.execute(
-            "SELECT credential_id, authenticated_at FROM browser_sessions "
+            "SELECT credential_id, authenticated_at, absolute_expires_at FROM browser_sessions "
             "WHERE id = ? AND principal_id = ? AND revoked_at IS NULL",
             (flow.browser_session_id, flow.principal_id),
         ).fetchone())
         if not data or not data.get("credential_id"):
-            raise OIDCError("The credential session is no longer available.")
-        return str(data["credential_id"]), str(data["authenticated_at"])
+            raise OIDCError("The credential session is no longer available.", reason="credential_session_unavailable")
+        return str(data["credential_id"]), str(data["authenticated_at"]), str(data["absolute_expires_at"])
 
     return run_read(operation)
 
 
+@observe_oidc("identity_binding")
 def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, subject: str) -> OIDCIdentity:
+    events = LifecycleEvents("provider_provisioning")
+
     def operation(conn: Any) -> OIDCIdentity:
         existing = _row(conn.execute(
             "SELECT o.id, o.principal_id, o.issuer, o.subject, p.status FROM oidc_identities o "
@@ -392,25 +501,35 @@ def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, su
                     ) <= _now()
                     or _as_utc(source["authenticated_at"]) < cutoff
                     or (source["credential_expires_at"] is not None and _as_utc(source["credential_expires_at"]) <= _now())):
-                raise OIDCError("A recent, active credential session is required to link OIDC.")
+                raise OIDCError(
+                    "A recent, active credential session is required to link OIDC.",
+                    reason="recent_credential_required"
+                )
             if existing and existing["principal_id"] != flow.principal_id:
-                raise OIDCError("This provider identity is already linked to another workspace.")
+                raise OIDCError(
+                    "This provider identity is already linked to another workspace.",
+                    reason="identity_already_linked"
+                )
             other = _row(conn.execute(
                 "SELECT id, subject FROM oidc_identities WHERE principal_id = ? AND issuer = ?",
                 (flow.principal_id, issuer),
             ).fetchone())
             if other and other["subject"] != subject:
-                raise OIDCError("This workspace is already linked to a different provider identity.")
+                raise OIDCError(
+                    "This workspace is already linked to a different provider identity.",
+                    reason="workspace_already_linked"
+                )
             principal_id = flow.principal_id
         else:
             if existing:
                 if existing["status"] != "active":
-                    raise OIDCError("This workspace is unavailable.")
+                    raise OIDCError("This workspace is unavailable.", reason="workspace_disabled")
                 return _identity(existing)
             policy = str(config.get("oidc_provisioning") or "disabled")
             if policy == "disabled" or (policy == "allowlist" and subject not in config.get("oidc_allowed_subjects", [])):
-                raise OIDCError("This provider identity isn't approved for a workspace.")
+                raise OIDCError("This provider identity isn't approved for a workspace.", reason="provisioning_denied")
             principal_id = _create_principal(conn)
+            events.principal("PRINCIPAL_CREATED", get_principal(principal_id, conn=conn))
         if existing:
             return _identity(existing)
         identity_id = f"oid_{secrets.token_hex(16)}"
@@ -427,9 +546,10 @@ def complete_identity(config: Mapping[str, Any], flow: OIDCFlow, issuer: str, su
         )
         return OIDCIdentity(identity_id, principal_id, issuer, subject)
 
-    return run_transaction(operation)
+    return events.run(operation)
 
 
+@observe_oidc("identity_binding")
 def unlink_identity(principal_id: str, issuer: str) -> bool:
     def operation(conn: Any) -> bool:
         row = _row(conn.execute(
@@ -444,7 +564,10 @@ def unlink_identity(principal_id: str, issuer: str) -> bool:
             (principal_id, timestamp()),
         ).fetchone())
         if not int(usable.get("count") or 0):
-            raise OIDCError("Add an active portable credential before unlinking the only sign-in method.")
+            raise OIDCError(
+                "Add an active portable credential before unlinking the only sign-in method.",
+                reason="alternative_credential_required"
+            )
         conn.execute("DELETE FROM oidc_identities WHERE id = ?", (row["id"],))
         conn.execute(
             "UPDATE browser_sessions SET revoked_at = ?, revocation_reason = 'OIDC identity unlinked' "

@@ -43,13 +43,13 @@ def real_start_kwargs(
     owner_context: object,
     private_values: tuple[str, ...],
 ) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {"owner_context": owner_context}
     if owner_client_id:
         kwargs["owner_client_id"] = owner_client_id
     if owner_tab_id:
         kwargs["owner_tab_id"] = owner_tab_id
     if team_id:
-        kwargs.update({"team_id": team_id, "owner_context": owner_context})
+        kwargs["team_id"] = team_id
     if private_values:
         kwargs["private_values"] = private_values
     return kwargs

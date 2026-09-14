@@ -119,6 +119,38 @@ describe('session.js', () => {
     expect(fetchCalls[1][1].headers['X-Darklab-CSRF']).toBeUndefined()
   })
 
+  it.each(['credential_required', 'idle_browser_session', 'expired_browser_session',
+    'revoked_browser_session', 'unknown_browser_session', 'malformed_browser_session'])(
+    'redirects a restricted %s response once without consuming its body or carrying query secrets', async error => {
+      const location = { pathname: '/history/run_123', search: '?token=private', hash: '#secret', replace: vi.fn() }
+      const apiResponse = new Response(JSON.stringify({ error }), { status: 401 })
+      const { apiFetch } = loadSession({
+        appConfig: { access_profile: 'mixed' }, location,
+        fetchImpl: () => Promise.resolve(apiResponse),
+      })
+      const results = await Promise.all([apiFetch('/history'), apiFetch('/config')])
+      expect(location.replace).toHaveBeenCalledExactlyOnceWith('/auth/sign-in?next=%2Fhistory%2Frun_123')
+      expect(results[0]).toBe(apiResponse)
+      expect(await apiResponse.json()).toEqual({ error })
+    },
+  )
+
+  it.each([
+    ['open', '/', 401, 'revoked_browser_session'],
+    ['mixed', '/auth/sign-in', 401, 'expired_browser_session'],
+    ['mixed', '/', 403, 'recent_authentication_required'],
+    ['mixed', '/', 401, 'unknown_credential'],
+    ['mixed', '/', 503, 'expired_browser_session'],
+  ])('preserves local error handling for %s %s %s %s', async (profile, path, status, error) => {
+    const location = { pathname: path, replace: vi.fn() }
+    const { apiFetch } = loadSession({
+      appConfig: { access_profile: profile }, location,
+      fetchImpl: () => Promise.resolve(new Response(JSON.stringify({ error }), { status })),
+    })
+    expect((await apiFetch('/projects')).status).toBe(status)
+    expect(location.replace).not.toHaveBeenCalled()
+  })
+
   it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
     const { logClientError, fetchCalls } = loadSession({
       storageData: { anonymous_id: 'session-log', client_id: 'client-log' },

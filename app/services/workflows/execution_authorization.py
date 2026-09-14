@@ -9,12 +9,8 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 
 from config import resolve_effective_cfg
-from core.database_access import get_db_connect
-from services.auth.background_authorization import (
-    BackgroundAuthorizationState,
-    resolve_background_authorization,
-)
-from services.teams.capabilities import Capability
+from services.auth.background_authorization import BackgroundAuthorizationState
+from services.workflows.execution_owner import resolve_execution_owner
 
 
 def max_execution_runtime_seconds() -> int:
@@ -71,16 +67,7 @@ def current_execution_role(
     execution: Mapping[str, object],
 ) -> tuple[str, str, str]:
     """Return one stable failure or the initiator's current command role."""
-    with get_db_connect()() as conn:
-        authorization = resolve_background_authorization(
-            conn,
-            principal_id=str(execution.get("principal_id") or ""),
-            personal_workspace_id=str(execution.get("personal_workspace_id") or ""),
-            team_id=str(execution.get("team_id") or ""),
-            actor_member_id=str(execution.get("actor_member_id") or ""),
-            originating_credential_id=str(execution.get("originating_credential_id") or ""),
-            required_capability=Capability.RUN_COMMANDS,
-        )
+    authorization = resolve_execution_owner(execution)
     if authorization.state is BackgroundAuthorizationState.PRINCIPAL_DISABLED:
         return "principal_disabled", authorization.message, ""
     if authorization.state is BackgroundAuthorizationState.TEAM_UNAVAILABLE:

@@ -22,6 +22,7 @@ from services.secrets.vault import decrypt_secret, encrypt_secret
 from services.storage.transactions import run_read, run_transaction
 
 from .contracts import CREDENTIAL_WRAP_ALGORITHM, IdentityStorageError, timestamp
+from .observability import log_browser_signing_key_unavailable
 
 BROWSER_SESSION_COOKIE = "darklab_browser_session"
 BROWSER_CSRF_COOKIE = "darklab_csrf"
@@ -36,6 +37,14 @@ class BrowserSessionError(IdentityStorageError):
     """Raised when persisted browser-session state is unsafe or invalid."""
 
 
+class BrowserSessionSigningKeyError(BrowserSessionError):
+    """A stored signing key is unavailable for a fixed, safe failure reason."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class IssuedBrowserSession:
     id: str
@@ -47,6 +56,10 @@ class IssuedBrowserSession:
     csrf_token: str
     created_at: str
     absolute_expires_at: str
+
+    @property
+    def cookie_max_age(self) -> int:
+        return max(0, int((_as_utc(self.absolute_expires_at) - _active_now(None)).total_seconds()))
 
 
 @dataclass(frozen=True)
@@ -171,10 +184,12 @@ def load_signing_key(conn: Any, version: int) -> bytes:
         (int(version),),
     ).fetchone()
     if row is None:
-        raise BrowserSessionError("browser-session signing key was not found")
+        raise BrowserSessionSigningKeyError("missing_key", "browser-session signing key was not found")
     data = _row_dict(row)
     if str(data["wrap_algorithm"]) != CREDENTIAL_WRAP_ALGORITHM:
-        raise BrowserSessionError("stored browser-session signing key uses an unsupported wrapper")
+        raise BrowserSessionSigningKeyError(
+            "unsupported_wrapper", "stored browser-session signing key uses an unsupported wrapper",
+        )
     try:
         plaintext = decrypt_secret(
             bytes(data["wrapped_key"]),
@@ -182,8 +197,11 @@ def load_signing_key(conn: Any, version: int) -> bytes:
             associated_data=_associated_data(int(version)),
         )
     except Exception as exc:
-        raise BrowserSessionError("browser-session signing key cannot be decrypted") from exc
-    return _decode_key(plaintext)
+        raise BrowserSessionSigningKeyError("decryption_failed", "browser-session signing key cannot be decrypted") from exc
+    try:
+        return _decode_key(plaintext)
+    except BrowserSessionError as exc:
+        raise BrowserSessionSigningKeyError("invalid_key", "stored browser-session signing key is invalid") from exc
 
 
 def _signature(key: bytes, session_id: str, version: int) -> str:
@@ -215,12 +233,15 @@ def create_browser_session(
     absolute_seconds: int,
     replace_session_id: str = "",
     authenticated_at: str | None = None,
+    absolute_expires_at: str | None = None,
     now: datetime | None = None,
     conn: Any | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedBrowserSession:
     active_now = _active_now(now)
     expires_at = active_now + timedelta(seconds=max(1, int(absolute_seconds)))
+    if absolute_expires_at is not None:
+        expires_at = min(expires_at, _as_utc(absolute_expires_at))
 
     def operation(active_conn: Any) -> IssuedBrowserSession:
         if bool(credential_id) == bool(oidc_identity_id):
@@ -296,6 +317,70 @@ def _failure(state: str, code: str, message: str) -> BrowserSessionResolution:
     return BrowserSessionResolution(state=state, error_code=code, message=message)
 
 
+def _session_row(conn: Any, session_id: str) -> Any:
+    return conn.execute(
+        "SELECT s.*, c.created_at AS credential_created_at, c.last_used_at AS credential_last_used_at, "
+        "c.expires_at AS credential_expires_at, c.revoked_at AS credential_revoked_at, "
+        "c.credential_type, p.status AS principal_status, w.id AS personal_workspace_id, "
+        "w.storage_key AS workspace_storage_key, "
+        "o.issuer AS oidc_issuer, o.subject AS oidc_subject, o.principal_id AS oidc_principal_id "
+        "FROM browser_sessions s LEFT JOIN credentials c ON c.id = s.credential_id "
+        "LEFT JOIN oidc_identities o ON o.id = s.oidc_identity_id "
+        "JOIN principals p ON p.id = s.principal_id "
+        "JOIN personal_workspaces w ON w.principal_id = s.principal_id "
+        "WHERE s.id = ?",
+        (session_id,),
+    ).fetchone()
+
+
+def _session_state_failure(data: dict[str, Any], active_now: datetime, idle_seconds: int) -> BrowserSessionResolution | None:
+    if data.get("revoked_at") is not None:
+        return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
+    if _as_utc(data["absolute_expires_at"]) <= active_now:
+        return _failure("expired", "expired_browser_session", "The browser session has expired.")
+    if _as_utc(data["last_seen_at"]) + timedelta(seconds=max(1, int(idle_seconds))) <= active_now:
+        return _failure("expired", "idle_browser_session", "The browser session expired after inactivity.")
+    if str(data.get("principal_status")) != "active":
+        return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
+    if data.get("oidc_identity_id"):
+        if data.get("credential_id") or data.get("oidc_principal_id") != data.get("principal_id"):
+            return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
+    elif (
+        not data.get("credential_id")
+        or data.get("credential_revoked_at") is not None
+        or str(data.get("credential_type")) != "portable"
+    ):
+        return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
+    if data.get("credential_expires_at") is not None and _as_utc(data["credential_expires_at"]) <= active_now:
+        return _failure("expired", "expired_browser_session", "The browser session has expired.")
+    return None
+
+
+def revalidate_browser_session(
+    session_id: str,
+    *,
+    principal_id: str,
+    credential_id: str,
+    oidc_identity_id: str,
+    idle_seconds: int,
+    now: datetime,
+    conn: Any,
+) -> str:
+    """Recheck a previously authenticated connection by bound IDs; never sign in."""
+    row = _session_row(conn, session_id)
+    if row is None:
+        return "unknown_browser_session"
+    data = _row_dict(row)
+    if (
+        data["principal_id"] != principal_id
+        or str(data.get("credential_id") or "") != credential_id
+        or str(data.get("oidc_identity_id") or "") != oidc_identity_id
+    ):
+        return "revoked_browser_session"
+    failure = _session_state_failure(data, _active_now(now), idle_seconds)
+    return failure.error_code if failure is not None else ""
+
+
 def resolve_browser_session(
     cookie_value: str,
     *,
@@ -314,47 +399,20 @@ def resolve_browser_session(
     active_now = _active_now(now)
 
     def operation(active_conn: Any) -> BrowserSessionResolution:
-        row = active_conn.execute(
-            "SELECT s.*, c.created_at AS credential_created_at, c.last_used_at AS credential_last_used_at, "
-            "c.expires_at AS credential_expires_at, c.revoked_at AS credential_revoked_at, "
-            "c.credential_type, p.status AS principal_status, w.id AS personal_workspace_id, "
-            "w.storage_key AS workspace_storage_key, "
-            "o.issuer AS oidc_issuer, o.subject AS oidc_subject, o.principal_id AS oidc_principal_id "
-            "FROM browser_sessions s LEFT JOIN credentials c ON c.id = s.credential_id "
-            "LEFT JOIN oidc_identities o ON o.id = s.oidc_identity_id "
-            "JOIN principals p ON p.id = s.principal_id "
-            "JOIN personal_workspaces w ON w.principal_id = s.principal_id "
-            "WHERE s.id = ? AND s.signing_key_version = ?",
-            (session_id, version),
-        ).fetchone()
-        if row is None:
+        row = _session_row(active_conn, session_id)
+        if row is None or int(row["signing_key_version"]) != version:
             return _failure("unknown", "unknown_browser_session", "The browser session is no longer available.")
         data = _row_dict(row)
         try:
             key = load_signing_key(active_conn, version)
-        except BrowserSessionError:
+        except BrowserSessionError as exc:
+            log_browser_signing_key_unavailable(version, exc, reason=getattr(exc, "reason", "invalid_key"))
             return _failure("unknown", "unknown_browser_session", "The browser session is no longer available.")
         if not hmac.compare_digest(_signature(key, session_id, version), supplied_signature):
             return _failure("unknown", "unknown_browser_session", "The browser session is no longer available.")
-        if data.get("revoked_at") is not None:
-            return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
-        if _as_utc(data["absolute_expires_at"]) <= active_now:
-            return _failure("expired", "expired_browser_session", "The browser session has expired.")
-        if _as_utc(data["last_seen_at"]) + timedelta(seconds=max(1, int(idle_seconds))) <= active_now:
-            return _failure("expired", "idle_browser_session", "The browser session expired after inactivity.")
-        if str(data.get("principal_status")) != "active":
-            return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
-        if data.get("oidc_identity_id"):
-            if data.get("credential_id") or data.get("oidc_principal_id") != data.get("principal_id"):
-                return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
-        elif (
-            not data.get("credential_id")
-            or data.get("credential_revoked_at") is not None
-            or str(data.get("credential_type")) != "portable"
-        ):
-            return _failure("revoked", "revoked_browser_session", "The browser session has been revoked.")
-        if data.get("credential_expires_at") is not None and _as_utc(data["credential_expires_at"]) <= active_now:
-            return _failure("expired", "expired_browser_session", "The browser session has expired.")
+        failure = _session_state_failure(data, active_now, idle_seconds)
+        if failure is not None:
+            return failure
         if touch and _as_utc(data["last_seen_at"]) + timedelta(seconds=BROWSER_SESSION_TOUCH_INTERVAL_SECONDS) <= active_now:
             active_conn.execute(
                 "UPDATE browser_sessions SET last_seen_at = ? WHERE id = ? AND revoked_at IS NULL",

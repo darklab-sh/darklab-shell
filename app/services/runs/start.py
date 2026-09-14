@@ -18,7 +18,7 @@ from services.runs.start_context import (
 )
 from services.runs.start_contracts import BrokeredRunStartResult, RunStartHandlers
 from services.runs.signal_context import RunOutputSignalContext, validated_run_output_signal_context
-from services.teams.scope import OwnerContext, owner_context_for_scope
+from services.teams.scope import OwnerContext
 
 
 def start_brokered_run(
@@ -26,6 +26,7 @@ def start_brokered_run(
     original_command: str,
     display_command: str = "",
     session_id: str,
+    owner_context: OwnerContext,
     client_ip: str,
     handlers: RunStartHandlers,
     owner_client_id: str = "",
@@ -51,7 +52,6 @@ def start_brokered_run(
     )
     safe_command = str(display_command or original_command)
     safe_private_values = private_data.normalized_private_values(private_values)
-    owner_context: OwnerContext = owner_context_for_scope(session_id, team_id=team_id)
     if handlers.resolves_exact_special_builtin_command(original_command):
         if link_project_id:
             raise RunStartRejected(

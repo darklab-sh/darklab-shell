@@ -269,6 +269,26 @@ test.describe('output actions', () => {
     await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
   })
 
+  test('entity menu stays usable while live output follows new lines', async ({ page }) => {
+    await appendEntityOutput(page)
+    const token = page.locator('.tab-panel.active .atlas-entity-token')
+    const menu = page.locator('.atlas-output-entity-menu')
+    await token.click()
+    await expect(menu).toBeVisible()
+    await page.evaluate(() => {
+      const out = getOutput(activeTabId)
+      window.__entityOutputScrollEvents = 0
+      out.addEventListener('scroll', () => { window.__entityOutputScrollEvents += 1 })
+      getTab(activeTabId).followOutput = true
+      for (let i = 0; i < 150; i++) appendLine(`live progress ${i}`, '', activeTabId)
+    })
+    await expect.poll(() => page.evaluate(() => window.__entityOutputScrollEvents)).toBeGreaterThan(0)
+    await expect(menu).toBeVisible()
+    await menu.locator('[data-output-entity-action="copy-value"]').click()
+    await expect(page.evaluate(() => window.__copiedEntity)).resolves.toBe('ip.darklab.sh')
+    await expect(menu).toHaveCount(0)
+  })
+
   test('entity actions insert at the command selection without running it and close on shell typing', async ({ page }) => {
     await appendEntityOutput(page)
     const token = page.locator('.tab-panel.active .atlas-entity-token')
@@ -279,10 +299,7 @@ test.describe('output actions', () => {
     await page.evaluate(() => setComposerValue('ping TARGET now', 5, 11))
     await token.click()
     await expect(menu).toBeVisible()
-    // The insertion path itself is covered through a real tap below. Dispatch
-    // here so Playwright's pre-click scroll-into-view step doesn't exercise the
-    // separate scroll-to-dismiss contract before the fixed menu item activates.
-    await menu.locator('[data-output-entity-action="insert-command"]').dispatchEvent('click')
+    await menu.locator('[data-output-entity-action="insert-command"]').click()
     await expect(input).toHaveValue('ping ip.darklab.sh now')
     await expect(input).toBeFocused()
     await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(lineCount)

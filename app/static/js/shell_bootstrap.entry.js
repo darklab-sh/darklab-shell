@@ -36,7 +36,7 @@ import './features/findings/finding_triage_bridge.js';
 import './features/terminal/composer_editing.js';
 import './features/shortcuts/global_shortcuts.js';
 import './features/shortcuts/shortcuts_key_handler.js';
-import './app.js';
+import { openOptions } from './app.js';
 import './features/terminal/local_commands.js';
 import './features/mobile/mobile_shell_layout.js';
 import './features/terminal/mobile_composer_keyboard.js';
@@ -76,3 +76,11 @@ import './features/terminal/composer_controller.js';
 import './e2e_test_hooks_loader.js';
 import './shell_chrome.js';
 import './mobile_chrome.js';
+
+// Sign-in can return directly to Access after the shell and panel handlers load.
+const initialLocation = new URL(window.location.href);
+if (initialLocation.searchParams.get('options') === 'access') {
+  initialLocation.searchParams.delete('options');
+  window.history.replaceState(window.history.state, '', initialLocation.href);
+  openOptions({ tab: 'access' });
+}

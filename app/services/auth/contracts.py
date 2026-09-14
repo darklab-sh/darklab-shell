@@ -12,6 +12,11 @@ import secrets
 from typing import Any
 from uuid import UUID
 
+# Authorization is checked every ten seconds and stream readers wake within
+# five seconds, keeping idle revocation detection within fifteen seconds.
+STREAM_AUTH_CHECK_SECONDS = 10.0
+STREAM_AUTH_POLL_SECONDS = 5.0
+
 
 MAX_CREDENTIAL_LABEL_LENGTH = 64
 MAX_REASON_LENGTH = 256

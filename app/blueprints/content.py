@@ -149,6 +149,8 @@ def _frontend_config_payload():
         "max_tabs":              cfg["max_tabs"],
         "history_panel_limit":      cfg["history_panel_limit"],
         "access_profile":          str(cfg.get("access_profile") or "open"),
+        "public_shares_enabled":    str(cfg.get("access_profile") or "open") == "open"
+        or bool(cfg.get("restricted_public_shares_enabled", False)),
         "command_timeout_seconds":  cfg["command_timeout_seconds"],
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),

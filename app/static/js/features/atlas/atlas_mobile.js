@@ -282,8 +282,6 @@ let exportedDarklabAtlasMobile = null;
     search.addEventListener('input', () => {
       controller.state.query = String(search.value || '').trim();
       controller.state.requestedEntityValue = '';
-      controller.state.refreshIntelOnSelect = false;
-      controller.state.addActiveProjectOnSelect = false;
       controller.state.selectedFindingIds.clear();
       controller.state.selectedEntityIds.clear();
       clearTimeout(searchTimer);

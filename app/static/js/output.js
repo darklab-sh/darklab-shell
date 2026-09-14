@@ -836,7 +836,7 @@ function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
   _prepareOutputRenderedLinks(content);
 }
 
-function _openAtlasForOutputEntity(token, options = {}) {
+function _openAtlasForOutputEntity(token) {
   if (!token || !_outputCanOpenAtlas()) return;
   const entityType = String(token.dataset.atlasEntityType || '');
   const entityValue = String(token.dataset.atlasEntityValue || '');
@@ -849,8 +849,6 @@ function _openAtlasForOutputEntity(token, options = {}) {
     entityType,
     entityValue,
     forceView: 'profile',
-    refreshIntel: !!options.refreshIntel,
-    addActiveProject: !!options.addActiveProject,
   });
 }
 
@@ -859,6 +857,7 @@ let _outputEntityMenuOpener = null;
 let _outputEntityMenuSequence = 0;
 let _outputEntityMenuOutsideClickHandle = null;
 let _outputEntityMenuPressableHandles = [];
+let _outputEntityMenuObserver = null;
 
 function _hasOutputTextSelection(token = null) {
   const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
@@ -879,6 +878,8 @@ function _hasOutputTextSelection(token = null) {
 
 function _closeOutputEntityMenu(options = {}) {
   const opener = _outputEntityMenuOpener;
+  _outputEntityMenuObserver?.disconnect();
+  _outputEntityMenuObserver = null;
   _outputEntityMenuPressableHandles.forEach(handle => handle?.dispose?.());
   _outputEntityMenuPressableHandles = [];
   _outputEntityMenuOutsideClickHandle?.dispose?.();
@@ -1083,6 +1084,14 @@ function _showOutputEntityMenu(token, x = null, y = null) {
     onClose: () => _closeOutputEntityMenu(),
     triggers: token,
   }) || null;
+  if (typeof MutationObserver === 'function') {
+    _outputEntityMenuObserver = new MutationObserver(() => {
+      if (_outputEntityMenuOpener && !document.contains(_outputEntityMenuOpener)) {
+        _closeOutputEntityMenu();
+      }
+    });
+    _outputEntityMenuObserver.observe(document.body, { childList: true, subtree: true });
+  }
   const firstItem = menu.querySelector('[data-output-entity-action]');
   if (firstItem) firstItem.focus({ preventScroll: true });
 }
@@ -1128,20 +1137,16 @@ function _bindOutputEntityTokenEvents() {
     // Moving the composer selection can update an input's internal horizontal
     // scroll position. Typing and outside clicks already own dismissal there.
     if (event.target?.matches?.('#cmd, #mobile-cmd')) return;
+    if (event.target?.matches?.('.output') && event.target.contains(_outputEntityMenuOpener)) {
+      _positionOutputEntityMenu(_outputEntityMenu, _outputEntityMenuOpener);
+      return;
+    }
     _closeOutputEntityMenu();
   }, true);
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', () => _closeOutputEntityMenu());
     window.visualViewport?.addEventListener?.('resize', () => _closeOutputEntityMenu());
     window.visualViewport?.addEventListener?.('scroll', () => _closeOutputEntityMenu());
-  }
-  if (typeof MutationObserver === 'function' && document.body) {
-    const observer = new MutationObserver(() => {
-      if (_outputEntityMenuOpener && !document.contains(_outputEntityMenuOpener)) {
-        _closeOutputEntityMenu();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
   }
 }
 

@@ -17,9 +17,10 @@ from conftest import build_test_config
 from core.database_access import get_db_connect
 from flask.testing import FlaskClient
 from joserfc import jwk, jwt
-from services.auth import oidc, storage
+from services.auth import oidc, oidc_cache, storage
 from services.auth import lifecycle
-from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
+from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE, resolve_browser_session
+from services.auth.contracts import timestamp
 
 ISSUER = "https://idp.example/realms/test"
 ORIGIN = "https://shell.example"
@@ -39,13 +40,16 @@ class _Response:
 
 class LocalProvider:
     def __init__(self, monkeypatch):
-        self.private_key = jwk.RSAKey.generate_key(2048, private=True)
+        oidc_cache.reset_provider_cache()
+        self.private_key = jwk.RSAKey.generate_key(2048, private=True, auto_kid=True)
         self.subject = "local-subject-1"
         self.signing_key = self.private_key
         self.nonce = ""
         self.verifier = ""
         self.claim_overrides = {}
+        self.claim_omissions = set()
         self.available = True
+        self.get_calls = []
         metadata = {
             "issuer": ISSUER,
             "authorization_endpoint": f"{ISSUER}/protocol/openid-connect/auth",
@@ -55,6 +59,7 @@ class LocalProvider:
         }
 
         def get(url, **kwargs):
+            self.get_calls.append(url)
             assert kwargs["allow_redirects"] is False
             assert kwargs["verify"] is True
             if not self.available:
@@ -66,6 +71,8 @@ class LocalProvider:
             raise AssertionError(url)
 
         def fetch_token(_client, url, **kwargs):
+            if not self.available:
+                raise oidc.requests.ConnectionError("offline")
             assert url == metadata["token_endpoint"]
             assert kwargs["code"] == "local-code"
             assert kwargs["code_verifier"] == self.verifier
@@ -82,7 +89,9 @@ class LocalProvider:
                 "nonce": self.nonce,
                 **self.claim_overrides,
             }
-            return {"id_token": jwt.encode({"alg": "RS256"}, claims, self.signing_key)}
+            for claim in self.claim_omissions:
+                claims.pop(claim, None)
+            return {"id_token": jwt.encode({"alg": "RS256", "kid": self.signing_key.kid}, claims, self.signing_key)}
 
         monkeypatch.setattr(oidc.requests, "get", get)
         monkeypatch.setattr(oidc.OAuth2Session, "fetch_token", fetch_token)
@@ -292,6 +301,7 @@ def test_oidc_disabled_provisioning_and_provider_outage_fail_closed(monkeypatch)
     state = _start(client, provider)
     assert "oidc_error" in _callback(client, state).headers["Location"]
     provider.available = False
+    oidc_cache.reset_provider_cache()
     assert "oidc_error" in client.get("/auth/oidc/start", base_url=ORIGIN).headers["Location"]
     assert client.get("/", base_url=ORIGIN).status_code == 302
 
@@ -303,6 +313,7 @@ def test_existing_oidc_session_survives_temporary_provider_outage(monkeypatch):
     assert _callback(client, state).status_code == 302
     provider.available = False
     assert client.get("/", base_url=ORIGIN).status_code == 200
+    oidc_cache.reset_provider_cache()
     assert "oidc_error" in client.get("/auth/oidc/start", base_url=ORIGIN).headers["Location"]
     assert client.get("/", base_url=ORIGIN).status_code == 200
 
@@ -353,13 +364,40 @@ def test_oidc_link_requires_recent_credential_and_unlink_revokes_all_sessions(mo
     nonce = _response_cookie(page, "darklab_sign_in_nonce")
     signed = client.post("/auth/sign-in", base_url=ORIGIN, data={"credential": bundle.credential.secret, "sign_in_nonce": nonce})
     assert signed.status_code == 302
+    original_cookie = _client_cookie(client, BROWSER_SESSION_COOKIE)
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=30)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE browser_sessions SET absolute_expires_at = ? WHERE principal_id = ?",
+            (timestamp(deadline), bundle.principal.id),
+        )
+        authenticated_at = conn.execute(
+            "SELECT authenticated_at FROM browser_sessions WHERE principal_id = ? AND revoked_at IS NULL",
+            (bundle.principal.id,),
+        ).fetchone()["authenticated_at"]
+        conn.commit()
     csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
     assert client.post("/auth/oidc/link", base_url=ORIGIN).status_code == 403
     start = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
     assert start.status_code == 200
     state = parse_qs(urlsplit(start.get_json()["authorization_url"]).query)["state"][0]
     provider.expect(state)
-    assert _callback(client, state).headers["Location"] == "/"
+    linked = _callback(client, state)
+    assert linked.headers["Location"] == "/"
+    for header in linked.headers.getlist("Set-Cookie"):
+        cookies = SimpleCookie(header)
+        for name in (BROWSER_SESSION_COOKIE, BROWSER_CSRF_COOKIE):
+            if name in cookies:
+                assert 0 < int(cookies[name]["max-age"]) <= 30
+    with get_db_connect()() as conn:
+        replacement = conn.execute(
+            "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
+            "WHERE principal_id = ? AND revoked_at IS NULL", (bundle.principal.id,),
+        ).fetchone()
+    assert replacement["authenticated_at"] == authenticated_at
+    assert replacement["absolute_expires_at"] == timestamp(deadline)
+    for cookie in (original_cookie, _client_cookie(client, BROWSER_SESSION_COOKIE)):
+        assert not resolve_browser_session(cookie, idle_seconds=1800, now=deadline, touch=False).valid
     principal = client.get("/auth/principal", base_url=ORIGIN).get_json()
     assert principal["principal"]["id"] == bundle.principal.id
     assert principal["authentication"]["credential_type"] == "portable"
@@ -370,3 +408,127 @@ def test_oidc_link_requires_recent_credential_and_unlink_revokes_all_sessions(mo
     result = client.post("/auth/oidc/unlink", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
     assert result.get_json() == {"sessions_revoked": True, "unlinked": True}
     assert client.get("/", base_url=ORIGIN).status_code == 302
+
+
+def test_fresh_oidc_sign_in_renews_absolute_deadline(monkeypatch):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = "fresh-oidc-deadline"
+    app = _app(monkeypatch, _config())
+    client = app.test_client()
+    assert _callback(client, _start(client, provider)).status_code == 302
+    principal_id = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+    original_cookie = _client_cookie(client, BROWSER_SESSION_COOKIE)
+    with get_db_connect()() as conn:
+        conn.execute(
+            "UPDATE browser_sessions SET absolute_expires_at = ? WHERE principal_id = ?",
+            (timestamp(datetime.now(timezone.utc) + timedelta(seconds=30)), principal_id),
+        )
+        conn.commit()
+    started = datetime.now(timezone.utc)
+    assert _callback(client, _start(client, provider)).status_code == 302
+    with get_db_connect()() as conn:
+        replacement = conn.execute(
+            "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
+            "WHERE principal_id = ? AND revoked_at IS NULL", (principal_id,),
+        ).fetchone()
+    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started
+    assert datetime.fromisoformat(replacement["absolute_expires_at"]) >= started + timedelta(hours=12)
+    assert not resolve_browser_session(original_cookie, idle_seconds=1800, touch=False).valid
+
+
+@pytest.mark.parametrize("profile", ["mixed", "token_required", "oidc_required"])
+def test_credential_reauthentication_selects_the_permitted_sign_in_method(monkeypatch, profile):
+    config = _config(profile=profile, provisioning="disabled" if profile == "token_required" else "automatic")
+    client = _app(monkeypatch, config).test_client()
+    response = client.get("/auth/sign-in?force=credential&next=%2F%3Foptions%3Daccess", base_url=ORIGIN)
+    assert response.status_code == 200
+    assert (b"Continue with identity provider" in response.data) == (profile == "oidc_required")
+    if profile != "oidc_required":
+        assert b'name="force" value="credential"' in response.data
+        assert b'name="next" value="/?options=access"' in response.data
+        nonce = _response_cookie(response, "darklab_sign_in_nonce")
+        failed = client.post("/auth/sign-in", base_url=ORIGIN, data={
+            "credential": "invalid", "sign_in_nonce": nonce,
+            "force": "credential", "next": "/?options=access",
+        })
+        assert b"Continue with identity provider" not in failed.data
+        assert b'name="force" value="credential"' in failed.data
+    else:
+        assert b"restricted-credential" not in response.data
+
+
+def test_link_recency_is_visible_and_credential_reauthentication_restores_access(monkeypatch):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = "reauth-link-subject"
+    client = _app(monkeypatch, _config(profile="mixed")).test_client()
+    with get_db_connect()() as conn:
+        bundle = storage.create_principal_with_credential(conn=conn)
+        conn.commit()
+
+    def credential_sign_in():
+        page = client.get("/auth/sign-in?force=credential&next=%2F%3Foptions%3Daccess", base_url=ORIGIN)
+        return client.post("/auth/sign-in", base_url=ORIGIN, data={
+            "credential": bundle.credential.secret,
+            "sign_in_nonce": _response_cookie(page, "darklab_sign_in_nonce"),
+            "force": "credential", "next": "/?options=access",
+        })
+
+    assert credential_sign_in().headers["Location"] == "/?options=access"
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is True
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET authenticated_at = ?", (stale,))
+        conn.commit()
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is False
+    csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
+    for action in ("link", "unlink"):
+        response = client.post(f"/auth/oidc/{action}", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf})
+        assert response.status_code == 403
+        assert response.get_json()["error"] == "recent_credential_required"
+    assert credential_sign_in().headers["Location"] == "/?options=access"
+    assert client.get("/auth/principal", base_url=ORIGIN).get_json()["authentication"]["recent_credential_session"] is True
+    csrf = _client_cookie(client, BROWSER_CSRF_COOKIE)
+    malformed = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf}, json=["invalid"])
+    assert malformed.status_code == 400
+    start = client.post("/auth/oidc/link", base_url=ORIGIN, headers={"X-Darklab-CSRF": csrf}, json={"next": "/?options=access"})
+    assert start.status_code == 200
+    state = parse_qs(urlsplit(start.get_json()["authorization_url"]).query)["state"][0]
+    provider.expect(state)
+    assert _callback(client, state).headers["Location"] == "/?options=access"
+
+
+@pytest.mark.parametrize("profile", ["mixed", "oidc_required"])
+@pytest.mark.parametrize("defer", [False, True])
+def test_provider_only_issuance_policy_rejects_unusable_browser_credentials(monkeypatch, profile, defer):
+    provider = LocalProvider(monkeypatch)
+    provider.subject = f"issuance-{profile}-{defer}"
+    client = _app(monkeypatch, _config(profile=profile)).test_client()
+    assert _callback(client, _start(client, provider)).status_code == 302
+    principal_id = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+    csrf = {"X-Darklab-CSRF": _client_cookie(client, BROWSER_CSRF_COOKIE)}
+    policy = client.get("/auth/credentials", base_url=ORIGIN).get_json()
+    assert policy["portable_credentials_enabled"] is (profile == "mixed")
+    recovery = lifecycle.operator_issue(principal_id, credential_type="portable", label="Operator recovery")
+    for payload in ({}, {"type": "portable"}):
+        issued = client.post("/auth/credentials", base_url=ORIGIN, headers=csrf, json=payload)
+        assert issued.status_code == (201 if profile == "mixed" else 403)
+        if profile == "oidc_required":
+            assert "Browser credentials are disabled" in issued.get_json()["message"]
+            assert "secret" not in issued.get_json()
+    rotated = client.post(f"/auth/credentials/{recovery.metadata.id}/rotate", base_url=ORIGIN,
+                          headers=csrf, json={"defer_revocation": defer})
+    assert rotated.status_code == (201 if profile == "mixed" else 403)
+    if profile == "oidc_required":
+        remaining = client.get("/auth/credentials", base_url=ORIGIN).get_json()["credentials"]
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == recovery.metadata.id
+        assert remaining[0]["revoked_at"] is None
+    pat = client.post("/auth/credentials", base_url=ORIGIN, headers=csrf,
+                      json={"type": "pat", "scopes": ["identity:read"]})
+    assert pat.status_code == 201
+    replacement = client.post(f"/auth/credentials/{pat.get_json()['credential']['id']}/rotate",
+                              base_url=ORIGIN, headers=csrf, json={"defer_revocation": defer})
+    assert replacement.status_code == 201
+    bearer = {"Authorization": f"Bearer {replacement.get_json()['secret']}"}
+    api_client = client.application.test_client(use_cookies=False)
+    assert api_client.get("/api/v1/whoami", base_url=ORIGIN, headers=bearer).status_code == 200

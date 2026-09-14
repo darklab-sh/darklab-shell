@@ -4,11 +4,28 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, setComposerValueForTest } from './helpers.js'
 
+test('autocomplete recovers after a failed startup request', async ({ page }) => {
+  let catalogRequests = 0
+  await page.route('**/autocomplete', route => {
+    catalogRequests += 1
+    return catalogRequests === 1 ? route.abort('failed') : route.continue()
+  })
+  await page.goto('/')
+  await ensurePromptReady(page, { waitForAutocomplete: true })
+  await page.locator('#cmd').pressSequentially('nmap ')
+  await expect(page.locator('#ac-dropdown')).toContainText('<target>')
+  await expect(page.locator('#ac-dropdown')).toContainText('-sT')
+  expect(catalogRequests).toBe(2)
+})
+
 test.describe('autocomplete', () => {
+  test.describe.configure({ timeout: 60_000 })
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
-    await ensurePromptReady(page, { waitForAutocomplete: true })
+    // CI can complete the catalog request after 19 seconds under load.
+    // Allow startup to settle before testing the normal interaction deadlines.
+    await ensurePromptReady(page, { waitForAutocomplete: true, timeout: 30_000 })
   })
 
   test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({

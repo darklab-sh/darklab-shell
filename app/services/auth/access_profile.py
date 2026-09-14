@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from flask import current_app, jsonify, redirect, request, url_for
 
@@ -20,6 +21,7 @@ from .browser_sessions import (
     verify_csrf_token,
 )
 from .resolver import AuthenticatedContext
+from .observability import log_browser_csrf_rejected
 
 OPEN = "open"
 TOKEN_REQUIRED = "token_required"
@@ -43,12 +45,21 @@ RESTRICTED_PUBLIC_ENDPOINTS = frozenset({
     "assets.vendor_xterm_css",
     "assets.vendor_fonts",
     "auth.sign_in",
+    "auth.logout",
     "auth.redeem",
     "auth.oidc_start",
     "auth.oidc_callback",
 })
 RESTRICTED_SHARE_ENDPOINT = "history.get_share"
 RESTRICTED_SHARE_CREATE_ENDPOINT = "history.save_share"
+# These handlers enforce identity:read and/or restrict a PAT to itself.
+# No browser data or session-management endpoint may accept a scoped PAT.
+PAT_AUTH_ENDPOINTS = frozenset({
+    "auth.current_principal",
+    "auth.credentials",
+    "auth.credential_durable_work",
+    "auth.revoke_credential",
+})
 PRIVILEGE_CHANGE_ENDPOINTS = frozenset({
     "teams.session_teams_create",
     "teams.session_teams_join",
@@ -83,16 +94,42 @@ def is_public_endpoint(endpoint: str | None = None) -> bool:
 
 
 def safe_next_path(value: object, *, fallback: str = "/") -> str:
-    path = str(value or "").strip()
-    if not path.startswith("/") or path.startswith("//") or "\r" in path or "\n" in path:
+    path = str(value or "")
+    if not path.startswith("/") or path.startswith("//") or len(path) > 2048:
         return fallback
-    return path[:2048]
+    # Browsers normalize backslashes and strip control characters when parsing
+    # Location. Validate before any parser can discard those characters.
+    if any(char == "\\" or char.isspace() or ord(char) < 32 or ord(char) == 127 for char in path):
+        return fallback
+    try:
+        parsed = urlsplit(path)
+        decoded_path = unquote(parsed.path, errors="strict")
+    except (UnicodeError, ValueError):
+        return fallback
+    if parsed.scheme or parsed.netloc or decoded_path.startswith("//"):
+        return fallback
+    if any(char == "\\" or char.isspace() or ord(char) < 32 or ord(char) == 127 for char in decoded_path):
+        return fallback
+    return path
 
 
 def _unauthorized_response():
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error("credential_required", "Sign in is required.")), 401
     return jsonify({"error": "credential_required", "message": "Sign in is required."}), 401
+
+
+def enforce_pat_route_access(authentication_result):
+    """Keep bearer tokens inside interfaces that enforce their scope policy."""
+    context = authentication_result.context
+    if not isinstance(context, AuthenticatedContext) or context.credential_type != "pat":
+        return None
+    if request.path.startswith("/api/v1/") or request.endpoint in PAT_AUTH_ENDPOINTS:
+        return None
+    return jsonify({
+        "error": "pat_route_forbidden",
+        "message": "Personal access tokens use API v1 and cannot access browser routes.",
+    }), 403
 
 
 def enforce_restricted_access(authentication_result):
@@ -140,16 +177,21 @@ def enforce_browser_csrf(authentication_result):
         return None
     cookie_token = str(request.cookies.get(BROWSER_CSRF_COOKIE) or "")
     header_token = str(request.headers.get("X-Darklab-CSRF") or "")
-    if (
-        not cookie_token
-        or not hmac_compare(cookie_token, header_token)
-        or not verify_csrf_token(context.browser_session_id, cookie_token)
-    ):
-        message = "The request couldn't be verified. Refresh the page and try again."
-        if request.path.startswith("/api/v1/"):
-            return jsonify(json_error("csrf_validation_failed", message)), 403
-        return jsonify({"error": "csrf_validation_failed", "message": message}), 403
-    return None
+    if not cookie_token:
+        reason = "missing_cookie"
+    elif not header_token:
+        reason = "missing_header"
+    elif not hmac_compare(cookie_token, header_token):
+        reason = "token_mismatch"
+    elif not verify_csrf_token(context.browser_session_id, cookie_token):
+        reason = "stored_token_invalid"
+    else:
+        return None
+    log_browser_csrf_rejected(reason)
+    message = "The request couldn't be verified. Refresh the page and try again."
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("csrf_validation_failed", message)), 403
+    return jsonify({"error": "csrf_validation_failed", "message": message}), 403
 
 
 def hmac_compare(left: str, right: str) -> bool:
@@ -179,11 +221,12 @@ def rotate_browser_session_after_privilege_change(response):
         absolute_seconds=absolute_seconds,
         replace_session_id=context.browser_session_id,
         authenticated_at=context.browser_session_authenticated_at,
+        absolute_expires_at=context.browser_session_absolute_expires_at,
     )
     response.set_cookie(
         BROWSER_SESSION_COOKIE,
         issued.cookie_value,
-        max_age=absolute_seconds,
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=True,
         samesite="Strict",
@@ -192,7 +235,7 @@ def rotate_browser_session_after_privilege_change(response):
     response.set_cookie(
         BROWSER_CSRF_COOKIE,
         issued.csrf_token,
-        max_age=absolute_seconds,
+        max_age=issued.cookie_max_age,
         secure=True,
         httponly=False,
         samesite="Strict",

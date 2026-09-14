@@ -78,7 +78,9 @@ def _run_config_startup(
 
     env = os.environ.copy()
     for name in tuple(env):
-        if name.startswith(("AI_", "DATABASE_")) or name in {
+        if name.startswith(("AI_", "DATABASE_", "OIDC_", "BROWSER_SESSION_")) or name in {
+            "ACCESS_PROFILE",
+            "RESTRICTED_PUBLIC_SHARES_ENABLED",
             "APP_CONF_DIR",
             "APP_LOCAL_CONF_DIR",
             "ASSET_BUNDLE_MODE",
@@ -591,6 +593,116 @@ class TestConfigureLogging:
 
 
 class TestConfigStartupLogging:
+    @pytest.mark.parametrize("log_format", ["text", "gelf"])
+    @pytest.mark.parametrize("profile,provider,provisioning,shares,expected_shares", [
+        ("open", False, "disabled", False, True),
+        ("open", True, "disabled", False, True),
+        ("token_required", False, "disabled", False, False),
+        ("token_required", False, "disabled", True, True),
+        ("oidc_required", True, "disabled", False, False),
+        ("oidc_required", True, "automatic", False, False),
+        ("mixed", True, "automatic", False, False),
+        ("mixed", True, "allowlist", True, True),
+    ])
+    def test_loaded_config_reports_safe_access_policy(
+        self, tmp_path, log_format, profile, provider, provisioning, shares, expected_shares,
+    ):
+        values = {
+            "access_profile": profile,
+            "oidc_provisioning": provisioning,
+            "restricted_public_shares_enabled": shares,
+            "browser_session_idle_minutes": 45,
+            "browser_session_absolute_hours": 24,
+        }
+        if provider:
+            values.update({
+                "oidc_issuer": "https://private-provider.example",
+                "oidc_client_id": "private-client-canary",
+                "oidc_client_secret": "private-secret-canary",
+                "oidc_redirect_uri": "https://private-app.example/auth/oidc/callback",
+            })
+        if provisioning == "allowlist":
+            values["oidc_allowed_subjects"] = ["private-subject-canary"]
+        result = _run_config_startup(
+            tmp_path, base_config=f"app_name: startup-test\nlog_level: INFO\nlog_format: {log_format}\n",
+            local_config=json.dumps(values), configure_twice=True,
+        )
+        assert result.returncode == 0
+        assert result.stderr.count("CONFIG_LOADED") == 1
+        assert "private-" not in result.stderr + result.stdout
+        expected = {
+            "access_profile": profile, "oidc_configured": provider, "oidc_provisioning": provisioning,
+            "public_shares_enabled": expected_shares,
+            "browser_session_idle_minutes": 45, "browser_session_absolute_hours": 24,
+        }
+        if log_format == "gelf":
+            loaded = next(item for item in _gelf_records(result.stderr) if item["short_message"] == "CONFIG_LOADED")
+            assert loaded["level"] == 6
+            for key, value in expected.items():
+                assert loaded[f"_{key}"] == value
+        else:
+            loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
+            assert "[INFO ]" in loaded
+            for key, value in expected.items():
+                assert f"{key}={value}" in loaded
+
+    @pytest.mark.parametrize("log_format", ["text", "gelf"])
+    @pytest.mark.parametrize("overrides,key,reason,provider", [
+        ({"oidc_provisioning": "private-invalid-policy"}, "oidc_provisioning", "unsupported_provisioning", True),
+        ({"oidc_scopes": {"private-scope": True}}, "oidc_scopes", "invalid_list", True),
+        ({"oidc_allowed_subjects": [123]}, "oidc_allowed_subjects", "invalid_list", True),
+        ({"oidc_scopes": ["private-scope"]}, "oidc_scopes", "openid_scope_missing", True),
+        ({"oidc_scopes": ["openid", "openid"]}, "oidc_scopes", "duplicate_values", True),
+        ({"oidc_allowed_subjects": ["private-subject", "private-subject"]}, "oidc_allowed_subjects", "duplicate_values", True),
+        ({"access_profile": "mixed"}, "access_profile", "oidc_configuration_required", False),
+        ({"access_profile": "oidc_required"}, "access_profile", "oidc_configuration_required", False),
+        ({"oidc_issuer": ""}, "oidc_issuer", "required_setting_missing", True),
+        ({"oidc_client_id": ""}, "oidc_client_id", "required_setting_missing", True),
+        ({"oidc_client_secret": ""}, "oidc_client_secret", "required_setting_missing", True),
+        ({"oidc_redirect_uri": ""}, "oidc_redirect_uri", "required_setting_missing", True),
+        ({"oidc_issuer": "http://private-provider.example"}, "oidc_issuer", "invalid_issuer_url", True),
+        ({"oidc_issuer": "https://[private-invalid-host"}, "oidc_issuer", "invalid_issuer_url", True),
+        ({"oidc_redirect_uri": "https://private-app.example/wrong"}, "oidc_redirect_uri", "invalid_redirect_uri", True),
+        ({"oidc_redirect_uri": "https://[private-invalid-host"}, "oidc_redirect_uri", "invalid_redirect_uri", True),
+        ({"oidc_provisioning": "allowlist"}, "oidc_allowed_subjects", "allowlist_required", True),
+        ({"oidc_allowed_subjects": ["private-subject"]}, "oidc_allowed_subjects", "allowlist_not_enabled", True),
+        ({"access_profile": "open", "oidc_provisioning": "automatic"},
+         "oidc_provisioning", "access_profile_disallows_provisioning", True),
+        ({"access_profile": "open", "browser_session_idle_minutes": 61, "browser_session_absolute_hours": 1},
+         "browser_session_idle_minutes", "idle_exceeds_absolute", False),
+    ])
+    def test_access_validation_emits_one_safe_fatal_record(self, tmp_path, log_format, overrides, key, reason, provider):
+        values = {
+            "access_profile": "mixed",
+            "oidc_issuer": "https://private-provider.example",
+            "oidc_client_id": "private-client-canary",
+            "oidc_client_secret": "private-secret-canary",
+            "oidc_redirect_uri": "https://private-app.example/auth/oidc/callback",
+        } if provider else {}
+        values.update(overrides)
+        result = _run_config_startup(
+            tmp_path, base_config=f"app_name: startup-test\nlog_level: DEBUG\nlog_format: {log_format}\n",
+            local_config=json.dumps(values), fatal=True,
+        )
+        assert result.returncode != 0
+        assert result.stderr.count("CONFIG_LOAD_FAILED") == 1
+        assert "private-" not in result.stderr + result.stdout
+        phase = "access_profile_validation" if key == "browser_session_idle_minutes" else "oidc_validation"
+        source = str(tmp_path / "local" / "config.local.yaml") if key in values else "built-in defaults"
+        if log_format == "gelf":
+            records = _gelf_records(result.stderr)
+            assert len(records) == 1
+            failure = records[0]
+            assert failure["level"] == 3 and failure["short_message"] == "CONFIG_LOAD_FAILED"
+            assert failure["_phase"] == phase and failure["_key"] == key
+            assert failure["_error"] == reason and failure["_event_source"] == source
+            assert "full_message" not in failure
+        else:
+            failure = next(line for line in result.stderr.splitlines() if "CONFIG_LOAD_FAILED" in line)
+            assert "[ERROR]" in failure and f"phase={phase}" in failure
+            assert f"key={key}" in failure and f"error={reason}" in failure
+            assert f"source={source}" in failure or f"source='{source}'" in failure
+
     @pytest.mark.parametrize("log_format", ["text", "gelf"])
     def test_debug_startup_replays_forgiving_warning_once(self, tmp_path, log_format):
         result = _run_config_startup(

@@ -84,6 +84,7 @@ def api_project_probe_launch(project_id):
             project_id,
             probe_request,
             {"confirmed": data.get("confirmed"), "plan_digest": data.get("plan_digest")},
+            owner_context=owner_scope.context,
             team_id=owner_scope.team_id,
             team_role=str((owner_scope.member or {}).get("role") or ""),
             actor_member_id=str((owner_scope.member or {}).get("id") or ""),

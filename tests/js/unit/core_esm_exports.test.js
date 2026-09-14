@@ -899,8 +899,6 @@ describe('core ESM exports', () => {
         entityType: 'domain',
         entityValue: 'ip.darklab.sh',
         forceView: 'profile',
-        refreshIntel: false,
-        addActiveProject: false,
       })
     } finally {
       setAtlasHandlers({ openAtlas })

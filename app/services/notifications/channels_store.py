@@ -175,7 +175,7 @@ def _channel_rows(conn, session_token: str, team_id: str = "") -> list[Any]:
     owner_sql, owner_params = _owner_where(session_token, team_id)
     return conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
-        "muted, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
+        "muted, muted_reason, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
         f"FROM notification_channels WHERE {owner_sql} ORDER BY lower(label) ASC, created ASC, id ASC",  # nosec
         owner_params,
     ).fetchall()
@@ -185,7 +185,7 @@ def _get_channel(conn, session_token: str, channel_id: str, team_id: str = "") -
     owner_sql, owner_params = _owner_where(session_token, team_id)
     row = conn.execute(
         "SELECT id, personal_workspace_id, team_id, kind, label, secrets_json, config_json, triggers_json, "
-        "muted, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
+        "muted, muted_reason, created, updated, principal_id, created_by_credential_id, last_changed_by_credential_id "
         f"FROM notification_channels WHERE {owner_sql} AND id = ?",  # nosec
         (*owner_params, channel_id),
     ).fetchone()
@@ -308,6 +308,7 @@ def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
             {"name": field, "configured": bool(str(channel.secrets.get(field) or "").strip())} for field in secret_fields
         ],
         "muted": channel.muted,
+        "muted_reason": channel.muted_reason,
         "created": channel.created,
         "updated": channel.updated,
     }
@@ -614,6 +615,7 @@ def update_notification_channel(
             config=_normalize_config(existing.kind, data.get("config", existing.config)),
             triggers=_normalize_triggers(data.get("triggers", list(existing.triggers))),
             muted=bool(data.get("muted", existing.muted)),
+            muted_reason=existing.muted_reason if bool(data.get("muted", existing.muted)) else "",
             created=existing.created,
             updated=_utc_now(),
             principal_id=existing.principal_id,
@@ -636,7 +638,7 @@ def update_notification_channel(
         owner_sql, owner_params = _owner_where(session_token, team_id)
         conn.execute(
             "UPDATE notification_channels "
-            "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, "
+            "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, muted_reason = ?, "
             "last_changed_by_credential_id = ?, updated = ? "
             f"WHERE {owner_sql} AND id = ?",  # nosec
             (
@@ -645,6 +647,7 @@ def update_notification_channel(
                 _json_param(channel.config),
                 _json_param(list(channel.triggers)),
                 dialect_for_backend(database.DB_BACKEND).boolean_param(channel.muted),
+                channel.muted_reason,
                 channel.last_changed_by_credential_id or None,
                 channel.updated,
                 *owner_params,

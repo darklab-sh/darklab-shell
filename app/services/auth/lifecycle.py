@@ -17,12 +17,13 @@ from services.workspace.models import WorkspaceSettings
 from . import storage
 from .contracts import (
     CredentialMetadata,
-    IdentityStorageError,
+    InvalidIdentityValue,
     IssuedCredential,
     PrincipalBundle,
     PrincipalRecord,
     timestamp,
 )
+from .lifecycle_logging import LifecycleEvents
 from .resolver import AuthenticatedContext, AuthenticationResult
 
 
@@ -50,11 +51,9 @@ def create_principal(
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> PrincipalBundle:
+    events = LifecycleEvents("anonymous_upgrade", request_fields)
+
     def operation(conn: Any) -> PrincipalBundle:
-        if storage._database_backend(conn).value == "sqlite":  # noqa: SLF001
-            # Reserve the write transaction before reading the verifier root.
-            # Two first-time upgrades must not both decide it needs creation.
-            conn.execute("BEGIN IMMEDIATE")
         bundle = storage.create_principal_with_credential(
             anonymous_id=anonymous_id,
             credential_label=credential_label,
@@ -77,9 +76,11 @@ def create_principal(
             conn=conn,
             **_audit_fields(request_fields),
         )
+        events.principal("PRINCIPAL_CREATED", bundle.principal)
+        events.credential("CREDENTIAL_CREATED", bundle.credential.metadata)
         return bundle
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def operator_bootstrap(
@@ -90,6 +91,8 @@ def operator_bootstrap(
     connect: Callable[[], Any] | None = None,
 ) -> PrincipalBundle:
     """Create the first restricted principal through the local operator boundary."""
+    events = LifecycleEvents("local_operator_bootstrap")
+
     def operation(conn: Any) -> PrincipalBundle:
         if storage._database_backend(conn).value == "postgres":  # noqa: SLF001
             conn.execute("LOCK TABLE principals IN EXCLUSIVE MODE")
@@ -98,7 +101,7 @@ def operator_bootstrap(
         count_row = conn.execute("SELECT COUNT(*) AS count FROM principals").fetchone()
         count = int(dict(count_row).get("count") or 0)
         if count:
-            raise IdentityStorageError(
+            raise InvalidIdentityValue(
                 "restricted bootstrap is available only before the first principal exists"
             )
         bundle = storage.create_principal_with_credential(
@@ -125,9 +128,11 @@ def operator_bootstrap(
         )
         if credential_sink is not None:
             credential_sink(bundle.credential.secret)
+        events.principal("PRINCIPAL_CREATED", bundle.principal)
+        events.credential("CREDENTIAL_CREATED", bundle.credential.metadata)
         return bundle
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def list_safe_credentials(
@@ -166,12 +171,18 @@ def issue(
     credential_type: str = "portable",
     label: str = "",
     expires_at: str | datetime | None = None,
+    expires_in_days: int | None = None,
+    portable_credentials_enabled: bool = True,
     scopes: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None = None,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     if context.credential_type == "pat":
         raise PermissionError("PATs cannot issue credentials")
+    if credential_type == "portable" and not portable_credentials_enabled:
+        raise PermissionError("Browser credentials are disabled for this deployment. Create an API token instead.")
+
+    events = LifecycleEvents("self_service", request_fields)
 
     def operation(conn: Any) -> IssuedCredential:
         issued = storage.issue_credential(
@@ -179,6 +190,7 @@ def issue(
             credential_type=credential_type,
             label=label,
             expires_at=expires_at,
+            expires_in_days=expires_in_days,
             scopes=scopes,
             created_by_credential_id=context.credential_id or None,
             conn=conn,
@@ -191,9 +203,10 @@ def issue(
             conn=conn,
             **_audit_fields(request_fields),
         )
+        events.credential("CREDENTIAL_CREATED", issued.metadata)
         return issued
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def operator_issue(
@@ -206,6 +219,8 @@ def operator_issue(
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     """Issue a credential through the local operator boundary."""
+    events = LifecycleEvents("local_operator")
+
     def operation(conn: Any) -> IssuedCredential:
         issued = storage.issue_credential(
             principal_id,
@@ -222,9 +237,10 @@ def operator_issue(
             details=_credential_details(issued.metadata, source="local_operator"),
             conn=conn,
         )
+        events.credential("CREDENTIAL_CREATED", issued.metadata)
         return issued
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def operator_recover(
@@ -234,24 +250,28 @@ def operator_recover(
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     """Revoke existing credentials and return one replacement exactly once."""
+    events = LifecycleEvents("local_operator_recovery")
+
     def operation(conn: Any) -> IssuedCredential:
         from .background_authorization import pause_durable_work_for_credential  # noqa: PLC0415
         from .browser_sessions import revoke_principal_browser_sessions  # noqa: PLC0415
 
+        storage._lock_active_principal_row(conn, principal_id)  # noqa: SLF001
         revoke_principal_browser_sessions(principal_id, reason="operator recovery", conn=conn)
 
         current = storage.list_credentials(principal_id, conn=conn)
         for credential in current:
             if credential.revoked_at is not None:
                 continue
-            storage.revoke_credential(
+            revoked = storage.revoke_credential(
                 principal_id,
                 credential.id,
                 reason="operator recovery",
                 allow_lockout=True,
                 conn=conn,
             )
-            pause_durable_work_for_credential(conn, principal_id, credential.id)
+            disposition = pause_durable_work_for_credential(conn, principal_id, credential.id)
+            events.credential("CREDENTIAL_REVOKED", revoked, paused_work_count=len(disposition.paused))
             record_event(
                 AuditEventType.CREDENTIAL_REVOKE,
                 target_type=AuditTargetType.CREDENTIAL,
@@ -272,9 +292,10 @@ def operator_recover(
             details=_credential_details(replacement.metadata, source="local_operator_recovery"),
             conn=conn,
         )
+        events.credential("CREDENTIAL_CREATED", replacement.metadata)
         return replacement
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def operator_summary(
@@ -331,6 +352,8 @@ def operator_rotate(
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     """Rotate a credential through the local operator boundary."""
+    events = LifecycleEvents("local_operator")
+
     def operation(conn: Any) -> IssuedCredential:
         replacement = storage.rotate_credential(
             principal_id,
@@ -349,9 +372,10 @@ def operator_rotate(
             ),
             conn=conn,
         )
+        events.credential("CREDENTIAL_ROTATED", replacement.metadata, previous_credential_id=credential_id)
         return replacement
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def operator_revoke(
@@ -364,6 +388,8 @@ def operator_revoke(
     connect: Callable[[], Any] | None = None,
 ) -> tuple[CredentialMetadata, Any]:
     """Revoke a credential and report its durable-work disposition."""
+    events = LifecycleEvents("local_operator")
+
     def operation(conn: Any) -> tuple[CredentialMetadata, Any]:
         from .background_authorization import (  # noqa: PLC0415
             DurableWorkDisposition,
@@ -371,6 +397,8 @@ def operator_revoke(
             pause_durable_work_for_credential,
         )
 
+        storage._lock_active_principal_row(conn, principal_id)  # noqa: SLF001
+        was_revoked = dict(storage._credential_row(conn, principal_id, credential_id))["revoked_at"] is not None  # noqa: SLF001
         metadata = storage.revoke_credential(
             principal_id,
             credential_id,
@@ -395,9 +423,11 @@ def operator_revoke(
             disposition = DurableWorkDisposition(
                 affected=durable_work_for_credential(conn, principal_id, metadata.id),
             )
+        if not was_revoked:
+            events.credential("CREDENTIAL_REVOKED", metadata, paused_work_count=len(disposition.paused))
         return metadata, disposition
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def rename(
@@ -461,30 +491,48 @@ def rotate(
     *,
     label: str | None = None,
     expires_at: str | datetime | None = None,
+    defer_revocation: bool = False,
+    portable_credentials_enabled: bool = True,
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> IssuedCredential:
     if context.credential_type == "pat":
         raise PermissionError("PATs cannot rotate credentials")
 
+    events = LifecycleEvents("self_service", request_fields)
+
     def operation(conn: Any) -> IssuedCredential:
+        if not portable_credentials_enabled:
+            current = storage._credential_row(conn, context.principal_id, credential_id)  # noqa: SLF001
+            if current["credential_type"] == "portable":
+                raise PermissionError(
+                    "Browser credentials are disabled for this deployment. Ask an operator about recovery access."
+                )
         replacement = storage.rotate_credential(
             context.principal_id,
             credential_id,
             label=label,
             expires_at=expires_at,
+            defer_revocation=defer_revocation,
             conn=conn,
         )
         record_event(
-            AuditEventType.CREDENTIAL_ROTATE,
-            target_id=credential_id,
-            details=_credential_details(replacement.metadata, target_id=replacement.metadata.id),
+            AuditEventType.CREDENTIAL_CREATE if defer_revocation else AuditEventType.CREDENTIAL_ROTATE,
+            target_id=replacement.metadata.id if defer_revocation else credential_id,
+            details=_credential_details(
+                replacement.metadata, target_id=credential_id if defer_revocation else replacement.metadata.id,
+                source="rotation_preparation" if defer_revocation else "self_service",
+            ),
             conn=conn,
             **_audit_fields(request_fields),
         )
+        if defer_revocation:
+            events.credential("CREDENTIAL_CREATED", replacement.metadata)
+        else:
+            events.credential("CREDENTIAL_ROTATED", replacement.metadata, previous_credential_id=credential_id)
         return replacement
 
-    return run_transaction(operation, connect=connect)
+    return events.run(operation, connect=connect)
 
 
 def revoke(
@@ -501,6 +549,8 @@ def revoke(
     if context.credential_type == "pat" and credential_id != context.credential_id:
         raise PermissionError("PATs may revoke only themselves")
 
+    events = LifecycleEvents("self_service", request_fields)
+
     def operation(conn: Any) -> tuple[CredentialMetadata, Any]:
         from .background_authorization import (  # noqa: PLC0415
             DurableWorkDisposition,
@@ -508,6 +558,8 @@ def revoke(
             pause_durable_work_for_credential,
         )
 
+        storage._lock_active_principal_row(conn, context.principal_id)  # noqa: SLF001
+        was_revoked = dict(storage._credential_row(conn, context.principal_id, credential_id))["revoked_at"] is not None  # noqa: SLF001
         metadata = storage.revoke_credential(
             context.principal_id,
             credential_id,
@@ -532,9 +584,11 @@ def revoke(
             disposition = DurableWorkDisposition(
                 affected=durable_work_for_credential(conn, context.principal_id, metadata.id),
             )
+        if not was_revoked:
+            events.credential("CREDENTIAL_REVOKED", metadata, paused_work_count=len(disposition.paused))
         return metadata, disposition
 
-    metadata, disposition = run_transaction(operation, connect=connect)
+    metadata, disposition = events.run(operation, connect=connect)
     return (metadata, disposition) if include_durable_work else metadata
 
 
@@ -546,7 +600,10 @@ def set_principal_enabled(
     request_fields: Mapping[str, Any] | None = None,
     connect: Callable[[], Any] | None = None,
 ) -> PrincipalRecord:
+    events = LifecycleEvents("local_operator", request_fields)
+
     def operation(conn: Any) -> PrincipalRecord:
+        previous_status = str(dict(storage._lock_principal_row(conn, principal_id))["status"])  # noqa: SLF001
         principal = (
             storage.enable_principal(principal_id, conn=conn)
             if enabled
@@ -563,9 +620,11 @@ def set_principal_enabled(
             conn=conn,
             **_audit_fields(request_fields),
         )
+        if principal.status != previous_status:
+            events.principal("PRINCIPAL_STATUS_CHANGED", principal)
         return principal
 
-    principal = run_transaction(operation, connect=connect)
+    principal = events.run(operation, connect=connect)
     if not enabled:
         from .background_runtime import stop_principal_active_work  # noqa: PLC0415
 

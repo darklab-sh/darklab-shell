@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
+import { backgroundPauseMessage } from '../../ui/background_pause.js';
 
 // Browser change-detection watchers modal.
 import { getAppConfig as importedGetAppConfig } from '../../core/config.js';
@@ -1425,7 +1426,7 @@ function _renderWatchersDetail() {
   if (watcher?.state_reason || watcher?.last_error) {
     const alert = document.createElement('div');
     alert.className = 'watchers-alert';
-    alert.textContent = watcher.last_error || watcher.state_reason || '';
+    alert.textContent = backgroundPauseMessage(watcher.state_reason) || watcher.last_error || watcher.state_reason || '';
     root.appendChild(alert);
   }
   _renderWatcherForm(root, isNew ? null : watcher);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { fromDomScripts } from './helpers/extract.js'
+import { ensureAutocompleteReady } from '../e2e/helpers.js'
 
 function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
   const cmdInput = document.getElementById('cmd')
@@ -3774,5 +3775,43 @@ describe('autocomplete helpers', () => {
       if (originalOffsetHeight)
         Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
     }
+  })
+})
+
+
+describe('autocomplete browser readiness', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('observes a pending startup catalog without issuing a competing request', async () => {
+    const state = { acContextRegistry: {} }
+    const apiFetch = vi.fn(() => new Promise(() => {}))
+    vi.stubGlobal('APP_STATE_API', { getState: () => state })
+    vi.stubGlobal('acContextRegistry', state.acContextRegistry)
+    vi.stubGlobal('apiFetch', apiFetch)
+    const page = {
+      waitForFunction: vi.fn(async (poll) => {
+        expect(poll()).toBe(false)
+        // The real startup request finishes between browser polling frames.
+        state.acContextRegistry = { nmap: { flags: ['-sT'] } }
+        expect(poll()).toBe(true)
+      }),
+    }
+
+    await ensureAutocompleteReady(page)
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(state.acContextRegistry).toEqual({ nmap: { flags: ['-sT'] } })
+  })
+
+  it('uses the loaded application state when the legacy test alias is empty', async () => {
+    vi.stubGlobal('APP_STATE_API', {
+      getState: () => ({ acContextRegistry: { whois: {} } }),
+    })
+    vi.stubGlobal('acContextRegistry', {})
+    const page = { waitForFunction: vi.fn(async (poll) => expect(poll()).toBe(true)) }
+
+    await ensureAutocompleteReady(page, { timeout: 1234 })
+
+    expect(page.waitForFunction).toHaveBeenCalledWith(expect.any(Function), undefined, { timeout: 1234 })
   })
 })

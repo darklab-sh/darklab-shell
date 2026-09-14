@@ -1028,6 +1028,7 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
 
+    await expect(page.locator('#confirm-host')).toBeHidden()
     await page.locator('[data-project-mobile-action="back-to-list"]').click()
     await expect(page.locator('#project-mobile-list-view')).toBeVisible()
     projectRow = page.locator('.project-mobile-row').filter({ hasText: projectName }).first()

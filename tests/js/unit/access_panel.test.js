@@ -8,6 +8,7 @@ vi.mock('../../../app/static/js/session.js', () => ({
       kind: 'credential', anonymousId: '', credentialId: id, validFormat: true,
     }
   }),
+  redirectToSignIn: vi.fn(),
   apiFetch: (...args) => globalThis.__accessPanelTest.apiFetch(...args),
   clearAccessCredential: vi.fn(() => {
     globalThis.__accessPanelTest.identity = {
@@ -32,6 +33,10 @@ vi.mock('../../../app/static/js/ui/ui_helpers.js', () => ({
 
 vi.mock('../../../app/static/js/core/config.js', () => ({
   getAppConfig: () => globalThis.__accessPanelTest.appConfig || {},
+}))
+
+vi.mock('../../../app/static/js/runtime_bridge.js', () => ({
+  logClientError: (...args) => globalThis.__accessPanelTest.logClientError(...args),
 }))
 
 const SECRET = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
@@ -77,6 +82,8 @@ function renderMarkup() {
       <div id="options-access-authenticated-actions" hidden>
         <button id="options-access-add-btn" disabled></button>
         <button id="options-access-remove-btn" disabled></button>
+        <button id="options-access-remove-all-btn" disabled hidden></button>
+        <a id="options-access-session-reauth" href="/auth/sign-in?next=%2F%3Foptions%3Daccess" hidden>Sign in again</a>
       </div>
       <button id="options-access-refresh-btn" disabled></button>
       <div id="options-access-credentials-section" hidden>
@@ -93,7 +100,7 @@ function renderMarkup() {
         <div id="options-access-oidc-status"></div>
         <button id="options-access-oidc-link" hidden></button>
         <button id="options-access-oidc-unlink" hidden></button>
-        <a id="options-access-oidc-reauth" hidden></a>
+        <a id="options-access-oidc-reauth" href="/auth/sign-in?force=credential&amp;next=%2F%3Foptions%3Daccess" hidden></a>
       </div>
     </div>
   `
@@ -112,6 +119,7 @@ describe('Access panel', () => {
       showConfirm: vi.fn().mockResolvedValue('cancel'),
       copy: vi.fn().mockResolvedValue(undefined),
       toast: vi.fn(),
+      logClientError: vi.fn(),
       appConfig: {},
     }
   })
@@ -310,7 +318,7 @@ describe('Access panel', () => {
       .mockResolvedValueOnce('revoke')
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
       if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID } })
-      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
+      if (url.endsWith('/rotate') && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
       if (url === '/auth/credentials') return response({ credentials: [credential()] })
       if (url.endsWith('/durable-work')) return response({ durable_work: { affected: [] } })
       if (url.endsWith('/revoke')) return response({ durable_work: { paused_count: 0 } })
@@ -329,7 +337,264 @@ describe('Access panel', () => {
 
     await vi.waitFor(() => expect(session.activateAccessCredential).toHaveBeenCalledWith(REPLACEMENT_SECRET))
     const urls = globalThis.__accessPanelTest.apiFetch.mock.calls.map(([url]) => url)
+    expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith(`/auth/credentials/${CURRENT_ID}/rotate`, expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ defer_revocation: true }),
+    }))
     expect(urls.indexOf('/auth/credentials')).toBeLessThan(urls.indexOf(`/auth/credentials/${CURRENT_ID}/revoke`))
+  })
+
+  it.each(['revoke', 'rotate'])('signs out a restricted browser after current credential %s', async action => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'token_required' }
+    globalThis.__accessPanelTest.identity = {
+      kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
+    }
+    if (action === 'rotate') globalThis.__accessPanelTest.showConfirm.mockResolvedValueOnce('continue')
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValueOnce('revoke')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
+      if (url.endsWith('/rotate') && options.method === 'POST') return response({ secret: REPLACEMENT_SECRET }, 201)
+      if (url === '/auth/credentials') return response({ credentials: [credential()] })
+      if (url.endsWith('/durable-work')) return response({ durable_work: { affected: [] } })
+      if (url.endsWith('/revoke')) return response({ durable_work: {} })
+      return response({})
+    })
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.querySelector(`[data-credential-action="${action}"]`).click()
+    if (action === 'rotate') {
+      await vi.waitFor(() => expect(document.getElementById('options-access-reveal').hidden).toBe(false))
+      expect(session.redirectToSignIn).not.toHaveBeenCalled()
+      expect(globalThis.__accessPanelTest.apiFetch.mock.calls.some(([url]) => url.endsWith('/revoke'))).toBe(false)
+      ;[...document.querySelectorAll('#options-access-reveal button')].find(button => button.textContent === 'I saved it').click()
+    }
+    await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls.at(-1)[0].body).toContain('sign out this browser')
+    expect(session.activateAccessCredential).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-reveal').textContent).not.toContain(REPLACEMENT_SECRET)
+  })
+
+  it('shows a failed logout in the Access panel and permits retry', async () => {
+    globalThis.__accessPanelTest.identity = {
+      kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
+    }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('remove')
+    globalThis.__accessPanelTest.apiFetch.mockRejectedValueOnce(new Error('Connection lost'))
+      .mockImplementation(() => response({}, 204))
+    const session = await import('../../../app/static/js/session.js')
+    await import('../../../app/static/js/features/preferences/access_panel.js')
+    document.getElementById('options-access-remove-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-msg').textContent).toContain('Connection lost'))
+    expect(session.redirectToSignIn).not.toHaveBeenCalled()
+    document.getElementById('options-access-remove-btn').click()
+    await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+  })
+
+  it.each(['open', 'oidc_required'])('creates an API token with the permitted credential choices in %s', async profile => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: profile }
+    const scopes = ['identity:read', 'history:read', 'runs:execute', 'projects:read']
+    const token = `dlp_v1_pat_${'e'.repeat(32)}_${'f'.repeat(43)}`
+    globalThis.__accessPanelTest.identity = {
+      kind: 'credential', anonymousId: '', credentialId: CURRENT_ID, validFormat: true,
+    }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation((url, options = {}) => {
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID } })
+      if (url === '/auth/credentials' && options.method === 'POST') return response({ secret: token }, 201)
+      if (url === '/auth/credentials') return response({ credentials: [credential()], portable_credentials_enabled: profile !== 'oidc_required', pat_policy: {
+        scopes, default_scopes: scopes.slice(0, 3), default_expiry_days: 90, min_expiry_days: 1, max_expiry_days: 365,
+      } })
+      return response({})
+    })
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.getElementById('options-access-add-btn').click()
+    const editor = document.getElementById('options-access-editor')
+    const type = editor.querySelector('select')
+    if (profile === 'oidc_required') {
+      expect(type.value).toBe('pat')
+      expect(type.querySelector('[value="portable"]')).toBeNull()
+      expect(document.querySelector('[data-credential-action="rotate"]')).toBeNull()
+      expect(document.getElementById('options-access-credentials').textContent).toContain('Recovery credential')
+    }
+    type.value = 'pat'
+    type.dispatchEvent(new Event('change'))
+    expect(editor.querySelector('input[type="datetime-local"]').closest('label').hidden).toBe(true)
+    expect([...editor.querySelectorAll('[name="pat_scope"]:checked')].map(node => node.value)).toEqual(scopes.slice(0, 3))
+    editor.querySelector('input[type="text"]').value = 'CLI work'
+    const days = editor.querySelector('input[type="number"]')
+    days.value = '366'
+    editor.querySelector('.btn-primary').click()
+    await vi.waitFor(() => expect(editor.textContent).toContain('between 1 and 365'))
+    expect(globalThis.__accessPanelTest.apiFetch.mock.calls.some(([url, opts]) => url === '/auth/credentials' && opts?.method === 'POST')).toBe(false)
+    days.value = '1'
+    editor.querySelector('[value="projects:read"]').checked = true
+    editor.querySelector('.btn-primary').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-reveal').hidden).toBe(false))
+    const [, options] = globalThis.__accessPanelTest.apiFetch.mock.calls.find(([url, opts]) => url === '/auth/credentials' && opts?.method === 'POST')
+    expect(JSON.parse(options.body)).toEqual({ type: 'pat', label: 'CLI work', expires_in_days: 1, scopes })
+    expect(session.activateAccessCredential).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-reveal').textContent).not.toContain(token)
+  })
+
+  it.each(['portable', 'oidc'])('shows session sign-out wording for %s browsers', async kind => {
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', credentialId: '', validFormat: true }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => response(url === '/auth/principal'
+      ? { authentication: { credential_id: kind === 'portable' ? CURRENT_ID : '', credential_type: kind } }
+      : { credentials: [] }))
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-remove-btn').textContent).toBe('Sign out')
+    expect(document.getElementById('options-access-remove-all-btn').hidden).toBe(false)
+    document.getElementById('options-access-remove-btn').click()
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls[0][0].body).toContain('Your workspace stays saved')
+    expect(globalThis.__accessPanelTest.showConfirm.mock.calls[0][0].body.includes('identity provider')).toBe(kind === 'oidc')
+    globalThis.__accessPanelTest.identity = { kind: 'credential', credentialId: CURRENT_ID, validFormat: true }
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-remove-btn').textContent).toBe('Remove from browser')
+    expect(document.getElementById('options-access-remove-all-btn').hidden).toBe(true)
+  })
+
+  it.each([false, true])('signs out everywhere or offers recent sign-in when required: %s', async needsReauth => {
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', credentialId: '', validFormat: true }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('sign-out-all')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => url === '/auth/sessions/revoke-all'
+      ? response(needsReauth ? { error: 'recent_authentication_required', message: 'Sign in again first.' } : { revoked_sessions: 2 }, needsReauth ? 403 : 200)
+      : response(url === '/auth/principal' ? { authentication: { credential_type: 'oidc' } } : { credentials: [] }))
+    const session = await import('../../../app/static/js/session.js')
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    document.getElementById('options-access-remove-all-btn').click()
+    await vi.waitFor(() => expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledWith('/auth/sessions/revoke-all', expect.objectContaining({ method: 'POST' })))
+    if (needsReauth) {
+      await vi.waitFor(() => expect(document.getElementById('options-access-session-reauth').hidden).toBe(false))
+      expect(document.getElementById('options-access-session-reauth').getAttribute('href')).toBe('/auth/sign-in?next=%2F%3Foptions%3Daccess')
+      expect(document.activeElement).toBe(document.getElementById('options-access-session-reauth'))
+      expect(session.redirectToSignIn).not.toHaveBeenCalled()
+    } else {
+      await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalledOnce())
+    }
+  })
+
+  it.each([
+    ['disabled', 404, '', '', ''],
+    ['authentication', 401, '', '', ''],
+    ['forbidden', 403, 'response', 'request_rejected', 'warning'],
+    ['server', 503, 'response', 'server_failed', 'error'],
+    ['network', 0, 'request', 'network_unavailable', 'warning'],
+    ['abort', 0, 'request', 'network_unavailable', 'warning'],
+    ['client', 0, 'request', 'client_failed', 'error'],
+    ['json', 200, 'parse', 'invalid_json', 'error'],
+    ['null', 200, 'response', 'invalid_payload', 'error'],
+    ['array', 200, 'response', 'invalid_payload', 'error'],
+    ['missing', 200, 'response', 'invalid_payload', 'error'],
+    ['string', 200, 'response', 'invalid_payload', 'error'],
+  ])('keeps provider load failure %s safe, visible, and retryable', async (kind, status, stage, reason, level) => {
+    const state = globalThis.__accessPanelTest
+    state.appConfig = { access_profile: 'mixed' }
+    state.identity = { kind: 'browser_session', validFormat: true }
+    const privateText = 'private-provider-response issuer=https://private.example subject=private-user credential=private-secret'
+    let failing = true
+    const errorBody = vi.fn().mockResolvedValue({ error: privateText })
+    state.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { recent_credential_session: true } })
+      if (url === '/auth/credentials') return response({ credentials: [credential()] })
+      if (!failing) return response({ linked: true, issuer: 'https://private.example', subject: 'private-user' })
+      if (['network', 'abort', 'client'].includes(kind)) {
+        const error = kind === 'network' ? new TypeError(privateText) : new Error(privateText)
+        if (kind === 'abort') error.name = 'AbortError'
+        throw error
+      }
+      if (kind === 'json') return Promise.resolve({ ok: true, status, json: () => Promise.reject(new SyntaxError(privateText)) })
+      if (status >= 400) return Promise.resolve({ ok: false, status, json: errorBody })
+      return response({ null: null, array: [], missing: {}, string: { linked: 'false' } }[kind])
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel({ force: true })
+    expect(document.getElementById('options-access-summary').textContent).toBe('Authenticated workspace')
+    expect(document.getElementById('options-access-credentials-section').hidden).toBe(false)
+    expect(document.getElementById('options-access-oidc-section').hidden).toBe(kind === 'disabled')
+    expect(errorBody).not.toHaveBeenCalled()
+    if (kind !== 'disabled') {
+      expect(document.getElementById('options-access-oidc-status').textContent).toContain('Select Refresh to try again')
+      expect(document.getElementById('options-access-msg').textContent).not.toContain('up to date')
+      for (const action of ['link', 'unlink', 'reauth']) expect(document.getElementById(`options-access-oidc-${action}`).hidden).toBe(true)
+    }
+    if (level) {
+      expect(state.logClientError).toHaveBeenCalledExactlyOnceWith('ACCESS_OIDC_IDENTITY_LOAD_FAILED', null, {
+        event: 'ACCESS_OIDC_IDENTITY_LOAD_FAILED', level, action: 'load_identity', stage, status, reason,
+      })
+      expect(JSON.stringify(state.logClientError.mock.calls)).not.toContain('private')
+    } else {
+      expect(state.logClientError).not.toHaveBeenCalled()
+    }
+    failing = false
+    state.logClientError.mockClear()
+    document.getElementById('options-access-refresh-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(false))
+    expect(document.getElementById('options-access-msg').textContent).toBe('Access is up to date.')
+    expect(state.logClientError).not.toHaveBeenCalled()
+  })
+
+  it('ignores a provider failure from an older refresh', async () => {
+    const state = globalThis.__accessPanelTest
+    state.appConfig = { access_profile: 'mixed' }
+    state.identity = { kind: 'browser_session', validFormat: true }
+    let finishOldRequest
+    const oldRequest = new Promise(resolve => { finishOldRequest = resolve })
+    let identityCalls = 0
+    state.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { recent_credential_session: true } })
+      if (url === '/auth/credentials') return response({ credentials: [] })
+      identityCalls += 1
+      return identityCalls === 1 ? oldRequest : response({ linked: true })
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    const oldRefresh = refreshAccessPanel({ force: true })
+    await vi.waitFor(() => expect(identityCalls).toBe(1))
+    await refreshAccessPanel({ force: true })
+    finishOldRequest(await response({}, 503))
+    await oldRefresh
+    expect(state.logClientError).not.toHaveBeenCalled()
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(false)
+    expect(document.getElementById('options-access-msg').textContent).toBe('Access is up to date.')
+  })
+
+  it.each([false, true])('offers credential sign-in for an older session, linked: %s', async linked => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'mixed' }
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', validFormat: true }
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => response(url === '/auth/principal'
+      ? { authentication: { credential_type: 'portable', recent_credential_session: false } }
+      : url === '/auth/oidc/identity' ? { linked } : { credentials: [] }))
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-link').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-unlink').hidden).toBe(true)
+    expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(false)
+    globalThis.__accessPanelTest.appConfig.access_profile = 'oidc_required'
+    await refreshAccessPanel()
+    expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(true)
+  })
+
+  it.each(['link', 'unlink'])('offers reauthentication when recency expires before %s', async action => {
+    globalThis.__accessPanelTest.appConfig = { access_profile: 'mixed' }
+    globalThis.__accessPanelTest.identity = { kind: 'browser_session', validFormat: true }
+    globalThis.__accessPanelTest.showConfirm.mockResolvedValue('unlink')
+    globalThis.__accessPanelTest.apiFetch.mockImplementation(url => {
+      if (url === '/auth/principal') return response({ authentication: { credential_type: 'portable', recent_credential_session: true } })
+      if (url === '/auth/oidc/identity') return response({ linked: action === 'unlink' })
+      if (url === `/auth/oidc/${action}`) return response({ error: 'recent_credential_required', message: 'Sign in again with your credential.' }, 403)
+      return response({ credentials: [] })
+    })
+    const { refreshAccessPanel } = await import('../../../app/static/js/features/preferences/access_panel.js')
+    await refreshAccessPanel()
+    const button = document.getElementById(`options-access-oidc-${action}`)
+    expect(button.hidden).toBe(false)
+    button.click()
+    await vi.waitFor(() => expect(document.getElementById('options-access-oidc-reauth').hidden).toBe(false))
+    expect(button.hidden).toBe(true)
+    expect(document.activeElement).toBe(document.getElementById('options-access-oidc-reauth'))
+    expect(document.getElementById('options-access-msg').textContent).toContain('Sign in again')
   })
 
   it('shows safe provider-link actions only for a credential-backed browser session', async () => {
@@ -338,7 +603,7 @@ describe('Access panel', () => {
       kind: 'browser_session', anonymousId: '', credentialId: '', validFormat: true,
     }
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url) => {
-      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable' } })
+      if (url === '/auth/principal') return response({ authentication: { credential_id: CURRENT_ID, credential_type: 'portable', recent_credential_session: true } })
       if (url === '/auth/credentials') return response({ credentials: [credential()] })
       if (url === '/auth/oidc/identity') return response({ linked: false, issuer: 'https://idp.example' })
       if (url === '/auth/oidc/link') return response({ authorization_url: 'http://unsafe.example/authorize' })
