@@ -17,7 +17,7 @@ from conftest import build_test_config
 from core.database_access import get_db_connect
 from flask.testing import FlaskClient
 from joserfc import jwk, jwt
-from services.auth import oidc, storage
+from services.auth import oidc, oidc_cache, storage
 from services.auth import lifecycle
 from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
 
@@ -39,13 +39,15 @@ class _Response:
 
 class LocalProvider:
     def __init__(self, monkeypatch):
-        self.private_key = jwk.RSAKey.generate_key(2048, private=True)
+        oidc_cache.reset_provider_cache()
+        self.private_key = jwk.RSAKey.generate_key(2048, private=True, auto_kid=True)
         self.subject = "local-subject-1"
         self.signing_key = self.private_key
         self.nonce = ""
         self.verifier = ""
         self.claim_overrides = {}
         self.available = True
+        self.get_calls = []
         metadata = {
             "issuer": ISSUER,
             "authorization_endpoint": f"{ISSUER}/protocol/openid-connect/auth",
@@ -55,6 +57,7 @@ class LocalProvider:
         }
 
         def get(url, **kwargs):
+            self.get_calls.append(url)
             assert kwargs["allow_redirects"] is False
             assert kwargs["verify"] is True
             if not self.available:
@@ -66,6 +69,8 @@ class LocalProvider:
             raise AssertionError(url)
 
         def fetch_token(_client, url, **kwargs):
+            if not self.available:
+                raise oidc.requests.ConnectionError("offline")
             assert url == metadata["token_endpoint"]
             assert kwargs["code"] == "local-code"
             assert kwargs["code_verifier"] == self.verifier
@@ -82,7 +87,7 @@ class LocalProvider:
                 "nonce": self.nonce,
                 **self.claim_overrides,
             }
-            return {"id_token": jwt.encode({"alg": "RS256"}, claims, self.signing_key)}
+            return {"id_token": jwt.encode({"alg": "RS256", "kid": self.signing_key.kid}, claims, self.signing_key)}
 
         monkeypatch.setattr(oidc.requests, "get", get)
         monkeypatch.setattr(oidc.OAuth2Session, "fetch_token", fetch_token)
@@ -292,6 +297,7 @@ def test_oidc_disabled_provisioning_and_provider_outage_fail_closed(monkeypatch)
     state = _start(client, provider)
     assert "oidc_error" in _callback(client, state).headers["Location"]
     provider.available = False
+    oidc_cache.reset_provider_cache()
     assert "oidc_error" in client.get("/auth/oidc/start", base_url=ORIGIN).headers["Location"]
     assert client.get("/", base_url=ORIGIN).status_code == 302
 
@@ -303,6 +309,7 @@ def test_existing_oidc_session_survives_temporary_provider_outage(monkeypatch):
     assert _callback(client, state).status_code == 302
     provider.available = False
     assert client.get("/", base_url=ORIGIN).status_code == 200
+    oidc_cache.reset_provider_cache()
     assert "oidc_error" in client.get("/auth/oidc/start", base_url=ORIGIN).headers["Location"]
     assert client.get("/", base_url=ORIGIN).status_code == 200
 

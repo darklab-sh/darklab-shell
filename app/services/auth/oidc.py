@@ -7,22 +7,19 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 import ssl
-import tempfile
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, cast
 from urllib.parse import urlsplit
 
 import requests
 from authlib.integrations.requests_client import OAuth2Session
-from certifi import where as requests_ca_bundle
 from joserfc import jwk, jwt
+from joserfc.errors import InvalidKeyIdError
 
 from services.audit.models import AuditEventType
 from services.audit.recorder import record_event
@@ -31,6 +28,7 @@ from services.workspace.settings import workspace_settings
 
 from .contracts import IdentityStorageError, new_identifier, timestamp
 from .workspace_storage import new_workspace_storage_key, validate_workspace_storage_key
+from .oidc_cache import cached_provider_value, combined_trust_bundle, trust_cache_key
 
 FLOW_SECONDS = 300
 RECENT_AUTH_SECONDS = 300
@@ -118,29 +116,9 @@ def _trust(config: Mapping[str, Any]) -> str | bool:
         raise OIDCUnavailable("The configured OIDC CA bundle is unavailable.")
     try:
         stat = path.stat()
-        return _combined_trust_bundle(str(path), stat.st_mtime_ns, stat.st_size)
+        return combined_trust_bundle(str(path), stat.st_mtime_ns, stat.st_size)
     except (OSError, ssl.SSLError, ValueError) as exc:
         raise OIDCUnavailable("The configured OIDC CA bundle is invalid.") from exc
-
-
-@lru_cache(maxsize=4)
-def _combined_trust_bundle(path: str, mtime_ns: int, size: int) -> str:
-    del mtime_ns
-    if not 0 < size <= 262_144:
-        raise ValueError("OIDC CA bundle size is invalid")
-    custom = Path(path).read_bytes()
-    if not custom.strip():
-        raise ValueError("OIDC CA bundle is empty")
-    ssl.create_default_context(cadata=custom.decode("ascii"))
-    system = Path(requests_ca_bundle()).read_bytes()
-    handle, combined_path = tempfile.mkstemp(prefix="darklab-oidc-trust-", suffix=".pem")
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(system.rstrip(b"\n") + b"\n" + custom)
-        return combined_path
-    except BaseException:
-        Path(combined_path).unlink(missing_ok=True)
-        raise
 
 
 def _valid_endpoint(endpoint: str) -> bool:
@@ -169,7 +147,7 @@ def _json_get(url: str, issuer: str, config: Mapping[str, Any]) -> dict[str, Any
     return result
 
 
-def provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
+def _load_provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
     issuer = str(config["oidc_issuer"])
     metadata = _json_get(f"{issuer}/.well-known/openid-configuration", issuer, config)
     if metadata.get("issuer") != issuer:
@@ -182,6 +160,30 @@ def provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(methods, list) or "S256" not in methods:
         raise OIDCError("The OIDC provider does not support PKCE S256.")
     return metadata
+
+
+def provider_metadata(config: Mapping[str, Any]) -> dict[str, Any]:
+    key = ("metadata", str(config["oidc_issuer"]), *trust_cache_key(_trust(config)))
+    # Callers receive a copy so one flow cannot mutate later flows' endpoints.
+    from copy import deepcopy  # noqa: PLC0415
+
+    return deepcopy(cached_provider_value(key, lambda: _load_provider_metadata(config)))
+
+
+def _provider_keys(config: Mapping[str, Any], metadata: Mapping[str, Any], *, replace: Any = None) -> jwk.KeySet:
+    issuer = str(config["oidc_issuer"])
+    key = ("keys", issuer, str(metadata["jwks_uri"]), *trust_cache_key(_trust(config)))
+
+    def load() -> jwk.KeySet:
+        keys = _json_get(str(metadata["jwks_uri"]), issuer, config)
+        if not isinstance(keys.get("keys"), list) or not keys["keys"]:
+            raise OIDCError("The OIDC provider returned an invalid signing key set.")
+        keyset = jwk.KeySet.import_key_set(cast(jwk.KeySetSerialization, keys))
+        if not keyset.keys:
+            raise OIDCError("The OIDC provider returned an invalid signing key set.")
+        return keyset
+
+    return cached_provider_value(key, load, replace=replace)
 
 
 def _client(config: Mapping[str, Any]) -> OAuth2Session:
@@ -273,12 +275,13 @@ def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple
     id_token = token.get("id_token")
     if not isinstance(id_token, str) or len(id_token) > 32_768:
         raise OIDCError("The OIDC provider did not return a valid ID token.")
-    keys = _json_get(metadata["jwks_uri"], str(config["oidc_issuer"]), config)
     try:
-        if not isinstance(keys.get("keys"), list):
-            raise OIDCError("The OIDC provider returned an invalid signing key set.")
-        keyset = jwk.KeySet.import_key_set(cast(jwk.KeySetSerialization, keys))
-        verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
+        keyset = _provider_keys(config, metadata)
+        try:
+            verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
+        except InvalidKeyIdError:
+            keyset = _provider_keys(config, metadata, replace=keyset)
+            verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
         claims = verified.claims
         now = int(_now().timestamp())
         jwt.JWTClaimsRegistry(
