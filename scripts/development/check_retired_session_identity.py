@@ -32,7 +32,6 @@ HISTORICAL_PREFIXES = (
 )
 MIGRATION_BOUNDARIES = {
     ".tooling/owner-query-inventory.jsonl",
-    "app/services/auth/legacy_cutover.py",
     "app/services/auth/resolver.py",
     "app/services/auth/schema_guard.py",
     "scripts/development/owner_query_inventory.py",
@@ -42,7 +41,6 @@ INTENTIONAL_NEGATIVE_TESTS = {
     "tests/py/test_postgres_backend.py",
     "tests/py/test_principal_auth.py",
     "tests/py/test_principal_credentials.py",
-    "tests/py/test_principal_cutover.py",
     "tests/py/test_session_routes.py",
     "tests/py/test_workflows_v2.py",
 }
