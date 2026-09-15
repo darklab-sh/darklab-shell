@@ -117,6 +117,8 @@ reports, and verifies that their node IDs are disjoint and add up to the
 unchanged complete suite. Use `npm run test:pytest`, not just the fast command,
 for the final local backend check.
 
+Environment example checks in `test_production_install.py` reject duplicate active or commented assignments and settings unused by the matching Compose file. They also load both templates' OIDC examples through the app's configuration loader with default and allowlist provisioning, using test credentials without contacting a provider.
+
 Run focused slices while iterating:
 
 ```bash

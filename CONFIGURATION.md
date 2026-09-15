@@ -288,6 +288,8 @@ The provider client must meet these requirements:
 
 `OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
 
+Leave `OIDC_ALLOWED_SUBJECTS` empty with `disabled` or `automatic` provisioning. To use a subject list, set `OIDC_PROVISIONING=allowlist` and supply the exact comma-separated subjects together; a populated list with either other policy fails startup validation.
+
 #### Provider linking and recovery
 
 In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
@@ -1337,6 +1339,8 @@ cp .env.example .env
 ```env
 # APP_PORT=8888
 # DEV_HOST_BIND_ADDRESS=127.0.0.1
+# Optional services: llama, postgres; production also supports zap and oast.
+# COMPOSE_PROFILES=
 # ACCESS_PROFILE=open
 # RESTRICTED_PUBLIC_SHARES_ENABLED=false
 # BROWSER_SESSION_IDLE_MINUTES=30
@@ -1357,8 +1361,8 @@ cp .env.example .env
 
 # Optional AI assists and bundled llama.cpp model settings.
 # Disabled until AI features are enabled.
-# If you also use Postgres, include it in COMPOSE_PROFILES, for example:
-# COMPOSE_PROFILES=llama,postgres
+# Add llama to COMPOSE_PROFILES above for the bundled model service.
+# Keep postgres in the same list if you also use the bundled database.
 # AI_WORKER_ENABLED=0
 # AI_ENABLED=false
 # AI_BASE_URL=http://llama:8080
@@ -1396,6 +1400,8 @@ cp .env.example .env
 # DARKLAB_OAST_TOKEN=
 ```
 
+Keep one `COMPOSE_PROFILES` assignment in `.env`, with every optional service the deployment needs. For example, use `llama,postgres` for the bundled model and database services. Edit that existing assignment when adding another profile; a later empty assignment would disable the earlier selection.
+
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
 
 | Variable | Used by | Purpose |
@@ -1425,12 +1431,12 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
 | `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED` | Docker Compose, Docker entrypoint | When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot |
 | `NUCLEI_TEMPLATE_REFRESH_ENABLED` | Docker Compose, Flask app | Enables the operator-controlled template refresh in Assessment-plan preflight. When unset or empty, it follows `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED`; disabling both leaves cache replacement to deployment operators |
-| `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
-| `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
+| `WEB_CONCURRENCY` | Development and production Compose, Gunicorn entrypoint | Number of Gunicorn worker processes; defaults to `4` |
+| `WEB_THREADS` | Development and production Compose, Gunicorn entrypoint | Number of threads per Gunicorn worker; defaults to `4` |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Scratch directory created and exported for `prometheus_client` multiprocess metrics |
-| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Available values are `llama`, `postgres`, `zap`, and `oast`; combine the ones the deployment uses, such as `postgres,zap,oast` |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated profiles to enable in one assignment. Development supports `llama` and `postgres`; production also supports `zap` and `oast`. Combine the ones the deployment uses, such as `postgres,zap,oast` in production |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
 | `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |

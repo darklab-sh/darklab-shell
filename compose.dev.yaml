@@ -107,6 +107,8 @@ services:
       - APP_SOURCE_DIR=/opt/darklab-source/app
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
+      - WEB_CONCURRENCY=${WEB_CONCURRENCY:-4}
+      - WEB_THREADS=${WEB_THREADS:-4}
       - PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}
       - DATABASE_BACKEND=${DATABASE_BACKEND:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
