@@ -64,7 +64,7 @@ To create your first token, sign into the browser and open **Options → Access 
 
 You can rotate or revoke tokens from the same Access panel. Rotation keeps the label, permissions, and existing expiry, shows the replacement once, and waits for you to save it before asking to revoke the old token. Update each integration that uses the token. Rotating a token does not extend its lifetime; use **Expiry** when you intend to change it.
 
-For operator-issued access, use the [in-container principal tool](../CONFIGURATION.md#principal-access-operations). Use the principal ID recorded by operator bootstrap or cutover, or returned by `darklab whoami` with an existing PAT. Check that ID with `status` before issuing another token. This example creates a token for reading Project data; it doesn't grant Project writes or command execution:
+For operator-issued access, use the [in-container principal tool](../CONFIGURATION.md#principal-access-operations). Use the principal ID recorded by operator bootstrap, or returned by `darklab whoami` with an existing PAT. Check that ID with `status` before issuing another token. This example creates a token for reading Project data; it doesn't grant Project writes or command execution:
 
 ```bash
 docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example

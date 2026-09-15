@@ -292,7 +292,7 @@ For cross-profile changes, run `tests/js/e2e/auth-profile-qualification.spec.js`
 
 Ordinary isolated SQLite tests that only need an empty current schema should use
 `copy_pristine_sqlite_database()` from `tests/py/conftest.py`. Tests for
-migrations, schema reconciliation, startup, cutover, failure, or rollback must
+migrations, schema reconciliation, startup, failure, or rollback must
 keep using a genuinely empty or purpose-built database and the real `db_init()`
 path.
 
