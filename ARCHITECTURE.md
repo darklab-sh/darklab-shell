@@ -1004,6 +1004,8 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 `project_filters.js` also owns the Project workspace filter state, finding filter query parameters, and the filtered Runs, Findings, and Artifacts collections used by the modal.
 
+The desktop Project list uses content-height grid rows inside `.project-workspace-body` (`grid-auto-rows: max-content`). The list scrolls within the bounded sidebar, so additional projects don't compress wrapped names, active status, or count badges. The create form remains outside that scroll region.
+
 `project_details.js` owns the paged Project target browser and its type, search, and auto-discovery filters. A debounced search refresh replaces the target browser from authoritative results while preserving focus and the caret or selection only when the search input still owns focus at render time.
 
 `project_entities.js` owns the Project Entities tabs, select-mode state, selected-row treatment, bulk actions, and auto-promote rules panel, including rule list rendering, preview/save/apply/delete browser flows, and the source-detail chip shown on auto-promoted entity rows. `project_workspace_events.js` routes row, checkbox, **Select all**, **Clear**, and select-mode rerenders through the shared Project scroll snapshot, preserving the active desktop or mobile detail body's reading position when the Entities tree is replaced.
