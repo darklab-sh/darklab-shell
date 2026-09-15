@@ -1350,6 +1350,7 @@
 
 .project-workspace-body {
   display: grid;
+  grid-auto-rows: max-content;
   gap: 8px;
   padding: 8px 12px 14px;
   overflow-y: auto;
