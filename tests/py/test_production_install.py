@@ -21,6 +21,7 @@ from email.parser import Parser
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import pytest
 import yaml
@@ -971,6 +972,60 @@ def _run_dockerhub_publisher(
         text=True,
     )
     return result, log_path.read_text(encoding="utf-8")
+
+
+def _env_example_settings(relative_path: str) -> list[tuple[str, str]]:
+    # Match standalone assignments, including commented opt-in settings, but
+    # exclude prose such as "# DATABASE_BACKEND=postgres with the profile...".
+    return re.findall(
+        r"^(?:# *)?([A-Z][A-Z0-9_]*)=([^\s]*)[ \t]*$",
+        (ROOT / relative_path).read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("env_file", "compose_file"),
+    [(".env.example", "compose.dev.yaml"), ("deploy/.env.example", "deploy/compose.yaml")],
+)
+def test_env_examples_have_unique_supported_settings(env_file: str, compose_file: str):
+    settings = _env_example_settings(env_file)
+    names = [name for name, _value in settings]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    assert not duplicates, f"{env_file} repeats settings that can override each other: {duplicates}"
+
+    compose = yaml.safe_load((ROOT / compose_file).read_text(encoding="utf-8"))
+    references = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", json.dumps(compose)))
+    # Compose consumes COMPOSE_PROFILES itself, without YAML interpolation.
+    unsupported = sorted(set(names) - references - {"COMPOSE_PROFILES"})
+    assert not unsupported, f"{env_file} advertises settings unused by {compose_file}: {unsupported}"
+
+
+@pytest.mark.parametrize("env_file", [".env.example", "deploy/.env.example"])
+@pytest.mark.parametrize("allowlist", [False, True], ids=["default-policy", "allowlist-policy"])
+def test_env_examples_oidc_settings_load(env_file: str, allowlist: bool, tmp_path: Path):
+    import config as app_config
+
+    environment = {
+        name: value for name, value in _env_example_settings(env_file)
+        if name.startswith("OIDC_")
+    }
+    environment.update({
+        "ACCESS_PROFILE": "mixed",
+        "OIDC_CLIENT_SECRET": "example-test-client-secret",
+    })
+    if allowlist:
+        environment.update({
+            "OIDC_PROVISIONING": "allowlist",
+            "OIDC_ALLOWED_SUBJECTS": "subject-one,subject-two",
+        })
+    with mock.patch.dict(os.environ, environment, clear=True):
+        cfg = app_config.load_config(tmp_path, tmp_path)
+
+    assert cfg["access_profile"] == "mixed"
+    assert cfg["oidc_provisioning"] == ("allowlist" if allowlist else "disabled")
+    assert cfg["oidc_allowed_subjects"] == (["subject-one", "subject-two"] if allowlist else [])
+    assert cfg["oidc_scopes"] == ["openid"]
 
 
 def test_production_compose_uses_pinned_public_image_and_no_source_mount():
