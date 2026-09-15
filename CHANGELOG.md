@@ -13,11 +13,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.0.0] - Unreleased
 
-Release candidate: `3.0.0-rc.2`.
+Release candidate: `3.0.0-rc.3`.
 
 ### Changed
 
-- **3.0.0-rc.2 is the current release candidate.** Application metadata, container defaults, the API contract, and installation and signing examples use the new candidate version.
+- **3.0.0-rc.3 is the current release candidate.** Application metadata, container defaults, the API contract, and installation and signing examples use the new candidate version.
 
 - **Workspace Access introduces pseudonymous principals with portable credentials, scoped API tokens, and optional provider sign-in.** A principal is a stable identity that owns a personal workspace without requiring a username, email address, or password. Personal data and Team membership stay with that identity while credentials and sign-in methods change. **Options → Access** brings workspace access, device and API credentials, provider linking, and session management together.
   - **Keep and manage a workspace:** In an open deployment, **Options → Access** lets anonymous users keep their existing workspace, use a saved credential on another browser, and add, rename, expire, rotate, or revoke credentials. Desktop and mobile show the current access state and only its available actions. Secrets are masked, shown once, and erased from the reveal after use; status indicators show safe hints. Rotation preserves the label, permissions, and expiry and lets the user save the replacement before revoking the old credential. Removing local access doesn't delete the workspace, and other tabs refresh when access changes.
