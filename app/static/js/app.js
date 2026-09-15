@@ -98,6 +98,7 @@ import {
   getShareRedactionDefaultPreference as importedGetShareRedactionDefaultPreference,
   syncOptionsControls as importedSyncOptionsControls,
 } from './features/preferences/preferences.js';
+import { startOptionsKeyboardTracking, stopOptionsKeyboardTracking } from './features/preferences/options_keyboard.js';
 import {
   closeWorkspace as importedCloseWorkspace,
 } from './workspace_bridge.js';
@@ -541,6 +542,7 @@ function openOptions({ tab = '', action = '' } = {}) {
   _appSyncOptionsControlsAdapter();
   if (tab) _appActivateOptionsTabAdapter(tab, { persist: true, focus: false });
   _appShowOptionsOverlayAdapter();
+  startOptionsKeyboardTracking(optionsOverlay);
   if (typeof _appMarkInteractionSurfaceReadyAdapter === 'function') {
     _appMarkInteractionSurfaceReadyAdapter('options', optionsOverlay, document.getElementById('options-modal'));
   }
@@ -576,6 +578,7 @@ function openOptions({ tab = '', action = '' } = {}) {
 }
 
 function _notifyOptionsClosing() {
+  stopOptionsKeyboardTracking();
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('app:options-closing'));
   }

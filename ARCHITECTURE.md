@@ -970,6 +970,12 @@ The options modal is part of that same browser-owned layer. It does not change b
 
 Options emits `app:options-tab-changed` only when the selected tab changes. Applying saved preferences still updates controls, focus, and persistence without restarting Access requests for an unchanged tab. Opening Options refreshes its active panel separately, so reopening Access still loads current credentials.
 
+Control refreshes preserve the currently visible tab while Options is open. Saved tab selection applies while the modal is closed; late startup preferences don't override a sign-in handoff or a tab the user selected during loading.
+
+Preference loading ignores responses superseded by a newer load or a changed browser identity. Priming an unchanged preference doesn't advance the local-edit revision, so routine Options rendering doesn't discard a pending workspace snapshot. Actual local edits still take precedence over a response that started before them.
+
+On mobile, `options_keyboard.js` tracks the visual viewport while Options is open. It constrains the sheet height and adds space beneath it for the keyboard, while the fixed backdrop continues to cover the whole app. Focus and viewport events scroll only the Options body to expose the active field. Closing Options removes the listeners and sizing overrides. Options text inputs and textareas use 16px text to avoid iOS focus zoom.
+
 The Access panel's provider loader validates the identity response separately from credential management. Failed loads preserve the Access layout, hide provider actions until a successful refresh, and show a retry message. Its diagnostic uses only fixed classifications and numeric HTTP status through the existing client-log allowlist; disabled-feature 404s, authentication failures, and superseded requests don't generate another report.
 
 ### Browser Runtime

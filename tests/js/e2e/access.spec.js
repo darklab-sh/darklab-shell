@@ -306,6 +306,55 @@ test.describe('workspace Access', () => {
 test.describe('mobile workspace Access', () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
 
+  test('keeps the focused credential visible as the keyboard viewport changes', async ({ page }) => {
+    await resetAnonymousBrowser(page)
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
+    await expect(page.locator('#options-panel-access')).toHaveAttribute('data-access-panel-bound', '1')
+    await page.locator('#options-access-use-btn').click()
+    const input = page.locator('#options-access-redemption-input')
+    await expect(input).toBeFocused()
+
+    // Desktop emulation does not open an iOS keyboard. Shrink only the visual
+    // viewport, leaving the layout viewport unchanged as iOS does.
+    async function setVisualViewport(height, offsetTop) {
+      await page.evaluate(({ height, offsetTop }) => {
+        Object.defineProperties(window.visualViewport, {
+          height: { configurable: true, value: height },
+          offsetTop: { configurable: true, value: offsetTop },
+        })
+        window.visualViewport.dispatchEvent(new Event('resize'))
+        window.visualViewport.dispatchEvent(new Event('scroll'))
+      }, { height, offsetTop })
+    }
+
+    for (const [height, offsetTop] of [[360, 0], [300, 45]]) {
+      await setVisualViewport(height, offsetTop)
+      await expect.poll(() => input.evaluate((field) => {
+        const rect = field.getBoundingClientRect()
+        const body = field.closest('.options-body').getBoundingClientRect()
+        const sheet = document.querySelector('#options-modal').getBoundingClientRect()
+        const viewport = window.visualViewport
+        return rect.top >= body.top && rect.bottom <= body.bottom
+          && sheet.top >= viewport.offsetTop - 1
+          && sheet.bottom <= viewport.offsetTop + viewport.height + 1
+      })).toBe(true)
+      await expect(input).toBeFocused()
+      await expect.poll(() => page.evaluate(() =>
+        document.elementFromPoint(5, 5)?.closest('#options-overlay')?.id)).toBe('options-overlay')
+    }
+
+    await page.locator('#options-access-redemption-apply').scrollIntoViewIfNeeded()
+    await expect(page.locator('#options-access-redemption-apply')).toBeInViewport()
+    await setVisualViewport(await page.evaluate(() => window.innerHeight), 0)
+    await expect(page.locator('#options-overlay')).toHaveCSS('padding-bottom', '0px')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/options-viewport-tracked/)
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
+    await expect(page.locator('#options-overlay')).toHaveClass(/options-viewport-tracked/)
+  })
+
   test('opens from the mobile identity summary and keeps actions touch-safe', async ({ page }) => {
     await resetAnonymousBrowser(page)
     await page.locator('#hamburger-btn').click()
@@ -320,6 +369,7 @@ test.describe('mobile workspace Access', () => {
     await page.locator('#options-access-use-btn').click()
     await expectRedemptionSpacing(page)
     const input = page.locator('#options-access-redemption-input')
+    await expect(input).toHaveCSS('font-size', '16px')
     await input.fill('not-a-credential')
     await expect(input).toBeFocused()
 

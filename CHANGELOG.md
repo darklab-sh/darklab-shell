@@ -46,6 +46,10 @@ Release candidate: `3.0.0-rc.1`.
 
 ### Fixed
 
+- **Mobile Options keeps text fields visible above the keyboard.** Text fields use a 16px font to avoid iOS focus zoom, and the sheet fits above the keyboard while its body scrolls the focused field into view. The backdrop still covers the header so tapping outside closes Options after the browser pans. Browser regressions cover keyboard resizing, backdrop dismissal, and provider sign-in.
+
+- **Workspace preferences survive overlapping loads and routine Options refreshes.** Refreshing an unchanged control no longer counts as a local edit, and older responses can't replace the latest workspace's preferences. Late startup preferences keep the current Options tab open, including Access after a provider sign-in handoff. Regression tests also check that real edits made during loading are preserved.
+
 - **Restoring workspace access avoids repeated credential refreshes.** Applying saved preferences no longer announces the already-selected Options tab as a new selection. This prevents overlapping Access requests from delaying the authenticated state on busy servers. Unit and browser regressions cover the repeated preference sync that caused intermittent CI failures.
 
 - **Environment examples apply the settings they advertise.** The production example keeps all optional Compose profiles in one assignment, so enabling a model or database service isn't overridden by a later empty value. Both OIDC examples leave subjects empty unless allowlist provisioning is selected. Development Compose now forwards `WEB_CONCURRENCY` and `WEB_THREADS`, making the documented overrides effective.
