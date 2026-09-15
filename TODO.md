@@ -8,8 +8,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 - [Open TODOs](#open-todos)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
-- [Technical Debt](#technical-debt)
-  - [Retire the one-time principal cutover tooling](#retire-the-one-time-principal-cutover-tooling)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
@@ -88,18 +86,6 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
 - [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
-
-## Technical Debt
-
-### Retire the one-time principal cutover tooling
-
-After the v3 release is cut and staging and production have migrated, verified their data and access, and taken post-cutover backups, remove as much of the pre-v3 identity cutover path as possible. There's little value in maintaining a complex one-off conversion tool and long operator runbook once the existing deployments have finished using them.
-
-- [ ] Audit uses of `scripts/operations/cutover_principal_identity.py` and `app/services/auth/legacy_cutover.py`, then remove the preflight, conversion, reset, and development-discard logic that no longer serves a live upgrade or recovery need.
-- [ ] Replace the detailed cutover instructions with a short note on recovering an older pre-cutover backup. Keep applied migration history and any fail-closed schema checks needed for fresh installs and restores; don't silently accept an old database with the new application.
-- [ ] Remove tests that exist only for the retired tool while keeping current-schema, authentication, backup, and restore coverage. Update the affected documentation and test inventories, record the shipped cleanup in `CHANGELOG.md`, and qualify both SQLite and Postgres before closing this item.
-
----
 
 ## Feature Enhancements
 

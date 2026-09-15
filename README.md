@@ -35,8 +35,6 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Quick Start
 
-**Upgrading from v2?** Legacy `tok_` values no longer authenticate. Follow the [v3 identity cutover procedure](CONFIGURATION.md#v3-identity-cutover), including a verified backup and preflight, before starting v3 against existing data.
-
 On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, create a new installation of release candidate `3.0.0-rc.2` with:
 
 ```bash
@@ -273,11 +271,11 @@ The installed `release-manifest.json` records both registry index references, th
 
 ### Storage and Lifecycle
 
-Production installations use `darklab-deploy` for backups; development checkouts use the repository backup helper. The [v3 identity cutover guide](CONFIGURATION.md#v3-identity-cutover) shows both paths.
+Production installations use `darklab-deploy` for backups; development checkouts use the repository backup helper. See [backup and restore](CONFIGURATION.md#operator-backups) for the supported lifecycle.
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Upgrading a pre-v3 SQLite or Postgres deployment requires the [v3 identity cutover procedure](CONFIGURATION.md#v3-identity-cutover): stop application writers, verify the old-state backup, stage and verify the new image, run its cutover tool, and only then start v3. SQLite can start with fresh application data or convert the explicitly reviewed operator workspace; Postgres uses the transactional selected conversion to preserve that workspace and its data. Development Postgres checkouts can also discard reviewed test-token data during that conversion without changing the production path. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
 Assessments can hand reviewed work to operator-managed ZAP and private OAST services. The production stack includes one isolated worker profile for each connector, so enabling either service doesn't require a custom process supervisor. Keep the provider and policy credentials in the installation's private `.env`, then follow [Running ZAP and OAST workers](CONFIGURATION.md#running-zap-and-oast-workers) to connect, start, and monitor them.
 

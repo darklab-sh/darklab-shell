@@ -1516,13 +1516,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
         "COPY scripts/operations/backup_system.py "
-        "scripts/operations/cutover_principal_identity.py "
         "scripts/operations/manage_principal_access.py "
         "scripts/operations/migrate_sqlite_to_postgres.py "
         "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
-    assert "!scripts/operations/cutover_principal_identity.py" in dockerignore
     assert "!scripts/operations/manage_principal_access.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
@@ -4537,18 +4535,9 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     )
     backup = _build_verified_backup(tmp_path, backend="postgres", operator_env=source_env)
     restore_helper = _load_script_module("restore_system")
-    assert restore_helper.verify_backup_archive(backup)["database_backend"] == "postgres"
     development_backup = _build_verified_backup(
         tmp_path / "development-backup", backend="postgres", repository_free=False
     )
-    with pytest.raises(restore_helper.RestoreError, match="managed deployment lifecycle"):
-        restore_helper.verify_backup_archive(development_backup)
-    verified_development = restore_helper.verify_backup_archive(
-        development_backup, allow_development_backup=True
-    )
-    assert verified_development["database_backend"] == "postgres"
-    assert verified_development["repository_free"] is False
-    assert verified_development["workspaces_included"] is True
     restore_target = tmp_path / "restore-target"
     restore_data = restore_target / "data"
     restore_conf = restore_target / "conf"
@@ -4583,7 +4572,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     monkeypatch.setattr(restore_helper.subprocess, "run", capture_pg_restore)
     expected_uid = 12001 if os.geteuid() == 0 else os.getuid()
     expected_gid = 12002 if os.geteuid() == 0 else os.getgid()
-    restore_helper.restore(SimpleNamespace(
+    restore_args = SimpleNamespace(
         archive=str(backup),
         data_dir=str(restore_data),
         local_conf_dir=str(restore_conf),
@@ -4592,7 +4581,13 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
         database_url=target_database_url,
         output_uid=str(expected_uid),
         output_gid=str(expected_gid),
-    ))
+    )
+    with pytest.raises(restore_helper.RestoreError, match="managed deployment lifecycle"):
+        restore_helper.restore(SimpleNamespace(**{**vars(restore_args), "archive": str(development_backup)}))
+    assert captured_restore == {}
+    for directory in (restore_data, restore_conf, restore_workspaces):
+        assert (directory / "stale.txt").read_text() == "stale\n"
+    restore_helper.restore(restore_args)
 
     restored_env = restore_env.read_text(encoding="utf-8")
     assert f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}" in restored_env

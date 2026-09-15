@@ -24,7 +24,7 @@ from services.auth.contracts import (
     WorkspaceAlreadyAttached,
     WorkspaceStorageError,
 )
-from services.auth.schema_guard import PostCutoverSchemaMismatch, assert_post_cutover_schema
+from services.auth.schema_guard import PostCutoverSchemaMismatch, validate_startup_schema
 from services.auth.verifier_keys import (
     delete_retired_verifier_root,
     rewrap_verifier_roots,
@@ -369,11 +369,32 @@ def test_verifier_roots_rotate_rewrap_and_reject_referenced_deletion(principal_d
         delete_retired_verifier_root(principal_db, 1)
 
 
-def test_schema_guard_can_be_scoped_for_pre_cutover_fixture_inspection(principal_db):
-    principal_db.execute("CREATE TABLE session_tokens (token TEXT PRIMARY KEY)")
-    assert_post_cutover_schema(principal_db, DatabaseBackend.SQLITE)
-    with pytest.raises(PostCutoverSchemaMismatch, match="session_tokens"):
-        assert_post_cutover_schema(principal_db, DatabaseBackend.SQLITE, enabled=True)
+@pytest.mark.parametrize("legacy_shape", ["table", "column"])
+def test_startup_schema_rejects_retired_identity_state(principal_db, legacy_shape):
+    validate_startup_schema(principal_db, DatabaseBackend.SQLITE)
+    if legacy_shape == "table":
+        principal_db.execute("CREATE TABLE session_tokens (token TEXT PRIMARY KEY)")
+    else:
+        principal_db.execute("CREATE TABLE obsolete_owners (session_token_hash TEXT)")
+    with pytest.raises(PostCutoverSchemaMismatch, match="legacy"):
+        validate_startup_schema(principal_db, DatabaseBackend.SQLITE)
+
+
+@pytest.mark.parametrize("schema_head", ["0077", "0081"])
+def test_sqlite_rejects_legacy_identity_database_without_removing_credentials(schema_head):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import applied_versions, run_migrations
+
+    with sqlite3.connect(":memory:") as conn:
+        conn.row_factory = sqlite3.Row
+        run_migrations(conn, tuple(m for m in MIGRATIONS if m.version <= schema_head), backend=DatabaseBackend.SQLITE)
+        conn.execute("INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                     ("tok_unsupported_backup", "2026-09-15", "2026-09-15"))
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+        assert "0082" not in applied_versions(conn)
+        assert conn.execute("SELECT token FROM session_tokens").fetchone()[0] == "tok_unsupported_backup"
 
 
 def test_metadata_bounds_are_enforced_before_sql(principal_db, tmp_path):
