@@ -436,6 +436,7 @@ function _optionsTabPanels() {
 
 function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   const nextTab = PreferenceCore.coerceOptionsModalTab(tab);
+  const previousTab = document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab;
   _optionsTabButtons().forEach((button) => {
     const active = button.dataset.optionsTab === nextTab;
     button.classList.toggle('is-active', active);
@@ -462,7 +463,9 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   if (nextTab === 'teams' && refreshTeams) {
     void refreshTeams();
   }
-  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+  // Applying saved preferences syncs these controls repeatedly. Notify lazy
+  // panels only when the tab changes, so an Access refresh can finish.
+  if (nextTab !== previousTab && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('app:options-tab-changed', { detail: { tab: nextTab } }));
   }
   return nextTab;
