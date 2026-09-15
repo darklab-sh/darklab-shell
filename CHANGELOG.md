@@ -46,6 +46,8 @@ Release candidate: `3.0.0-rc.1`.
 
 ### Fixed
 
+- **Projects modal cards stay readable as the list grows.** Cards keep enough height for wrapped names and count badges, and the sidebar scrolls within the modal while the create controls stay visible. Browser coverage checks adding and deleting across the six-to-seven-project threshold, eight and longer lists, short desktop windows, and mobile navigation.
+
 - **Project workspaces preserve typing, focus, and actions during background refreshes.**
   - **Assessments:** expanded worklists keep their scroll position. Canceling a confirmation returns focus to the current opening control, while choosing another control keeps that choice through later updates.
   - **Package drafts:** loading presets or Assessment choices preserves the focused field, its text, and cursor selection.
