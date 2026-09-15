@@ -254,14 +254,35 @@ test.describe('workspace Access', () => {
     await expect(page.locator('#options-access-msg')).toHaveAttribute('role', 'alert')
     await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
 
+    // Make the CI race deterministic: restoring preferences with Access saved
+    // as the last tab must not restart its in-flight credential-list refresh.
+    await page.route('**/session/preferences', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      const data = await response.json()
+      await route.fulfill({ response, json: {
+        ...data,
+        preferences: { ...data.preferences, pref_options_modal_last_tab: 'access', pref_prompt_username: 'restored-operator' },
+      } })
+    })
+    let credentialReads = 0
+    const countCredentialReads = request => {
+      if (request.method() === 'GET' && new URL(request.url()).pathname === '/auth/credentials') credentialReads += 1
+    }
+    page.on('request', countCredentialReads)
     await page.locator('#options-access-use-btn').click()
     await page.locator('#options-access-redemption-input').fill(replacementSecret)
     await page.locator('#options-access-redemption-apply').click()
+    await expect(page.locator('#options-prompt-username-input')).toHaveValue('restored-operator')
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
     await expectAccessActions(page, 'kept')
     await expect(peer.locator('#hud-session')).toContainText('crd_')
     const replacementRow = page.locator(`[data-credential-id="${replacementId}"]`)
     await expect(replacementRow).toContainText('Current')
+    // Identity change and successful redemption each request a refresh.
+    expect(credentialReads).toBeLessThanOrEqual(2)
+    page.off('request', countCredentialReads)
+    await page.unroute('**/session/preferences')
 
     await replacementRow.getByRole('button', { name: 'Revoke' }).click()
     await expect(page.locator('#confirm-host')).toContainText('This credential is active in this browser')

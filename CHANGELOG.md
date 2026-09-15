@@ -46,6 +46,8 @@ Release candidate: `3.0.0-rc.1`.
 
 ### Fixed
 
+- **Restoring workspace access avoids repeated credential refreshes.** Applying saved preferences no longer announces the already-selected Options tab as a new selection. This prevents overlapping Access requests from delaying the authenticated state on busy servers. Unit and browser regressions cover the repeated preference sync that caused intermittent CI failures.
+
 - **Environment examples apply the settings they advertise.** The production example keeps all optional Compose profiles in one assignment, so enabling a model or database service isn't overridden by a later empty value. Both OIDC examples leave subjects empty unless allowlist provisioning is selected. Development Compose now forwards `WEB_CONCURRENCY` and `WEB_THREADS`, making the documented overrides effective.
 
 - **Projects modal cards stay readable as the list grows.** Cards keep enough height for wrapped names and count badges, and the sidebar scrolls within the modal while the create controls stay visible. Browser coverage checks adding and deleting across the six-to-seven-project threshold, eight and longer lists, short desktop windows, and mobile navigation.

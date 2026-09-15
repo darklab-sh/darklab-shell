@@ -1372,6 +1372,31 @@ describe('app helpers', () => {
     expect(getOptionsModalLastTabPreference()).toBe('secrets')
   })
 
+  it('syncs preferences without reactivating the selected Options tab', async () => {
+    const { activateOptionsTab, syncOptionsControls } = await loadAppFns()
+    activateOptionsTab('preferences', { persist: false })
+    const changed = vi.fn()
+    window.addEventListener('app:options-tab-changed', changed)
+    try {
+      activateOptionsTab('access', { persist: false })
+      expect(changed).toHaveBeenCalledTimes(1)
+
+      // Each saved preference syncs the controls while Access is loading.
+      // None of those syncs should restart the credential requests.
+      for (let i = 0; i < 12; i += 1) syncOptionsControls()
+      activateOptionsTab('access', { persist: false, focus: true })
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(document.getElementById('options-tab-access'))
+      expect(document.getElementById('options-panel-access').hidden).toBe(false)
+
+      activateOptionsTab('preferences', { persist: false })
+      activateOptionsTab('access', { persist: false })
+      expect(changed).toHaveBeenCalledTimes(3)
+    } finally {
+      window.removeEventListener('app:options-tab-changed', changed)
+    }
+  })
+
   it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
     let createdTeam = null
     let failScopeRefresh = false
