@@ -13217,7 +13217,7 @@
   },
   "info": {
     "title": "darklab_shell API",
-    "version": "3.0.0-rc.2"
+    "version": "3.0.0-rc.3"
   },
   "openapi": "3.0.3",
   "paths": {
