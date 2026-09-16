@@ -337,7 +337,7 @@ Must keep:
 - Use T2 long when the entry is ≥5 sentences or has distinct root-cause / implementation / tests concepts.
 - Use T1 only for broad subsystem umbrellas — not as a substitute for T2 long.
 - If a `Before` / `After` / `Fix` / `What` / `Tests` bullet still contains several distinct points, split it into one additional child-bullet level instead of leaving a paragraph-sized block.
-- Keep the active `Unreleased` section and the two newest dated releases in the root file. Move older entries intact to one archive per major version after the next active section is seeded.
+- Development checkouts keep the active `Unreleased` section and the two newest dated releases in the root file. Finalized release checkouts keep three dated sections: the current release and the two previous releases. Move older entries intact to one archive per major version after the next active section is seeded.
 - Treat a change to an already published release as an explicit historical correction with separate review. Do not rewrite published sections during routine cleanup or archive rotation.
 
 ### `THEME.md`
