@@ -631,7 +631,7 @@ Practical note:
 - For browser tests that need a long-running command, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
 - `npm run lint:licenses` checks SPDX notices on project-owned source used by every test layer while leaving generated fixtures and third-party files under their existing terms.
-- Keep the live-listing commands, compact README Repository Layout, and configuration reference current. `tests/py/test_docs.py` checks those documentation contracts along with local links, full tables of contents, runtime support, capture-scene guidance, asset references, and operator-facing defaults.
+- Keep the live-listing commands, compact README Repository Layout, and configuration reference current. `tests/py/test_docs.py` checks those documentation contracts along with local links, full tables of contents, runtime support, capture-scene guidance, asset references, and operator-facing defaults. Changelog checks accept three dated releases in a finalized checkout or one active `Unreleased` section followed by two dated releases during development, and preserve published sections through an integrity baseline.
 
 ---
 
