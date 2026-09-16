@@ -174,6 +174,7 @@ const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
 var _sessionPreferenceOverrides = null;
 var _sessionPreferencePersistQueue = Promise.resolve();
 let _sessionPreferenceLocalRevision = 0;
+let _sessionPreferenceLoadSequence = 0;
 let _tourOpenedRecordedThisSession = false;
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
@@ -186,7 +187,9 @@ function setPreferenceCookie(name, value) {
 }
 
 function _primePreferenceValue(name, value) {
-  _sessionPreferenceLocalRevision += 1;
+  // Rendering an unchanged Options tab is not a local edit. Counting it as
+  // one makes an in-flight workspace load keep the old preference snapshot.
+  if (getPreference(name) !== value) _sessionPreferenceLocalRevision += 1;
   setPreferenceCookie(name, value);
   if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
     _sessionPreferenceOverrides[name] = value;
@@ -317,10 +320,8 @@ function _persistCurrentSessionPreferences() {
 }
 
 async function loadSessionPreferences() {
+  const loadSequence = ++_sessionPreferenceLoadSequence;
   const loadStartedAtRevision = _sessionPreferenceLocalRevision;
-  const openOptionsTab = document.getElementById('options-overlay')?.classList.contains('open')
-    ? document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab || ''
-    : '';
   if (typeof window !== 'undefined') {
   }
   try {
@@ -344,6 +345,8 @@ async function loadSessionPreferences() {
     if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
     if (!prefs) prefs = localFallback;
     if (!prefs) prefs = defaults;
+    // Identity changes can start another load before this response arrives.
+    if (loadSequence !== _sessionPreferenceLoadSequence || sessionId !== _preferenceSessionId().trim()) return null;
     if (_sessionPreferenceLocalRevision !== loadStartedAtRevision) {
       prefs = {
         ...prefs,
@@ -365,8 +368,8 @@ async function loadSessionPreferences() {
     applyCommandOutcomeSummariesPreference(prefs.pref_command_outcome_summaries, false);
     applyConstellationFullDayPreference(prefs.pref_constellation_full_day, false);
     await applyRunNotifyPreference(prefs.pref_run_notify, false);
+    if (loadSequence !== _sessionPreferenceLoadSequence) return null;
     syncOptionsControls({ preserveActiveTab: true });
-    if (openOptionsTab) activateOptionsTab(openOptionsTab, { persist: false, focus: false });
     return prefs;
   } finally {
     if (typeof window !== 'undefined') {
@@ -436,6 +439,7 @@ function _optionsTabPanels() {
 
 function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   const nextTab = PreferenceCore.coerceOptionsModalTab(tab);
+  const previousTab = document.querySelector('[data-options-tab][aria-selected="true"]')?.dataset?.optionsTab;
   _optionsTabButtons().forEach((button) => {
     const active = button.dataset.optionsTab === nextTab;
     button.classList.toggle('is-active', active);
@@ -462,7 +466,9 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   if (nextTab === 'teams' && refreshTeams) {
     void refreshTeams();
   }
-  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+  // Applying saved preferences syncs these controls repeatedly. Notify lazy
+  // panels only when the tab changes, so an Access refresh can finish.
+  if (nextTab !== previousTab && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('app:options-tab-changed', { detail: { tab: nextTab } }));
   }
   return nextTab;
@@ -567,7 +573,9 @@ function applyHudClockPreference(mode, persist = true) {
   if (typeof importedRenderHudClock === 'function') importedRenderHudClock();
 }
 
-function syncOptionsControls({ preserveActiveTab = false } = {}) {
+function syncOptionsControls({ preserveActiveTab = true } = {}) {
+  // A sign-in handoff or user action can open another tab while preferences
+  // load. Update its controls without navigating away from that live choice.
   const optionsOpen = document.getElementById('options-overlay')?.classList.contains('open');
   if (!preserveActiveTab || !optionsOpen) syncOptionsTabFromPreference();
   const tsSelect = optionsTsSelect;

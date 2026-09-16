@@ -63,7 +63,7 @@ ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
-ARG APP_VERSION=2.9.2
+ARG APP_VERSION=3.0.0
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
@@ -565,7 +565,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts the checkout separately and stages a private,
 # read-only runtime snapshot over /app before the app drops privileges.
 COPY app/ /app/
-COPY scripts/operations/backup_system.py scripts/operations/cutover_principal_identity.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
+COPY scripts/operations/backup_system.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

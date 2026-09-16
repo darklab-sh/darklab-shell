@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Post-cutover schema checks for removal of token-owned state."""
+"""Startup schema checks for principal-owned state."""
 
 from __future__ import annotations
 
@@ -21,9 +21,6 @@ _LEGACY_OWNER_COLUMN_NAMES = frozenset({
     "session_token",
     "session_token_hash",
 })
-
-POST_CUTOVER_SCHEMA_GUARD_ENABLED = True
-
 
 def _table_exists(conn: Any, backend: DatabaseBackend, table_name: str) -> bool:
     if backend == DatabaseBackend.POSTGRES:
@@ -85,23 +82,8 @@ def post_cutover_schema_violations(conn: Any, backend: DatabaseBackend) -> tuple
     return tuple(violations)
 
 
-def assert_post_cutover_schema(
-    conn: Any,
-    backend: DatabaseBackend,
-    *,
-    enabled: bool = False,
-) -> None:
-    """Reject mixed schemas when the caller enables the principal-only guard."""
-    if not enabled:
-        return
+def validate_startup_schema(conn: Any, backend: DatabaseBackend) -> None:
+    """Reject schemas that still contain retired identity ownership."""
     violations = post_cutover_schema_violations(conn, backend)
     if violations:
         raise PostCutoverSchemaMismatch("; ".join(violations))
-
-
-def validate_startup_schema(conn: Any, backend: DatabaseBackend) -> None:
-    assert_post_cutover_schema(
-        conn,
-        backend,
-        enabled=POST_CUTOVER_SCHEMA_GUARD_ENABLED,
-    )

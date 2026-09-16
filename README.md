@@ -35,13 +35,13 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Quick Start
 
-On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, install the current release with:
+On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, create a new installation of release `3.0.0` with:
 
 ```bash
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.2/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -233,8 +233,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.2/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.2/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -242,11 +242,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.2/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/2.9.2/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v2.9.2" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v3.0.0" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```
@@ -271,11 +271,11 @@ The installed `release-manifest.json` records both registry index references, th
 
 ### Storage and Lifecycle
 
-Production installations use `darklab-deploy` for backups; development checkouts use the repository backup helper. The [v3 identity cutover guide](CONFIGURATION.md#v3-identity-cutover) shows both paths.
+Production installations use `darklab-deploy` for backups; development checkouts use the repository backup helper. See [backup and restore](CONFIGURATION.md#operator-backups) for the supported lifecycle.
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
 
-Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Upgrading a pre-v3 SQLite or Postgres deployment requires the [v3 identity cutover procedure](CONFIGURATION.md#v3-identity-cutover): stop application writers, verify the old-state backup, stage and verify the new image, run its cutover tool, and only then start v3. SQLite can start with fresh application data or convert the explicitly reviewed operator workspace; Postgres uses the transactional selected conversion to preserve that workspace and its data. Development Postgres checkouts can also discard reviewed test-token data during that conversion without changing the production path. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
+Use `./darklab-deploy status`, `backup`, `restore`, `migrate-to-postgres`, `upgrade`, and `remove` for production lifecycle work. When the installation includes `compose.operator.yaml`, Compose-backed lifecycle steps automatically use it alongside the release-owned `compose.yaml`. A fresh replacement install can use `restore --adopt-backend` to recover a managed Postgres backup with the new host's generated database credentials. Back up before upgrades or database changes, keep the vault key with the data it protects, and verify signed release material before an offline install or upgrade. [CONFIGURATION.md](CONFIGURATION.md) contains the deployment, storage, Postgres, backup, host-tuning, and optional-service details.
 
 Assessments can hand reviewed work to operator-managed ZAP and private OAST services. The production stack includes one isolated worker profile for each connector, so enabling either service doesn't require a custom process supervisor. Keep the provider and policy credentials in the installation's private `.env`, then follow [Running ZAP and OAST workers](CONFIGURATION.md#running-zap-and-oast-workers) to connect, start, and monitor them.
 

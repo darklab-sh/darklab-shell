@@ -176,7 +176,7 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 
 For CLI and integration tokens, follow [Create a PAT](docs/api.md#create-a-pat). It covers browser and operator issuance, permissions, expiry, private one-time output, and verification with `darklab whoami`.
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap or cutover, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
+`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
 
 To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
 
@@ -288,6 +288,8 @@ The provider client must meet these requirements:
 
 `OIDC_PROVISIONING=disabled` accepts only identities already linked to workspaces. `allowlist` creates a workspace only for exact provider subjects listed in comma-separated `OIDC_ALLOWED_SUBJECTS`; `automatic` creates one for any valid provider subject. Existing links work under every policy. A fresh `oidc_required` deployment with disabled provisioning has no way in, so startup refuses it until an identity has been linked in `mixed` or `token_required`. In `oidc_required`, **Add credential** offers API tokens. Self-service portable-credential creation and rotation are disabled. An operator can still issue recovery credentials, but must enable `mixed` before they can be used for browser sign-in. Team roles remain managed in darklab_shell; provider groups grant no app permissions.
 
+Leave `OIDC_ALLOWED_SUBJECTS` empty with `disabled` or `automatic` provisioning. To use a subject list, set `OIDC_PROVISIONING=allowlist` and supply the exact comma-separated subjects together; a populated list with either other policy fails startup validation.
+
 #### Provider linking and recovery
 
 In **Options → Access**, an existing portable-credential user can link the provider after recently signing in with that credential and completing a fresh provider sign-in. The credential sign-in must be within the last five minutes. If it's older, Access offers **Sign in again with a credential** and returns to the panel after sign-in. The provider identity can link to only one workspace. Unlinking requires another recent credential sign-in, a usable portable credential for recovery, and revokes all of that workspace's browser sessions. For a provider-only workspace, follow [Issuing credentials and recovering access](#issuing-credentials-and-recovering-access), then use `mixed` to sign in and manage the link. `issue` adds access; `recover` revokes all credentials and browser sessions and pauses related work. Changing a provider subject creates a different identity; it does not silently transfer the old workspace. Keep an operator recovery path before changing the provider or its issuer.
@@ -310,234 +312,6 @@ The browser shows a generic failure message; the safe server records distinguish
 #### Public shares
 
 Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
-
-### v3 identity cutover
-
-The v3 release removes the earlier session identity instead of keeping a compatibility mode. Before starting v3 against an existing SQLite or Postgres database, verify a backup of the current stopped-state data and run the new image's cutover preflight. A backup taken before the app was stopped remains current if no database or file writer has changed that state since; elapsed time alone doesn't require another archive. Production installations use a managed backup from `./darklab-deploy backup`. Development checkouts can use the backup helper and explicitly opt in to that archive at cutover; this does not make development archives eligible for managed restore. The tool verifies every backup checksum, requires the backup's database backend to match the deployment, prints counts without printing credential values, reports whether the old shared-anonymous workspace exists, and stops if the credential count has changed from the number you reviewed.
-
-#### Development checkout
-
-For a development checkout using the bundled Postgres service, run the backup helper on the Docker host before stopping the stack. It uses `docker compose exec` for `pg_dump`, so Postgres must be running. Use the Python environment that has the app's requirements installed, and pass your actual `.env` and Compose paths if they differ. If you don't have an `.env`, omit that option and export the same `DATABASE_BACKEND` and `DATABASE_URL` used by the stack:
-
-```bash
-umask 077
-mkdir -p backups
-python3 scripts/operations/backup_system.py \
-  --env-file .env \
-  --compose-file compose.dev.yaml \
-  --postgres-dump-mode compose \
-  --output-dir backups
-```
-
-Check the reported warnings and archive manifest before relying on it. The archive contains the Postgres dump and `/data`; the host account must be able to read the app-owned data directory. Development workspaces may be temporary or mounted elsewhere. If you need to preserve workspace files, supply their actual `--workspace-source` or use `--include-ephemeral-workspaces` while the shell container is still running. Don't proceed with a data-preserving cutover if required workspace files are missing from the backup. Keep the archive private and rehearse its database restore separately; `darklab-deploy restore` intentionally accepts only managed backups.
-
-The development Compose stack has the checkout mounted at `/opt/darklab-source/app`, while `/app` is empty until the normal entrypoint stages it. The cutover tool reads that development source directly in a one-off container. Once Postgres is running and the backup exists, a development preflight looks like this:
-
-```bash
-docker compose -f compose.dev.yaml run --rm --no-deps \
-  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  --entrypoint python shell \
-  /opt/cutover-tools/cutover_principal_identity.py preflight \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --allow-development-backup \
-  --expected-legacy-credentials <reviewed-count> \
-  --confirm-no-external-users
-```
-
-If this is a development database with disposable test credentials, review their data before converting your operator workspace. Put the operator's old credential in an owner-only `cutover/selected-credential.txt` file and mount that directory read-only for this check:
-
-```bash
-mkdir -p cutover
-chmod 700 cutover
-chmod 600 cutover/selected-credential.txt
-docker compose -f compose.dev.yaml run --rm --no-deps \
-  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  -v "$PWD/cutover:/cutover:ro" \
-  --entrypoint python shell \
-  /opt/cutover-tools/cutover_principal_identity.py preflight \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --allow-development-backup \
-  --expected-legacy-credentials <reviewed-total> \
-  --confirm-no-external-users \
-  --selected-credential-file /cutover/selected-credential.txt
-```
-
-The selected development preflight holds the Postgres migration lock while calculating its review and rolls back any temporary schema updates before returning; it leaves the saved database state unchanged.
-
-The `development_discard_review` counts separate the other credentials, their owned rows, Team snapshots, Team recent values, and Team memberships without printing credential values. The discard path accepts only personal History runs, snapshots, recent values, preferences, and starred commands by default. If a Team snapshot belongs to a disposable test credential, inspect its metadata and links first. Once you've confirmed it can go, add `--reviewed-team-snapshot-id <snapshot-id>` to both the selected preflight above and the conversion below, repeating the flag for every Team snapshot you reviewed. Team recent-value suggestions have no standalone ID; inspect their Team, member role, kind, and count without printing the saved values, then add `--expected-discard-team-recent-values <reviewed-count>` to both commands. Both exceptions require an active Team owned by the selected operator and an active membership for the test credential. The snapshot IDs must match exactly and have no Project links, labels, or notes. The tool still refuses other Team-scoped data, unknown owner tables, linked runs or snapshots, Team owners, and memberships referenced elsewhere. Keep the backup if any check stops the conversion; don't delete token rows or History rows manually.
-
-For a development conversion, stop every application writer but leave Postgres running. Put the selected credential in an owner-only file, then use the same source mount and backup with the conversion confirmations:
-
-```bash
-mkdir -p cutover
-chmod 700 cutover
-chmod 600 cutover/selected-credential.txt
-docker compose -f compose.dev.yaml stop shell
-docker compose -f compose.dev.yaml run --rm --no-deps \
-  -v "$PWD/scripts/operations:/opt/cutover-tools:ro" \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  -v "$PWD/cutover:/cutover" \
-  --entrypoint python shell \
-  /opt/cutover-tools/cutover_principal_identity.py convert \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --allow-development-backup \
-  --expected-legacy-credentials <reviewed-count> \
-  --confirm-no-external-users \
-  --confirm-application-stopped \
-  --selected-credential-file /cutover/selected-credential.txt \
-  --new-credential-file /cutover/new-access-credential.txt \
-  --confirm-selected-conversion convert-the-selected-operator
-```
-
-When the extra owners are confirmed disposable and the review succeeds, insert these flags between `--new-credential-file` and `--confirm-selected-conversion` in the development `convert` command. Use the counts printed immediately beforehand:
-
-```bash
-  --expected-discard-credentials <reviewed-other-credentials> \
-  --expected-discard-rows <reviewed-other-owned-rows> \
-  --expected-discard-team-members <reviewed-other-team-members> \
-  --reviewed-team-snapshot-id <reviewed-snapshot-id-if-any> \
-  --expected-discard-team-recent-values <reviewed-team-recent-values-if-any> \
-  --confirm-discard-other-legacy-data discard-other-development-owners \
-```
-
-Omit the Team-snapshot and Team-recent-value flags when those records aren't present. This option requires a checksum-verified development backup and Postgres. It removes only the reviewed test-owned database records and Team memberships in the same transaction as the selected-owner conversion and legacy-schema removal; the selected operator's Team recent values stay. A count change or unexpected reference rolls everything back. It leaves test workspace directories and old output files on disk so a failed database transaction can't lose files; keep them in the backup and clean them up separately only after the new credential works. Managed production backups cannot enable this discard option.
-
-If the old workspace is on a separate volume or bind mount, mount that same location in the one-off container as well. The development-backup opt-in is not needed for managed archives and must not be used as a substitute for a managed production backup.
-
-#### Managed upgrade from v2.9.2
-
-The v2.9.2 image doesn't contain `/app/tools/cutover_principal_identity.py`. Stage and verify the reviewed v3 release before running that tool, while keeping the application stopped. `darklab-deploy upgrade` updates managed files and selects the new image in `.env`; it doesn't start the application. Rehearse the chosen reset or conversion on a private copy of the old installation and its backup before changing the live installation.
-
-Run these commands from the managed installation directory. Keep the same Compose project name, `.env`, data, configuration, and workspace mounts throughout. This helper includes the operator override when present:
-
-```bash
-cutover_compose() {
-  if [ -f compose.operator.yaml ]; then
-    docker compose --env-file .env -f compose.yaml -f compose.operator.yaml "$@"
-  else
-    docker compose --env-file .env -f compose.yaml "$@"
-  fi
-}
-```
-
-1. **Stop application writers and back up the old state using v2.9.2.** Stop any external database or workspace writers too. Keep the existing Postgres service available; don't use `down` or remove its volume. If bundled Postgres is stopped, start only that service with `cutover_compose --profile postgres up -d --no-deps --wait postgres` before taking the backup.
-
-   ```bash
-   ./darklab-deploy status
-   cutover_compose stop shell zap-worker oast-worker
-   ./darklab-deploy backup
-   ```
-
-   The backup command verifies the managed archive and prints its path. Review its warnings and confirm it includes the database, private configuration, vault key, and the workspace files being preserved. Keep that exact archive and the old deployment files for recovery; no writers may change the backed-up state before cutover.
-
-2. **Stage the reviewed v3 release without starting it.** Replace the backup filename with the path printed above; use the exact reviewed v3 version if it differs from this example.
-
-   ```bash
-   ./darklab-deploy upgrade 3.0.0 \
-     --backup "$PWD/backups/darklab-backup-<timestamp>.tar.gz"
-   ./darklab-deploy status
-   ```
-
-   This verifies the supplied backup and release material, installs the v3 managed files, and updates `DARKLAB_IMAGE` in `.env`. Review new settings in `.env.example` and preserve the existing database and workspace configuration. Remove any exported `DARKLAB_IMAGE` override, and ensure `compose.operator.yaml` doesn't select a different application image. **Don't run the restart command printed by `upgrade` yet.**
-
-3. **Pull and verify the selected v3 application image.** These commands use the new `.env` and release manifest. Pulling the image and overriding its entrypoint for a one-off tool run don't start the application or its startup migrations.
-
-   ```bash
-   cutover_compose pull shell
-   ./verify-release-image.sh
-   cutover_compose run --rm --no-deps --entrypoint python shell \
-     /app/tools/cutover_principal_identity.py --help
-   ```
-
-4. **Run v3 preflight, then the selected reset or conversion below.** Keep Postgres running and every application writer stopped. The one-off `shell` service inherits the installation's data, config, and workspace mounts, including `compose.operator.yaml`; add any separately managed workspace mount if it isn't in that service definition. Mount the verified backup read-only and use a private operator directory for credential input and one-time output.
-
-For an initial inventory, omit `--expected-legacy-credentials` from the preflight command. Review the reported count, then supply it on the repeated preflight and chosen cutover command. A changed count stops the operation:
-
-```bash
-mkdir -p cutover
-chmod 700 cutover
-cutover_compose run --rm --no-deps \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  -v "$PWD/cutover:/cutover" \
-  --entrypoint python shell \
-  /app/tools/cutover_principal_identity.py preflight \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --expected-legacy-credentials <reviewed-count> \
-  --confirm-no-external-users
-```
-
-For SQLite, the preflight recommends a fresh application-data reset. Stop the complete Compose project before making that change, then repeat the verified inputs and type the exact confirmation phrase:
-
-```bash
-cutover_compose stop
-cutover_compose run --rm --no-deps \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  --entrypoint python shell \
-  /app/tools/cutover_principal_identity.py reset \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --expected-legacy-credentials <reviewed-count> \
-  --confirm-no-external-users \
-  --confirm-application-stopped \
-  --confirm-fresh-reset erase-current-application-data
-```
-
-The reset prints database and workspace rollback directories. Keep both until the upgraded application is healthy. Before creating any new application state, you can restore the staged data with `rollback-reset`; the command refuses to overwrite a non-empty destination:
-
-```bash
-cutover_compose run --rm --no-deps --entrypoint python shell \
-  /app/tools/cutover_principal_identity.py rollback-reset \
-  --database-rollback-path <printed-database-path> \
-  --workspace-rollback-path <printed-workspace-path> \
-  --confirm-application-stopped \
-  --confirm-reset-rollback restore-staged-application-data
-```
-
-The selected conversion is deliberately narrow: use it only for the one operator-owned workspace approved during rehearsal. It is the supported data-preserving path for Postgres and an optional path for SQLite. Put that workspace's old credential in `cutover/selected-credential.txt`, set the file to `0600`, and choose a new output path that doesn't exist.
-
-For SQLite, stop the complete Compose project. For Postgres, leave the `postgres` service running but stop every application process that can write to it:
-
-```bash
-# SQLite
-cutover_compose stop
-
-# Postgres
-cutover_compose stop shell zap-worker oast-worker
-```
-
-Then run the conversion:
-
-```bash
-chmod 600 cutover/selected-credential.txt
-cutover_compose run --rm --no-deps \
-  -v "$PWD/backups:/cutover-backups:ro" \
-  -v "$PWD/cutover:/cutover" \
-  --entrypoint python shell \
-  /app/tools/cutover_principal_identity.py convert \
-  --backup /cutover-backups/darklab-backup-<timestamp>.tar.gz \
-  --expected-legacy-credentials <reviewed-count> \
-  --confirm-no-external-users \
-  --confirm-application-stopped \
-  --selected-credential-file /cutover/selected-credential.txt \
-  --new-credential-file /cutover/new-access-credential.txt \
-  --confirm-selected-conversion convert-the-selected-operator
-```
-
-Preflight can read an untouched v2.9.2 database. The conversion applies its required schema updates together with ownership conversion in one transaction, keeps the existing workspace directory name, validates the backend's History rows and a known substring search, and writes the replacement credential once to the owner-only output file. SQLite additionally verifies database integrity, every `runs.rowid`, and the FTS5 index. Postgres takes the same transaction-scoped advisory lock as startup migrations, so the ownership conversion and migration `0082` commit together. A non-empty shared-anonymous directory or any data or Team membership owned by a different old credential stops conversion for an explicit operator decision.
-
-If conversion fails, the transaction rolls back, the old database and workspace remain in place, and the incomplete output file is removed. Keep the verified backup and don't restart the application until the command succeeds and the replacement credential is stored securely. After a successful conversion, the old credentials are invalid and normal startup can apply later migrations. SQLite reset and reset rollback aren't available for Postgres; production installations use managed backup and restore for recovery, while development checkouts restore their separately rehearsed Postgres dump and files.
-
-After the chosen cutover succeeds and the replacement credential is saved, start the selected v3 deployment and check its health:
-
-```bash
-cutover_compose up -d
-cutover_compose ps
-```
-
-For a conversion, sign in with the replacement and verify the preserved workspace, History search, and Files. For a reset, verify the intended fresh-access profile and bootstrap restricted access when required. Keep the verified pre-upgrade backup and any reset rollback directories until those checks succeed. A failed cutover leaves application writers stopped; don't start either release against an unreviewed partial state.
-
----
 
 ## Application YAML Settings
 
@@ -1335,6 +1109,8 @@ cp .env.example .env
 ```env
 # APP_PORT=8888
 # DEV_HOST_BIND_ADDRESS=127.0.0.1
+# Optional services: llama, postgres; production also supports zap and oast.
+# COMPOSE_PROFILES=
 # ACCESS_PROFILE=open
 # RESTRICTED_PUBLIC_SHARES_ENABLED=false
 # BROWSER_SESSION_IDLE_MINUTES=30
@@ -1355,8 +1131,8 @@ cp .env.example .env
 
 # Optional AI assists and bundled llama.cpp model settings.
 # Disabled until AI features are enabled.
-# If you also use Postgres, include it in COMPOSE_PROFILES, for example:
-# COMPOSE_PROFILES=llama,postgres
+# Add llama to COMPOSE_PROFILES above for the bundled model service.
+# Keep postgres in the same list if you also use the bundled database.
 # AI_WORKER_ENABLED=0
 # AI_ENABLED=false
 # AI_BASE_URL=http://llama:8080
@@ -1394,6 +1170,8 @@ cp .env.example .env
 # DARKLAB_OAST_TOKEN=
 ```
 
+Keep one `COMPOSE_PROFILES` assignment in `.env`, with every optional service the deployment needs. For example, use `llama,postgres` for the bundled model and database services. Edit that existing assignment when adding another profile; a later empty assignment would disable the earlier selection.
+
 For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
 
 | Variable | Used by | Purpose |
@@ -1423,12 +1201,12 @@ For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and
 | `ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED` | Docker Compose, Flask app | Enables maintained intrusive Assessment actions and the reviewed intrusive Nuclei profile for Project probes. It doesn't bypass per-launch confirmation, Project scope, request/time bounds, or command-specific safety checks; intrusive Dalfox probes and destructive actions remain unavailable |
 | `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED` | Docker Compose, Docker entrypoint | When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot |
 | `NUCLEI_TEMPLATE_REFRESH_ENABLED` | Docker Compose, Flask app | Enables the operator-controlled template refresh in Assessment-plan preflight. When unset or empty, it follows `NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED`; disabling both leaves cache replacement to deployment operators |
-| `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
-| `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
+| `WEB_CONCURRENCY` | Development and production Compose, Gunicorn entrypoint | Number of Gunicorn worker processes; defaults to `4` |
+| `WEB_THREADS` | Development and production Compose, Gunicorn entrypoint | Number of threads per Gunicorn worker; defaults to `4` |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Scratch directory created and exported for `prometheus_client` multiprocess metrics |
-| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Available values are `llama`, `postgres`, `zap`, and `oast`; combine the ones the deployment uses, such as `postgres,zap,oast` |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated profiles to enable in one assignment. Development supports `llama` and `postgres`; production also supports `zap` and `oast`. Combine the ones the deployment uses, such as `postgres,zap,oast` in production |
 | `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
 | `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
 | `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted personal or team vault for the queued request scope; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
@@ -1607,7 +1385,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:2.9.2` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:3.0.0` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 
@@ -1711,7 +1489,7 @@ For a local development image, pass the metadata values you want Docker inventor
 
 ```bash
 docker compose -f compose.dev.yaml build \
-  --build-arg APP_VERSION=2.9.2 \
+  --build-arg APP_VERSION=3.0.0 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
@@ -1804,7 +1582,7 @@ This option is only for a Postgres backup restored into a fresh install that's s
 
 `./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, the candidate base stack doesn't work with the installed `compose.operator.yaml`, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands; the printed Compose commands include the operator override when it exists. Changing an image tag never reverses a database migration.
 
-The underlying `scripts/operations/backup_system.py` helper is also available to development checkouts and custom test environments, including the [v3 identity cutover](#v3-identity-cutover). It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
+The underlying `scripts/operations/backup_system.py` helper is also available to development checkouts and custom test environments. It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
 
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 
