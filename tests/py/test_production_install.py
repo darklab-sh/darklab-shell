@@ -21,6 +21,7 @@ from email.parser import Parser
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import pytest
 import yaml
@@ -30,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "2.9.2"
+RELEASE_VERSION = "3.0.0"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
@@ -40,7 +41,7 @@ NEXT_RC_VERSION = (
     if _CURRENT_RC_NUMBER
     else RC_TWO_VERSION
 )
-NEXT_VERSION = "2.9.3"
+NEXT_VERSION = "3.0.1"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
@@ -973,6 +974,60 @@ def _run_dockerhub_publisher(
     return result, log_path.read_text(encoding="utf-8")
 
 
+def _env_example_settings(relative_path: str) -> list[tuple[str, str]]:
+    # Match standalone assignments, including commented opt-in settings, but
+    # exclude prose such as "# DATABASE_BACKEND=postgres with the profile...".
+    return re.findall(
+        r"^(?:# *)?([A-Z][A-Z0-9_]*)=([^\s]*)[ \t]*$",
+        (ROOT / relative_path).read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("env_file", "compose_file"),
+    [(".env.example", "compose.dev.yaml"), ("deploy/.env.example", "deploy/compose.yaml")],
+)
+def test_env_examples_have_unique_supported_settings(env_file: str, compose_file: str):
+    settings = _env_example_settings(env_file)
+    names = [name for name, _value in settings]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    assert not duplicates, f"{env_file} repeats settings that can override each other: {duplicates}"
+
+    compose = yaml.safe_load((ROOT / compose_file).read_text(encoding="utf-8"))
+    references = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", json.dumps(compose)))
+    # Compose consumes COMPOSE_PROFILES itself, without YAML interpolation.
+    unsupported = sorted(set(names) - references - {"COMPOSE_PROFILES"})
+    assert not unsupported, f"{env_file} advertises settings unused by {compose_file}: {unsupported}"
+
+
+@pytest.mark.parametrize("env_file", [".env.example", "deploy/.env.example"])
+@pytest.mark.parametrize("allowlist", [False, True], ids=["default-policy", "allowlist-policy"])
+def test_env_examples_oidc_settings_load(env_file: str, allowlist: bool, tmp_path: Path):
+    import config as app_config
+
+    environment = {
+        name: value for name, value in _env_example_settings(env_file)
+        if name.startswith("OIDC_")
+    }
+    environment.update({
+        "ACCESS_PROFILE": "mixed",
+        "OIDC_CLIENT_SECRET": "example-test-client-secret",
+    })
+    if allowlist:
+        environment.update({
+            "OIDC_PROVISIONING": "allowlist",
+            "OIDC_ALLOWED_SUBJECTS": "subject-one,subject-two",
+        })
+    with mock.patch.dict(os.environ, environment, clear=True):
+        cfg = app_config.load_config(tmp_path, tmp_path)
+
+    assert cfg["access_profile"] == "mixed"
+    assert cfg["oidc_provisioning"] == ("allowlist" if allowlist else "disabled")
+    assert cfg["oidc_allowed_subjects"] == (["subject-one", "subject-two"] if allowlist else [])
+    assert cfg["oidc_scopes"] == ["openid"]
+
+
 def test_production_compose_uses_pinned_public_image_and_no_source_mount():
     compose_text = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
     compose = yaml.safe_load(compose_text)
@@ -1461,13 +1516,11 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
         "COPY scripts/operations/backup_system.py "
-        "scripts/operations/cutover_principal_identity.py "
         "scripts/operations/manage_principal_access.py "
         "scripts/operations/migrate_sqlite_to_postgres.py "
         "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
-    assert "!scripts/operations/cutover_principal_identity.py" in dockerignore
     assert "!scripts/operations/manage_principal_access.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
@@ -4482,18 +4535,9 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     )
     backup = _build_verified_backup(tmp_path, backend="postgres", operator_env=source_env)
     restore_helper = _load_script_module("restore_system")
-    assert restore_helper.verify_backup_archive(backup)["database_backend"] == "postgres"
     development_backup = _build_verified_backup(
         tmp_path / "development-backup", backend="postgres", repository_free=False
     )
-    with pytest.raises(restore_helper.RestoreError, match="managed deployment lifecycle"):
-        restore_helper.verify_backup_archive(development_backup)
-    verified_development = restore_helper.verify_backup_archive(
-        development_backup, allow_development_backup=True
-    )
-    assert verified_development["database_backend"] == "postgres"
-    assert verified_development["repository_free"] is False
-    assert verified_development["workspaces_included"] is True
     restore_target = tmp_path / "restore-target"
     restore_data = restore_target / "data"
     restore_conf = restore_target / "conf"
@@ -4528,7 +4572,7 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
     monkeypatch.setattr(restore_helper.subprocess, "run", capture_pg_restore)
     expected_uid = 12001 if os.geteuid() == 0 else os.getuid()
     expected_gid = 12002 if os.geteuid() == 0 else os.getgid()
-    restore_helper.restore(SimpleNamespace(
+    restore_args = SimpleNamespace(
         archive=str(backup),
         data_dir=str(restore_data),
         local_conf_dir=str(restore_conf),
@@ -4537,7 +4581,13 @@ def test_restore_preserves_target_postgres_credentials_and_host_ownership(
         database_url=target_database_url,
         output_uid=str(expected_uid),
         output_gid=str(expected_gid),
-    ))
+    )
+    with pytest.raises(restore_helper.RestoreError, match="managed deployment lifecycle"):
+        restore_helper.restore(SimpleNamespace(**{**vars(restore_args), "archive": str(development_backup)}))
+    assert captured_restore == {}
+    for directory in (restore_data, restore_conf, restore_workspaces):
+        assert (directory / "stale.txt").read_text() == "stale\n"
+    restore_helper.restore(restore_args)
 
     restored_env = restore_env.read_text(encoding="utf-8")
     assert f"DARKLAB_IMAGE={_dockerhub_image(RELEASE_VERSION)}" in restored_env

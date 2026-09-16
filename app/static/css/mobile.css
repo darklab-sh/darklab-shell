@@ -600,9 +600,21 @@ body.mobile-terminal-mode .tabbar-scroll {
     display: none !important;
   }
   body.mobile-terminal-mode .modal-token-input,
-  body.mobile-terminal-mode .options-token-input {
+  body.mobile-terminal-mode .options-token-input,
+  body.mobile-terminal-mode #options-modal input:not([type="checkbox"], [type="radio"], [type="range"]),
+  body.mobile-terminal-mode #options-modal textarea {
     font-size: 16px;
     line-height: 1.35;
+  }
+  body.mobile-terminal-mode #options-overlay.options-viewport-tracked {
+    /* Keep the dismissible scrim over the whole app, including the header. */
+    box-sizing: border-box;
+    padding-bottom: var(--options-viewport-bottom);
+  }
+  body.mobile-terminal-mode #options-overlay.options-viewport-tracked #options-modal {
+    box-sizing: border-box;
+    min-height: min(56svh, var(--options-viewport-height));
+    max-height: min(88svh, var(--options-viewport-height)) !important;
   }
   body.mobile-terminal-mode #workspace-path-input,
   body.mobile-terminal-mode #workspace-labels-input,

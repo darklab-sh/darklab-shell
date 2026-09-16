@@ -67,7 +67,7 @@ _POSTGRES = (
                WHERE principal_id IS NULL OR principal_id = ''
            ) THEN
             RAISE EXCEPTION USING MESSAGE =
-                'legacy identities remain; run cutover_principal_identity.py before starting this release';
+                'legacy session identities are not supported by this release';
         END IF;
     END
     $$

@@ -1372,6 +1372,89 @@ describe('app helpers', () => {
     expect(getOptionsModalLastTabPreference()).toBe('secrets')
   })
 
+  it('syncs preferences without reactivating the selected Options tab', async () => {
+    const { activateOptionsTab, syncOptionsControls } = await loadAppFns()
+    activateOptionsTab('preferences', { persist: false })
+    const changed = vi.fn()
+    window.addEventListener('app:options-tab-changed', changed)
+    try {
+      activateOptionsTab('access', { persist: false })
+      expect(changed).toHaveBeenCalledTimes(1)
+
+      // Each saved preference syncs the controls while Access is loading.
+      // None of those syncs should restart the credential requests.
+      for (let i = 0; i < 12; i += 1) syncOptionsControls()
+      activateOptionsTab('access', { persist: false, focus: true })
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(document.getElementById('options-tab-access'))
+      expect(document.getElementById('options-panel-access').hidden).toBe(false)
+
+      activateOptionsTab('preferences', { persist: false })
+      activateOptionsTab('access', { persist: false })
+      expect(changed).toHaveBeenCalledTimes(3)
+    } finally {
+      window.removeEventListener('app:options-tab-changed', changed)
+    }
+  })
+
+  it('restores preferences after Options controls sync during a pending load', async () => {
+    const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const { loadSessionPreferences, syncOptionsControls, getPromptUsernamePreference } = await loadAppFns({ apiFetch })
+    let finishLoad
+    apiFetch.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+    const loading = loadSessionPreferences()
+    syncOptionsControls()
+    finishLoad({ ok: true, json: async () => ({ preferences: { pref_prompt_username: 'restored-operator' } }) })
+    await loading
+    expect(getPromptUsernamePreference()).toBe('restored-operator')
+  })
+
+  it('ignores an older preference response after a newer workspace load finishes', async () => {
+    const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const { loadSessionPreferences, getPromptUsernamePreference } = await loadAppFns({ apiFetch })
+    let finishOldLoad
+    apiFetch.mockImplementationOnce(() => new Promise(resolve => { finishOldLoad = resolve }))
+    const oldLoad = loadSessionPreferences()
+    apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ preferences: { pref_prompt_username: 'restored-operator' } }) })
+    await loadSessionPreferences()
+    finishOldLoad({ ok: true, json: async () => ({ preferences: { pref_prompt_username: 'old-workspace' } }) })
+    await oldLoad
+    expect(getPromptUsernamePreference()).toBe('restored-operator')
+  })
+
+  it('preserves a prompt-name edit made during a pending preference load', async () => {
+    const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const { loadSessionPreferences, applyPromptUsernamePreference, getPromptUsernamePreference } = await loadAppFns({ apiFetch })
+    let finishLoad
+    apiFetch.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+    const loading = loadSessionPreferences()
+    applyPromptUsernamePreference('local-operator')
+    finishLoad({ ok: true, json: async () => ({ preferences: { pref_prompt_username: 'remote-operator' } }) })
+    await loading
+    expect(getPromptUsernamePreference()).toBe('local-operator')
+  })
+
+  it('keeps Access open when startup preferences arrive after the sign-in handoff', async () => {
+    const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const { loadSessionPreferences, activateOptionsTab } = await loadAppFns({ apiFetch })
+    activateOptionsTab('access', { persist: false })
+    let finishLoad
+    apiFetch.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+    const loading = loadSessionPreferences()
+    document.getElementById('options-overlay').classList.add('open')
+    activateOptionsTab('access', { persist: false })
+    const changed = vi.fn()
+    window.addEventListener('app:options-tab-changed', changed)
+    try {
+      finishLoad({ ok: true, json: async () => ({ preferences: { pref_options_modal_last_tab: 'preferences' } }) })
+      await loading
+      expect(document.getElementById('options-panel-access').hidden).toBe(false)
+      expect(changed).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('app:options-tab-changed', changed)
+    }
+  })
+
   it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
     let createdTeam = null
     let failScopeRefresh = false
