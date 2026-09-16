@@ -115,6 +115,7 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
 })
 
 _PUBLISHED_CHANGELOG_HASHES = {
+    "3.0.0": "952912b9a10f16dee456b0f50ee411a19bb5b0b7cdc253bb0ecefe42a42746b3",
     "2.9.2": "d833472879c54cc34f4119c56e15e07e068bfd911ef2656798c94a3e187ac3f0",
     "2.9.1": "62cc5d27126cc1c653ef5591eb54ac781b2cf49304244ed22d3575c7327c3514",
     "2.9.0": "785878223959305e63aa3b66ebbf624734757d33418785dcd51419b7f2a41bb6",
@@ -815,8 +816,8 @@ class TestChangelogArchives:
     def test_root_keeps_active_release_and_two_newest_published_releases(self):
         sections = _changelog_sections(_CHANGELOG)
         assert len(sections) == 3
-        assert sections[0]["label"] == "Unreleased"
-        assert all(section["label"] != "Unreleased" for section in sections[1:])
+        published = sections[1:] if sections[0]["label"] == "Unreleased" else sections
+        assert all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", section["label"]) for section in published)
 
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
