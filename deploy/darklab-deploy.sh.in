@@ -498,6 +498,9 @@ create_repository_free_backup() {
         --postgres-dump-mode local \
         --extra-file /deployment/release-manifest.json \
         --extra-file /deployment/managed-files.sha256
+    if [ -e "$script_dir/compose.operator.yaml" ] || [ -L "$script_dir/compose.operator.yaml" ]; then
+        set -- "$@" --operator-compose-file /deployment/compose.operator.yaml
+    fi
     if [ -n "$keep_days" ]; then
         set -- "$@" --keep-days "$keep_days"
     fi
