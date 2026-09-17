@@ -19,6 +19,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Browser tests keep one worker per isolated app server.** Separate projects still run in parallel, while diagnostics layout checks avoid an extra page render from timezone detection. A dedicated browser check covers that redirect, and traces retain the original failed attempt even when its retry passes. CI continues to reject flaky results.
 
+- **Assessment browser checks reliably observe loading states.** Preview and template-refresh fixtures hold their responses until loading-state and scroll checks finish, removing a race caused by fixed response delays on busy CI runners.
+
+- **Access and comparison browser checks tolerate busy CI runners.** Multi-step token, logout, and provider journeys have enough time for their repeated page loads and refreshes. Comparison checks capture the finding highlight when navigation happens, before its brief animation expires.
+
+- **Provider browser checks can repeat after an interrupted attempt.** The local test provider keeps a separate identity for each browser context, and the linking journey clears any operator link left by an earlier attempt before signing in.
+
 ---
 
 ## [3.0.0] - 2026-09-15

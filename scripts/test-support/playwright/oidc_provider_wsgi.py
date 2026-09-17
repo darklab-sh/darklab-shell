@@ -25,7 +25,8 @@ CLIENT_ID = os.environ["OIDC_CLIENT_ID"]
 CLIENT_SECRET = os.environ["OIDC_CLIENT_SECRET"]
 REDIRECT_URI = os.environ["OIDC_REDIRECT_URI"]
 _KEY = jwk.RSAKey.generate_key(2048, private=True)
-_CODES: dict[str, tuple[str, str, str]] = {}
+_CODES: dict[str, tuple[str, str, str, str]] = {}
+_SUBJECT_COOKIE = "darklab_e2e_oidc_subject"
 _LOCK = Lock()
 
 
@@ -61,9 +62,14 @@ def provider(request: Request) -> Response:
                 or not query.get("state") or not query.get("nonce") or not query.get("code_challenge")):
             return _error("invalid authorization request")
         code = secrets.token_urlsafe(32)
+        # Keep the provider identity stable within a browser, but isolate new
+        # contexts and retries from identities provisioned by earlier attempts.
+        subject = request.cookies.get(_SUBJECT_COOKIE) or secrets.token_urlsafe(24)
         with _LOCK:
-            _CODES[code] = (query["code_challenge"], query["nonce"], query["redirect_uri"])
-        return Response(status=302, headers={"Location": f"{REDIRECT_URI}?code={code}&state={query['state']}"})
+            _CODES[code] = (query["code_challenge"], query["nonce"], query["redirect_uri"], subject)
+        response = Response(status=302, headers={"Location": f"{REDIRECT_URI}?code={code}&state={query['state']}"})
+        response.set_cookie(_SUBJECT_COOKIE, subject, secure=True, httponly=True, samesite="Strict", path="/idp")
+        return response
     if request.path == "/token" and request.method == "POST":
         try:
             scheme, encoded = request.headers.get("Authorization", "").split(" ", 1)
@@ -83,7 +89,7 @@ def provider(request: Request) -> Response:
             return _error("invalid code")
         now = int(time.time())
         id_token = jwt.encode({"alg": "RS256"}, {
-            "iss": ISSUER, "sub": "playwright-subject", "aud": CLIENT_ID,
+            "iss": ISSUER, "sub": flow[3], "aud": CLIENT_ID,
             "exp": now + 300, "iat": now, "auth_time": now, "nonce": flow[1],
         }, _KEY)
         return _json({

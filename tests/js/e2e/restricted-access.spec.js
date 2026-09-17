@@ -121,6 +121,8 @@ test.describe('restricted access profile', () => {
   })
 
   test('retries a failed rail logout and leaves another browser signed in', async ({ page, browser, context, request }) => {
+    // Three complete sign-ins share this budget, including the peer browser.
+    test.setTimeout(60_000)
     await openSignIn(page)
     await signIn(page)
     const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })

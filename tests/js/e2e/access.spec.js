@@ -116,6 +116,8 @@ test.describe('workspace Access', () => {
     test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
 
     test('creates a scoped API token from Access', async ({ page }) => {
+      // Keeping the workspace reloads the app before the token-creation journey.
+      test.setTimeout(60_000)
       await keepBrowserWorkspace(page, { label: 'PAT issuer' })
       if (width < 600) {
         await page.locator('#hamburger-btn').click()
