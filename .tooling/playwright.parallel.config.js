@@ -84,7 +84,7 @@ const openProjects = specGroups
       use: {
         ...devices['Desktop Chrome'],
         baseURL: `http://127.0.0.1:${basePort + index}`,
-        trace: 'on-first-retry',
+        trace: 'retain-on-failure',
       },
     }
   })
@@ -97,7 +97,7 @@ const restrictedProject = {
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${restrictedPort}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcPort = restrictedPort + 1
@@ -108,7 +108,7 @@ const oidcProject = {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcRequiredPort = oidcPort + 1
@@ -119,7 +119,7 @@ const oidcRequiredProject = {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcRequiredPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const restrictedQualificationPort = oidcRequiredPort + 1
@@ -129,7 +129,7 @@ const restrictedQualificationProject = {
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${restrictedQualificationPort}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcQualificationPort = restrictedQualificationPort + 1
@@ -140,13 +140,15 @@ const oidcQualificationProject = {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcQualificationPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
+// Tests in one project share an app process and database. Keep parallelism
+// between isolated servers instead of letting one project use every worker.
 const projects = [
   ...openProjects, restrictedProject, oidcProject, oidcRequiredProject,
   restrictedQualificationProject, oidcQualificationProject,
-]
+].map((project) => ({ ...project, workers: 1 }))
 
 export default defineConfig({
   testDir,

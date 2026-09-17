@@ -199,7 +199,7 @@ async function installSafeAssessmentLaunchFixture(page) {
   })
 }
 
-async function installAssessmentBatchLifecycleFixture(page) {
+async function installAssessmentBatchLifecycleFixture(page, { holdLoadingStates = false } = {}) {
   const state = {
     launched: false,
     canceling: false,
@@ -209,6 +209,13 @@ async function installAssessmentBatchLifecycleFixture(page) {
     startBody: null,
     retryBody: null,
     preview: null,
+  }
+  // Keep transient loading states visible until the test has checked them.
+  const previewHeld = new Promise(resolve => { state.releasePreview = resolve })
+  const templateRefreshHeld = new Promise(resolve => { state.releaseTemplateRefresh = resolve })
+  if (!holdLoadingStates) {
+    state.releasePreview()
+    state.releaseTemplateRefresh()
   }
   const batchId = 'wfx_assessment_batch_playwright'
   const retryBatchId = 'wfx_assessment_batch_retry_playwright'
@@ -357,7 +364,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         reason_code: '',
       }
       state.preview = refreshed
-      await new Promise(resolve => setTimeout(resolve, 125))
+      await templateRefreshHeld
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -388,7 +395,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         operator_action: 'Update the managed templates when network access is available.',
       }
       state.preview = payload.preview
-      await new Promise(resolve => setTimeout(resolve, 125))
+      await previewHeld
       await route.fulfill({
         response,
         contentType: 'application/json',
@@ -589,7 +596,7 @@ test.describe('project assessment qualification', () => {
 
   test('previews starts restores and cancels a bounded assessment batch', async ({ page }) => {
     test.setTimeout(90_000)
-    const fixture = await installAssessmentBatchLifecycleFixture(page)
+    const fixture = await installAssessmentBatchLifecycleFixture(page, { holdLoadingStates: true })
     const { assessment } = await startNetworkAssessment(
       page,
       `Assessment Batch ${Date.now()}`,
@@ -628,9 +635,13 @@ test.describe('project assessment qualification', () => {
     })
     await previewButton.scrollIntoViewIfNeeded()
     const scrollBeforePreview = await explorerBody.evaluate(node => node.scrollTop)
-    await previewButton.click()
-    await expect(section.getByRole('button', { name: 'Building preview…' })).toBeVisible()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
+    try {
+      await previewButton.click()
+      await expect(section.getByRole('button', { name: 'Building preview…' })).toBeVisible()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
+    } finally {
+      fixture.releasePreview()
+    }
     expect((await previewResponse).status()).toBe(201)
     await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
     await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
@@ -666,10 +677,14 @@ test.describe('project assessment qualification', () => {
     })
     await expect(updateTemplates).toBeVisible()
     const scrollBeforeTemplateRefresh = await explorerBody.evaluate(node => node.scrollTop)
-    await updateTemplates.click()
-    await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
-      .toBe(scrollBeforeTemplateRefresh)
+    try {
+      await updateTemplates.click()
+      await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
+        .toBe(scrollBeforeTemplateRefresh)
+    } finally {
+      fixture.releaseTemplateRefresh()
+    }
     expect((await templateRefresh).status()).toBe(200)
     await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
       .toBe(scrollBeforeTemplateRefresh)

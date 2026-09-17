@@ -151,10 +151,14 @@ Playwright notes:
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. Each server keeps the shipped catalogs under `app/conf` and writes only its private settings overlay to a per-slot temporary directory. The helper uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
 - `npm run test:e2e:source` runs a source-mode Playwright slice against the four-profile access matrix, Project Assessment lifecycle, boot resilience, share/permalink flows, shell-output entity actions, and the high-risk lazy shell surfaces. Its lazy-surface check also runs a workflow terminal command before the Workflows controller has loaded, which keeps cold-start command lifecycle regressions covered. It is included in `npm test` and runs as a separate required GitLab job, so browser-native ESM import loading stays covered even though the full browser suite stays in bundle mode.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
-- CI retries a failed Playwright case once to capture a trace, but `failOnFlakyTests` keeps the job red if that retry passes. `forbidOnly` also rejects focused tests before they can quietly reduce the suite.
+- Browser runs use `retain-on-failure` tracing, so artifacts include the original failed attempt even when its retry passes. CI retries once, but `failOnFlakyTests` keeps the job red if that retry passes. `forbidOnly` also rejects focused tests before they can quietly reduce the suite.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
-- each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
+- Each parallel project allows one browser worker and gets its own Flask server port plus isolated `APP_DATA_DIR` state. Separate projects run concurrently within the global worker limit. This applies to the normal CLI suite and the Postgres qualification matrix, keeping concurrent test workers on separate servers.
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
+- Assessment preview and template-refresh fixtures hold their responses until loading-state and scroll checks finish. These checks control response timing instead of relying on a brief fixed delay to catch a busy state.
+- Multi-step token, logout, and provider journeys have individual time budgets for their page loads and refreshes. Comparison anchor checks capture the highlighted row at the navigation event so a busy runner doesn't miss its brief pulse.
+- Access-profile qualification waits up to 30 seconds for the shell URL and `DOMContentLoaded` after sign-in and reload, then checks prompt readiness. This keeps navigation out of the five-second URL assertion budget and avoids waiting for unrelated assets to finish loading.
+- The local HTTPS provider keeps its identity in a private cookie for each browser context. New contexts, including retries, get a fresh provider identity. The linking journey also clears any operator link left by an interrupted attempt through the app's authenticated API before starting its browser flow.
 
 ---
 
@@ -435,7 +439,9 @@ The focused probe spec runs in bundle and source modes. It creates active Projec
 The browser layer now uses a split config model:
 
 - [.tooling/playwright.config.js](../.tooling/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
-- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the open-profile suite across 5 isolated projects by default using measured per-file runtime weights. Separate `chromium-restricted` and `chromium-oidc` projects own the credential-gated and HTTPS-provider servers so their configuration and bootstrap state can't leak into other journeys. CI currently sets `PLAYWRIGHT_PROJECT_COUNT=3` to reduce browser/server contention on the shared runner.
+- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the open-profile suite across 5 isolated projects by default using measured per-file runtime weights. Separate `chromium-restricted` and `chromium-oidc` projects own the credential-gated and HTTPS-provider servers so their configuration and bootstrap state can't leak into other journeys. CI currently sets `PLAYWRIGHT_PROJECT_COUNT=3` for the open-profile suite. Each project has a one-worker limit, and the CLI suite allows up to seven projects to run concurrently, including the dedicated access-profile projects.
+
+Diagnostics layout and navigation checks supply `tz_offset=0` so each visit renders the page once. A separate browser check opens `/diag` in a non-UTC timezone and verifies that timezone detection redirects exactly once.
 
 ### Demo Recording
 
@@ -604,7 +610,7 @@ Common artifact locations:
 
 | Path | Produced by | Purpose |
 | --- | --- | --- |
-| `test-results/` | Playwright and other focused test helpers | Browser failure context, screenshots, error markdown, and related debugging output |
+| `test-results/` | Playwright and other focused test helpers | Failed-attempt traces, browser failure context, screenshots, error markdown, and isolated server logs |
 | `tests/py/fixtures/container_smoke_test-expectations.json` | smoke-test capture workflow | Stored expected command corpus output for the Container Smoke Test |
 | `tests/py/fixtures/container_smoke_test-deterministic-commands.txt` | required container smoke tier | Network-free packaged-tool commands safe for a required merge gate |
 | `test-results/container_smoke_test.xml` | container smoke test | JUnit-style result output when the smoke test is run directly or through its wrapper |
