@@ -25,6 +25,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Provider browser checks can repeat after an interrupted attempt.** The local test provider keeps a separate identity for each browser context, and the linking journey clears any operator link left by an earlier attempt before signing in.
 
+- **Access-profile browser checks wait reliably for sign-in navigation.** Credential and provider journeys wait for the new document with a dedicated navigation budget, then verify shell readiness. A successful redirect no longer fails because a URL assertion also waits for every page asset within five seconds.
+
 ---
 
 ## [3.0.0] - 2026-09-15

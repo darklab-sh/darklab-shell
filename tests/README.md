@@ -157,6 +157,7 @@ Playwright notes:
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
 - Assessment preview and template-refresh fixtures hold their responses until loading-state and scroll checks finish. These checks control response timing instead of relying on a brief fixed delay to catch a busy state.
 - Multi-step token, logout, and provider journeys have individual time budgets for their page loads and refreshes. Comparison anchor checks capture the highlighted row at the navigation event so a busy runner doesn't miss its brief pulse.
+- Access-profile qualification waits up to 30 seconds for the shell URL and `DOMContentLoaded` after sign-in and reload, then checks prompt readiness. This keeps navigation out of the five-second URL assertion budget and avoids waiting for unrelated assets to finish loading.
 - The local HTTPS provider keeps its identity in a private cookie for each browser context. New contexts, including retries, get a fresh provider identity. The linking journey also clears any operator link left by an interrupted attempt through the app's authenticated API before starting its browser flow.
 
 ---
