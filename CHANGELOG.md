@@ -17,6 +17,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
 
+- **Browser tests keep one worker per isolated app server.** Separate projects still run in parallel, while diagnostics layout checks avoid an extra page render from timezone detection. A dedicated browser check covers that redirect, and traces retain the original failed attempt even when its retry passes. CI continues to reject flaky results.
+
+- **Assessment browser checks reliably observe loading states.** Preview and template-refresh fixtures hold their responses until loading-state and scroll checks finish, removing a race caused by fixed response delays on busy CI runners.
+
+- **Access and comparison browser checks tolerate busy CI runners.** Multi-step token, logout, and provider journeys have enough time for their repeated page loads and refreshes. Comparison checks capture the finding highlight when navigation happens, before its brief animation expires.
+
+- **Provider browser checks can repeat after an interrupted attempt.** The local test provider keeps a separate identity for each browser context, and the linking journey clears any operator link left by an earlier attempt before signing in.
+
+- **Access-profile browser checks wait reliably for sign-in navigation.** Credential and provider journeys wait for the new document with a dedicated navigation budget, then verify shell readiness. A successful redirect no longer fails because a URL assertion also waits for every page asset within five seconds.
+
 ---
 
 ## [3.0.0] - 2026-09-15
