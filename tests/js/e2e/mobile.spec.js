@@ -100,16 +100,18 @@ async function openFullMobileHistoryPanel(page) {
 // The e2e server (run_e2e_server.sh) writes a test config.local.yaml that adds
 // 127.0.0.0/8 to diagnostics_allowed_cidrs, so Playwright's loopback connection
 // reaches /diag without any extra header manipulation.
+// Layout checks supply a timezone to avoid rendering diagnostics twice. The
+// separate redirect check below covers browser timezone detection.
 test.describe('diagnostics page on mobile', () => {
   test('back button is visible at mobile viewport width', async ({ page }) => {
     await page.setViewportSize(MOBILE)
-    await page.goto('/diag')
+    await page.goto('/diag?tz_offset=0')
     await expect(page.locator('.diag-back-btn')).toBeVisible()
   })
 
   test('back button navigates back to the shell', async ({ page }) => {
     await page.setViewportSize(MOBILE)
-    await page.goto('/diag')
+    await page.goto('/diag?tz_offset=0')
     await page.locator('.diag-back-btn').click()
     await expect(page.locator('header h1')).toBeVisible()
     await expect(page.locator('#hamburger-btn')).toBeVisible()
@@ -117,7 +119,7 @@ test.describe('diagnostics page on mobile', () => {
 
   test('storage breakdown renders table sizing diagnostics', async ({ page }) => {
     await page.setViewportSize(MOBILE)
-    await page.goto('/diag')
+    await page.goto('/diag?tz_offset=0')
     const storage = page.locator('.diag-section.s-storage')
     await expect(storage).toContainText('Storage breakdown')
     await expect(storage.locator('.diag-storage-table tbody tr').first()).toBeVisible()
@@ -128,7 +130,7 @@ test.describe('diagnostics page on mobile', () => {
   // must also appear. The breakpoint was previously 760px which missed this.
   test('back button is visible at 850px touch viewport (shell threshold)', async ({ page }) => {
     await page.setViewportSize({ width: 850, height: 900 })
-    await page.goto('/diag')
+    await page.goto('/diag?tz_offset=0')
     await expect(page.locator('.diag-back-btn')).toBeVisible()
   })
 })
@@ -141,8 +143,26 @@ test.describe('diagnostics page on desktop at threshold width', () => {
 
   test('back button is hidden at 850px non-touch viewport', async ({ page }) => {
     await page.setViewportSize({ width: 850, height: 900 })
-    await page.goto('/diag')
+    await page.goto('/diag?tz_offset=0')
     await expect(page.locator('.diag-back-btn')).toBeHidden()
+  })
+})
+
+test.describe('diagnostics page timezone redirect', () => {
+  test.use({ timezoneId: 'Asia/Tokyo' })
+
+  test('adds the browser timezone with one redirect', async ({ page }) => {
+    const navigations = []
+    page.on('request', (request) => {
+      if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) return
+      const url = new URL(request.url())
+      if (url.pathname === '/diag') navigations.push(url.pathname + url.search)
+    })
+
+    await page.goto('/diag')
+    await expect(page).toHaveURL(/\/diag\?tz_offset=-540$/)
+    await expect(page.locator('.diag-header-title')).toBeVisible()
+    expect(navigations).toEqual(['/diag', '/diag?tz_offset=-540'])
   })
 })
 

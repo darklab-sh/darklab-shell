@@ -17,6 +17,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
 
+- **Browser tests keep one worker per isolated app server.** Separate projects still run in parallel, while diagnostics layout checks avoid an extra page render from timezone detection. A dedicated browser check covers that redirect, and traces retain the original failed attempt even when its retry passes. CI continues to reject flaky results.
+
 ---
 
 ## [3.0.0] - 2026-09-15
