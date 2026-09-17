@@ -1284,6 +1284,21 @@ def include_config_files(ctx: BackupContext, stage: Path, compose_files: Sequenc
             "source": str(env_file),
             "archive_path": "operator/.env",
         })
+        if ctx.args.operator_compose_file:
+            source = Path(ctx.args.operator_compose_file).expanduser().resolve()
+            destination = stage / "operator" / "compose.operator.yaml"
+            try:
+                shutil.copy2(source, destination)
+            except OSError as exc:
+                if _is_permission_error(exc):
+                    _raise_unreadable_source("operator Compose file", source, exc)
+                raise
+            destination.chmod(0o600)
+            ctx.included.append({
+                "kind": "operator_compose",
+                "source": str(source),
+                "archive_path": "operator/compose.operator.yaml",
+            })
         release_dir = stage / "release"
         release_dir.mkdir()
         for compose_file in compose_files:
@@ -1358,11 +1373,22 @@ def write_restore_notes(stage: Path) -> None:
             "",
             "This archive contains sensitive deployment data. Protect it like production secrets.",
             "",
+            "Managed deployment backups use `operator/` for `.env` and `conf/`.",
+            "Restore them with `./darklab-deploy restore /path/to/backup.tar.gz`.",
+            "When present, `operator/compose.operator.yaml` is a private copy for manual recovery.",
+            "Managed restore keeps the destination's Compose override unchanged, even if it is absent.",
+            "To recover the saved override, verify the archive checksums, review its host paths and settings,",
+            "then copy it beside the installed `compose.yaml` with permissions 0600.",
+            "Validate the layered stack with `docker compose --env-file .env -f compose.yaml "
+            "-f compose.operator.yaml config --quiet` before starting it.",
+            "Older backups may not contain an operator Compose file.",
+            "",
             "Restore outline:",
             "",
             "1. Stop the running darklab_shell app before replacing database or filesystem state.",
             "2. Restore `data/` to the host path mounted as `/data`, keeping owner-only permissions.",
-            "3. Restore `config/` files, including `.env` or local overlays, before starting containers.",
+            "3. Restore `.env` and local overlays from `operator/` for managed backups or `config/` "
+            "for source-checkout backups before starting containers.",
             "4. Restore `database/history.db` for SQLite, or restore `database/postgres.dump` with `pg_restore` for Postgres.",
             "5. Restore `workspaces/` to the host bind mount or Docker volume recorded in `manifest.json`.",
             "6. Keep the same `SECRETS_MASTER_KEY` value or restored `.secrets_master_key` file "
@@ -1611,6 +1637,23 @@ def _prepare_requested_inputs(ctx: BackupContext) -> None:
             "production backups require --env-file and --local-conf-dir"
         )
 
+    if ctx.args.operator_compose_file:
+        if not ctx.args.repository_free:
+            raise BackupError("--operator-compose-file requires --repository-free")
+        path = Path(ctx.args.operator_compose_file).expanduser().resolve()
+        source_stat = _stat_readable_source(path, kind="operator Compose file", missing_ok=True)
+        if source_stat is None:
+            raise BackupError(f"operator Compose file does not exist: {path}")
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise BackupError(f"operator Compose path is not a file: {path}")
+        try:
+            with path.open("rb"):
+                pass
+        except OSError as exc:
+            if _is_permission_error(exc):
+                _raise_unreadable_source("operator Compose file", path, exc)
+            raise
+
     env_paths = [Path(path).expanduser().resolve() for path in (ctx.args.env_file_multi or [])]
     if ctx.args.env_file:
         env_paths.append(Path(ctx.args.env_file).expanduser().resolve())
@@ -1752,6 +1795,7 @@ def build_dry_run_plan(ctx: BackupContext) -> dict[str, Any]:
         "data_dir": data_source.__dict__,
         "workspace": None if workspace_source is None else workspace_source.__dict__,
         "compose_files": [str(path) for path in compose_files],
+        "operator_compose_file": ctx.args.operator_compose_file,
         "env_files_loaded": ctx.env_files_loaded,
         "excluded": ctx.excluded,
         "extra_files": list(ctx.args.extra_file or []),
@@ -1789,6 +1833,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Do not fail when an --extra-file path is missing.",
     )
     parser.add_argument("--compose-file", action="append", default=[], help="Docker Compose file used for service detection.")
+    parser.add_argument(
+        "--operator-compose-file",
+        default="",
+        help="Operator Compose override to preserve for manual recovery in a managed backup.",
+    )
     parser.add_argument("--compose-service", default="shell", help="Compose service name for the app container. Default: shell.")
     parser.add_argument(
         "--postgres-service",

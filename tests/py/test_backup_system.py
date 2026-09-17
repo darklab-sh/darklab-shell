@@ -193,7 +193,11 @@ def test_extra_and_env_files_are_included_without_logging_secret_values(tmp_path
     assert any(path.name == "docker-compose.local.yml" for path in (backup_dir / "extra").rglob("docker-compose.local.yml"))
 
 
-def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypatch):
+@pytest.mark.parametrize("include_operator_compose", [False, True])
+@pytest.mark.parametrize("target_has_operator_compose", [False, True])
+def test_repository_free_backup_uses_operator_restore_layout(
+    tmp_path, monkeypatch, capsys, include_operator_compose, target_has_operator_compose,
+):
     _clean_env(monkeypatch)
     data_dir = tmp_path / "data"
     _write_sqlite_database(data_dir / "history.db")
@@ -210,6 +214,13 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     )
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
+    operator_compose = tmp_path / "compose.operator.yaml"
+    operator_secret = "private-operator-setting"
+    operator_compose.write_text(
+        f"services:\n  shell:\n    environment:\n      PRIVATE_SETTING: {operator_secret}\n",
+        encoding="utf-8",
+    )
+    operator_compose.chmod(0o644)
     release_manifest = tmp_path / "release-manifest.json"
     release_manifest.write_text('{"version":"2.6.0"}\n', encoding="utf-8")
     managed_checksums = tmp_path / "managed-files.sha256"
@@ -226,6 +237,7 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         str(env_file),
         "--compose-file",
         str(compose_file),
+        *(["--operator-compose-file", str(operator_compose)] if include_operator_compose else []),
         "--data-source",
         f"bind:{data_dir}",
         "--extra-file",
@@ -241,6 +253,17 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     assert rc == 0
     backup_dir = _backup_dirs(output_dir)[0]
     assert (backup_dir / "operator" / ".env").read_bytes() == env_file.read_bytes()
+    assert stat.S_IMODE((backup_dir / "operator" / ".env").stat().st_mode) == 0o600
+    saved_operator_compose = backup_dir / "operator" / "compose.operator.yaml"
+    assert saved_operator_compose.exists() is include_operator_compose
+    assert not (backup_dir / "release" / "compose.operator.yaml").exists()
+    if include_operator_compose:
+        assert saved_operator_compose.read_bytes() == operator_compose.read_bytes()
+        assert stat.S_IMODE(saved_operator_compose.stat().st_mode) == 0o600
+        checksum = hashlib.sha256(operator_compose.read_bytes()).hexdigest()
+        assert f"{checksum}  operator/compose.operator.yaml\n" in (
+            backup_dir / "checksums.sha256"
+        ).read_text(encoding="utf-8")
     assert (backup_dir / "operator" / "conf" / "config.local.yaml").read_bytes() == (
         local_conf_dir / "config.local.yaml"
     ).read_bytes()
@@ -256,6 +279,18 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 1
     manifest = _manifest(backup_dir)
     assert manifest["repository_free"] is True
+    assert [entry for entry in manifest["included"] if entry["kind"] == "operator_compose"] == (
+        [{
+            "kind": "operator_compose",
+            "source": str(operator_compose),
+            "archive_path": "operator/compose.operator.yaml",
+        }] if include_operator_compose else []
+    )
+    captured = capsys.readouterr()
+    assert operator_secret not in captured.out + captured.err + json.dumps(manifest)
+    assert "Managed restore keeps the destination's Compose override unchanged" in (
+        backup_dir / "RESTORE.md"
+    ).read_text(encoding="utf-8")
 
     archive_path = tmp_path / "principal-backup.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
@@ -268,8 +303,12 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         directory.mkdir(parents=True)
     restore_env = restore_root / ".env"
     restore_env.write_bytes(env_file.read_bytes())
+    target_operator_compose = restore_root / "compose.operator.yaml"
+    target_operator_content = "services:\n  shell:\n    labels:\n      target: preserved\n"
+    if target_has_operator_compose:
+        target_operator_compose.write_text(target_operator_content, encoding="utf-8")
 
-    restore_system.restore(SimpleNamespace(
+    restore_args = SimpleNamespace(
         archive=str(archive_path),
         data_dir=str(restore_data),
         local_conf_dir=str(restore_conf),
@@ -278,7 +317,12 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         database_url="",
         output_uid="",
         output_gid="",
-    ))
+    )
+    restore_system.restore(restore_args)
+
+    assert target_operator_compose.exists() is target_has_operator_compose
+    if target_has_operator_compose:
+        assert target_operator_compose.read_text(encoding="utf-8") == target_operator_content
 
     assert (restore_data / ".secrets_master_key").read_bytes() == (
         data_dir / ".secrets_master_key"
@@ -293,6 +337,60 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         assert conn.execute(
             "SELECT length(wrapped_root), length(wrap_nonce) FROM credential_verifier_roots"
         ).fetchone() == (48, 12)
+
+    if include_operator_compose:
+        saved_operator_compose.write_text("services: {}\n", encoding="utf-8")
+        with tarfile.open(archive_path, "w:gz") as archive:
+            archive.add(backup_dir, arcname=backup_dir.name)
+        with pytest.raises(restore_system.RestoreError, match="checksum mismatch: operator/compose.operator.yaml"):
+            restore_system.restore(restore_args)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("source_kind", ["missing", "directory", "broken_symlink", "unreadable", "unmanaged"])
+def test_operator_compose_input_is_validated_before_writing(
+    tmp_path, monkeypatch, capsys, dry_run, source_kind,
+):
+    _clean_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    operator_compose = tmp_path / "compose.operator.yaml"
+    if source_kind == "directory":
+        operator_compose.mkdir()
+    elif source_kind == "broken_symlink":
+        operator_compose.symlink_to(tmp_path / "missing-target")
+    elif source_kind in {"unreadable", "unmanaged"}:
+        operator_compose.write_text("services: {}\n", encoding="utf-8")
+    if source_kind == "unreadable":
+        original_open = Path.open
+
+        def unreadable_open(path, *args, **kwargs):
+            if path == operator_compose:
+                raise PermissionError(errno.EACCES, "Permission denied", str(path))
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", unreadable_open)
+    output_dir = tmp_path / "backups"
+    rc = backup_system.main([
+        *(["--repository-free"] if source_kind != "unmanaged" else []),
+        "--env-file", str(env_file),
+        "--local-conf-dir", str(tmp_path),
+        "--operator-compose-file", str(operator_compose),
+        "--output-dir", str(output_dir),
+        *(["--dry-run"] if dry_run else []),
+    ])
+
+    assert rc == 2
+    assert not output_dir.exists()
+    error = capsys.readouterr().err
+    if source_kind == "unmanaged":
+        assert "--operator-compose-file requires --repository-free" in error
+    elif source_kind == "directory":
+        assert "operator Compose path is not a file" in error
+    elif source_kind == "unreadable":
+        assert "operator Compose file source is not readable" in error
+    else:
+        assert "operator Compose file does not exist" in error
 
 
 def test_missing_extra_file_fails_unless_operator_allows_it(tmp_path, monkeypatch):

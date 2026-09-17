@@ -4764,6 +4764,7 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     assert "environment settings changed" in recreated.stdout
     recreated_log = log_path.read_text(encoding="utf-8")
     assert " up -d --wait --force-recreate shell" in recreated_log
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in recreated_log
     _assert_compose_log_uses_operator_override(recreated_log, install_dir)
 
     log_path.unlink()
@@ -5323,6 +5324,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert (install_dir / "backups" / "darklab-backup-auto.tar.gz").is_file()
     upgrade_log = log_path.read_text(encoding="utf-8")
     assert "--result-path-only" in upgrade_log
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in upgrade_log
     _assert_compose_log_uses_operator_override(upgrade_log, install_dir)
     manifest = json.loads((install_dir / "release-manifest.json").read_text())
     assert manifest["version"] == next_version
@@ -5375,6 +5377,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert "--workspace-source bind:/workspaces" in postgres_backup_command
     assert "--include-workspaces always" in postgres_backup_command
     assert "--include-workspaces never" not in postgres_backup_command
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in postgres_backup_command
     postgres_stop = next(
         index for index, line in enumerate(stopped_postgres_log)
         if " stop postgres" in line
@@ -5396,6 +5399,22 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert " up -d --wait postgres" not in running_postgres_log
     assert " stop postgres" not in running_postgres_log
     (install_dir / ".env").write_text(env_text, encoding="utf-8")
+
+    (install_dir / "compose.operator.yaml").unlink()
+    log_path.write_text("", encoding="utf-8")
+    backup_without_override = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "backup"],
+        cwd=install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert backup_without_override.returncode == 0, backup_without_override.stderr
+    assert "--operator-compose-file" not in log_path.read_text(encoding="utf-8")
+    (install_dir / "compose.operator.yaml").write_text(
+        operator_files["compose.operator.yaml"], encoding="utf-8",
+    )
 
     downgrade = subprocess.run(
         [
