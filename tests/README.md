@@ -121,6 +121,8 @@ for the final local backend check.
 
 Backup coverage checks the optional operator Compose copy, private permissions, manifest and checksum coverage, rejection of invalid inputs before writes, and restore behavior with both older archives and existing destination overrides. Lifecycle coverage checks that the wrapper passes the override to the archive helper.
 
+Catalog and validator coverage in `test_config_inspection.py` checks complete reviewed metadata, shared constraint bounds, fail-closed nested disclosure, sensitive count/presence summaries, bounded output, and subprocess exit behavior under broken startup configuration.
+
 Configuration loader characterization in `test_config_builder.py` pins overlay and environment precedence, nested provenance, derived sizes, normalization warnings, unknown-key exclusion, and invalid-input outcomes independently of the loader implementation.
 
 Environment example checks in `test_production_install.py` reject duplicate active or commented assignments and settings unused by the matching Compose file. They also load both templates' OIDC examples through the app's configuration loader with default and allowlist provisioning, using test credentials without contacting a provider.

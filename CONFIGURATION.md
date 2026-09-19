@@ -313,6 +313,33 @@ The browser shows a generic failure message; the safe server records distinguish
 
 Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
+## Validating Instance Configuration
+
+The image includes a local checker that uses the same configuration rules as startup. It prints a fresh evaluation of the inputs supplied to that command, including safe values, source layers, and normalization warnings. It doesn't report the configuration loaded by any existing web or background worker.
+
+```bash
+docker compose exec -T shell python /app/tools/check_instance_config.py
+docker compose exec -T shell python /app/tools/check_instance_config.py --json --strict
+```
+
+Use `--local-yaml /path/to/candidate.yaml` to replace the local YAML input with a candidate file. The command reads the shipped configuration and supported environment overrides as usual; an environment override can still win over the candidate. It never writes settings, parses the host `.env`, creates keys, or initializes the database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`.
+
+For a stopped deployment or invalid configuration that prevents startup, bypass the normal entrypoint. Mount the candidate read-only at an explicit path:
+
+```bash
+docker compose run --rm --no-deps --entrypoint python \
+  --volume "$PWD/conf/config.local.yaml:/candidate/config.local.yaml:ro" \
+  shell /app/tools/check_instance_config.py --local-yaml /candidate/config.local.yaml --json
+```
+
+That command sees the environment supplied by Compose. It doesn't run the entrypoint's overlay staging, so the explicit candidate mount is the local input being checked. Image selection, published ports, worker counts, and other host-only settings are listed as unobserved and still require their own Compose/startup checks.
+
+The inspection catalog allows only reviewed full values, declared summaries, or withheld values. Custom redaction rules and provider subject allowlists expose counts only; the AI endpoint exposes presence only. Credentials and protected references remain withheld. Unknown input values never appear in diagnostics. Long permitted values have explicit truncation markers, and inspection doesn't offer a secret reveal.
+
+`admin_console_reauth_minutes` is host-owned YAML with a default of `30` and accepted range of `5`–`60` minutes. It controls verified authentication freshness for operator inspection without changing the five-minute provider-linking policy. Browser idle and absolute deadlines apply independently.
+
+---
+
 ## Application YAML Settings
 
 The values below are the built-in server defaults that operators can fine-tune with `config.local.yaml`. Deployment-owned settings are intentionally omitted and live in `.env` instead.
@@ -321,6 +348,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `admin_console_reauth_minutes` | `30` | Verified authentication age allowed for the operator console, from 5 through 60 minutes. Browser idle and absolute deadlines still apply |
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
 | `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their personal workspace |

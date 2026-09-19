@@ -24,6 +24,65 @@ from config_redaction import normalize_redaction_rules
 PROJECT_NAME = "darklab_shell"
 APP_NAME_MAX_CHARS = 20
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
+ACCESS_PROFILES = ("open", "token_required", "oidc_required", "mixed")
+OIDC_PROVISIONING_POLICIES = ("disabled", "allowlist", "automatic")
+DURATION_BOUNDS = {
+    "browser_session_idle_minutes": (1, 1440),
+    "browser_session_absolute_hours": (1, 8760),
+    "admin_console_reauth_minutes": (5, 60),
+}
+AUDIT_EXPORT_MAX_ROWS = 200000
+ENVIRONMENT_CSV_KEYS = {"restricted_command_input_cidrs", "ai_base_url_allowed_cidrs"}
+ENVIRONMENT_KEYS = {
+    "ACCESS_PROFILE": "access_profile",
+    "RESTRICTED_PUBLIC_SHARES_ENABLED": "restricted_public_shares_enabled",
+    "BROWSER_SESSION_IDLE_MINUTES": "browser_session_idle_minutes",
+    "BROWSER_SESSION_ABSOLUTE_HOURS": "browser_session_absolute_hours",
+    "OIDC_ISSUER": "oidc_issuer",
+    "OIDC_CLIENT_ID": "oidc_client_id",
+    "OIDC_CLIENT_SECRET": "oidc_client_secret",
+    "OIDC_REDIRECT_URI": "oidc_redirect_uri",
+    "OIDC_SCOPES": "oidc_scopes",
+    "OIDC_PROVISIONING": "oidc_provisioning",
+    "OIDC_ALLOWED_SUBJECTS": "oidc_allowed_subjects",
+    "OIDC_CA_BUNDLE": "oidc_ca_bundle",
+    "AI_ENABLED": "ai_enabled",
+    "AI_PROVIDER": "ai_provider",
+    "AI_BASE_URL": "ai_base_url",
+    "AI_MODEL": "ai_model",
+    "AI_API_KEY_SECRET_NAME": "ai_api_key_secret_name",
+    "AI_API_KEY": "ai_api_key",
+    "AI_CONNECT_TIMEOUT_SECONDS": "ai_connect_timeout_seconds",
+    "AI_TIMEOUT_SECONDS": "ai_timeout_seconds",
+    "AI_MAX_INPUT_CHARS": "ai_max_input_chars",
+    "AI_MAX_OUTPUT_TOKENS": "ai_max_output_tokens",
+    "AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS": "ai_next_commands_max_output_tokens",
+    "AI_MAX_CONCURRENT": "ai_max_concurrent",
+    "AI_MAX_QUEUE_DEPTH": "ai_max_queue_depth",
+    "AI_RATE_LIMIT_PER_SESSION_HOUR": "ai_rate_limit_per_session_hour",
+    "AI_RATE_LIMIT_GLOBAL_PER_MINUTE": "ai_rate_limit_global_per_minute",
+    "AI_ALLOW_FULL_OUTPUT": "ai_allow_full_output",
+    "AI_REQUIRE_PRIVATE_BASE_URL": "ai_require_private_base_url",
+    "AI_BASE_URL_ALLOWED_CIDRS": "ai_base_url_allowed_cidrs",
+    "AI_PROMPT_VERSION_OVERRIDE": "ai_prompt_version_override",
+    "AI_FEATURE_SUMMARY": "ai_feature_summary",
+    "AI_FEATURE_NEXT_COMMANDS": "ai_feature_next_commands",
+    "AI_FEATURE_RUN_SUGGESTIONS": "ai_feature_run_suggestions",
+    "WORKSPACE_ENABLED": "workspace_enabled",
+    "WORKSPACE_BACKEND": "workspace_backend",
+    "WORKSPACE_ROOT": "workspace_root",
+    "INTERACTIVE_PTY_ENABLED": "interactive_pty_enabled",
+    "PROMETHEUS_MULTIPROC_DIR": "prometheus_multiproc_dir",
+    "ASSET_BUNDLE_MODE": "asset_bundle_mode",
+    "RESTRICTED_COMMAND_INPUT_CIDRS": "restricted_command_input_cidrs",
+    "RAW_PACKET_SCANNING_ENABLED": "raw_packet_scanning_enabled",
+    "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED": "assessment_intrusive_actions_enabled",
+    "DATABASE_BACKEND": "database_backend",
+    "DATABASE_URL": "database_url",
+    "DATABASE_POOL_MIN": "database_pool_min",
+    "DATABASE_POOL_MAX": "database_pool_max",
+    "DATABASE_POSTGRES_JIT": "database_postgres_jit"
+}
 
 
 @dataclass
@@ -40,6 +99,9 @@ class BuildEvents:
 
     def warning(self, event, *, extra):
         self.events.append(("warning", event, extra))
+        if event == "SHARE_REDACTION_RULE_INVALID":
+            _state().warnings.append({"event": "CONFIG_VALUE_DROPPED", "key": "share_redaction_rules",
+                                      "reason": "invalid_redaction_rule"})
 
     def error(self, event, *, extra):
         self.events.append(("error", event, extra))
@@ -1161,7 +1223,7 @@ def _reject_access_config(
 
 def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str]) -> None:
     access_profile = str(defaults.get("access_profile") or "open").strip().lower()
-    if access_profile not in {"open", "token_required", "oidc_required", "mixed"}:
+    if access_profile not in ACCESS_PROFILES:
         _record_config_load_failure(
             phase="access_profile_validation",
             source=_config_source(provenance, "access_profile"),
@@ -1173,7 +1235,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
     for key in ("oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri", "oidc_ca_bundle"):
         defaults[key] = str(defaults.get(key) or "").strip()
     policy = str(defaults.get("oidc_provisioning") or "disabled").strip().lower()
-    if policy not in {"disabled", "allowlist", "automatic"}:
+    if policy not in OIDC_PROVISIONING_POLICIES:
         _reject_access_config(provenance, "oidc_provisioning", "unsupported_provisioning",
                               "oidc_provisioning must be disabled, allowlist, or automatic")
     defaults["oidc_provisioning"] = policy
@@ -1227,10 +1289,7 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
     if access_profile not in {"oidc_required", "mixed"} and policy != "disabled":
         _reject_access_config(provenance, "oidc_provisioning", "access_profile_disallows_provisioning",
                               "OIDC provisioning requires oidc_required or mixed access")
-    for key, minimum, maximum in (
-        ("browser_session_idle_minutes", 1, 1440),
-        ("browser_session_absolute_hours", 1, 8760),
-    ):
+    for key, (minimum, maximum) in DURATION_BOUNDS.items():
         parsed = _parse_int_value(defaults.get(key))
         if parsed is None or not minimum <= parsed <= maximum:
             _record_config_load_failure(
@@ -1343,14 +1402,14 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
     defaults["output_preview_max_mb"] = output_preview_max_mb
     defaults["output_preview_max_bytes"] = output_preview_max_mb * 1024 * 1024
     provenance["output_preview_max_bytes"] = provenance.get("output_preview_max_mb", "derived from output_preview_max_mb")
-    if defaults["audit_export_max_rows"] > 200000:
+    if defaults["audit_export_max_rows"] > AUDIT_EXPORT_MAX_ROWS:
         _warn_config_value_clamped(
             "audit_export_max_rows",
             provenance,
             reason="above_maximum",
-            maximum=200000,
+            maximum=AUDIT_EXPORT_MAX_ROWS,
         )
-        defaults["audit_export_max_rows"] = 200000
+        defaults["audit_export_max_rows"] = AUDIT_EXPORT_MAX_ROWS
     # Share/export redaction rules are normalized up front so the browser and
     # the snapshot endpoint both receive the same validated rule set.
     defaults["share_redaction_rules"] = normalize_redaction_rules(
@@ -1400,6 +1459,7 @@ def config_defaults() -> dict[str, Any]:
         "restricted_public_shares_enabled": False,
         "browser_session_idle_minutes": 30,
         "browser_session_absolute_hours": 12,
+        "admin_console_reauth_minutes": 30,
         "oidc_issuer": "",
         "oidc_client_id": "",
         "oidc_client_secret": "",
@@ -1757,165 +1817,13 @@ def _build_config(layers, environment):
     for source, overlay in layers:
         _merge_config_overlay(defaults, deepcopy(overlay), source=source,
                               provenance=provenance, allowed_paths=allowed_paths)
-    applied_env_names: list[str] = []
-    access_env_keys = {
-        "ACCESS_PROFILE": "access_profile",
-        "RESTRICTED_PUBLIC_SHARES_ENABLED": "restricted_public_shares_enabled",
-        "BROWSER_SESSION_IDLE_MINUTES": "browser_session_idle_minutes",
-        "BROWSER_SESSION_ABSOLUTE_HOURS": "browser_session_absolute_hours",
-        "OIDC_ISSUER": "oidc_issuer",
-        "OIDC_CLIENT_ID": "oidc_client_id",
-        "OIDC_CLIENT_SECRET": "oidc_client_secret",
-        "OIDC_REDIRECT_URI": "oidc_redirect_uri",
-        "OIDC_SCOPES": "oidc_scopes",
-        "OIDC_PROVISIONING": "oidc_provisioning",
-        "OIDC_ALLOWED_SUBJECTS": "oidc_allowed_subjects",
-        "OIDC_CA_BUNDLE": "oidc_ca_bundle",
-    }
-    for env_name, cfg_key in access_env_keys.items():
-        raw = str(environment.get(env_name) or "").strip()
-        if raw:
-            _set_config_value(defaults, provenance, cfg_key, raw, env_name)
-            applied_env_names.append(env_name)
-    env_workspace_enabled = str(environment.get("WORKSPACE_ENABLED") or "").strip()
-    if env_workspace_enabled:
-        _set_config_value(
-            defaults,
-            provenance,
-            "workspace_enabled",
-            env_workspace_enabled,
-            "WORKSPACE_ENABLED",
-        )
-        applied_env_names.append("WORKSPACE_ENABLED")
-    env_workspace_backend = str(environment.get("WORKSPACE_BACKEND") or "").strip()
-    if env_workspace_backend:
-        _set_config_value(
-            defaults,
-            provenance,
-            "workspace_backend",
-            env_workspace_backend,
-            "WORKSPACE_BACKEND",
-        )
-        applied_env_names.append("WORKSPACE_BACKEND")
-    env_workspace_root = str(environment.get("WORKSPACE_ROOT") or "").strip()
-    if env_workspace_root:
-        _set_config_value(defaults, provenance, "workspace_root", env_workspace_root, "WORKSPACE_ROOT")
-        applied_env_names.append("WORKSPACE_ROOT")
-    env_interactive_pty_enabled = str(environment.get("INTERACTIVE_PTY_ENABLED") or "").strip()
-    if env_interactive_pty_enabled:
-        _set_config_value(
-            defaults,
-            provenance,
-            "interactive_pty_enabled",
-            env_interactive_pty_enabled,
-            "INTERACTIVE_PTY_ENABLED",
-        )
-        applied_env_names.append("INTERACTIVE_PTY_ENABLED")
-    env_prometheus_multiproc_dir = str(environment.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
-    if env_prometheus_multiproc_dir:
-        _set_config_value(
-            defaults,
-            provenance,
-            "prometheus_multiproc_dir",
-            env_prometheus_multiproc_dir,
-            "PROMETHEUS_MULTIPROC_DIR",
-        )
-        applied_env_names.append("PROMETHEUS_MULTIPROC_DIR")
-    env_asset_bundle_mode = str(environment.get("ASSET_BUNDLE_MODE") or "").strip()
-    if env_asset_bundle_mode:
-        _set_config_value(defaults, provenance, "asset_bundle_mode", env_asset_bundle_mode, "ASSET_BUNDLE_MODE")
-        applied_env_names.append("ASSET_BUNDLE_MODE")
-    env_restricted_command_input_cidrs = str(environment.get("RESTRICTED_COMMAND_INPUT_CIDRS") or "").strip()
-    if env_restricted_command_input_cidrs:
-        _set_config_value(
-            defaults,
-            provenance,
-            "restricted_command_input_cidrs",
-            [item.strip() for item in env_restricted_command_input_cidrs.split(",") if item.strip()],
-            "RESTRICTED_COMMAND_INPUT_CIDRS",
-        )
-        applied_env_names.append("RESTRICTED_COMMAND_INPUT_CIDRS")
-    env_raw_packet_scanning_enabled = str(environment.get("RAW_PACKET_SCANNING_ENABLED") or "").strip()
-    if env_raw_packet_scanning_enabled:
-        _set_config_value(
-            defaults,
-            provenance,
-            "raw_packet_scanning_enabled",
-            env_raw_packet_scanning_enabled,
-            "RAW_PACKET_SCANNING_ENABLED",
-        )
-        applied_env_names.append("RAW_PACKET_SCANNING_ENABLED")
-    env_assessment_intrusive_actions_enabled = str(
-        environment.get("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED") or ""
-    ).strip()
-    if env_assessment_intrusive_actions_enabled:
-        _set_config_value(
-            defaults,
-            provenance,
-            "assessment_intrusive_actions_enabled",
-            env_assessment_intrusive_actions_enabled,
-            "ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED",
-        )
-        applied_env_names.append("ASSESSMENT_INTRUSIVE_ACTIONS_ENABLED")
-    env_database_backend = str(environment.get("DATABASE_BACKEND") or "").strip()
-    if env_database_backend:
-        _set_config_value(defaults, provenance, "database_backend", env_database_backend, "DATABASE_BACKEND")
-        applied_env_names.append("DATABASE_BACKEND")
-    env_database_url = str(environment.get("DATABASE_URL") or "").strip()
-    if env_database_url:
-        _set_config_value(defaults, provenance, "database_url", env_database_url, "DATABASE_URL")
-        applied_env_names.append("DATABASE_URL")
-    env_database_pool_min = str(environment.get("DATABASE_POOL_MIN") or "").strip()
-    if env_database_pool_min:
-        _set_config_value(defaults, provenance, "database_pool_min", env_database_pool_min, "DATABASE_POOL_MIN")
-        applied_env_names.append("DATABASE_POOL_MIN")
-    env_database_pool_max = str(environment.get("DATABASE_POOL_MAX") or "").strip()
-    if env_database_pool_max:
-        _set_config_value(defaults, provenance, "database_pool_max", env_database_pool_max, "DATABASE_POOL_MAX")
-        applied_env_names.append("DATABASE_POOL_MAX")
-    env_database_postgres_jit = str(environment.get("DATABASE_POSTGRES_JIT") or "").strip()
-    if env_database_postgres_jit:
-        _set_config_value(
-            defaults,
-            provenance,
-            "database_postgres_jit",
-            env_database_postgres_jit,
-            "DATABASE_POSTGRES_JIT",
-        )
-        applied_env_names.append("DATABASE_POSTGRES_JIT")
-    ai_env_keys = {
-        "AI_ENABLED": "ai_enabled",
-        "AI_PROVIDER": "ai_provider",
-        "AI_BASE_URL": "ai_base_url",
-        "AI_MODEL": "ai_model",
-        "AI_API_KEY_SECRET_NAME": "ai_api_key_secret_name",
-        "AI_API_KEY": "ai_api_key",
-        "AI_CONNECT_TIMEOUT_SECONDS": "ai_connect_timeout_seconds",
-        "AI_TIMEOUT_SECONDS": "ai_timeout_seconds",
-        "AI_MAX_INPUT_CHARS": "ai_max_input_chars",
-        "AI_MAX_OUTPUT_TOKENS": "ai_max_output_tokens",
-        "AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS": "ai_next_commands_max_output_tokens",
-        "AI_MAX_CONCURRENT": "ai_max_concurrent",
-        "AI_MAX_QUEUE_DEPTH": "ai_max_queue_depth",
-        "AI_RATE_LIMIT_PER_SESSION_HOUR": "ai_rate_limit_per_session_hour",
-        "AI_RATE_LIMIT_GLOBAL_PER_MINUTE": "ai_rate_limit_global_per_minute",
-        "AI_ALLOW_FULL_OUTPUT": "ai_allow_full_output",
-        "AI_REQUIRE_PRIVATE_BASE_URL": "ai_require_private_base_url",
-        "AI_BASE_URL_ALLOWED_CIDRS": "ai_base_url_allowed_cidrs",
-        "AI_PROMPT_VERSION_OVERRIDE": "ai_prompt_version_override",
-        "AI_FEATURE_SUMMARY": "ai_feature_summary",
-        "AI_FEATURE_NEXT_COMMANDS": "ai_feature_next_commands",
-        "AI_FEATURE_RUN_SUGGESTIONS": "ai_feature_run_suggestions",
-    }
-    for env_name, cfg_key in ai_env_keys.items():
+    applied_env_names = []
+    for env_name, key in ENVIRONMENT_KEYS.items():
         raw = str(environment.get(env_name) or "").strip()
         if not raw:
             continue
-        if cfg_key == "ai_base_url_allowed_cidrs":
-            value = [item.strip() for item in raw.split(",") if item.strip()]
-        else:
-            value = raw
-        _set_config_value(defaults, provenance, cfg_key, value, env_name)
+        value = [item.strip() for item in raw.split(",") if item.strip()] if key in ENVIRONMENT_CSV_KEYS else raw
+        _set_config_value(defaults, provenance, key, value, env_name)
         applied_env_names.append(env_name)
     _state().summary["env_keys"] = sorted(applied_env_names)
     _state().log.debug("CONFIG_ENV_OVERRIDES_APPLIED", extra={"env_keys": sorted(applied_env_names)})

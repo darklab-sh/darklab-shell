@@ -160,28 +160,10 @@ def _append_unique(values: list[str], value: str) -> None:
 
 
 def _config_default_keys() -> list[str]:
-    """Return app/config.py load_config() default keys in source order."""
-    tree = ast.parse(_CONFIG_PY.read_text())
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != "load_config":
-            continue
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Assign):
-                continue
-            if not any(isinstance(target, ast.Name) and target.id == "defaults"
-                       for target in child.targets):
-                continue
-            if not isinstance(child.value, ast.Dict):
-                continue
-            keys: list[str] = []
-            for key_node in child.value.keys:
-                if key_node is None:
-                    continue
-                key = ast.literal_eval(key_node)
-                if isinstance(key, str):
-                    keys.append(key)
-            return keys
-    raise AssertionError("Could not find load_config() defaults dict in app/config.py")
+    """Read the import-safe builder's default inventory in source order."""
+    from config_builder import config_defaults
+
+    return list(config_defaults())
 
 
 def _operator_yaml_default_keys() -> list[str]:
