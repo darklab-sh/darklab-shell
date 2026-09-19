@@ -2593,6 +2593,8 @@ The Docker bridge remains the supported network model. The root entrypoint loads
 
 ---
 
+Instance inspection grants live in `instance_operator_grants`, keyed by principal id with cascading principal deletion. They carry no workspace or Team authority. Local grant changes lock the principal and record a fail-closed audit event in the same transaction; success logging follows commit. Database snapshots and the shared table discovery used for SQLite-to-Postgres migration preserve these records.
+
 ## Configuration Surfaces
 
 The Flask index route embeds the same normalized browser config payload that `/config` returns, and `config.js` reads that server-rendered JSON into `APP_CONFIG` before the rest of the shell entry finishes loading. The `/config` endpoint remains available for runtime refresh and diagnostics, but both paths are built from the same Python payload helper. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than the effective server config; backend-only persistence and storage controls do not cross that boundary.

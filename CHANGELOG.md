@@ -15,6 +15,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Instance inspection grants are explicit and auditable.** Local operators can grant, inspect, and revoke principal-bound access independently of Team roles. Grants persist through both database backends, backups, and database migration; repeated operations are predictable and disabled principals cannot receive access.
+
 - **Operators can validate configuration without a working application process.** The local checker shares startup rules, supports candidate YAML and strict/versioned JSON output, and reports reviewed values, counts, presence, or withheld markers without initializing services. A complete field catalog tracks supported inputs and host apply guidance.
 
 - **Configuration evaluation is available without starting the application.** The import-safe builder shares startup normalization and validation, isolates each evaluation's warnings, and exposes a captured startup snapshot without re-reading files or environment.

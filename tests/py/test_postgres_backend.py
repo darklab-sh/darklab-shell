@@ -7931,7 +7931,7 @@ def test_postgres_fresh_schema_preflight_leaves_ledger_creation_to_locked_runner
 
 
 def _build_migration_sqlite_fixture(root: Path) -> Path:
-    from core.migrations import v0078_principal_credential_persistence, v0083_browser_sessions
+    from core.migrations import v0078_principal_credential_persistence, v0083_browser_sessions, v0086_instance_operator_grants
 
     db_path = root / "history.db"
     pointer = _write_body_pointer(root, "snapshot body for darklab.sh", "body-store/snapshots/snap-1.txt.gz")
@@ -8026,6 +8026,8 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
         ):
             conn.execute(statement)
         for statement in v0083_browser_sessions.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+            conn.execute(statement)
+        for statement in v0086_instance_operator_grants.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
         for table_name, old_column, new_column in (
             ("runs", "session_id", "personal_workspace_id"),
@@ -8168,6 +8170,7 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
                 "2026-09-06T13:00:00+00:00",
             ),
         )
+        conn.execute("INSERT INTO instance_operator_grants VALUES (?, ?, NULL)", (principal_id, created))
         conn.commit()
     finally:
         conn.close()
@@ -8283,6 +8286,7 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert report.copied_rows["credentials"] == 1
     assert report.copied_rows["browser_session_signing_keys"] == 1
     assert report.copied_rows["browser_sessions"] == 1
+    assert report.copied_rows["instance_operator_grants"] == 1
     assert report.verified_files == 2
     assert "runs_fts" in report.skipped_tables
     assert "schema_migrations" in report.skipped_tables
@@ -8291,6 +8295,9 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     conn.execute(f"SET search_path TO {_quote_ident(postgres_schema.schema)}")
     assert conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"] == 1
     assert conn.execute("SELECT COUNT(*) AS count FROM secrets").fetchone()["count"] == 1
+    assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchone() == {
+        "principal_id": "prn_" + "1" * 32, "revoked_at": None,
+    }
     assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()["storage_key"] == (
         "sess_" + "4" * 32
     )

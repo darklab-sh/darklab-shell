@@ -19,7 +19,7 @@ sys.path.insert(0, str(APP_ROOT))
 
 from config import CFG  # noqa: E402
 from runtime_bootstrap import init_database  # noqa: E402
-from services.auth import lifecycle  # noqa: E402
+from services.auth import lifecycle, operator_grants  # noqa: E402
 from services.auth.suspended_work import operator_suspended_work  # noqa: E402
 from services.auth.browser_sessions import (  # noqa: E402
     revoke_principal_browser_sessions,
@@ -88,6 +88,10 @@ def _parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="Show safe principal metadata, credentials, and suspended work.")
     status.add_argument("principal_id")
 
+    for command in ("operator-grant", "operator-status", "operator-revoke"):
+        operator = commands.add_parser(command, help="Manage the explicit instance settings inspection grant.")
+        operator.add_argument("principal_id")
+
     issue = commands.add_parser("issue", help="Issue a portable credential or PAT.")
     issue.add_argument("principal_id")
     issue.add_argument("--type", choices=("portable", "pat"), default="portable")
@@ -142,6 +146,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command == "operator-status":
+        return operator_grants.grant_status(args.principal_id)
+    if args.command in {"operator-grant", "operator-revoke"}:
+        return operator_grants.set_grant(args.principal_id, granted=args.command == "operator-grant")
     if args.command == "bootstrap":
         if str(CFG.get("access_profile") or "open") != "token_required":
             raise RuntimeError("bootstrap requires access_profile: token_required")

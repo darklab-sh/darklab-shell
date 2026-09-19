@@ -76,6 +76,7 @@ default_args=(
   -c .tooling/pytest.ini
   --rootdir=.
   tests/py/test_postgres_backend.py
+  tests/py/test_operator_grants.py
   tests/py/test_backend_modules.py::TestDatabaseBackend
   tests/py/test_backend_modules.py::TestPostgresMigrations
   tests/py/test_backend_modules.py::TestRunHistorySearchClauses

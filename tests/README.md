@@ -653,3 +653,5 @@ Practical note:
 - [ARCHITECTURE.md](../ARCHITECTURE.md#test-suite) - testing architecture and runtime boundaries
 - [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation contracts enforced by the meta-tests
 - [ui-capture-scenes.md](ui-capture-scenes.md) - visual-review scenes and capture workflow
+
+Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, and audit rollback. Backup and database-migration fixtures preserve explicit grants.

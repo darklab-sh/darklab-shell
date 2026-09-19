@@ -61,7 +61,7 @@ def _write_config(conf_dir: Path, body: str) -> None:
 
 def _write_sqlite_database(path: Path) -> None:
     from core.database_backend import DatabaseBackend
-    from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
+    from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes, v0086_instance_operator_grants
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
@@ -73,6 +73,8 @@ def _write_sqlite_database(path: Path) -> None:
             conn.execute(statement)
         for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
+        for statement in v0086_instance_operator_grants.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+            conn.execute(statement)
         created = "2026-09-06T12:00:00+00:00"
         principal_id = "prn_" + "1" * 32
         credential_id = "crd_" + "3" * 32
@@ -80,6 +82,7 @@ def _write_sqlite_database(path: Path) -> None:
             "INSERT INTO principals VALUES (?, 'active', '', ?, ?, NULL)",
             (principal_id, created, created),
         )
+        conn.execute("INSERT INTO instance_operator_grants VALUES (?, ?, NULL)", (principal_id, created))
         conn.execute(
             "INSERT INTO personal_workspaces VALUES (?, ?, ?, ?)",
             ("wsp_" + "2" * 32, principal_id, "ws_" + "4" * 32, created),
@@ -145,6 +148,9 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
     assert manifest["data_dir"]["logical_dir"] == "/data"
     assert manifest["data_dir"]["source"] == str(data_dir)
     with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute("SELECT command FROM runs").fetchone()[0] == "ping -c 4 darklab.sh"
         credential = conn.execute(
             "SELECT principal_id, public_prefix, length(verifier_digest) FROM credentials"
@@ -272,6 +278,9 @@ def test_repository_free_backup_uses_operator_restore_layout(
     assert (backup_dir / "release" / "managed-files.sha256").is_file()
     assert (backup_dir / "data" / ".secrets_master_key").is_file()
     with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute(
             "SELECT version, length(wrapped_root), length(wrap_nonce) "
             "FROM credential_verifier_roots"
@@ -328,6 +337,9 @@ def test_repository_free_backup_uses_operator_restore_layout(
         data_dir / ".secrets_master_key"
     ).read_bytes()
     with sqlite3.connect(restore_data / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()[0] == (
             "ws_" + "4" * 32
         )

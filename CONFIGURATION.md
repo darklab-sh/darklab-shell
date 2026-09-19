@@ -156,6 +156,8 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 ## Principal Access Operations
 
+Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
+
 The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.
 
 Run it through the installed Compose project:
@@ -168,6 +170,9 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py disabl
 docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
 docker compose exec -T shell python /app/tools/manage_principal_access.py revoke-all-sessions prn_example
 docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-status prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-revoke prn_example
 ```
 
 `status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
