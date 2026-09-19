@@ -81,6 +81,7 @@ class _ContainerSmokeEnvironment(str):
     raw_target_ip: str
     allowed_target_ip: str
     compose: list[str]
+    image_tag: str
 
     def __new__(
         cls,
@@ -90,12 +91,14 @@ class _ContainerSmokeEnvironment(str):
         raw_target_ip: str,
         allowed_target_ip: str,
         compose: list[str],
+        image_tag: str,
     ):
         instance = str.__new__(cls, base_url)
         instance.restricted_url = restricted_url
         instance.raw_target_ip = raw_target_ip
         instance.allowed_target_ip = allowed_target_ip
         instance.compose = compose
+        instance.image_tag = image_tag
         return instance
 
 
@@ -1673,6 +1676,7 @@ def container_smoke_test():
                 raw_target_ip=raw_target_ip,
                 allowed_target_ip=allowed_target_ip,
                 compose=compose,
+                image_tag=image_tag,
             )
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
@@ -1759,21 +1763,32 @@ def container_smoke_test_nuclei_templates(container_smoke_test) -> None:
     )
 
 
-def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_test):
+def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_test, tmp_path):
     # Run the installed tool with the same bypass-entrypoint shape documented
-    # for a deployment that cannot start. No web/DB service is needed by it.
-    command = container_smoke_test.compose + [
+    # for a deployment that cannot start. The development smoke service has an
+    # /app tmpfs, so use the production image without that source overlay.
+    compose_file = tmp_path / "validator-compose.yaml"
+    compose_file.write_text(yaml.safe_dump({"services": {"shell": {
+        "image": container_smoke_test.image_tag, "read_only": True,
+        "network_mode": "none", "user": "appuser",
+    }}}))
+    command = ["docker", "compose", "-p", "validator-" + uuid.uuid4().hex[:12], "-f", str(compose_file)] + [
         "run", "--rm", "--no-deps", "--entrypoint", "python",
-        "-e", "ACCESS_PROFILE=invalid-private-profile", "shell", "/app/tools/check_instance_config.py",
     ]
-    help_result = _run(command + ["--help"], timeout=60)
+    tool = ["shell", "/app/tools/check_instance_config.py"]
+    broken = command + ["-e", "ACCESS_PROFILE=invalid-private-profile"] + tool
+    help_result = _run(broken + ["--help"], timeout=60)
     assert "--local-yaml" in help_result.stdout
-    invalid = _run(command + ["--json"], timeout=60, check=False)
+    invalid = _run(broken + ["--json"], timeout=60, check=False)
     assert invalid.returncode == 2
     payload = json.loads(invalid.stdout)
     assert payload["valid"] is False and payload["fields"] == ["access_profile"]
     assert "invalid-private-profile" not in invalid.stdout + invalid.stderr
     assert "Traceback" not in invalid.stderr
+    valid = _run(command + ["-e", "ACCESS_PROFILE=open"] + tool + ["--json"], timeout=60)
+    evaluated = json.loads(valid.stdout)
+    assert evaluated["valid"] is True and evaluated["schema_version"] == 1
+    assert evaluated["settings"]
 
 
 def test_container_smoke_test_startup(container_smoke_test):
