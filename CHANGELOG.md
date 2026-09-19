@@ -13,7 +13,31 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.0.1] - Unreleased
 
+### Added
+
+- **Operators can inspect loaded settings from a read-only desktop and mobile console.** Explicitly granted browser sessions can search reviewed values, source layers, warnings, and host apply guidance. Sensitive settings show approved summaries or withheld markers, snapshots identify the serving worker, and refresh clears stale information after access loss. Existing diagnostics retain their permitted field exposure.
+
+- **Operator verification preserves session limits.** Credential and provider step-up verify the same account, recheck current access, and rotate live browser sessions without extending their original absolute deadline. Console requests enforce the network boundary before identity lookup and keep responses private. Signed provider proof is tracked separately from ordinary sign-in recency, so providers that omit it can still use existing session-revocation controls.
+
+- **Instance inspection grants are explicit and auditable.** Local operators can grant, inspect, and revoke principal-bound access independently of Team roles. Grants persist through both database backends, backups, and database migration; repeated operations are predictable and disabled principals cannot receive access.
+
+- **Operators can validate configuration without a working application process.** The local checker shares startup rules, supports candidate YAML and strict/versioned JSON output, and reports reviewed values, counts, presence, or withheld markers without initializing services. A complete field catalog tracks supported inputs and host apply guidance.
+
+- **Configuration evaluation is available without starting the application.** The import-safe builder shares startup normalization and validation, isolates each evaluation's warnings, and exposes a captured startup snapshot without re-reading files or environment.
+
+- **Configuration regression checks pin the existing loading contract.** A table-driven corpus covers effective values, nested provenance, environment precedence, warnings, derived defaults, and invalid-input outcomes.
+
+- **Coding agents have a shared repository guide.** `AGENTS.md` collects the project rules for architecture, security, UI consistency, tests, logging, documentation, and authorized Git/CI work, with links to the detailed contracts. The authorized `todo` workflow uses CI for broad validation, permits a temporary uncommitted pre-commit hook bypass with restoration, and checks pipelines between implementation slices and before final handoff. Contributor guidance uses live test inventories instead of maintaining exact totals.
+
 ### Fixed
+
+- **Operator pages share consistent headers and navigation.** Diagnostics, Audit log, and Operator settings show the app name, a page subtitle, and links to the other two pages. The desktop overflow menu opens Operator settings in a separate tab or window, keeping the shell available.
+
+- **Operator settings stay easy to browse as the inventory grows.** Group, source, and warning filters respond immediately, including styled dropdown and keyboard selection after refresh. Expandable groups show match counts, Clear filters restores the earlier browsing view, and refresh preserves expanded details, focus, and scroll. Compact cards separate loaded sources from host configuration locations and explain accepted values in plain language; desktop filters stay within reach and mobile controls remain touch-safe. Failed or expired refreshes still clear the inventory.
+
+- **Operator-console helpers have explicit configuration and authentication types.** Configuration failures declare their diagnostic fields, retention accepts the shared configuration mapping, and provider verification checks that proof is present. PostgreSQL fixtures use typed row connections and quoted schema identifiers; authentication tests assert that sessions, rows, and response payloads exist before reading them.
+
+- **The bundled TruffleHog uses a patched AMQP dependency.** Its pinned source release is built with `amqp091-go` v1.13.0 to address AMQP parser and TLS vulnerabilities. The image build verifies the dependency embedded in the executable and includes its license notice.
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
 

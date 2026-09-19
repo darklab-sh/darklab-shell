@@ -148,6 +148,10 @@ if [[ "$ACCESS_PROFILE_VALUE" == "token_required" || "$ACCESS_PROFILE_VALUE" == 
   fi
 fi
 
+if [[ -n "${PW_E2E_SECRET_DIR:-}" ]]; then
+  "$PYTHON_BIN" "$SCRIPT_DIR/operator_fixture.py" record "$PW_E2E_SECRET_DIR/${SLOT}.runtime.json"
+fi
+
 server_cmd=(
   "$PYTHON_BIN" -m gunicorn
   --bind "127.0.0.1:$PORT"

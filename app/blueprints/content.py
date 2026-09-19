@@ -193,6 +193,7 @@ def _frontend_config_payload():
 
 @content_bp.route("/")
 def index():
+    from services.auth.operator_access import navigation_eligible
     current_theme = _current_theme_entry()
     log.info(
         "PAGE_LOAD",
@@ -204,6 +205,7 @@ def index():
     )
     return render_template(
         "index.html",
+        operator_console_enabled=navigation_eligible(),
         app_name=_config.CFG["app_name"],
         project_name=_config.PROJECT_NAME,
         version=_config.APP_VERSION,

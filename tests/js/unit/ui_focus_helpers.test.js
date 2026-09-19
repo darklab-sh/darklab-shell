@@ -255,6 +255,12 @@ describe('app-native select enhancement', () => {
       'Two',
       'Three',
     ])
+    select.value = 'two'
+    const trigger = document.querySelector('.app-select-trigger')
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(select.value).toBe('three')
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(select.value).toBe('two')
   })
 
   it('enhances form-select controls inserted after startup', async () => {

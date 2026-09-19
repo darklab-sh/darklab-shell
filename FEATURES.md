@@ -55,6 +55,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Audit Log](#audit-log)
+- [Operator Settings](#operator-settings)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Related Docs](#related-docs)
 
@@ -1707,6 +1708,18 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 **Limits:** `/diag/audit` is an operator-wide view. Anyone allowed through `diagnostics_allowed_cidrs` can see personal and team activity, actor labels, target ids, request metadata, and safe details visible to the audit table. Do not expose it broadly in multi-tenant deployments until you have a narrower owner-scoped audit surface in front of it. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+
+---
+
+## Operator Settings
+
+**Purpose:** help authorized operators understand loaded settings and how to change their host configuration safely.
+
+**Behavior:** authorized operators can inspect configuration from the desktop or mobile **Operator settings** menu. The desktop menu keeps the shell open in its original tab, and shared page headers let you move between settings, diagnostics, and the audit log. Browse collapsed groups with setting counts, combine search with group, source, and warning filters, or clear every filter at once. Matching groups open automatically; clearing filters restores your earlier browsing view. Refresh keeps expanded details and your place. Compact cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive values stay withheld or show only an approved count or presence indicator; there is no reveal or edit action.
+
+Each snapshot identifies the web worker that served it and when that worker loaded configuration. Refreshing does not prove that every worker agrees, and deployment settings that the worker cannot observe are clearly marked. The local configuration checker can validate a proposed YAML overlay even when the web application cannot start.
+
+Access requires a restricted sign-in profile, an allowed operator network, an explicit principal grant, and recent verified authentication. The console is closed by default. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console).
 
 ---
 

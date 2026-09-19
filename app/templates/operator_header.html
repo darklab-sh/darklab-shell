@@ -1,0 +1,29 @@
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+
+{% macro operator_header(app_name, current_page, subtitle, generated_at=none) -%}
+<div class="diag-topbar">
+  <header class="export-header diag-header">
+    <div class="export-header-copy diag-header-copy">
+      <h1 class="diag-header-title">{{ app_name }}</h1>
+      <span class="diag-header-meta">{{ subtitle }}</span>
+    </div>
+    <nav class="diag-header-actions" aria-label="Operator pages">
+      {% for page, href, label in [('diag', '/diag', 'diagnostics'), ('audit', '/diag/audit', 'audit log'), ('admin', '/admin/', 'operator settings')] %}
+      {% if page != current_page %}
+      <a href="{{ href }}" class="btn btn-secondary btn-compact diag-nav-btn">{{ label }}</a>
+      {% endif %}
+      {% endfor %}
+      <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+    </nav>
+  </header>
+  {% if generated_at %}
+  <div class="diag-status-bar">
+    <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">
+      <span class="diag-live-dot"></span>
+      <span>Refreshed at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
+    </span>
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}

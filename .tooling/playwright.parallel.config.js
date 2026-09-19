@@ -17,7 +17,7 @@ const basePort = Math.max(
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => name.endsWith('.spec.js'))
-  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js'].includes(name))
+  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js', 'operator-console.spec.js'].includes(name))
   .sort()
 
 // Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
@@ -80,7 +80,7 @@ const openProjects = specGroups
     if (!specs.length) return null
     return {
       name: `chromium-w${index + 1}`,
-      testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js'] : specs,
+      testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js', 'operator-console.spec.js'] : specs,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: `http://127.0.0.1:${basePort + index}`,
@@ -114,7 +114,7 @@ const oidcProject = {
 const oidcRequiredPort = oidcPort + 1
 const oidcRequiredProject = {
   name: 'chromium-oidc-required',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcRequiredPort}`,
@@ -125,7 +125,7 @@ const oidcRequiredProject = {
 const restrictedQualificationPort = oidcRequiredPort + 1
 const restrictedQualificationProject = {
   name: 'chromium-restricted-qualification',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${restrictedQualificationPort}`,
@@ -135,7 +135,7 @@ const restrictedQualificationProject = {
 const oidcQualificationPort = restrictedQualificationPort + 1
 const oidcQualificationProject = {
   name: 'chromium-oidc-qualification',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcQualificationPort}`,

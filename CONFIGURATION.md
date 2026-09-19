@@ -156,6 +156,12 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 ## Principal Access Operations
 
+The operator verification form at `/admin/reauth` requires an eligible browser session and the allowed diagnostics network. Credential re-entry must belong to the same principal. Provider verification requests fresh sign-in and checks the signed authentication time; a silent provider session without that proof cannot qualify. Successful verification rotates the browser session while preserving its original absolute expiry. Reads refresh ordinary activity but never verified authentication time: the 30-minute console freshness and 30-minute idle defaults deliberately measure different things. Idle or absolute expiry requires a new ordinary sign-in.
+
+Provider sign-in time and verified provider authentication time are tracked separately. Ordinary sign-in still allows **Sign out everywhere** for five minutes, even when the provider omits `auth_time`. Console access requires recent signed provider proof; existing sessions without that proof must verify again.
+
+Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
+
 The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.
 
 Run it through the installed Compose project:
@@ -168,6 +174,9 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py disabl
 docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
 docker compose exec -T shell python /app/tools/manage_principal_access.py revoke-all-sessions prn_example
 docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-status prn_example
+docker compose exec -T shell python /app/tools/manage_principal_access.py operator-revoke prn_example
 ```
 
 `status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
@@ -313,6 +322,51 @@ The browser shows a generic failure message; the safe server records distinguish
 
 Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
+## Operator Settings Console
+
+Explicitly granted operators can open **Operator settings** from the desktop more menu or mobile menu, or go directly to `/admin/`. The desktop menu opens a separate tab or window, like Diagnostics; mobile opens the page in place with a back-to-shell link. Diagnostics, Audit log, and Operator settings share a header with links to the other two pages. Search by setting name or description and combine the group, source, and warning filters. Groups start collapsed with setting counts; filtering opens matching groups, and clearing filters restores your earlier expanded groups. Expand all and Collapse all control the visible groups. Refresh preserves expanded guidance, permitted long values, focus, and scroll where the setting remains available. This page is read only: it has no edit, reveal, save, or restart controls.
+
+**Loaded from** identifies the winning source, including built-in defaults, shipped `config.yaml`, local `config.local.yaml`, or the supported environment variable. **Defaults and host configuration** explains where to configure the setting, its accepted values, and which processes need a restart. Usual paths distinguish source checkouts (`app/conf/config.local.yaml`) from packaged deployments (`conf/config.local.yaml`); custom directories may differ. Environment values take precedence, but the worker cannot identify their original host file. A host `.env` participates only when the deployment uses or passes that variable. Raw schema is available in a separate disclosure.
+
+The console is unavailable by default. To enable access:
+
+1. Configure `diagnostics_allowed_cidrs` for the operator network in `conf/config.local.yaml`. Set `trusted_proxy_cidrs` only for proxies you control; forwarded client addresses are honored only from those peers.
+2. Choose `token_required`, `oidc_required`, or `mixed` in the host configuration. Follow [restricted browser access](#restricted-browser-access), including HTTPS, bootstrap/provider setup, and profile-transition precautions before switching a live deployment.
+3. Apply the required container recreation through the deployment workflow. Production startup copies local overlays into a private snapshot; a web-worker reload cannot read later host edits. See [reload behavior](#config-file-reload-behavior).
+4. Establish an active principal and run `docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
+5. Sign in at `/admin/`. Use `operator-status` or `operator-revoke` through the same local tool to inspect or remove access. If account access is lost, follow [local recovery](#issuing-credentials-and-recovering-access), then review the principal's grant.
+
+Every page, inventory, and verification request checks the network, restricted profile, browser session, active principal, grant, and authentication freshness. Out-of-range clients and ineligible principals receive a generic 404. API tokens and direct credential headers cannot open the console. Missing or expired sessions require sign-in; stale verification requires credential re-entry or a fresh provider authentication. The [verification policy](#principal-access-operations) preserves the original absolute session deadline. An idle tab may retain information already delivered; its next refresh clears the view if access has been lost.
+
+The page labels its result as the **serving web worker's loaded configuration**, with process identity and load time. Refresh samples whichever worker handles the request; it does not establish agreement across web or background workers. Host deployment settings are listed separately as unobserved. The same [reviewed disclosure rules](#validating-instance-configuration) protect the page, JSON inventory, and local checker: secrets are withheld, sensitive lists show counts, and the AI endpoint shows only whether it is configured. Existing `/diag` cards retain their separate access policy and permitted values.
+
+## Validating Instance Configuration
+
+The image includes a local checker that uses the same configuration rules as startup. It prints a fresh evaluation of the inputs supplied to that command, including safe values, source layers, and normalization warnings. It doesn't report the configuration loaded by any existing web or background worker.
+
+```bash
+docker compose exec -T shell python /app/tools/check_instance_config.py
+docker compose exec -T shell python /app/tools/check_instance_config.py --json --strict
+```
+
+Use `--local-yaml /path/to/candidate.yaml` to replace the local YAML input with a candidate file. The command reads the shipped configuration and supported environment overrides as usual; an environment override can still win over the candidate. It never writes settings, parses the host `.env`, creates keys, or initializes the database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`.
+
+For a stopped deployment or invalid configuration that prevents startup, bypass the normal entrypoint. Mount the candidate read-only at an explicit path:
+
+```bash
+docker compose run --rm --no-deps --entrypoint python \
+  --volume "$PWD/conf/config.local.yaml:/candidate/config.local.yaml:ro" \
+  shell /app/tools/check_instance_config.py --local-yaml /candidate/config.local.yaml --json
+```
+
+That command sees the environment supplied by Compose. It doesn't run the entrypoint's overlay staging, so the explicit candidate mount is the local input being checked. Image selection, published ports, worker counts, and other host-only settings are listed as unobserved and still require their own Compose/startup checks.
+
+The inspection catalog allows only reviewed full values, declared summaries, or withheld values. Custom redaction rules and provider subject allowlists expose counts only; the AI endpoint exposes presence only. Credentials and protected references remain withheld. Unknown input values never appear in diagnostics. Long permitted values have explicit truncation markers, and inspection doesn't offer a secret reveal.
+
+`admin_console_reauth_minutes` is host-owned YAML with a default of `30` and accepted range of `5`–`60` minutes. It controls verified authentication freshness for operator inspection without changing the five-minute provider-linking policy. Browser idle and absolute deadlines apply independently.
+
+---
+
 ## Application YAML Settings
 
 The values below are the built-in server defaults that operators can fine-tune with `config.local.yaml`. Deployment-owned settings are intentionally omitted and live in `.env` instead.
@@ -321,6 +375,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `admin_console_reauth_minutes` | `30` | Verified authentication age allowed for the operator console, from 5 through 60 minutes. Browser idle and absolute deadlines still apply |
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
 | `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their personal workspace |
@@ -331,7 +386,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, `/metrics`, and the `/admin/` console. Console access additionally requires a restricted profile, eligible browser session, explicit principal grant, and verified freshness. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |

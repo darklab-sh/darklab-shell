@@ -1,0 +1,194 @@
+[
+  {
+    "key": "APP_PORT",
+    "description": "App port exposed by the container and published by the base Compose file",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "HOST_BIND_ADDRESS",
+    "description": "Host address used for the published app port. The public stack defaults to 0.0.0.0 so remote hosts can connect. Use 127.0.0.1 when only a local reverse proxy should reach the app",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "DARKLAB_IMAGE",
+    "description": "Exact Docker Hub image tag to run. Keep this on a reviewed semantic-version tag rather than latest",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "APP_LOCAL_CONF_DIR",
+    "description": "Optional operator root for every supported local overlay. Production sets /config; when unset, loaders keep using sibling files beside their shipped assets",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED",
+    "description": "When enabled, installs managed Nuclei templates if the persistent cache has no manifest. The attempt is bounded and non-fatal, and it never refreshes an installed snapshot",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "NUCLEI_TEMPLATE_REFRESH_ENABLED",
+    "description": "Enables the operator-controlled template refresh in Assessment-plan preflight. When unset or empty, it follows NUCLEI_TEMPLATE_BOOTSTRAP_ENABLED; disabling both leaves cache replacement to deployment operators",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "WEB_CONCURRENCY",
+    "description": "Number of Gunicorn worker processes; defaults to 4",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "WEB_THREADS",
+    "description": "Number of threads per Gunicorn worker; defaults to 4",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "NOTIFICATION_WORKER_ENABLED",
+    "description": "Starts the outbound notification worker beside Gunicorn when set to 1 or left unset. Set to 0 to run only the web process",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "SCHEDULER_ENABLED",
+    "description": "Starts the scheduled-run worker beside Gunicorn when set to 1 or left unset. Set to 0 to run only the web process",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "COMPOSE_PROFILES",
+    "description": "Optional comma-separated profiles to enable in one assignment. Development supports llama and postgres; production also supports zap and oast. Combine the ones the deployment uses, such as postgres,zap,oast in production",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "AI_WORKER_ENABLED",
+    "description": "Starts the AI worker beside Gunicorn when set to 1. Leave it 0 when AI is disabled or when another process is responsible for draining the AI queue",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "LLAMA_HF_MODEL",
+    "description": "Hugging Face GGUF repo and quantization passed to the optional llama.cpp sidecar",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "SECRETS_MASTER_KEY",
+    "description": "Optional base64-encoded 32-byte master key for the encrypted personal/team secrets vault and short-lived private OAST provider sessions. When unset, the app creates <data_dir>/.secrets_master_key with mode 0600 on first use and repairs broader existing key-file permissions to 0600 before use. If both env and file exist, the env value wins and the app logs MASTER_KEY_FILE_IGNORED",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "DARKLAB_ZAP_API_KEY",
+    "description": "ZAP API key used by the shipped zap worker profile when zap_connector.api_key_secret_id names this variable",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "DARKLAB_ZAP_SCOPE_POLICY_TOKEN",
+    "description": "Bearer token used for scanner-side scope attestations when zap_connector.scope_policy_token_secret_id names this variable",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "DARKLAB_OAST_TOKEN",
+    "description": "Private Interactsh-compatible service token used by the shipped oast worker profile when oast_connector.token_secret_id names this variable",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "LLAMA_THREADS",
+    "description": "Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps LLAMA_PARALLEL=1 so serialized AI worker requests reuse one slot more predictably",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "LLAMA_CTX_SIZE",
+    "description": "Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps LLAMA_PARALLEL=1 so serialized AI worker requests reuse one slot more predictably",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "LLAMA_N_PREDICT",
+    "description": "Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps LLAMA_PARALLEL=1 so serialized AI worker requests reuse one slot more predictably",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "LLAMA_PARALLEL",
+    "description": "Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps LLAMA_PARALLEL=1 so serialized AI worker requests reuse one slot more predictably",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "POSTGRES_DB",
+    "description": "Credentials used by the optional postgres Compose profile",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "POSTGRES_USER",
+    "description": "Credentials used by the optional postgres Compose profile",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  },
+  {
+    "key": "POSTGRES_PASSWORD",
+    "description": "Credentials used by the optional postgres Compose profile",
+    "value": null,
+    "status": "Not observed",
+    "input": "Host environment / Compose configuration",
+    "apply": "Update host configuration and recreate affected containers. This process does not read the host .env file."
+  }
+]

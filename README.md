@@ -148,6 +148,8 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
+Authorized operators can use the read-only [Operator settings console](CONFIGURATION.md#operator-settings-console) to browse expandable setting groups, combine search and filters, and find readable input rules and host configuration guidance. Refresh keeps your place and expanded details. A local checker also validates proposed YAML when the application cannot start. Sensitive values remain withheld or summarized.
+
 Released images keep shipped defaults under `/app/conf`; production installations keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for settings, precedence, supported runtimes, deployment choices, Files storage, raw scanning, database selection, and production tuning. Back up the current data before a database migration, then follow [Postgres Migration](docs/postgres-migration.md) for SQLite-to-Postgres moves or Postgres major-version upgrades. Theme authors can use [THEME.md](THEME.md).
@@ -349,6 +351,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 ## Documentation Map
 
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
+- [AGENTS.md](AGENTS.md) - Repository guidance for coding agents, including project contracts, validation, and documentation rules
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
 - [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
 - [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for production `.env` and `conf/` settings, development overrides, Compose customization, storage, and host tuning

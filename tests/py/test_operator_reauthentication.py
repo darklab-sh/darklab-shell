@@ -1,0 +1,421 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+from admin_helpers import operator_db as _operator_db
+from core.database_access import get_db_connect
+from services.auth import (
+    browser_sessions,
+    oidc,
+    operator_access,
+    operator_grants,
+    operator_reauth,
+    resolver,
+    storage,
+)
+from services.auth.contracts import IdentityStorageError, timestamp
+from test_oidc_sign_in import (
+    ORIGIN,
+    LocalProvider,
+    _callback,
+    _client_cookie,
+    _config,
+    _start,
+)
+
+operator_db = _operator_db
+
+
+def app_for(monkeypatch, config):
+    import config as shell_config
+    from core import database
+
+    import app as application
+    monkeypatch.setattr(shell_config, "CFG", config)
+    monkeypatch.setattr(application, "CFG", config)
+    monkeypatch.setattr(database, "CFG", config)
+    app = application.create_app(config)
+    app.config.update(TESTING=True, RATELIMIT_ENABLED=False)
+    return app
+
+
+def create_identity():
+    with get_db_connect()() as conn:
+        bundle = storage.create_principal_with_credential(conn=conn)
+        conn.commit()
+    return bundle
+
+
+def source_context(bundle, issued):
+    return SimpleNamespace(
+        principal_id=bundle.principal.id, browser_session_id=issued.id, authentication_method="browser_cookie",
+    )
+
+
+def credential_setup(operator_db, monkeypatch):
+    cfg = operator_db.cfg.with_overrides({"access_profile": "token_required", "diagnostics_allowed_cidrs": ["127.0.0.0/8"]})
+    app = app_for(monkeypatch, cfg)
+    bundle = create_identity()
+    operator_grants.set_grant(bundle.principal.id, granted=True)
+    issued = browser_sessions.create_browser_session(
+        principal_id=bundle.principal.id, credential_id=bundle.credential.metadata.id, absolute_seconds=43200,
+    )
+    client = app.test_client()
+    client.set_cookie(browser_sessions.BROWSER_SESSION_COOKIE, issued.cookie_value, domain="shell.example")
+    client.set_cookie(browser_sessions.BROWSER_CSRF_COOKIE, issued.csrf_token, domain="shell.example")
+    return app, client, bundle, issued
+
+
+def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(operator_db, monkeypatch):
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+    peer = create_identity()
+    page = client.get("/admin/reauth?next=/admin/", base_url=ORIGIN)
+    assert page.status_code == 200 and b"Verify operator access" in page.data
+    assert page.headers["Cache-Control"] == "private, no-store"
+    assert client.post("/admin/reauth", base_url=ORIGIN, data={"credential": bundle.credential.secret}).status_code == 403
+    wrong = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": peer.credential.secret, "csrf_token": original.csrf_token, "next": "/admin/",
+    })
+    assert wrong.status_code == 400 and peer.credential.secret.encode() not in wrong.data
+    signed = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": bundle.credential.secret, "csrf_token": original.csrf_token, "next": "//attacker.test",
+    })
+    assert signed.status_code == 302 and signed.headers["Location"] == "/admin/"
+    cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    replacement = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False).session
+    assert replacement is not None
+    assert replacement.id != original.id
+    assert replacement.absolute_expires_at == original.absolute_expires_at
+    assert browser_sessions.resolve_browser_session(original.cookie_value, idle_seconds=1800).state == "revoked"
+
+
+@pytest.mark.parametrize("change", ["grant", "principal", "session", "credential", "absolute", "idle"])
+def test_verification_cannot_revive_a_revoked_or_expired_source(operator_db, monkeypatch, change):
+    app, _client, bundle, original = credential_setup(operator_db, monkeypatch)
+    proof = resolver.redeem_portable_credential(bundle.credential.secret).context
+    now = datetime.now(timezone.utc)
+    if change == "grant":
+        operator_grants.set_grant(bundle.principal.id, granted=False)
+    else:
+        with get_db_connect()() as conn:
+            if change == "principal":
+                conn.execute("UPDATE principals SET status = 'disabled', disabled_at = ? WHERE id = ?",
+                             (timestamp(now), bundle.principal.id))
+            elif change == "credential":
+                conn.execute("UPDATE credentials SET revoked_at = ? WHERE id = ?",
+                             (timestamp(now), bundle.credential.metadata.id))
+            elif change == "session":
+                conn.execute("UPDATE browser_sessions SET revoked_at = ? WHERE id = ?", (timestamp(now), original.id))
+            elif change == "idle":
+                conn.execute("UPDATE browser_sessions SET last_seen_at = ? WHERE id = ?",
+                             (timestamp(now - timedelta(hours=1)), original.id))
+            conn.commit()
+    if change == "absolute":
+        now = datetime.fromisoformat(original.absolute_expires_at)
+    with pytest.raises(IdentityStorageError):
+        operator_reauth.rotate_verified_session(source_context(bundle, original), app.config["DARKLAB_CONFIG"],
+                                                credential_context=proof, now=now)
+    with get_db_connect()() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
+
+
+@pytest.mark.parametrize("provider", [False, True])
+def test_repeated_rotations_preserve_deadline_at_last_second(operator_db, monkeypatch, provider):
+    cfg = operator_db.cfg.with_overrides({"access_profile": "token_required"})
+    bundle = create_identity()
+    operator_grants.set_grant(bundle.principal.id, granted=True)
+    start = datetime.now(timezone.utc).replace(microsecond=0)
+    identity_id = "oid_test_operator"
+    if provider:
+        cfg = _config("mixed").with_overrides({"browser_session_idle_minutes": 60})
+        with get_db_connect()() as conn:
+            conn.execute("INSERT INTO oidc_identities (id, principal_id, issuer, subject, created_at) VALUES (?, ?, ?, ?, ?)",
+                         (identity_id, bundle.principal.id, cfg["oidc_issuer"], "operator_subject", timestamp(start)))
+            conn.commit()
+    original = browser_sessions.create_browser_session(
+        principal_id=bundle.principal.id, credential_id="" if provider else bundle.credential.metadata.id,
+        oidc_identity_id=identity_id if provider else "", absolute_seconds=3600, now=start,
+    )
+    issued = original
+    for seconds in (900, 1800, 2700, 3599):
+        clock = start + timedelta(seconds=seconds)
+        proof = ({"provider_proof": oidc.OIDCProof(cfg["oidc_issuer"], "operator_subject", timestamp(clock))}
+                 if provider else {"credential_context": resolver.redeem_portable_credential(bundle.credential.secret).context})
+        issued = operator_reauth.rotate_verified_session(source_context(bundle, issued), cfg, now=clock, **proof)
+        assert issued.absolute_expires_at == original.absolute_expires_at
+    with pytest.raises(IdentityStorageError):
+        operator_reauth.rotate_verified_session(source_context(bundle, issued), cfg, now=start + timedelta(seconds=3600), **proof)
+
+
+def test_expiry_is_evaluated_after_waiting_for_locks(operator_db, monkeypatch):
+    app, _client, bundle, original = credential_setup(operator_db, monkeypatch)
+    proof = resolver.redeem_portable_credential(bundle.credential.secret).context
+    clock = datetime.fromisoformat(original.created_at) + timedelta(seconds=1)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock
+    monkeypatch.setattr(browser_sessions, "datetime", Clock)
+    monkeypatch.setattr(operator_reauth, "datetime", Clock)
+    lock = operator_grants.lock_principal
+    def delayed_lock(conn, principal_id):
+        nonlocal clock
+        result = lock(conn, principal_id)
+        clock = datetime.fromisoformat(original.absolute_expires_at)
+        return result
+    monkeypatch.setattr(operator_grants, "lock_principal", delayed_lock)
+    with pytest.raises(IdentityStorageError):
+        operator_reauth.rotate_verified_session(
+            source_context(bundle, original), app.config["DARKLAB_CONFIG"], credential_context=proof,
+        )
+
+
+def provider_setup(operator_db, monkeypatch, profile="oidc_required"):
+    config = _config(profile).with_overrides({
+        "database_backend": operator_db.cfg["database_backend"], "database_url": operator_db.cfg["database_url"],
+        "data_dir": operator_db.cfg["data_dir"], "diagnostics_allowed_cidrs": ["127.0.0.0/8"],
+    })
+    provider = LocalProvider(monkeypatch)
+    app = app_for(monkeypatch, config)
+    client = app.test_client()
+    assert _callback(client, _start(client, provider)).status_code == 302
+    principal_payload = client.get("/auth/principal", base_url=ORIGIN).get_json()
+    assert principal_payload is not None
+    principal = principal_payload["principal"]["id"]
+    operator_grants.set_grant(principal, granted=True)
+    csrf = _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)
+    response = client.post("/admin/reauth", base_url=ORIGIN, data={"csrf_token": csrf, "next": "/admin/?view=host"})
+    assert response.status_code == 302
+    query = parse_qs(urlsplit(response.headers["Location"]).query)
+    assert query["max_age"] == ["0"] and query["prompt"] == ["login"]
+    state = query["state"][0]
+    provider.expect(state)
+    return app, client, provider, state, principal
+
+
+def test_provider_step_up_binds_state_and_preserves_original_deadline_without_strict_cookie(operator_db, monkeypatch):
+    _app, client, _provider, state, principal = provider_setup(operator_db, monkeypatch)
+    old_cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    old = browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800, touch=False).session
+    assert old is not None
+    client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE, domain="shell.example")
+    result = _callback(client, state)
+    assert result.status_code == 302 and result.headers["Location"] == "/admin/?view=host"
+    new = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
+                                                    idle_seconds=1800, touch=False).session
+    assert new is not None
+    assert new.principal_id == principal and new.absolute_expires_at == old.absolute_expires_at
+    assert new.id != old.id
+    assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
+
+
+@pytest.mark.parametrize("failure", ["missing", "old", "future", "subject", "state", "revoked", "network", "provider"])
+def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, monkeypatch, failure):
+    app, client, provider, state, principal = provider_setup(operator_db, monkeypatch)
+    if failure == "missing":
+        provider.claim_omissions.add("auth_time")
+    elif failure == "old":
+        provider.claim_overrides["auth_time"] = int(datetime.now(timezone.utc).timestamp()) - 60
+    elif failure == "future":
+        provider.claim_overrides["auth_time"] = int(datetime.now(timezone.utc).timestamp()) + 300
+    elif failure == "subject":
+        provider.subject = "another-account"
+    elif failure == "state":
+        client.delete_cookie(oidc.OIDC_STATE_COOKIE, domain="shell.example", path="/auth/oidc/callback")
+    elif failure == "revoked":
+        operator_grants.set_grant(principal, granted=False)
+    elif failure == "network":
+        app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({"diagnostics_allowed_cidrs": []})
+    elif failure == "provider":
+        provider.available = False
+    result = _callback(client, state)
+    assert result.status_code in (302, 404)
+    assert not any(value.startswith(browser_sessions.BROWSER_SESSION_COOKIE + "=")
+                   for value in result.headers.getlist("Set-Cookie"))
+    with get_db_connect()() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
+    assert "private" in result.headers["Cache-Control"]
+
+
+@pytest.mark.parametrize("profile", ["mixed", "oidc_required"])
+@pytest.mark.parametrize("proof", ["missing", "stale"])
+def test_provider_proof_does_not_change_ordinary_sign_in_recency(operator_db, monkeypatch, profile, proof):
+    _app, client, provider, _state, _principal = provider_setup(operator_db, monkeypatch, profile)
+    if proof == "missing":
+        provider.claim_omissions.add("auth_time")
+    else:
+        provider.claim_overrides["auth_time"] = int(datetime.now(timezone.utc).timestamp()) - 3600
+    assert _callback(client, _start(client, provider)).status_code == 302
+    session = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
+                                                       idle_seconds=1800, touch=False).session
+    assert session is not None
+    assert datetime.fromisoformat(session.authenticated_at) > datetime.now(timezone.utc) - timedelta(minutes=1)
+    assert (session.provider_authenticated_at is None) == (proof == "missing")
+    assert client.get("/projects", base_url=ORIGIN).status_code == 200
+    inspection = client.get("/admin/settings", base_url=ORIGIN)
+    inspection_payload = inspection.json
+    assert inspection_payload is not None
+    assert inspection.status_code == 401 and inspection_payload["error"] == "reauthentication_required"
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?",
+                     (timestamp(datetime.now(timezone.utc) - timedelta(minutes=6)), session.id))
+        conn.commit()
+    stale = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
+                        headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+    assert stale.status_code == 403
+    stale_payload = stale.json
+    assert stale_payload is not None
+    assert stale_payload["error"] == "recent_authentication_required"
+    assert _callback(client, _start(client, provider)).status_code == 302
+    inspection_payload = client.get("/admin/settings", base_url=ORIGIN).json
+    assert inspection_payload is not None
+    assert inspection_payload["error"] == "reauthentication_required"
+    revoked = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
+                          headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+    revoked_payload = revoked.json
+    assert revoked_payload is not None
+    assert revoked.status_code == 200 and revoked_payload["revoked_sessions"] >= 1
+
+
+def test_provider_proof_upgrade_preserves_sessions_without_inventing_freshness(operator_db, monkeypatch):
+    from core.database_backend import DatabaseBackend
+    from core.migrations.v0088_provider_authentication_time import MIGRATION
+
+    _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
+    cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    session = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False).session
+    assert session is not None
+    assert session.provider_authenticated_at
+    with get_db_connect()() as conn:
+        conn.execute("ALTER TABLE browser_sessions DROP COLUMN provider_authenticated_at")
+        before_row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone()
+        assert before_row is not None
+        before = dict(before_row)
+        for statement in MIGRATION.statements_for(DatabaseBackend(operator_db.backend)):
+            conn.execute(statement)
+        after_row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone()
+        assert after_row is not None
+        after = dict(after_row)
+        conn.commit()
+    assert after.pop("provider_authenticated_at") is None
+    assert after == before
+    resolved = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False)
+    assert resolved.session is not None
+    assert resolved.valid and resolved.session.authenticated_at == session.authenticated_at
+    inspection_payload = client.get("/admin/settings", base_url=ORIGIN).json
+    assert inspection_payload is not None
+    assert inspection_payload["error"] == "reauthentication_required"
+
+
+def test_team_rotation_preserves_provider_proof_without_refreshing_console_access(operator_db, monkeypatch):
+    _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
+    old = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
+                                                   idle_seconds=1800, touch=False).session
+    assert old is not None
+    proof_time = timestamp(datetime.now(timezone.utc) - timedelta(minutes=31))
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET provider_authenticated_at = ? WHERE id = ?", (proof_time, old.id))
+        conn.commit()
+    for number in range(2):
+        response = client.post("/session/teams", base_url=ORIGIN, json={"name": f"Provider Team {number}"},
+                               headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+        assert response.status_code == 201
+        replacement = browser_sessions.resolve_browser_session(
+            _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE), idle_seconds=1800, touch=False,
+        ).session
+        assert replacement is not None
+        assert replacement.id != old.id
+        assert replacement.authenticated_at == old.authenticated_at
+        assert replacement.provider_authenticated_at == proof_time
+        assert replacement.absolute_expires_at == old.absolute_expires_at
+        inspection = client.get("/admin/settings", base_url=ORIGIN)
+        inspection_payload = inspection.json
+        assert inspection_payload is not None
+        assert inspection.status_code == 401 and inspection_payload["error"] == "reauthentication_required"
+        old = replacement
+
+
+@pytest.mark.parametrize("path", ["/admin/", "/admin/settings", "/admin/reauth", "/auth/oidc/callback?state=admin_test"])
+@pytest.mark.parametrize("closed", ["network", "profile"])
+def test_closed_console_never_resolves_authentication_or_grants(operator_db, monkeypatch, path, closed):
+    from core import helpers
+    cfg = operator_db.cfg.with_overrides({
+        "access_profile": "open" if closed == "profile" else "token_required",
+        "diagnostics_allowed_cidrs": ["127.0.0.0/8"] if closed == "profile" else [],
+    })
+    app = app_for(monkeypatch, cfg)
+    def forbidden(*args, **kwargs):
+        pytest.fail("closed console resolved identity or grant")
+    monkeypatch.setattr(helpers, "get_authentication_result", forbidden)
+    monkeypatch.setattr(operator_access, "has_grant", forbidden)
+    response = app.test_client().get(path, base_url=ORIGIN)
+    assert response.status_code == 404 and not response.data
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert "Location" not in response.headers
+
+
+def test_logout_committed_during_rotation_cannot_be_undone(operator_db, monkeypatch):
+    if operator_db.backend != "postgres":
+        pytest.skip("row-lock contention is qualified on Postgres")
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    app, _client, bundle, original = credential_setup(operator_db, monkeypatch)
+    proof = resolver.redeem_portable_credential(bundle.credential.secret).context
+    entered = Event()
+    lock = browser_sessions.lock_rotation_source
+    def notified_lock(*args, **kwargs):
+        entered.set()
+        return lock(*args, **kwargs)
+    monkeypatch.setattr(browser_sessions, "lock_rotation_source", notified_lock)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with get_db_connect()() as conn:
+            conn.execute("UPDATE browser_sessions SET revoked_at = ? WHERE id = ?", (timestamp(), original.id))
+            future = executor.submit(operator_reauth.rotate_verified_session, source_context(bundle, original),
+                                     app.config["DARKLAB_CONFIG"], credential_context=proof)
+            assert entered.wait(5)
+            conn.commit()
+        with pytest.raises(IdentityStorageError):
+            future.result(timeout=10)
+    with get_db_connect()() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
+
+
+def test_provider_flow_upgrade_preserves_pending_sign_in_and_link(operator_db):
+    from core.database_backend import DatabaseBackend
+    from core.migrations.runner import apply_migration
+    from core.migrations.v0084_oidc_identities import MIGRATION as old
+    from core.migrations.v0087_operator_reauthentication import MIGRATION as upgrade
+
+    bundle = create_identity()
+    backend = DatabaseBackend(operator_db.backend)
+    now = timestamp(datetime.now(timezone.utc))
+    with get_db_connect()() as conn:
+        conn.execute("DROP TABLE oidc_auth_flows")
+        for statement in old.statements_for(backend):
+            if "CREATE TABLE oidc_auth_flows" in statement or "CREATE INDEX idx_oidc_auth_flows_expiry" in statement:
+                conn.execute(statement)
+        for purpose in ("sign_in", "link"):
+            conn.execute(
+                "INSERT INTO oidc_auth_flows "
+                "(state_digest, nonce, code_verifier, purpose, principal_id, browser_session_id, "
+                "next_path, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (purpose.encode(), "nonce", "verifier", purpose, bundle.principal.id if purpose == "link" else None,
+                 "browser_source" if purpose == "link" else None, "/admin/", now, now),
+            )
+        before = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
+        conn.execute("DELETE FROM schema_migrations WHERE version = ?", ("0087",))
+        conn.commit()
+        apply_migration(conn, upgrade, backend=backend)
+        after = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
+        assert before == after

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "3.0.0",
-  "reviewed_on": "2026-09-15",
+  "reviewed_on": "2026-09-19",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -208,6 +208,13 @@
       "source": "https://github.com/trufflesecurity/trufflehog",
       "license": "AGPL-3.0",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/TruffleHog.txt"
+    },
+    {
+      "name": "TruffleHog AMQP dependency",
+      "version_arg": "TRUFFLEHOG_AMQP_VERSION",
+      "source": "https://github.com/rabbitmq/amqp091-go",
+      "license": "BSD-2-Clause",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/amqp091-go.txt"
     },
     {
       "name": "massdns",

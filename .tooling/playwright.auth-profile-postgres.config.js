@@ -27,7 +27,7 @@ export default defineConfig({
   projects: profiles.map(([name, , , tls], index) => ({
     name,
     workers: 1,
-    testMatch: ['auth-profile-qualification.spec.js'],
+    testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
     use: {
       ...devices['Desktop Chrome'],
       baseURL: `${tls ? 'https' : 'http'}://127.0.0.1:${basePort + index}`,

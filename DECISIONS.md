@@ -19,6 +19,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Bounded Assessment Batches Reuse Workflow Coordination](#bounded-assessment-batches-reuse-workflow-coordination)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
+  - [Operator Inspection Uses a Loaded Snapshot and Explicit Grant](#operator-inspection-uses-a-loaded-snapshot-and-explicit-grant)
   - [Two-User Security Model](#two-user-security-model)
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
   - [Workspace Shell Conveniences Stay App-Mediated](#workspace-shell-conveniences-stay-app-mediated)
@@ -431,6 +432,12 @@ The architecture suite enforces this decision. It keeps an explicit compatibilit
 **Solution:** `sudo -u scanner kill -TERM -<pgid>`. The sudoers rule `appuser ALL=(scanner) NOPASSWD: ALL` covers this. The kill sends to the entire process group (negative pgid) to catch child processes spawned by the shell.
 
 **PGID capture timing:** The `/kill` endpoint stores the subprocess PID at spawn time and uses it directly as the PGID (`pgid = pid`) rather than calling `os.getpgid(pid)` at kill time. Since all subprocesses are spawned with `preexec_fn=os.setsid`, PGID equals PID at creation, making the stored PID a safe stand-in. The alternative — calling `os.getpgid()` after `proc.wait()` has reaped the process — returns the PGID of whatever new process reused that PID. If that new process is a freshly spawned Gunicorn worker (workers and scanner subprocesses draw from the same kernel PID pool), `kill -TERM -<worker_pgid>` sends SIGTERM to the entire Gunicorn worker pool.
+
+### Operator Inspection Uses a Loaded Snapshot and Explicit Grant
+
+Configuration inspection reports one serving worker's startup snapshot, rather than reloading files or claiming instance-wide agreement. Production overlay staging and independently running workers make a fresh command's values insufficient evidence of active web configuration. The offline validator therefore shares evaluation rules but clearly describes a separate evaluation.
+
+A reviewed disclosure catalog fails closed and distinguishes safe full values, approved summaries, and withheld values. Principal-bound operator grants stay independent of workspace and Team permissions. Fresh credential/provider verification preserves the original session deadline, so repeated step-up cannot renew absolute access indefinitely. Configuration remains host-owned; the console exposes no mutation or restart authority.
 
 ### Two-User Security Model
 

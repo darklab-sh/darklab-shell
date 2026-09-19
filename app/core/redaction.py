@@ -10,16 +10,18 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from functools import lru_cache
-import hashlib
 import logging
 import re
 
+from config_redaction import (
+    _ALLOWED_FLAGS, _pattern_hash, _python_re_flags,
+    normalize_redaction_rules as _normalize_redaction_rules,
+)
 from core.trufflehog_redaction import redact_trufflehog_json_line
 from services.runs.output_model import LineEntity, LineEvent, LineKind, from_wire, line_event_from_legacy, to_legacy_wire
 
 
 log = logging.getLogger("shell")
-_ALLOWED_FLAGS = {"i", "m"}
 REDACTED_ENTITY_SENTINEL = "<redacted>"
 _PRIVATE_KEY_BEGIN_RE = re.compile(
     r"-----\s*BEGIN[ A-Z0-9_.-]*PRIVATE KEY(?: BLOCK)?\s*-----",
@@ -80,53 +82,7 @@ _RAW_BUILTIN_SHARE_REDACTION_RULES = [
 
 
 def normalize_redaction_rules(raw_rules):
-    """Return only valid, normalized regex redaction rules."""
-    normalized = []
-    if not isinstance(raw_rules, list):
-        return normalized
-    for item in raw_rules:
-        if not isinstance(item, dict):
-            continue
-        pattern = item.get("pattern")
-        if not isinstance(pattern, str) or not pattern.strip():
-            continue
-        replacement = item.get("replacement", "[redacted]")
-        if not isinstance(replacement, str):
-            replacement = "[redacted]"
-        flags = item.get("flags", "")
-        if not isinstance(flags, str):
-            flags = ""
-        flags = "".join(ch for ch in flags.lower() if ch in _ALLOWED_FLAGS)
-        label = item.get("label", "")
-        try:
-            re.compile(pattern, _python_re_flags(flags))
-        except re.error as exc:
-            log.warning("SHARE_REDACTION_RULE_INVALID", extra={
-                "label": label.strip() if isinstance(label, str) else "",
-                "pattern_hash": _pattern_hash(pattern),
-                "error": str(exc),
-            })
-            continue
-        normalized.append({
-            "label": label.strip() if isinstance(label, str) else "",
-            "pattern": pattern,
-            "replacement": replacement,
-            "flags": flags,
-        })
-    return normalized
-
-
-def _python_re_flags(flags: str) -> int:
-    compiled = 0
-    if "i" in flags:
-        compiled |= re.IGNORECASE
-    if "m" in flags:
-        compiled |= re.MULTILINE
-    return compiled
-
-
-def _pattern_hash(pattern: object) -> str:
-    return hashlib.sha256(str(pattern or "").encode("utf-8", errors="replace")).hexdigest()[:12]
+    return _normalize_redaction_rules(raw_rules, logger=log)
 
 
 def _redaction_rule_cache_key(rules) -> tuple[tuple[str, str, str, str], ...]:

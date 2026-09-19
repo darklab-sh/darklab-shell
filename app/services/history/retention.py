@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from core.database_backend import DatabaseBackend
 from services.assessments.cleanup import mark_run_evidence_unavailable_on_conn
@@ -18,7 +18,7 @@ log = logging.getLogger("shell")
 def prune_retention_on_conn(
     conn: Any,
     *,
-    cfg: dict[str, Any],
+    cfg: Mapping[str, Any],
     backend: DatabaseBackend,
     delete_run_artifacts_fn: Callable[[Any, list[str]], None],
     delete_snapshot_metadata_fn: Callable[[Any, list[str]], None],

@@ -177,6 +177,8 @@ def enforce_browser_csrf(authentication_result):
         return None
     cookie_token = str(request.cookies.get(BROWSER_CSRF_COOKIE) or "")
     header_token = str(request.headers.get("X-Darklab-CSRF") or "")
+    if request.endpoint == "admin.reauthenticate":
+        header_token = header_token or str(request.form.get("csrf_token") or "")
     if not cookie_token:
         reason = "missing_cookie"
     elif not header_token:
@@ -221,6 +223,7 @@ def rotate_browser_session_after_privilege_change(response):
         absolute_seconds=absolute_seconds,
         replace_session_id=context.browser_session_id,
         authenticated_at=context.browser_session_authenticated_at,
+        provider_authenticated_at=context.browser_session_provider_authenticated_at,
         absolute_expires_at=context.browser_session_absolute_expires_at,
     )
     response.set_cookie(

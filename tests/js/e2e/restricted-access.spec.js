@@ -26,7 +26,7 @@ async function openSignIn(page) {
 async function signIn(page) {
   await page.getByLabel('Access credential').fill(restrictedCredential())
   await Promise.all([
-    page.waitForURL(url => url.pathname === '/'),
+    page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded' }),
     page.getByRole('button', { name: 'Sign in' }).click(),
   ])
   await ensurePromptReady(page)
