@@ -1516,11 +1516,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
         "COPY scripts/operations/backup_system.py "
+        "scripts/operations/check_instance_config.py "
         "scripts/operations/manage_principal_access.py "
         "scripts/operations/migrate_sqlite_to_postgres.py "
         "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
+    assert "!scripts/operations/check_instance_config.py" in dockerignore
     assert "!scripts/operations/manage_principal_access.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
