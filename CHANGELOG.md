@@ -13,6 +13,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.0.1] - Unreleased
 
+### Added
+
+- **Configuration regression checks pin the existing loading contract.** A table-driven corpus covers effective values, nested provenance, environment precedence, warnings, derived defaults, and invalid-input outcomes.
+
 ### Fixed
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
