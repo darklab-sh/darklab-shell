@@ -282,6 +282,10 @@ The current event inventory is:
 | INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
+| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected | fixed reason only |
+| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | console network, profile, or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
+| INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; repeated unchanged operations are quiet | principal_id, source, granted |
 | INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
 | INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
 | INFO | `CREDENTIAL_ROTATED` | committed immediate credential replacement | principal_id, credential_id, previous_credential_id, credential_type, scope_count, source, request_id |

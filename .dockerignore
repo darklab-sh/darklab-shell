@@ -25,6 +25,7 @@ assets/
 scripts/*
 !scripts/container/
 !scripts/container/install_go_tool.sh
+!scripts/container/verify_go_dependency.sh
 !scripts/container/patches/
 !scripts/container/patches/httpx-disable-leakless.patch
 !scripts/container/stage_runtime_source.sh
@@ -32,6 +33,7 @@ scripts/*
 !scripts/container/prepare_nuclei_template_cache.sh
 !scripts/operations/
 !scripts/operations/backup_system.py
+!scripts/operations/check_instance_config.py
 !scripts/operations/manage_principal_access.py
 !scripts/operations/migrate_sqlite_to_postgres.py
 !scripts/operations/restore_system.py

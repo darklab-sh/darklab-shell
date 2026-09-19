@@ -4,6 +4,8 @@ This guide is for developers and contributors working on darklab_shell locally. 
 
 For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOC_STANDARDS.md](DOC_STANDARDS.md).
 
+Coding agents should also follow [AGENTS.md](AGENTS.md), which collects the repository's working rules and links to the detailed contracts.
+
 ---
 
 ## Table of Contents
@@ -559,7 +561,7 @@ Also verify:
 - docs match the behavior you changed
 - new functionality includes new or updated tests at the right layer (`pytest`, `Vitest`, and/or `Playwright`)
 - bug fixes include a regression test whenever the behavior can be locked in cleanly
-- test counts are updated if you added tests
+- testing guidance and live inventory commands stay current when coverage changes
 - screenshots, generated docs, or release notes are updated if the change requires them
 
 When choosing the test layer:

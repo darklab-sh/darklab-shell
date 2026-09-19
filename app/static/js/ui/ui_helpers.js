@@ -1132,13 +1132,13 @@ import { requestWelcomeSettle as importedRequestWelcomeSettle } from '../welcome
       }
       if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
       event.preventDefault();
-      const enabledOptions = options.filter((btn) => !btn.disabled);
+      const enabledOptions = Array.from(select.options).filter((option) => !option.disabled);
       if (!enabledOptions.length) return;
-      const currentIndex = Math.max(0, enabledOptions.findIndex((btn) => btn.dataset.value === select.value));
+      const currentIndex = Math.max(0, enabledOptions.findIndex((option) => option.value === select.value));
       const delta = event.key === 'ArrowUp' ? -1 : 1;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         const next = enabledOptions[(currentIndex + delta + enabledOptions.length) % enabledOptions.length];
-        select.value = next.dataset.value;
+        select.value = next.value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
         _syncAppSelect(select);
         return;

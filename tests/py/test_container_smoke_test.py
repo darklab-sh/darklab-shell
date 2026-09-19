@@ -81,6 +81,7 @@ class _ContainerSmokeEnvironment(str):
     raw_target_ip: str
     allowed_target_ip: str
     compose: list[str]
+    image_tag: str
 
     def __new__(
         cls,
@@ -90,12 +91,14 @@ class _ContainerSmokeEnvironment(str):
         raw_target_ip: str,
         allowed_target_ip: str,
         compose: list[str],
+        image_tag: str,
     ):
         instance = str.__new__(cls, base_url)
         instance.restricted_url = restricted_url
         instance.raw_target_ip = raw_target_ip
         instance.allowed_target_ip = allowed_target_ip
         instance.compose = compose
+        instance.image_tag = image_tag
         return instance
 
 
@@ -1673,6 +1676,7 @@ def container_smoke_test():
                 raw_target_ip=raw_target_ip,
                 allowed_target_ip=allowed_target_ip,
                 compose=compose,
+                image_tag=image_tag,
             )
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
@@ -1759,8 +1763,57 @@ def container_smoke_test_nuclei_templates(container_smoke_test) -> None:
     )
 
 
+def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_test, tmp_path):
+    # Run the installed tool with the same bypass-entrypoint shape documented
+    # for a deployment that cannot start. The development smoke service has an
+    # /app tmpfs, so use the production image without that source overlay.
+    compose_file = tmp_path / "validator-compose.yaml"
+    compose_file.write_text(yaml.safe_dump({"services": {"shell": {
+        "image": container_smoke_test.image_tag, "read_only": True,
+        "network_mode": "none", "user": "appuser",
+    }}}))
+    command = ["docker", "compose", "-p", "validator-" + uuid.uuid4().hex[:12], "-f", str(compose_file)] + [
+        "run", "--rm", "--no-deps", "--entrypoint", "python",
+    ]
+    tool = ["shell", "/app/tools/check_instance_config.py"]
+    broken = command + ["-e", "ACCESS_PROFILE=invalid-private-profile"] + tool
+    help_result = _run(broken + ["--help"], timeout=60)
+    assert "--local-yaml" in help_result.stdout
+    invalid = _run(broken + ["--json"], timeout=60, check=False)
+    assert invalid.returncode == 2
+    payload = json.loads(invalid.stdout)
+    assert payload["valid"] is False and payload["fields"] == ["access_profile"]
+    assert "invalid-private-profile" not in invalid.stdout + invalid.stderr
+    assert "Traceback" not in invalid.stderr
+    valid = _run(command + ["-e", "ACCESS_PROFILE=open"] + tool + ["--json"], timeout=60)
+    evaluated = json.loads(valid.stdout)
+    assert evaluated["valid"] is True and evaluated["schema_version"] == 1
+    assert evaluated["settings"]
+
+
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):
+    name = "trufflehog-smoke-" + uuid.uuid4().hex[:12]
+    try:
+        result = _run([
+            "docker", "run", "--rm", "--name", name,
+            "--network", "none", "--read-only", "--user", "scanner:appuser",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+            "--entrypoint", "sh", container_smoke_test.image_tag, "-c",
+            "set -eu; mkdir /tmp/trufflehog-fixture; "
+            "printf 'An ordinary file without credentials.\\n' > /tmp/trufflehog-fixture/readme.txt; "
+            "exec trufflehog --no-update --no-verification --json filesystem /tmp/trufflehog-fixture",
+        ], timeout=60)
+        assert not result.stdout.strip(), "the innocuous fixture must not produce secret findings"
+        events = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+        completed = [event for event in events if event.get("msg") == "finished scanning"]
+        assert completed, f"TruffleHog did not report scan completion: {result.stderr}"
+        assert completed[-1]["chunks"] >= 1
+    finally:
+        _run(["docker", "rm", "--force", name], timeout=30, check=False)
 
 
 def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):

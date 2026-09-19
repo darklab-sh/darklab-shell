@@ -1,0 +1,61 @@
+/* /static/css/admin-console.css */
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+body.admin-page .diag-main.admin-main { max-width: 1100px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 24px; }
+body.admin-page { height: auto; overflow-anchor: none; }
+body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex: none; }
+.admin-intro, .admin-setting { border: 1px solid var(--border); border-radius: var(--radius-card, 8px); padding: 18px; background: var(--panel); }
+.admin-intro { display: grid; gap: 18px; }
+.admin-intro-copy { display: grid; gap: 10px; }
+.admin-intro h2 { font-size: 16px; }
+.admin-intro p, .admin-intro h2, .admin-setting p, .admin-setting h4 { margin: 0; line-height: 1.6; }
+.admin-observation { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; }
+.admin-snapshot-actions { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }
+.admin-snapshot-actions #admin-status { flex: 1 1 260px; min-height: 3.2em; display: flex; align-items: center; }
+.admin-filter-bar { position: sticky; top: 0; z-index: 20; padding: 18px 0 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.admin-filters { display: grid; grid-template-columns: 2fr 1.4fr 1fr 1fr; gap: 14px; }
+.admin-filters label { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.admin-filters .app-select { width: 100%; }
+.admin-filters .form-control, .admin-filters .app-select-trigger { width: 100%; min-width: 0; height: 44px; font-size: 13px; padding: 10px 12px; border-radius: 6px; }
+.admin-filters :is(.form-control, .app-select-trigger):focus-visible { box-shadow: 0 0 0 3px var(--green-glow); }
+.admin-results-toolbar, .admin-results-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.admin-results-toolbar { justify-content: space-between; margin-top: 14px; }
+.admin-results-toolbar p { margin: 0; }
+.admin-main .btn { min-height: 44px; }
+.admin-category { margin-top: 16px; }
+.admin-group-title { margin: 0; font-size: 15px; }
+.admin-disclosure-trigger { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; white-space: normal; text-align: left; line-height: 1.5; }
+.admin-disclosure-indicator { flex: 0 0 12px; }
+.admin-category > .admin-group-title > .admin-disclosure-trigger { border: 1px solid var(--border); background: var(--panel); }
+.admin-disclosure-panel { display: grid; gap: 14px; padding: 12px 0 0; }
+.admin-disclosure-panel.u-hidden { display: none; }
+.admin-category > .admin-disclosure-panel { gap: 12px; }
+.admin-setting { display: grid; gap: 12px; overflow-wrap: anywhere; }
+.admin-setting h3 { font-size: 14px; margin: 0; }
+.admin-setting-key { font-size: 12px; color: var(--muted); }
+.admin-setting code, .admin-setting pre, .admin-scalar { font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-metadata { display: grid; gap: 8px; margin: 0; }
+.admin-metadata > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px 16px; }
+.admin-metadata dt { color: var(--muted); }
+.admin-metadata dd { min-width: 0; margin: 0; line-height: 1.6; }
+.admin-code { margin: 0; max-height: 240px; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-accepted { display: grid; gap: 8px; }
+.admin-accepted ul { margin: 0; padding-left: 24px; line-height: 1.6; }
+.admin-warning { color: var(--amber); }
+.admin-summary, .admin-withheld { color: var(--muted); font-style: italic; }
+.admin-page :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.admin-page :is(button, input, pre) { scroll-margin-block: 180px 24px; }
+@media (max-width: 760px), (max-height: 600px) {
+  .admin-filter-bar { position: static; }
+  .admin-page :is(button, input, pre) { scroll-margin-block: 24px; }
+}
+@media (max-width: 760px) {
+  body.admin-page .diag-main.admin-main { padding: 16px; }
+  .admin-filters { grid-template-columns: 1fr; }
+  .admin-filters .form-control, .admin-filters .app-select-trigger { font-size: 16px; }
+  .admin-setting, .admin-intro { padding: 14px; }
+  .admin-metadata > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+

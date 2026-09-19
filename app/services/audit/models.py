@@ -142,6 +142,10 @@ class AuditEventType(str, Enum):
     PRINCIPAL_CREATE = "principal.create"
     PRINCIPAL_DISABLE = "principal.disable"
     PRINCIPAL_ENABLE = "principal.enable"
+    INSTANCE_OPERATOR_GRANT = "instance_operator.grant"
+    INSTANCE_OPERATOR_REVOKE = "instance_operator.revoke"
+    INSTANCE_OPERATOR_VIEW = "instance_operator.view"
+    INSTANCE_OPERATOR_REAUTH = "instance_operator.reauthenticate"
     OIDC_IDENTITY_LINK = "oidc.identity_link"
     OIDC_IDENTITY_UNLINK = "oidc.identity_unlink"
     CREDENTIAL_CREATE = "credential.create"
@@ -342,6 +346,18 @@ def _spec(
 
 
 EVENT_SPECS: dict[str, EventSpec] = {
+    AuditEventType.INSTANCE_OPERATOR_VIEW.value: _spec(
+        AuditEventType.INSTANCE_OPERATOR_VIEW, AuditTargetType.PRINCIPAL, RecordingMode.BEST_EFFORT,
+    ),
+    AuditEventType.INSTANCE_OPERATOR_REAUTH.value: _spec(
+        AuditEventType.INSTANCE_OPERATOR_REAUTH, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.INSTANCE_OPERATOR_GRANT.value: _spec(
+        AuditEventType.INSTANCE_OPERATOR_GRANT, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED,
+    ),
+    AuditEventType.INSTANCE_OPERATOR_REVOKE.value: _spec(
+        AuditEventType.INSTANCE_OPERATOR_REVOKE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED,
+    ),
     AuditEventType.PRINCIPAL_CREATE.value: _spec(
         AuditEventType.PRINCIPAL_CREATE, AuditTargetType.PRINCIPAL, RecordingMode.FAIL_CLOSED
     ),

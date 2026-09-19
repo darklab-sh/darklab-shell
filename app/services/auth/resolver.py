@@ -70,6 +70,7 @@ class AuthenticatedContext:
     browser_session_id: str = ""
     browser_session_absolute_expires_at: str | None = None
     browser_session_authenticated_at: str | None = None
+    browser_session_provider_authenticated_at: str | None = None
     oidc_identity_id: str = ""
     selected_team_id: str = ""
     role: str = ""
@@ -417,6 +418,7 @@ def resolve_authentication(
                     browser_session_id=session.id,
                     browser_session_absolute_expires_at=session.absolute_expires_at,
                     browser_session_authenticated_at=session.authenticated_at,
+                    browser_session_provider_authenticated_at=session.provider_authenticated_at,
                     oidc_identity_id=session.oidc_identity_id,
                     capabilities=frozenset(PAT_SCOPES),
                 ),

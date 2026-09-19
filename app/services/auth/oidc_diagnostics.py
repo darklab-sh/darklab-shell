@@ -5,15 +5,15 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
-import logging
-import time
 from typing import Any
 
-from flask import has_request_context, request
 import requests
+from flask import has_request_context, request
 
 from .contracts import IdentityStorageError
 from .observability import _request_value, _warning
@@ -39,7 +39,7 @@ _REASONS = frozenset({
 
 
 def _purpose(value: Any) -> str:
-    return value if value in ("sign_in", "link", "unlink") else "unknown"
+    return value if value in ("sign_in", "link", "unlink", "admin_reauth") else "unknown"
 
 
 def provider_status(value: Any) -> int | None:

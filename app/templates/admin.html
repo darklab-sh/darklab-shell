@@ -1,0 +1,54 @@
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+{% extends "base.html" %}
+{% block page_title %}{{ app_name }} — operator settings{% endblock %}
+{% block page_stylesheets %}
+{% for name in ['terminal-export', 'diag', 'admin-console'] %}
+{% for href in asset_bundle(name) %}<link rel="stylesheet" href="{{ href }}">{% endfor %}
+{% endfor %}
+{% endblock %}
+{% block body_class %}permalink-page diag-page admin-page{% endblock %}
+{% block content %}
+{% from "operator_header.html" import operator_header %}
+{{ operator_header(app_name, 'admin', 'operator settings · read only') }}
+<main class="diag-main admin-main" id="admin-console">
+  <section class="admin-intro" aria-labelledby="admin-boundary">
+    <div class="admin-intro-copy">
+      <h2 id="admin-boundary">Serving web worker's loaded configuration</h2>
+      <p>A refresh samples the worker handling that request. It doesn't prove all web or background workers agree.</p>
+    </div>
+    <div id="admin-observation" class="admin-observation diag-muted"></div>
+    <div class="admin-snapshot-actions">
+      <button type="button" id="admin-refresh" class="btn btn-secondary">Refresh snapshot</button>
+      <p id="admin-status" role="status" aria-live="polite">Loading settings…</p>
+    </div>
+    <div id="admin-host-explanation">
+      <p>Files and deployment settings stay on the host. Container startup copies local files into a private snapshot; a web-worker reload cannot pick up later host edits. Restart the container to refresh staged files, and recreate affected containers when their environment changes.</p>
+      <p>Loaded values follow this order: built-in defaults, shipped config.yaml, local config.local.yaml, then supported environment overrides. The locations below describe the usual deployment layout, not paths observed on your host.</p>
+    </div>
+  </section>
+  <div class="admin-filter-bar">
+  <form class="admin-filters" role="search" aria-label="Filter settings">
+    <label class="form-field">Search settings<input class="form-control" type="search" id="admin-search" placeholder="Key, label, or description" autocomplete="off"></label>
+    <label class="form-field">Group<select class="form-select" id="admin-group" aria-label="Group"><option value="">All groups</option></select></label>
+    <label class="form-field">Source<select class="form-select" id="admin-source" aria-label="Source"><option value="">All sources</option><option value="default">Built-in default</option><option value="shipped">Shipped YAML</option><option value="local">Local YAML</option><option value="environment">Environment</option><option value="host">Host · not observed</option></select></label>
+    <label class="form-field">Warnings<select class="form-select" id="admin-warnings" aria-label="Warnings"><option value="">All settings</option><option value="yes">With warnings</option></select></label>
+  </form>
+  <div class="admin-results-toolbar">
+    <p id="admin-count" role="status" aria-live="polite"></p>
+    <div class="admin-results-actions">
+      <button type="button" id="admin-clear" class="btn btn-ghost">Clear filters</button>
+      <button type="button" id="admin-expand" class="btn btn-ghost">Expand all</button>
+      <button type="button" id="admin-collapse" class="btn btn-ghost">Collapse all</button>
+    </div>
+  </div>
+  </div>
+  <div id="admin-load-warnings"></div>
+  <div id="admin-results"></div>
+  <p class="diag-muted">Refreshing after access expires clears this view and returns you to sign-in or verification. Information already delivered to a browser cannot be recalled from an idle tab.</p>
+  <noscript>Enable JavaScript to load and filter the settings inventory.</noscript>
+</main>
+{% endblock %}
+{% block body_scripts %}
+{% for src in asset_bundle('admin') %}<script type="{{ asset_bundle_script_type('admin') }}" src="{{ src }}"></script>{% endfor %}
+{% endblock %}

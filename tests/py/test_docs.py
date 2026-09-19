@@ -35,7 +35,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "cd50c32e122f683d3f98061c2bf02cfaa65d0bd9300151a34e7227228dacbdac"
+_LOG_EVENT_INVENTORY_HASH = "4e2b18a346888381107edf59ca05861bd20fb786a0b9da3c2e6fcceabcdf51f7"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
@@ -160,28 +160,10 @@ def _append_unique(values: list[str], value: str) -> None:
 
 
 def _config_default_keys() -> list[str]:
-    """Return app/config.py load_config() default keys in source order."""
-    tree = ast.parse(_CONFIG_PY.read_text())
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != "load_config":
-            continue
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Assign):
-                continue
-            if not any(isinstance(target, ast.Name) and target.id == "defaults"
-                       for target in child.targets):
-                continue
-            if not isinstance(child.value, ast.Dict):
-                continue
-            keys: list[str] = []
-            for key_node in child.value.keys:
-                if key_node is None:
-                    continue
-                key = ast.literal_eval(key_node)
-                if isinstance(key, str):
-                    keys.append(key)
-            return keys
-    raise AssertionError("Could not find load_config() defaults dict in app/config.py")
+    """Read the import-safe builder's default inventory in source order."""
+    from config_builder import config_defaults
+
+    return list(config_defaults())
 
 
 def _operator_yaml_default_keys() -> list[str]:
@@ -887,7 +869,7 @@ class TestLoggingReference:
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 393
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 397
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

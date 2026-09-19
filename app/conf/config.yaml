@@ -18,6 +18,10 @@
 # uppercase environment variables in .env so Compose, container startup,
 # lifecycle tools, and the app all receive the same values. See CONFIGURATION.md.
 
+# Verified authentication age for the operator console; 5–60 minutes.
+# Activity never refreshes this deadline; browser idle/absolute limits still apply.
+# admin_console_reauth_minutes: 30
+
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages.
