@@ -400,3 +400,5 @@ Files drag-and-drop feedback does not introduce its own theme keys. The dragged 
 - [ARCHITECTURE.md](ARCHITECTURE.md#theme-system) - runtime theme boundaries
 - [FEATURES.md](FEATURES.md) - user-facing theme behavior
 - [CONTRIBUTING.md](CONTRIBUTING.md) - contributor workflow
+
+The read-only operator settings page reuses the diagnostics header, shared form/button controls, and semantic theme tokens. Its own content flow keeps the introduction and filters full width on desktop and stacks controls on mobile; it does not inherit the diagnostics card grid.

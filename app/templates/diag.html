@@ -679,7 +679,7 @@
             {% if key in data.config %}
             <tr>
               <td>{{ key }}</td>
-              <td>{{ diag_config_value(data.config[key]) }}</td>
+              <td>{{ diag_config_value(data.config[key]) }}{% if key in data.config_truncated %} <span class="diag-muted">(truncated)</span>{% endif %}</td>
             </tr>
             {% endif %}
           {% endfor %}

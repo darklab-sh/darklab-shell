@@ -682,6 +682,13 @@
             <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          {% if operator_console_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="admin">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">Operator settings</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% endif %}
           <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
             <span class="menu-item-icon" aria-hidden="true">⊕</span>
             <span class="menu-item-label">diag</span>
@@ -762,6 +769,9 @@
         <button class="rail-nav-item nav-item rail-more-item" data-action="faq" type="button" role="menuitem" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
         <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
         <button class="rail-nav-item nav-item rail-more-item" data-action="theme" type="button" role="menuitem" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+        {% if operator_console_enabled %}
+        <a class="rail-nav-item nav-item rail-more-item" data-action="admin" href="/admin/" role="menuitem" title="Operator settings"><span class="rail-nav-glyph">⚙</span><span class="rail-nav-label">Operator settings</span></a>
+        {% endif %}
         <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       </div>
       <a class="rail-nav-version" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>

@@ -932,7 +932,7 @@ let importedProjectWorkspaceShell;
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
     const action = item.dataset.action;
-    if (action === 'diag') {
+    if (action === 'diag' || action === 'admin') {
       closeRailMoreMenu();
       return; // native <a> navigation
     }

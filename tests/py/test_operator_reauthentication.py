@@ -289,3 +289,34 @@ def test_logout_committed_during_rotation_cannot_be_undone(operator_db, monkeypa
             future.result(timeout=10)
     with get_db_connect()() as conn:
         assert conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()["count"] == 1
+
+
+def test_provider_flow_upgrade_preserves_pending_sign_in_and_link(operator_db):
+    from core.database_backend import DatabaseBackend
+    from core.migrations.runner import apply_migration
+    from core.migrations.v0084_oidc_identities import MIGRATION as old
+    from core.migrations.v0087_operator_reauthentication import MIGRATION as upgrade
+
+    bundle = create_identity()
+    backend = DatabaseBackend(operator_db.backend)
+    now = timestamp(datetime.now(timezone.utc))
+    with get_db_connect()() as conn:
+        conn.execute("DROP TABLE oidc_auth_flows")
+        for statement in old.statements_for(backend):
+            if "CREATE TABLE oidc_auth_flows" in statement or "CREATE INDEX idx_oidc_auth_flows_expiry" in statement:
+                conn.execute(statement)
+        for purpose in ("sign_in", "link"):
+            conn.execute(
+                "INSERT INTO oidc_auth_flows "
+                "(state_digest, nonce, code_verifier, purpose, principal_id, browser_session_id, "
+                "next_path, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (purpose.encode(), "nonce", "verifier", purpose, bundle.principal.id if purpose == "link" else None,
+                 "browser_source" if purpose == "link" else None, "/admin/", now, now),
+            )
+        before = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
+        conn.execute("DELETE FROM schema_migrations WHERE version = ?", ("0087",))
+        conn.commit()
+        apply_migration(conn, upgrade, backend=backend)
+        after = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
+        assert before == after

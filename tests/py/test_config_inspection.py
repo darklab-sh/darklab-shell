@@ -119,3 +119,34 @@ def test_validator_candidate_strict_and_json_contract(tmp_path):
     assert "SECRET_NEVER_DISPLAY" not in result.stdout
     assert run_validator(tmp_path, "--local-yaml", str(candidate), "--strict").returncode == 1
     assert run_validator(tmp_path, "--local-yaml", str(tmp_path / "missing")).returncode == 2
+
+
+def test_two_real_worker_snapshots_ignore_later_file_and_environment_changes(tmp_path):
+    code = '''
+import json, os
+from pathlib import Path
+from config import get_loaded_config_snapshot
+before = get_loaded_config_snapshot()
+Path(os.environ["APP_LOCAL_CONF_DIR"], "config.local.yaml").write_text("app_name: changed-after-load\\n")
+os.environ["APP_NAME"] = "changed-environment"
+after = get_loaded_config_snapshot()
+assert before == after
+print(json.dumps({"pid": after["process_id"], "name": after["values"]["app_name"], "loaded": after["loaded_at"]}))
+'''
+    processes = []
+    for name in ("First worker", "Second worker"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "config.local.yaml").write_text("app_name: " + name + "\n")
+        environment = {**os.environ, "APP_CONF_DIR": str(folder), "APP_LOCAL_CONF_DIR": str(folder),
+                       "PYTHONPATH": str(ROOT / "app")}
+        environment.pop("APP_NAME", None)
+        processes.append(subprocess.Popen([sys.executable, "-c", code], env=environment, cwd=ROOT,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+    snapshots = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=20)
+        assert process.returncode == 0, stderr
+        snapshots.append(json.loads(stdout))
+    assert snapshots[0]["pid"] != snapshots[1]["pid"]
+    assert [snapshot["name"] for snapshot in snapshots] == ["First worker", "Second worker"]

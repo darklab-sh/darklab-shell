@@ -36,6 +36,10 @@ MIGRATION = Migration(
         _TABLE.replace("state_digest BLOB", "state_digest BYTEA")
         .replace("created_at TEXT", "created_at TIMESTAMPTZ")
         .replace("expires_at TEXT", "expires_at TIMESTAMPTZ"),
-        *_FINISH,
+        # Build the index before copying rows: deferred FK trigger events on
+        # populated upgrades otherwise prevent CREATE INDEX in PostgreSQL.
+        "CREATE INDEX idx_oidc_auth_flows_operator_expiry ON oidc_auth_flows_operator_new (expires_at)",
+        *_FINISH[:3],
+        "ALTER INDEX idx_oidc_auth_flows_operator_expiry RENAME TO idx_oidc_auth_flows_expiry",
     ),
 )

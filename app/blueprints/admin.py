@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from config import get_theme_entry
 from core.helpers import current_theme_name, get_authentication_result
-from flask import Blueprint, current_app, g, redirect, render_template, request
+from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request
 from services.audit.context import request_audit_fields
 from services.auth import lifecycle, oidc, operator_access, operator_reauth
 from services.auth.access_profile import active_config, safe_next_path
@@ -115,3 +115,16 @@ def complete_provider_reauthentication(flow, proof):
     _set_browser_session_cookies(response, issued)
     _clear_oidc_state_cookie(response)
     return response
+
+
+@admin_bp.get("/")
+def index():
+    theme = get_theme_entry(current_theme_name(), fallback=str(active_config()["default_theme"]))
+    return render_template("admin.html", app_name=active_config()["app_name"],
+                           current_theme=theme, current_theme_css=theme["vars"])
+
+
+@admin_bp.get("/settings")
+def settings():
+    from services.operator_console import loaded_settings
+    return jsonify(loaded_settings(g.operator_context, request_audit_fields(request)))

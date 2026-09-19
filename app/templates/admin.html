@@ -1,0 +1,48 @@
+<!-- SPDX-FileCopyrightText: 2026 mmayhew -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+{% extends "base.html" %}
+{% block page_title %}{{ app_name }} — operator settings{% endblock %}
+{% block page_stylesheets %}
+{% for name in ['terminal-export', 'diag', 'admin-console'] %}
+{% for href in asset_bundle(name) %}<link rel="stylesheet" href="{{ href }}">{% endfor %}
+{% endfor %}
+{% endblock %}
+{% block body_class %}permalink-page diag-page admin-page{% endblock %}
+{% block content %}
+<div class="diag-topbar">
+  <header class="export-header diag-header">
+    <div class="export-header-copy diag-header-copy">
+      <h1 class="diag-header-title">Operator settings</h1>
+      <span class="diag-header-meta">{{ app_name }} · read only</span>
+    </div>
+    <div class="diag-header-actions">
+      <a href="/diag" class="btn btn-secondary btn-compact">Diagnostics</a>
+      <a href="/" class="btn btn-secondary btn-compact">Back to shell</a>
+    </div>
+  </header>
+</div>
+<main class="diag-main admin-main" id="admin-console">
+  <section class="admin-intro" aria-labelledby="admin-boundary">
+    <h2 id="admin-boundary">Serving web worker's loaded configuration</h2>
+    <p>A refresh samples the worker handling that request. It doesn't prove all web or background workers agree.</p>
+    <p>Files and deployment settings stay on the host. Container startup copies local files into a private snapshot; a web-worker reload cannot pick up later host edits.</p>
+    <p id="admin-observation" class="diag-muted"></p>
+    <button type="button" id="admin-refresh" class="btn btn-secondary">Refresh snapshot</button>
+    <p id="admin-status" role="status" aria-live="polite">Loading settings…</p>
+  </section>
+  <form class="admin-filters" role="search" aria-label="Filter settings">
+    <label class="form-field">Search settings<input class="form-input" type="search" id="admin-search" placeholder="Key, label, or description" autocomplete="off"></label>
+    <label class="form-field">Group<select class="form-select" id="admin-group"><option value="">All groups</option></select></label>
+    <label class="form-field">Source<select class="form-select" id="admin-source"><option value="">All sources</option><option value="default">Built-in default</option><option value="shipped">Shipped YAML</option><option value="local">Local YAML</option><option value="environment">Environment</option><option value="host">Host · not observed</option></select></label>
+    <label class="form-field">Warnings<select class="form-select" id="admin-warnings"><option value="">All settings</option><option value="yes">With warnings</option></select></label>
+  </form>
+  <p id="admin-count" role="status" aria-live="polite"></p>
+  <div id="admin-load-warnings"></div>
+  <div id="admin-results"></div>
+  <p class="diag-muted">Refreshing after access expires clears this view and returns you to sign-in or verification. Information already delivered to a browser cannot be recalled from an idle tab.</p>
+  <noscript>Enable JavaScript to load and filter the settings inventory.</noscript>
+</main>
+{% endblock %}
+{% block body_scripts %}
+{% for src in asset_bundle('admin') %}<script type="{{ asset_bundle_script_type('admin') }}" src="{{ src }}"></script>{% endfor %}
+{% endblock %}

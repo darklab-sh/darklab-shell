@@ -180,3 +180,16 @@ def catalog_errors():
         if entry.get("environment") != [name for name, field in ENVIRONMENT_KEYS.items() if field == key]:
             errors.append(f"environment:{key}")
     return errors
+
+
+def diagnostic_values(values, config):
+    """Keep diagnostics' existing key set and scalar/list shape, using shared policy."""
+    formatted = {}
+    truncated = []
+    for key, value in values.items():
+        source = DERIVED_SUMMARIES.get(key, (key, ""))[0]
+        disclosed = safe_value(source, config.get(source) if key in DERIVED_SUMMARIES else value)
+        formatted[key] = disclosed["value"]
+        if disclosed["truncated"]:
+            truncated.append(key)
+    return formatted, truncated

@@ -15,6 +15,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Operators can inspect loaded settings from a read-only desktop and mobile console.** Explicitly granted browser sessions can search reviewed values, source layers, warnings, and host apply guidance. Sensitive settings show approved summaries or withheld markers, snapshots identify the serving worker, and refresh clears stale information after access loss. Existing diagnostics retain their permitted field exposure.
+
 - **Operator verification preserves session limits.** Credential and provider step-up verify the same account, recheck current access, and rotate live browser sessions without extending their original absolute deadline. Console requests enforce the network boundary before identity lookup and keep responses private.
 
 - **Instance inspection grants are explicit and auditable.** Local operators can grant, inspect, and revoke principal-bound access independently of Team roles. Grants persist through both database backends, backups, and database migration; repeated operations are predictable and disabled principals cannot receive access.

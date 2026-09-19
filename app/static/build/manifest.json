@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.438785914df9.js",
-      "hash": "8ad9bea4bc4b90e5be64a79e0d35772f89b383805e570de0c697ff5a948aa2d4",
+      "path": "/static/build/shell-bootstrap.4dab796b96ec.js",
+      "hash": "77b3ccb1a344657c7fecf84e4c79457f1602b47ca0090f61ad53ae31567c2896",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -213,7 +213,7 @@
         "/static/js/features/history/history_rows.js": "de4cb4f30b1f08a77a0bab9982aacab7936df142945191291852a8075a4289c2",
         "/static/js/features/history/history_run_modal_state_bridge.js": "e1caf887ace97ebca74619e1ee21b145a31370250518d767885e37b4144dd063",
         "/static/js/features/history/history_search.js": "62ab11c6383da3848cef26152c69ac0c0ebdbeb4699427148b84fa400f7572de",
-        "/static/js/features/mobile/mobile_menu_actions.js": "56af589f1d6fdc62bf32c911310acd0776c77cf2b371e0a971ced881137fe657",
+        "/static/js/features/mobile/mobile_menu_actions.js": "8e634123491151090cf586f929f6d76b077c966332484864bbdfeb618c580f5f",
         "/static/js/features/mobile/mobile_shell_layout.js": "94e84b4c86f45a2a69ad5313f63df900d94d786e9b62690cd02ebe2288d40fc4",
         "/static/js/features/mobile/mobile_shell_layout_bridge.js": "2dc56cc7210e3e5b13deb8d4c4cdeef495fab7a9602bb82d8c9a5e46ee3fc08e",
         "/static/js/features/preferences/browser_logout.js": "af0003d725f4a0953ff54e5829ed0661aec0970e7676f01e2cd2aa20c54d04bb",
@@ -262,7 +262,7 @@
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "47b220da6ea5b7267811a5ca2dc102677197f2ce554d3f1f8cf98f1bb47c3ac4",
         "/static/js/shell_bootstrap.entry.js": "fbe928bcd8f4ba33b4c764e650a27de0394727fe84624e50cfd8982119f44be2",
-        "/static/js/shell_chrome.js": "dbd84dc82faabf84017fb7745244bda84ae994f94d587b77c2a35a5a2644fdf7",
+        "/static/js/shell_chrome.js": "b01b23fbb6fc321b941624583a95fc9dbf3053072a943d30e45511621490c2af",
         "/static/js/tabs.js": "e6e9ad4feefb6b7054323ba99fff9f7b8c3783022f72445f35e69648b12d9b5c",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
         "/static/js/ui/cleanup_reasons.js": "51a7d0c8cd780bc72234b7d4bf0b0ad69f1cf9bdd143a157fa0cccd719d54d4c",
@@ -333,6 +333,65 @@
       },
       "entries": [
         "/static/js/permalink.entry.js"
+      ]
+    },
+    "admin-console": {
+      "type": "css",
+      "path": "/static/build/admin-console.77a7bb22a499.css",
+      "hash": "77a7bb22a499d0ba268ea7c4f3cb9b8c0e325d66b53a7327093f8a831c3a9d59",
+      "sources": [
+        "/static/css/admin-console.css"
+      ],
+      "source_hashes": {
+        "/static/css/admin-console.css": "6c9d42d78f47d8771a2e77bfe6935df18d8abcbd1c3193e4b859d0a164a74d0c"
+      }
+    },
+    "admin": {
+      "type": "esm",
+      "path": "/static/build/admin.c53b77791fd2.js",
+      "hash": "c53b77791fd2f00add5ffc6af604e3e11189cf8496715c90cda8c67ddd1a4a36",
+      "sources": [
+        "/static/js/admin.entry.js",
+        "/static/js/core/dom.js",
+        "/static/js/core/state.js",
+        "/static/js/features/admin/operator_console.js",
+        "/static/js/features/history/history_panel_bridge.js",
+        "/static/js/features/history/history_recall_bridge.js",
+        "/static/js/features/mobile/mobile_shell_layout.js",
+        "/static/js/features/mobile/mobile_shell_layout_bridge.js",
+        "/static/js/features/terminal/composer_prompt_bridge.js",
+        "/static/js/runner_bridge.js",
+        "/static/js/ui/mobile_sheet.js",
+        "/static/js/ui/ui_action_sheet.js",
+        "/static/js/ui/ui_confirm.js",
+        "/static/js/ui/ui_dismissible.js",
+        "/static/js/ui/ui_focus_trap.js",
+        "/static/js/ui/ui_helpers.js",
+        "/static/js/ui/ui_pressable.js",
+        "/static/js/welcome_bridge.js"
+      ],
+      "source_hashes": {
+        "/static/js/admin.entry.js": "fa6f0985a9d7c371e75873ba0a24df3d780d082d437a06498ff78830cb10f497",
+        "/static/js/core/dom.js": "f1680f5e57c4e91a01cc904c6508c4144fcb25c3f801fdf7597b87947c63f210",
+        "/static/js/core/state.js": "07016305ab506b6fd4737a6b95a9c71a757beada67c6e1c82a63ab5a2ff8510c",
+        "/static/js/features/admin/operator_console.js": "bf26f0ddf15774104ce9ab22926290f4f788ad0d9b728b7a5df9413b41d060cb",
+        "/static/js/features/history/history_panel_bridge.js": "f305ed2892bb453e299b6550d9c15aa84ac67a706a86b935a5f4f318c94bed9a",
+        "/static/js/features/history/history_recall_bridge.js": "f3c38fcd523eba11a3ee390cf0373317030c3c966272ff704c065081f1f86905",
+        "/static/js/features/mobile/mobile_shell_layout.js": "94e84b4c86f45a2a69ad5313f63df900d94d786e9b62690cd02ebe2288d40fc4",
+        "/static/js/features/mobile/mobile_shell_layout_bridge.js": "2dc56cc7210e3e5b13deb8d4c4cdeef495fab7a9602bb82d8c9a5e46ee3fc08e",
+        "/static/js/features/terminal/composer_prompt_bridge.js": "489ef73a2cda4da73bdb4f55ae5e483afbd3deba390de87e39a5a4531128b4e8",
+        "/static/js/runner_bridge.js": "53dbc6cdeda09bc867c3d4b5e88ddd59533889d955ae59fc0566cc07d11ffc5f",
+        "/static/js/ui/mobile_sheet.js": "4d09b0e347bba8ecca3afb252bcf99bde815c0d52c1a176ee6adb62a124f46f3",
+        "/static/js/ui/ui_action_sheet.js": "4a3d8c2449fa4e44ea6b607e557add19da9b3a3cc03ef3c242673893c715e778",
+        "/static/js/ui/ui_confirm.js": "bf62a3e6a8c9ab446e76139b0af894ec2693a0e989f258d3fbd8fe34960bbf9e",
+        "/static/js/ui/ui_dismissible.js": "577358846ca3705ec0b1b6b36e3952e95f678bab271bb082f3c2a7ddb85ad409",
+        "/static/js/ui/ui_focus_trap.js": "54a0241accdc28cc0856100f0226c6423637d54051508bfeeb32161290487f57",
+        "/static/js/ui/ui_helpers.js": "5536f91db443ac33f7c4466e9f0cf9198e279e2ce1b4c6041e6b4959a69f1e76",
+        "/static/js/ui/ui_pressable.js": "43e66fb39270b6777eb049e6316427d8b3acfd7a6802d80b431c930c9216c661",
+        "/static/js/welcome_bridge.js": "4fb141951e9a5eb90dcb55f1ce32b416ff37d8f8c48394b2d9d0ef98f4c2fcfe"
+      },
+      "entries": [
+        "/static/js/admin.entry.js"
       ]
     }
   },

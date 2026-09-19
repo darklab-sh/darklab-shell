@@ -1,0 +1,31 @@
+/* SPDX-FileCopyrightText: 2026 mmayhew */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+body.admin-page .diag-main.admin-main { display: block; max-width: 1100px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+.admin-intro, .admin-setting { border: 1px solid var(--border); border-radius: var(--radius-card, 8px); padding: 18px; background: var(--panel); }
+.admin-intro h2 { font-size: 16px; color: var(--green); }
+.admin-intro p { line-height: 1.6; }
+.admin-filters { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 14px; margin-top: 20px; }
+.admin-filters label { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.admin-filters input, .admin-filters select { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; }
+.admin-group-title { margin-top: 28px; font-size: 16px; color: var(--green); }
+.admin-setting { margin: 12px 0; overflow-wrap: anywhere; }
+.admin-setting h3 { font-size: 14px; margin: 0 0 8px; }
+.admin-setting p { line-height: 1.6; }
+.admin-setting code, .admin-setting pre { font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-value { margin: 12px 0; max-height: 160px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 4px; }
+.admin-setting details { margin-top: 12px; }
+.admin-setting summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--green); }
+.admin-warning { color: var(--amber); }
+.admin-summary, .admin-withheld { color: var(--muted); }
+.admin-page :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+@media (max-width: 760px) {
+  .admin-filters { grid-template-columns: 1fr; }
+  .admin-filters .app-select { width: 100%; }
+  .admin-filters .app-select-trigger, .admin-page #admin-refresh { min-height: 44px; }
+  .admin-filters input, .admin-filters select { font-size: 16px; }
+  .admin-setting, .admin-intro { padding: 14px; }
+  .admin-page .diag-header { flex-wrap: wrap; }
+  .admin-page .diag-header-actions { flex-wrap: wrap; }
+  .admin-page .diag-header-actions a { min-height: 44px; }
+}

@@ -11,7 +11,7 @@ from flask import current_app, g, jsonify, redirect, request
 
 from .access_profile import active_config, active_profile, safe_next_path
 from .operator_grants import has_grant
-from .resolver import AuthenticatedContext
+from .resolver import AuthenticatedContext, AuthenticationState
 
 log = logging.getLogger("shell")
 
@@ -93,7 +93,10 @@ def enforce_operator_access():
         # session. Strict browser-session cookies need not survive that return.
         return None
     from core.helpers import get_authentication_result
-    context = get_authentication_result().context
+    authentication = get_authentication_result()
+    if authentication.state in {AuthenticationState.DISABLED_PRINCIPAL, AuthenticationState.REVOKED_CREDENTIAL}:
+        return hidden_response("ineligible")
+    context = authentication.context
     if not isinstance(context, AuthenticatedContext) or context.authentication_method != "browser_cookie":
         return require_authentication()
     if not browser_eligible(context):

@@ -77,6 +77,7 @@ default_args=(
   --rootdir=.
   tests/py/test_postgres_backend.py
   tests/py/test_operator_grants.py
+  tests/py/test_operator_console.py
   tests/py/test_operator_reauthentication.py
   tests/py/test_backend_modules.py::TestDatabaseBackend
   tests/py/test_backend_modules.py::TestPostgresMigrations

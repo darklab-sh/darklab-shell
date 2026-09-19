@@ -148,6 +148,8 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
+Authorized operators can use the read-only [Operator settings console](CONFIGURATION.md#operator-settings-console) to search loaded settings, see their sources and warnings, and find host configuration guidance. A local checker also validates proposed YAML when the application cannot start. Sensitive values remain withheld or summarized.
+
 Released images keep shipped defaults under `/app/conf`; production installations keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for settings, precedence, supported runtimes, deployment choices, Files storage, raw scanning, database selection, and production tuning. Back up the current data before a database migration, then follow [Postgres Migration](docs/postgres-migration.md) for SQLite-to-Postgres moves or Postgres major-version upgrades. Theme authors can use [THEME.md](THEME.md).
