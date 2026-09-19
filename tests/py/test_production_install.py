@@ -2136,6 +2136,103 @@ def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
     assert expected_error in result.stderr
 
 
+def test_trufflehog_build_patches_and_verifies_the_bundled_amqp_dependency():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG TRUFFLEHOG_VERSION=v3.97.0" in dockerfile
+    assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0" in dockerfile
+    build = dockerfile.split('RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}"', 1)[1]
+    build = build.split("\nRUN ", 1)[0]
+    select_dependency = (
+        'go -C /tmp/trufflehog get "github.com/rabbitmq/amqp091-go@${TRUFFLEHOG_AMQP_VERSION}"'
+    )
+    compile_tool = "go -C /tmp/trufflehog install"
+    verify_binary = "sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog"
+    assert build.index(select_dependency) < build.index(compile_tool) < build.index(verify_binary)
+    assert 'github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}"' in build
+    assert "amqp091-go@${TRUFFLEHOG_AMQP_VERSION}/LICENSE" in build
+    assert "/licenses/go-modules/amqp091-go.txt" in build
+    assert "COPY scripts/container/verify_go_dependency.sh /usr/local/bin/verify-go-dependency" in dockerfile
+    assert "!scripts/container/verify_go_dependency.sh" in (ROOT / ".dockerignore").read_text()
+    # Changing only this dependency must not invalidate unrelated Go tool builds.
+    assert dockerfile.index("go -C /tmp/gosu build") < dockerfile.index(
+        "\nARG TRUFFLEHOG_AMQP_VERSION\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("dependency_info", "go_status", "accepted"),
+    [
+        ("dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n", 0, True),
+        ("dep github.com/rabbitmq/amqp091-go v1.10.0 h1:test\n", 0, False),
+        ("", 0, False),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0\n"
+            "=> github.com/rabbitmq/amqp091-go v1.10.0 h1:test\n",
+            0,
+            False,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0\n"
+            "=> /tmp/local-amqp (devel)\n",
+            0,
+            False,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n"
+            "dep example.test/other v1.0.0\n=> /tmp/local-other (devel)\n",
+            0,
+            True,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n"
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n",
+            0,
+            False,
+        ),
+        ("dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n", 1, False),
+    ],
+    ids=["patched", "vulnerable", "missing", "replaced-version", "replaced-path",
+         "unrelated-replacement", "duplicate", "unreadable-binary"],
+)
+def test_go_dependency_guard_checks_the_executable(
+    tmp_path: Path, dependency_info: str, go_status: int, accepted: bool,
+):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_go = fake_bin / "go"
+    fake_go.write_text(
+        '#!/bin/sh\nset -eu\n'
+        'test "$*" = "version -m /out/usr/local/bin/trufflehog"\n'
+        'cat "$GO_TEST_BUILD_INFO"\nexit "$GO_TEST_STATUS"\n',
+        encoding="utf-8",
+    )
+    fake_go.chmod(0o755)
+    metadata = tmp_path / "build-info"
+    metadata.write_text(
+        "/out/usr/local/bin/trufflehog: go1.27.0\n"
+        "path github.com/trufflesecurity/trufflehog/v3\n"
+        "mod github.com/trufflesecurity/trufflehog/v3 (devel)\n"
+        + dependency_info + "build -buildmode=exe\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "sh", str(ROOT / "scripts" / "container" / "verify_go_dependency.sh"),
+            "/out/usr/local/bin/trufflehog", "github.com/rabbitmq/amqp091-go", "v1.13.0",
+        ],
+        env={
+            **os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "GO_TEST_BUILD_INFO": str(metadata), "GO_TEST_STATUS": str(go_status),
+        },
+        capture_output=True, text=True, check=False,
+    )
+    assert (result.returncode == 0) is accepted, result.stderr
+    if accepted:
+        assert "module=github.com/rabbitmq/amqp091-go version=v1.13.0" in result.stdout
+    elif go_status == 0:
+        assert "Go binary dependency mismatch" in result.stderr
+
+
 def test_container_license_inventory_matches_dockerfile_and_release():
     result = subprocess.run(
         [sys.executable, "scripts/release/check_container_licenses.py"],
