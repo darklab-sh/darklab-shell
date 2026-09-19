@@ -15,6 +15,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Configuration evaluation is available without starting the application.** The import-safe builder shares startup normalization and validation, isolates each evaluation's warnings, and exposes a captured startup snapshot without re-reading files or environment.
+
 - **Configuration regression checks pin the existing loading contract.** A table-driven corpus covers effective values, nested provenance, environment precedence, warnings, derived defaults, and invalid-input outcomes.
 
 ### Fixed

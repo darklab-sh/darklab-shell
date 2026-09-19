@@ -3,12 +3,18 @@
 
 """Independent characterization of the configuration loader before extraction."""
 
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
 import yaml
 
 import config
+from config_builder import build_config
 
 
 CASES = [
@@ -44,6 +50,11 @@ def test_loader_characterization(tmp_path, shipped, local, env, expected, warnin
     (tmp_path / "config.local.yaml").write_text(yaml.safe_dump(local))
     with patch.dict("os.environ", env, clear=True):
         loaded = config.load_config(tmp_path)
+    built = build_config([(str(tmp_path / "config.yaml"), shipped),
+                          (str(tmp_path / "config.local.yaml"), local)], env)
+    assert built.config.model_dump() == loaded.model_dump()
+    assert built.provenance == loaded._provenance
+    assert list(built.warnings) == config.CONFIG_LOAD_WARNINGS
     for key, value in expected.items():
         assert value_at(loaded.model_dump(), key) == value
     assert sorted((item["key"], item.get("reason", "")) for item in config.CONFIG_LOAD_WARNINGS) == sorted(warnings)
@@ -79,3 +90,45 @@ def test_loader_invalid_characterization(tmp_path, overlay, message):
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(overlay))
     with patch.dict("os.environ", {}, clear=True), pytest.raises(config.ConfigLoadError, match=message):
         config.load_config(tmp_path)
+
+
+def test_import_and_build_are_independent_of_invalid_startup_and_runtime(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("access_profile: broken\n")
+    env = {**os.environ, "APP_CONF_DIR": str(tmp_path), "APP_LOCAL_CONF_DIR": str(tmp_path)}
+    script = """
+import json, logging, sys
+from config_builder import build_config
+assert 'config' not in sys.modules
+assert 'core.database' not in sys.modules
+assert not any(name.startswith('services.') for name in sys.modules)
+assert not logging.getLogger('shell').handlers
+result = build_config([('local', {'app_name': 'independent'})], {})
+print(json.dumps({'name': result.config.app_name, 'warnings': result.warnings}))
+"""
+    result = subprocess.run([sys.executable, "-c", script], env=env, cwd=Path(config.__file__).parent,
+                            capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == {"name": "independent", "warnings": []}
+    assert result.stderr == ""
+    invalid = subprocess.run([sys.executable, "-c", "import config"], env=env,
+                             cwd=Path(config.__file__).parent, capture_output=True, text=True)
+    assert invalid.returncode != 0
+    assert "ConfigLoadError" in invalid.stderr
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_builds_do_not_share_warnings_or_mutate_inputs():
+    overlay = {"database_pool_min": -10}
+    first = build_config([("local", overlay)], {})
+    second = build_config([], {})
+    assert first.warnings and not second.warnings
+    assert overlay == {"database_pool_min": -10}
+
+
+def test_loaded_snapshot_is_detached_from_runtime_mutation_and_later_files():
+    original = config.get_loaded_config_snapshot()
+    altered = config.get_loaded_config_snapshot()
+    altered["values"]["app_name"] = "not-the-loaded-value"
+    assert config.get_loaded_config_snapshot() == original
+    assert original["process_id"] == os.getpid()
+    assert original["loaded_at"]
