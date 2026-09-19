@@ -31,6 +31,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Operator settings stay easy to browse as the inventory grows.** Group, source, and warning filters respond immediately, including styled dropdown and keyboard selection after refresh. Expandable groups show match counts, Clear filters restores the earlier browsing view, and refresh preserves expanded details, focus, and scroll. Compact cards separate loaded sources from host configuration locations and explain accepted values in plain language; desktop filters stay within reach and mobile controls remain touch-safe. Failed or expired refreshes still clear the inventory.
+
 - **Operator-console helpers have explicit configuration and authentication types.** Configuration failures declare their diagnostic fields, retention accepts the shared configuration mapping, and provider verification checks that proof is present. PostgreSQL fixtures use typed row connections and quoted schema identifiers; authentication tests assert that sessions, rows, and response payloads exist before reading them.
 
 - **The bundled TruffleHog uses a patched AMQP dependency.** Its pinned source release is built with `amqp091-go` v1.13.0 to address AMQP parser and TLS vulnerabilities. The image build verifies the dependency embedded in the executable and includes its license notice.

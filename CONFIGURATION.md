@@ -324,7 +324,9 @@ Public share permalinks are disabled by default in every restricted profile: sna
 
 ## Operator Settings Console
 
-Explicitly granted operators can open **Operator settings** from the desktop more menu or mobile menu, or go directly to `/admin/`. Search by setting name or description, filter by group, source, or warnings, and expand permitted values and host configuration guidance. This page is read only: it has no edit, reveal, save, or restart controls.
+Explicitly granted operators can open **Operator settings** from the desktop more menu or mobile menu, or go directly to `/admin/`. Search by setting name or description and combine the group, source, and warning filters. Groups start collapsed with setting counts; filtering opens matching groups, and clearing filters restores your earlier expanded groups. Expand all and Collapse all control the visible groups. Refresh preserves expanded guidance, permitted long values, focus, and scroll where the setting remains available. This page is read only: it has no edit, reveal, save, or restart controls.
+
+**Loaded from** identifies the winning source, including built-in defaults, shipped `config.yaml`, local `config.local.yaml`, or the supported environment variable. **Defaults and host configuration** explains where to configure the setting, its accepted values, and which processes need a restart. Usual paths distinguish source checkouts (`app/conf/config.local.yaml`) from packaged deployments (`conf/config.local.yaml`); custom directories may differ. Environment values take precedence, but the worker cannot identify their original host file. A host `.env` participates only when the deployment uses or passes that variable. Raw schema is available in a separate disclosure.
 
 The console is unavailable by default. To enable access:
 

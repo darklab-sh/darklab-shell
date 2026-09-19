@@ -3,57 +3,15 @@
 
 import { bindPressable } from '../../ui/ui_pressable.js';
 
-export function displayValue(value) {
-  if (value?.mode === 'summary') {
-    if (value.summary === 'count') return `${value.value} entries configured`;
-    if (value.summary === 'presence') return value.value ? 'Configured' : 'Not configured';
-  }
-  if (value?.mode !== 'full') return 'Value withheld';
-  if (value.value === null) return 'Not set';
-  if (value.value === '') return '(empty)';
-  return typeof value.value === 'string' ? value.value : JSON.stringify(value.value, null, 2);
-}
+import { enhanceAppSelects, syncAppSelect } from '../../ui/ui_helpers.js';
+import { element, disclosure, settingCard } from './operator_settings_view.js';
+export { displayValue } from './operator_settings_view.js';
 
 export function filterSettings(rows, { search = '', group = '', source = '', warnings = '' } = {}) {
   const query = search.trim().toLocaleLowerCase();
   return rows.filter(row => (!query || `${row.key} ${row.label} ${row.description}`.toLocaleLowerCase().includes(query))
     && (!group || row.group === group) && (!source || row.source.layer === source)
     && (!warnings || row.warnings.length > 0));
-}
-
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
-
-function settingCard(row) {
-  const card = element('article', undefined, 'admin-setting');
-  card.dataset.key = row.key;
-  card.append(element('h3', row.label || row.key), element('code', row.key), element('p', row.description));
-  card.append(element('p', `Source: ${row.source.name}`, 'diag-muted'));
-  const mode = row.effective?.mode;
-  const text = displayValue(row.effective);
-  card.append(element('pre', text.length > 240 && mode === 'full' ? `${text.slice(0, 240)}…` : text,
-    `admin-value admin-${mode || 'withheld'}`));
-  if (mode === 'full' && text.length > 240) {
-    const details = element('details');
-    details.append(element('summary', 'Expand permitted value'), element('pre', text));
-    card.append(details);
-  }
-  if (row.effective?.truncated) card.append(element('p', 'Truncated by the display limit; this is not the complete value.', 'admin-warning'));
-  for (const warning of row.warnings) card.append(element('p', `${warning.event}: ${warning.reason}`, 'admin-warning'));
-  const guidance = element('details');
-  guidance.append(element('summary', 'Defaults and host configuration'));
-  guidance.append(element('p', `Default: ${displayValue(row.default)}${row.default?.truncated ? ' (truncated)' : ''}`));
-  guidance.append(element('p', `YAML: ${row.yaml || 'Not an application YAML setting'}`));
-  guidance.append(element('p', `Environment: ${row.environment?.join(', ') || 'No supported override'}`));
-  guidance.append(element('p', `Affected processes: ${row.processes?.join(', ') || 'Deployment'}`));
-  if (row.rules && Object.keys(row.rules).length) guidance.append(element('pre', JSON.stringify(row.rules, null, 2)));
-  guidance.append(element('p', row.apply));
-  card.append(guidance);
-  return card;
 }
 
 export function initializeConsole(root, { fetcher = fetch, navigate = path => window.location.assign(path) } = {}) {
@@ -63,29 +21,83 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
   const warnings = query('#admin-warnings'), results = query('#admin-results'), count = query('#admin-count');
   const status = query('#admin-status'), observation = query('#admin-observation'), refresh = query('#admin-refresh');
   const diagnostics = query('#admin-load-warnings');
-  let rows = [], requestId = 0;
+  const categoryState = new Map(), filteredState = new Map(), settingState = new Map();
+  let rows = [], requestId = 0, filtering = false, categoryHandles = [];
+  enhanceAppSelects(root);
+  const option = (label, value) => { const node = element('option', label); node.value = value; return node; };
+  const syncGroups = () => {
+    const selected = group.value;
+    const menu = group.nextElementSibling;
+    const active = document.activeElement;
+    const focusedOption = menu?.contains(active) && active.getAttribute('role') === 'option' ? active.dataset.value : null;
+    const groups = [...new Set(rows.map(row => row.group))];
+    group.replaceChildren(option('All groups', ''), ...groups.map(name => option(name, name)));
+    group.value = groups.includes(selected) ? selected : '';
+    syncAppSelect(group);
+    if (focusedOption !== null && !active.isConnected) {
+      const replacement = [...menu.querySelectorAll('[role="option"]')].find(node => node.dataset.value === focusedOption);
+      (replacement || menu.querySelector('.app-select-trigger')).focus({ preventScroll: true });
+    }
+  };
   const clear = () => {
     rows = [];
+    const lostFocus = results.contains(document.activeElement);
     results.replaceChildren();
     diagnostics.replaceChildren();
     count.textContent = '';
     observation.textContent = '';
+    categoryState.clear(); filteredState.clear(); settingState.clear(); categoryHandles = [];
+    syncGroups();
+    if (lostFocus) search.focus();
   };
-  const render = () => {
-    const visible = filterSettings(rows, { search: search.value, group: group.value, source: source.value, warnings: warnings.value });
+  const render = ({ filtersChanged = false } = {}) => {
+    const filters = { search: search.value, group: group.value, source: source.value, warnings: warnings.value };
+    filtering = Object.values(filters).some(value => value.trim());
+    if (filtersChanged) filteredState.clear();
+    const visible = filterSettings(rows, filters);
+    const active = document.activeElement;
+    const focusKey = results.contains(active) ? active.dataset.browseKey : null;
+    const scroll = { x: window.scrollX, y: window.scrollY };
+    const panelScroll = new Map([...results.querySelectorAll('[data-scroll-key]')].map(node => [node.dataset.scrollKey, [node.scrollLeft, node.scrollTop]]));
     const fragment = document.createDocumentFragment();
-    let previousGroup;
-    for (const row of visible) {
-      if (row.group !== previousGroup) fragment.append(element('h2', row.group, 'admin-group-title'));
-      previousGroup = row.group;
-      fragment.append(settingCard(row));
+    categoryHandles = [];
+    for (const name of new Set(visible.map(row => row.group))) {
+      const matches = visible.filter(row => row.group === name);
+      const total = rows.filter(row => row.group === name).length;
+      const label = `${name} · ${filtering ? `${matches.length} of ${total} settings match` : `${total} settings`}`;
+      const category = disclosure(label, `group:${name}`, matches.map(row => settingCard(row, settingState)),
+        filtering ? filteredState : categoryState, { initialOpen: filtering });
+      const heading = element('h2', undefined, 'admin-group-title');
+      heading.append(category.trigger);
+      category.wrapper.prepend(heading);
+      category.wrapper.classList.add('admin-category');
+      category.wrapper.dataset.group = name;
+      fragment.append(category.wrapper);
+      categoryHandles.push(category.handle);
     }
     if (!visible.length) fragment.append(element('p', 'No settings match these filters.'));
     results.replaceChildren(fragment);
     count.textContent = `${visible.length} of ${rows.length} settings`;
+    for (const node of results.querySelectorAll('[data-scroll-key]')) {
+      const position = panelScroll.get(node.dataset.scrollKey);
+      if (position) { node.scrollLeft = position[0]; node.scrollTop = position[1]; }
+    }
+    if (focusKey) {
+      const target = [...results.querySelectorAll('[data-browse-key]')].find(node => node.dataset.browseKey === focusKey && !node.closest('.u-hidden'));
+      if (target) target.focus({ preventScroll: true });
+      else {
+        search.focus();
+        return;
+      }
+    }
+    if (window.scrollX !== scroll.x || window.scrollY !== scroll.y) window.scrollTo(scroll.x, scroll.y);
   };
   async function load() {
     const current = ++requestId;
+    const restoreRefreshFocus = document.activeElement === refresh;
+    let focusMoved = false, navigating = false;
+    const trackFocus = event => { if (event.target !== refresh && event.target !== document.body) focusMoved = true; };
+    document.addEventListener('focusin', trackFocus);
     refresh.disabled = true;
     status.textContent = 'Loading settings…';
     try {
@@ -98,6 +110,7 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
         if (current !== requestId) return;
         const destination = new URL(data.destination, window.location.origin);
         if (destination.origin === window.location.origin && ['/auth/sign-in', '/admin/reauth'].includes(destination.pathname)) {
+          navigating = true;
           navigate(destination.pathname + destination.search);
         }
         return;
@@ -115,12 +128,14 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
         effective: { mode: 'full', value: 'Not observed by this worker' }, default: { mode: 'withheld' },
         source: { layer: 'host', name: item.status }, environment: [item.key], processes: ['Deployment'], warnings: [],
       }))].sort((a, b) => a.group.localeCompare(b.group) || a.key.localeCompare(b.key));
-      const selected = group.value;
-      const option = (label, value) => { const node = element('option', label); node.value = value; return node; };
-      group.replaceChildren(option('All groups', ''), ...[...new Set(rows.map(row => row.group))].map(name => option(name, name)));
-      group.value = selected;
+      syncGroups();
       const sample = data.observation;
-      observation.textContent = `Worker ${sample.process_id} · loaded ${sample.loaded_at} · application ${sample.app_version}`;
+      const date = new Date(sample.loaded_at);
+      const loadedAt = Number.isNaN(date.getTime()) ? 'Unavailable' : new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium', timeStyle: 'long', timeZone: 'UTC',
+      }).format(date);
+      observation.replaceChildren(...[`Worker ${sample.process_id}`, `Configuration loaded: ${loadedAt}`, `Application ${sample.app_version}`]
+        .map(text => element('span', text)));
       diagnostics.replaceChildren(...data.warnings.map(item => element('p', `${item.key}: ${item.event} · ${item.reason}`, 'admin-warning')));
       if (data.warnings_truncated) diagnostics.append(element('p', 'Additional load warnings were omitted.', 'admin-warning'));
       status.textContent = 'Snapshot loaded. Settings are read only.';
@@ -130,12 +145,32 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
       clear();
       status.textContent = 'Settings could not be loaded. Try refreshing.';
     } finally {
-      if (current === requestId) refresh.disabled = false;
+      document.removeEventListener('focusin', trackFocus);
+      if (current === requestId) {
+        refresh.disabled = false;
+        if (restoreRefreshFocus && !focusMoved && !navigating && document.activeElement === document.body) refresh.focus({ preventScroll: true });
+      }
     }
   }
-  for (const control of [search, group, source, warnings]) control.addEventListener('input', render);
+  search.addEventListener('input', () => render({ filtersChanged: true }));
+  for (const control of [group, source, warnings]) control.addEventListener('change', () => render({ filtersChanged: true }));
   root.querySelector('form').addEventListener('submit', event => event.preventDefault());
   bindPressable(refresh, { onActivate: load, refocusComposer: false });
+  bindPressable(query('#admin-clear'), { onActivate: () => {
+    search.value = '';
+    for (const control of [group, source, warnings]) { control.value = ''; syncAppSelect(control); }
+    render({ filtersChanged: true });
+    search.focus({ preventScroll: true });
+  }, refocusComposer: false });
+  for (const [id, action] of [['#admin-expand', 'open'], ['#admin-collapse', 'close']]) {
+    const button = query(id);
+    bindPressable(button, { onActivate: () => categoryHandles.forEach(handle => handle[action]()), refocusComposer: false });
+    button?.addEventListener('click', event => { if (event.detail === 0) button.focus({ preventScroll: true }); });
+  }
+  const hostExplanation = query('#admin-host-explanation');
+  if (hostExplanation) {
+    hostExplanation.replaceWith(disclosure('Host files and container snapshots', 'host-explanation', [...hostExplanation.childNodes], new Map()).wrapper);
+  }
   const ready = load();
   return { refresh: load, ready };
 }

@@ -1715,7 +1715,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Purpose:** help authorized operators understand loaded settings and how to change their host configuration safely.
 
-**Behavior:** authorized operators can inspect configuration from the desktop or mobile **Operator settings** menu. Search settings, filter by group, source, or warnings, and read defaults and instructions for applying host changes. Sensitive values stay withheld or show only an approved count or presence indicator; there is no reveal or edit action.
+**Behavior:** authorized operators can inspect configuration from the desktop or mobile **Operator settings** menu. Browse collapsed groups with setting counts, combine search with group, source, and warning filters, or clear every filter at once. Matching groups open automatically; clearing filters restores your earlier browsing view. Refresh keeps expanded details and your place. Compact cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive values stay withheld or show only an approved count or presence indicator; there is no reveal or edit action.
 
 Each snapshot identifies the web worker that served it and when that worker loaded configuration. Refreshing does not prove that every worker agrees, and deployment settings that the worker cannot observe are clearly marked. The local configuration checker can validate a proposed YAML overlay even when the web application cannot start.
 

@@ -14,7 +14,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "app_public_base_url": {
-    "label": "App public base url",
+    "label": "App public base URL",
     "group": "Shell and execution",
     "description": "Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths",
     "disclosure": "withheld",
@@ -106,7 +106,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_issuer": {
-    "label": "Oidc issuer",
+    "label": "OIDC issuer",
     "group": "Browser access",
     "description": "Exact HTTPS provider issuer from discovery, without a trailing slash",
     "disclosure": "withheld",
@@ -122,7 +122,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_client_id": {
-    "label": "Oidc client id",
+    "label": "OIDC client ID",
     "group": "Browser access",
     "description": "Confidential client ID registered with the provider",
     "disclosure": "withheld",
@@ -138,7 +138,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_client_secret": {
-    "label": "Oidc client secret",
+    "label": "OIDC client secret",
     "group": "Browser access",
     "description": "Private client secret; keep it in the installation's private .env",
     "disclosure": "withheld",
@@ -154,7 +154,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_redirect_uri": {
-    "label": "Oidc redirect uri",
+    "label": "OIDC redirect URI",
     "group": "Browser access",
     "description": "Exact public HTTPS callback URL ending in /auth/oidc/callback",
     "disclosure": "withheld",
@@ -170,7 +170,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_scopes": {
-    "label": "Oidc scopes",
+    "label": "OIDC scopes",
     "group": "Browser access",
     "description": "Space-separated requested scopes; includes openid by default",
     "disclosure": "full",
@@ -186,7 +186,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_provisioning": {
-    "label": "Oidc provisioning",
+    "label": "OIDC provisioning",
     "group": "Browser access",
     "description": "disabled, allowlist, or automatic; defaults to disabled",
     "disclosure": "full",
@@ -202,7 +202,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_allowed_subjects": {
-    "label": "Oidc allowed subjects",
+    "label": "OIDC allowed subjects",
     "group": "Browser access",
     "description": "Comma-separated exact provider subjects when provisioning is allowlist",
     "disclosure": "summary",
@@ -218,7 +218,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oidc_ca_bundle": {
-    "label": "Oidc ca bundle",
+    "label": "OIDC CA bundle",
     "group": "Browser access",
     "description": "Optional PEM CA path, relative to private conf/ or absolute inside the container",
     "disclosure": "full",
@@ -264,7 +264,7 @@
   "motd": {
     "label": "Motd",
     "group": "Shell and execution",
-    "description": "Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports bold,  code , link, and newlines. Leave empty to disable",
+    "description": "Optional operator message shown at the top of the welcome sequence as a centered \u201cMessage From The Operator\u201d notice. Supports bold,  code , link, and newlines. Leave empty to disable",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
@@ -366,7 +366,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "database_url": {
-    "label": "Database url",
+    "label": "Database URL",
     "group": "Persistence",
     "description": "Postgres DSN used when DATABASE_BACKEND=postgres",
     "disclosure": "withheld",
@@ -417,7 +417,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "database_postgres_jit": {
-    "label": "Database postgres jit",
+    "label": "Database PostgreSQL JIT",
     "group": "Persistence",
     "description": "Server-side only. Controls whether app-owned Postgres pool connections allow PostgreSQL JIT compilation. The default keeps interactive pages from paying JIT startup cost on complex queries. Can also be set with DATABASE_POSTGRES_JIT",
     "disclosure": "full",
@@ -520,7 +520,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "trusted_proxy_cidrs": {
-    "label": "Trusted proxy cidrs",
+    "label": "Trusted proxy CIDRs",
     "group": "Network and logging",
     "description": "IPs / CIDRs allowed to supply X-Forwarded-For. Requests outside these ranges ignore forwarded headers and use the direct connection IP",
     "disclosure": "full",
@@ -534,7 +534,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "diagnostics_allowed_cidrs": {
-    "label": "Diagnostics allowed cidrs",
+    "label": "Diagnostics allowed CIDRs",
     "group": "Network and logging",
     "description": "IPs / CIDRs that may access /diag, /diag/audit, /metrics, and the /admin/ console. Console access additionally requires a restricted profile, eligible browser session, explicit principal grant, and verified freshness. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so X-Forwarded-For is honored only when the direct peer is inside trusted_proxy_cidrs. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a diag button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies",
     "disclosure": "full",
@@ -594,7 +594,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "metrics_histogram_buckets_http_duration": {
-    "label": "Metrics histogram buckets http duration",
+    "label": "Metrics histogram buckets HTTP duration",
     "group": "Metrics",
     "description": "Prometheus HTTP request duration histogram buckets, in seconds",
     "disclosure": "full",
@@ -609,7 +609,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "metrics_histogram_buckets_ai_provider_duration": {
-    "label": "Metrics histogram buckets ai provider duration",
+    "label": "Metrics histogram buckets AI provider duration",
     "group": "Metrics",
     "description": "Prometheus AI provider duration histogram buckets, in seconds",
     "disclosure": "full",
@@ -624,7 +624,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_enabled": {
-    "label": "Ai enabled",
+    "label": "AI enabled",
     "group": "AI assists",
     "description": "Enable server-side AI assistance. Individual features and the provider must also be configured.",
     "disclosure": "full",
@@ -641,7 +641,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_provider": {
-    "label": "Ai provider",
+    "label": "AI provider",
     "group": "AI assists",
     "description": "Provider adapter used for AI assistance requests.",
     "disclosure": "full",
@@ -658,7 +658,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_base_url": {
-    "label": "Ai base url",
+    "label": "AI base URL",
     "group": "AI assists",
     "description": "AI provider endpoint. Only whether an endpoint is configured is disclosed.",
     "disclosure": "summary",
@@ -675,7 +675,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_model": {
-    "label": "Ai model",
+    "label": "AI model",
     "group": "AI assists",
     "description": "Model identifier sent to the configured AI provider.",
     "disclosure": "full",
@@ -692,7 +692,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_api_key_secret_name": {
-    "label": "Ai api key secret name",
+    "label": "AI API key secret name",
     "group": "AI assists",
     "description": "Name of the protected provider credential. Its value is withheld.",
     "disclosure": "withheld",
@@ -709,7 +709,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_api_key": {
-    "label": "Ai api key",
+    "label": "AI API key",
     "group": "AI assists",
     "description": "Legacy direct provider credential. Its value is withheld.",
     "disclosure": "withheld",
@@ -726,7 +726,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_connect_timeout_seconds": {
-    "label": "Ai connect timeout seconds",
+    "label": "AI connect timeout seconds",
     "group": "AI assists",
     "description": "Provider TCP connect timeout",
     "disclosure": "full",
@@ -743,7 +743,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_timeout_seconds": {
-    "label": "Ai timeout seconds",
+    "label": "AI timeout seconds",
     "group": "AI assists",
     "description": "Provider read timeout. Local CPU models can need longer than normal HTTP calls, and AI assists run in the worker path rather than tying up a route worker",
     "disclosure": "full",
@@ -760,7 +760,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_max_input_chars": {
-    "label": "Ai max input chars",
+    "label": "AI max input chars",
     "group": "AI assists",
     "description": "Maximum assembled prompt context size, measured in characters rather than tokens",
     "disclosure": "full",
@@ -777,7 +777,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_max_output_tokens": {
-    "label": "Ai max output tokens",
+    "label": "AI max output tokens",
     "group": "AI assists",
     "description": "Provider output cap for summary JSON responses. Summaries ask the model only for short prose so local CPU providers return sooner",
     "disclosure": "full",
@@ -794,7 +794,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_next_commands_max_output_tokens": {
-    "label": "Ai next commands max output tokens",
+    "label": "AI next commands max output tokens",
     "group": "AI assists",
     "description": "Provider output cap for next-command JSON responses. This is higher than summaries because suggestions need enough room to close valid JSON",
     "disclosure": "full",
@@ -811,7 +811,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_max_concurrent": {
-    "label": "Ai max concurrent",
+    "label": "AI max concurrent",
     "group": "AI assists",
     "description": "Global provider-call concurrency target for the AI worker path",
     "disclosure": "full",
@@ -828,7 +828,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_max_queue_depth": {
-    "label": "Ai max queue depth",
+    "label": "AI max queue depth",
     "group": "AI assists",
     "description": "Maximum queued/in-progress assist backlog before writes should return busy",
     "disclosure": "full",
@@ -845,7 +845,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_rate_limit_per_session_hour": {
-    "label": "Ai rate limit per session hour",
+    "label": "AI rate limit per session hour",
     "group": "AI assists",
     "description": "Per-workspace AI write limit enforced through Redis before new assists are queued. Clients allowed by diagnostics_allowed_cidrs bypass this workspace quota only",
     "disclosure": "full",
@@ -862,7 +862,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_rate_limit_global_per_minute": {
-    "label": "Ai rate limit global per minute",
+    "label": "AI rate limit global per minute",
     "group": "AI assists",
     "description": "Deployment-wide AI write limit enforced through Redis so multiple workers cannot overload a local model",
     "disclosure": "full",
@@ -879,7 +879,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_allow_full_output": {
-    "label": "Ai allow full output",
+    "label": "Allow full AI output",
     "group": "AI assists",
     "description": "Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript",
     "disclosure": "full",
@@ -896,7 +896,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_require_private_base_url": {
-    "label": "Ai require private base url",
+    "label": "AI require private base URL",
     "group": "AI assists",
     "description": "Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR",
     "disclosure": "full",
@@ -913,7 +913,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_base_url_allowed_cidrs": {
-    "label": "Ai base url allowed cidrs",
+    "label": "AI base URL allowed CIDRs",
     "group": "AI assists",
     "description": "Extra CIDRs allowed for AI providers when ai_require_private_base_url is enabled",
     "disclosure": "full",
@@ -930,7 +930,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_prompt_version_override": {
-    "label": "Ai prompt version override",
+    "label": "AI prompt version override",
     "group": "AI assists",
     "description": "Optional prompt version override for staging comparisons",
     "disclosure": "full",
@@ -947,7 +947,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_feature_summary": {
-    "label": "Ai feature summary",
+    "label": "AI feature summary",
     "group": "AI assists",
     "description": "Allow AI summaries of permitted run output.",
     "disclosure": "full",
@@ -964,7 +964,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_feature_next_commands": {
-    "label": "Ai feature next commands",
+    "label": "AI feature next commands",
     "group": "AI assists",
     "description": "Allow AI suggestions for follow-up commands; suggestions do not execute commands.",
     "disclosure": "full",
@@ -981,7 +981,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "ai_feature_run_suggestions": {
-    "label": "Ai feature run suggestions",
+    "label": "AI feature run suggestions",
     "group": "AI assists",
     "description": "Allow AI-assisted run suggestions under normal execution policy.",
     "disclosure": "full",
@@ -998,7 +998,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "restricted_command_input_cidrs": {
-    "label": "Restricted command input cidrs",
+    "label": "Restricted command input CIDRs",
     "group": "Browser access",
     "description": "Optional comma-separated CIDRs that user-submitted scanner commands cannot target. The same value drives app validation and scanner-user OUTPUT deny rules",
     "disclosure": "full",
@@ -1076,7 +1076,7 @@
   "share_redaction_enabled": {
     "label": "Share redaction enabled",
     "group": "Sharing",
-    "description": "Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the share snapshot action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs",
+    "description": "Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the share snapshot action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt\u2019s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
@@ -1116,7 +1116,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "http_rate_limit_per_minute": {
-    "label": "Http rate limit per minute",
+    "label": "HTTP rate limit per minute",
     "group": "Shell and execution",
     "description": "Baseline limit for dynamic app routes that do not already have a tighter route-specific limit. Static assets are exempt, so normal page loads still work while broad scanners hitting random paths are throttled. Set to 0 to disable this baseline while keeping route-specific limits",
     "disclosure": "full",
@@ -1130,7 +1130,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "http_rate_limit_per_second": {
-    "label": "Http rate limit per second",
+    "label": "HTTP rate limit per second",
     "group": "Shell and execution",
     "description": "Baseline burst limit for dynamic app routes that do not already have a tighter route-specific limit. This leaves room for the app's first-load request fan-out while the minute limit still caps sustained unknown-path scans. Set to 0 to disable this baseline while keeping route-specific limits",
     "disclosure": "full",
@@ -1214,7 +1214,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_shodan_ip_seconds": {
-    "label": "Intel cache ttl shodan ip seconds",
+    "label": "Intel cache TTL shodan IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Shodan IP responses",
     "disclosure": "full",
@@ -1228,7 +1228,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_shodan_search_seconds": {
-    "label": "Intel cache ttl shodan search seconds",
+    "label": "Intel cache TTL shodan search seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Shodan search responses",
     "disclosure": "full",
@@ -1242,7 +1242,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_shodan_internetdb_ip_seconds": {
-    "label": "Intel cache ttl shodan internetdb ip seconds",
+    "label": "Intel cache TTL shodan internetdb IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Shodan InternetDB IP responses",
     "disclosure": "full",
@@ -1256,7 +1256,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_censys_host_seconds": {
-    "label": "Intel cache ttl censys host seconds",
+    "label": "Intel cache TTL censys host seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Censys host responses",
     "disclosure": "full",
@@ -1270,7 +1270,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_virustotal_domain_seconds": {
-    "label": "Intel cache ttl virustotal domain seconds",
+    "label": "Intel cache TTL virustotal domain seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized VirusTotal domain responses",
     "disclosure": "full",
@@ -1284,7 +1284,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_virustotal_file_seconds": {
-    "label": "Intel cache ttl virustotal file seconds",
+    "label": "Intel cache TTL virustotal file seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized VirusTotal file or hash responses",
     "disclosure": "full",
@@ -1298,7 +1298,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_greynoise_ip_seconds": {
-    "label": "Intel cache ttl greynoise ip seconds",
+    "label": "Intel cache TTL greynoise IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized GreyNoise IP responses",
     "disclosure": "full",
@@ -1312,7 +1312,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_otx_indicator_seconds": {
-    "label": "Intel cache ttl otx indicator seconds",
+    "label": "Intel cache TTL otx indicator seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized AlienVault OTX indicator responses",
     "disclosure": "full",
@@ -1326,7 +1326,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_abuseipdb_ip_seconds": {
-    "label": "Intel cache ttl abuseipdb ip seconds",
+    "label": "Intel cache TTL abuseipdb IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized AbuseIPDB IP responses",
     "disclosure": "full",
@@ -1340,7 +1340,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_ipinfo_ip_seconds": {
-    "label": "Intel cache ttl ipinfo ip seconds",
+    "label": "Intel cache TTL ipinfo IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized IPinfo IP responses",
     "disclosure": "full",
@@ -1354,7 +1354,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_teamcymru_ip_seconds": {
-    "label": "Intel cache ttl teamcymru ip seconds",
+    "label": "Intel cache TTL teamcymru IP seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Team Cymru IP ownership responses",
     "disclosure": "full",
@@ -1368,7 +1368,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_tls_certificate_domain_seconds": {
-    "label": "Intel cache ttl tls certificate domain seconds",
+    "label": "Intel cache TTL TLS certificate domain seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for live TLS certificate domain responses",
     "disclosure": "full",
@@ -1382,7 +1382,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_crtsh_domain_seconds": {
-    "label": "Intel cache ttl crtsh domain seconds",
+    "label": "Intel cache TTL crtsh domain seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized crt.sh domain responses",
     "disclosure": "full",
@@ -1396,7 +1396,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_hibp_password_seconds": {
-    "label": "Intel cache ttl hibp password seconds",
+    "label": "Intel cache TTL hibp password seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses",
     "disclosure": "full",
@@ -1410,7 +1410,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_nvd_cve_seconds": {
-    "label": "Intel cache ttl nvd cve seconds",
+    "label": "Intel cache TTL NVD CVE seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized NVD CVE responses",
     "disclosure": "full",
@@ -1424,7 +1424,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_vulners_cve_seconds": {
-    "label": "Intel cache ttl vulners cve seconds",
+    "label": "Intel cache TTL vulners CVE seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized Vulners CVE responses",
     "disclosure": "full",
@@ -1438,7 +1438,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_urlscan_search_seconds": {
-    "label": "Intel cache ttl urlscan search seconds",
+    "label": "Intel cache TTL urlscan search seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized urlscan.io search responses",
     "disclosure": "full",
@@ -1452,7 +1452,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_urlscan_result_seconds": {
-    "label": "Intel cache ttl urlscan result seconds",
+    "label": "Intel cache TTL urlscan result seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized urlscan.io result responses",
     "disclosure": "full",
@@ -1466,7 +1466,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_urlhaus_host_seconds": {
-    "label": "Intel cache ttl urlhaus host seconds",
+    "label": "Intel cache TTL urlhaus host seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized URLhaus host responses",
     "disclosure": "full",
@@ -1480,7 +1480,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_urlhaus_payload_seconds": {
-    "label": "Intel cache ttl urlhaus payload seconds",
+    "label": "Intel cache TTL urlhaus payload seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized URLhaus payload hash responses",
     "disclosure": "full",
@@ -1494,7 +1494,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_urlhaus_url_seconds": {
-    "label": "Intel cache ttl urlhaus url seconds",
+    "label": "Intel cache TTL urlhaus URL seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized URLhaus URL responses",
     "disclosure": "full",
@@ -1508,7 +1508,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_threatfox_ioc_seconds": {
-    "label": "Intel cache ttl threatfox ioc seconds",
+    "label": "Intel cache TTL threatfox ioc seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized ThreatFox IOC responses",
     "disclosure": "full",
@@ -1522,7 +1522,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_threatfox_hash_seconds": {
-    "label": "Intel cache ttl threatfox hash seconds",
+    "label": "Intel cache TTL threatfox hash seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized ThreatFox hash responses",
     "disclosure": "full",
@@ -1536,7 +1536,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_securitytrails_domain_seconds": {
-    "label": "Intel cache ttl securitytrails domain seconds",
+    "label": "Intel cache TTL securitytrails domain seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized SecurityTrails domain responses",
     "disclosure": "full",
@@ -1550,7 +1550,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_routeviews_prefix_seconds": {
-    "label": "Intel cache ttl routeviews prefix seconds",
+    "label": "Intel cache TTL routeviews prefix seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized RouteViews prefix responses",
     "disclosure": "full",
@@ -1564,7 +1564,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_fofa_search_seconds": {
-    "label": "Intel cache ttl fofa search seconds",
+    "label": "Intel cache TTL fofa search seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized FOFA search responses",
     "disclosure": "full",
@@ -1578,7 +1578,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_cache_ttl_zoomeye_search_seconds": {
-    "label": "Intel cache ttl zoomeye search seconds",
+    "label": "Intel cache TTL zoomeye search seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Default cache lifetime for normalized ZoomEye search responses",
     "disclosure": "full",
@@ -1872,7 +1872,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_rate_limit_tls_certificate_bucket": {
-    "label": "Intel rate limit tls certificate bucket",
+    "label": "Intel rate limit TLS certificate bucket",
     "group": "Shell and execution",
     "description": "Server-side only. Token-bucket size for live TLS certificate lookups per session",
     "disclosure": "full",
@@ -1886,7 +1886,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_rate_limit_tls_certificate_refill_seconds": {
-    "label": "Intel rate limit tls certificate refill seconds",
+    "label": "Intel rate limit TLS certificate refill seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Seconds between live TLS certificate token refills",
     "disclosure": "full",
@@ -1956,7 +1956,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_rate_limit_nvd_anonymous_bucket": {
-    "label": "Intel rate limit nvd anonymous bucket",
+    "label": "Intel rate limit NVD anonymous bucket",
     "group": "Shell and execution",
     "description": "Server-side only. Token-bucket size for anonymous NVD lookups per session",
     "disclosure": "full",
@@ -1970,7 +1970,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "intel_rate_limit_nvd_anonymous_refill_seconds": {
-    "label": "Intel rate limit nvd anonymous refill seconds",
+    "label": "Intel rate limit NVD anonymous refill seconds",
     "group": "Shell and execution",
     "description": "Server-side only. Seconds between anonymous NVD token refills",
     "disclosure": "full",
@@ -2418,7 +2418,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "output_preview_max_mb": {
-    "label": "Output preview max mb",
+    "label": "Output preview max MB",
     "group": "Output",
     "description": "Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. 0 means unlimited",
     "disclosure": "full",
@@ -2446,7 +2446,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "full_output_max_mb": {
-    "label": "Full output max mb",
+    "label": "Full output max MB",
     "group": "Persistence",
     "description": "Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. 0 means unlimited",
     "disclosure": "full",
@@ -2567,7 +2567,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "workspace_quota_mb": {
-    "label": "Workspace quota mb",
+    "label": "Workspace quota MB",
     "group": "Files",
     "description": "Server-side only. Per-owner workspace quota for each personal or team workspace. HTTPx screenshot finalization also applies the remaining byte budget to new captures and removes excess event-named screenshot output instead of evicting earlier files",
     "disclosure": "full",
@@ -2582,7 +2582,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "workspace_max_file_mb": {
-    "label": "Workspace max file mb",
+    "label": "Workspace max file MB",
     "group": "Files",
     "description": "Server-side only. Maximum single app-managed file size, including a saved HTTPx screenshot",
     "disclosure": "full",
@@ -2612,7 +2612,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "workspace_inactivity_ttl_hours": {
-    "label": "Workspace inactivity ttl hours",
+    "label": "Workspace inactivity TTL hours",
     "group": "Files",
     "description": "Server-side only. Inactive session workspace cleanup threshold in hours; 0 disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired sess_* directories rather than aging out individual files",
     "disclosure": "full",
@@ -2781,7 +2781,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "atlas_import_max_upload_mb": {
-    "label": "Atlas import max upload mb",
+    "label": "Atlas import max upload MB",
     "group": "Shell and execution",
     "description": "Server-side only. Maximum uploaded file size for one Atlas import preview",
     "disclosure": "full",
@@ -2795,7 +2795,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "atlas_import_max_expanded_mb": {
-    "label": "Atlas import max expanded mb",
+    "label": "Atlas import max expanded MB",
     "group": "Shell and execution",
     "description": "Server-side only. Maximum report size after a gzip or ZIP import is expanded",
     "disclosure": "full",
@@ -2893,7 +2893,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "atlas_import_draft_ttl_minutes": {
-    "label": "Atlas import draft ttl minutes",
+    "label": "Atlas import draft TTL minutes",
     "group": "Shell and execution",
     "description": "Server-side only. Time window in minutes before an unapplied Atlas import draft is treated as abandoned and cleaned up",
     "disclosure": "full",
@@ -2949,7 +2949,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "max_project_http_profiles_per_project": {
-    "label": "Max project http profiles per project",
+    "label": "Max project HTTP profiles per project",
     "group": "Shell and execution",
     "description": "Server-side only. Maximum saved HTTP assessment profiles for one project. 0 means unlimited",
     "disclosure": "full",
@@ -3145,7 +3145,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "evidence_package_max_mb": {
-    "label": "Evidence package max mb",
+    "label": "Evidence package max MB",
     "group": "Shell and execution",
     "description": "Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file",
     "disclosure": "full",
@@ -3159,7 +3159,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "evidence_package_max_uncompressed_mb": {
-    "label": "Evidence package max uncompressed mb",
+    "label": "Evidence package max uncompressed MB",
     "group": "Shell and execution",
     "description": "Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well",
     "disclosure": "full",
@@ -3287,7 +3287,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.http_timeout_seconds": {
-    "label": "Notifications / http timeout seconds",
+    "label": "Notifications / HTTP timeout seconds",
     "group": "Notifications",
     "description": "Server-side only. HTTP timeout for outbound webhook-style notification channel sends",
     "disclosure": "full",
@@ -3317,7 +3317,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.http_private_host_allowlist": {
-    "label": "Notifications / http private host allowlist",
+    "label": "Notifications / HTTP private host allowlist",
     "group": "Notifications",
     "description": "Server-side only. Exact hostnames, IPs, or CIDR ranges that webhook-style channels may post to even when they resolve to private, loopback, link-local, or otherwise non-public addresses",
     "disclosure": "full",
@@ -3332,7 +3332,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp": {
-    "label": "Notifications / smtp",
+    "label": "Notifications / SMTP",
     "group": "Notifications",
     "description": "SMTP relay settings. Individual fields are listed separately.",
     "disclosure": "withheld",
@@ -3347,7 +3347,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.host": {
-    "label": "Notifications / smtp / host",
+    "label": "Notifications / SMTP / host",
     "group": "Notifications",
     "description": "Server-side only. SMTP relay host required before email notification channels can send",
     "disclosure": "full",
@@ -3362,7 +3362,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.port": {
-    "label": "Notifications / smtp / port",
+    "label": "Notifications / SMTP / port",
     "group": "Notifications",
     "description": "Server-side only. SMTP relay port for email notification channels",
     "disclosure": "full",
@@ -3377,7 +3377,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.user": {
-    "label": "Notifications / smtp / user",
+    "label": "Notifications / SMTP / user",
     "group": "Notifications",
     "description": "Server-side only. SMTP username for the operator-managed relay",
     "disclosure": "withheld",
@@ -3392,7 +3392,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.password_secret_id": {
-    "label": "Notifications / smtp / password secret id",
+    "label": "Notifications / SMTP / password secret ID",
     "group": "Notifications",
     "description": "Server-side only. Environment variable name that contains the SMTP password; email channels never store this value",
     "disclosure": "withheld",
@@ -3407,7 +3407,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.from_address": {
-    "label": "Notifications / smtp / from address",
+    "label": "Notifications / SMTP / from address",
     "group": "Notifications",
     "description": "Server-side only. From address used for email notification messages",
     "disclosure": "withheld",
@@ -3422,7 +3422,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "notifications.smtp.tls": {
-    "label": "Notifications / smtp / tls",
+    "label": "Notifications / SMTP / TLS",
     "group": "Notifications",
     "description": "Server-side only. SMTP TLS mode: starttls, ssl, or none",
     "disclosure": "full",
@@ -3816,7 +3816,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk": {
-    "label": "Cve risk",
+    "label": "CVE risk",
     "group": "CVE intelligence",
     "description": "Server-side public CVE risk data. Release-pinned FIRST EPSS and CISA KEV snapshots work offline; live bulk-feed refresh remains an operator opt-in",
     "disclosure": "withheld",
@@ -3830,7 +3830,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.bootstrap_enabled": {
-    "label": "Cve risk / bootstrap enabled",
+    "label": "CVE risk / bootstrap enabled",
     "group": "CVE intelligence",
     "description": "Loads the release-pinned EPSS and KEV snapshots when the database has no newer accepted data. Bootstrap import is a silent ranking baseline and does not create risk-escalation events",
     "disclosure": "full",
@@ -3844,7 +3844,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.refresh_enabled": {
-    "label": "Cve risk / refresh enabled",
+    "label": "CVE risk / refresh enabled",
     "group": "CVE intelligence",
     "description": "Lets the scheduler refresh the public EPSS and KEV bulk feeds. Refreshes send no Project, target, finding, package, or CVE inventory values to either source",
     "disclosure": "full",
@@ -3858,7 +3858,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.refresh_interval_seconds": {
-    "label": "Cve risk / refresh interval seconds",
+    "label": "CVE risk / refresh interval seconds",
     "group": "CVE intelligence",
     "description": "Minimum interval between refresh attempts for each source, from 300 to 604800 seconds",
     "disclosure": "full",
@@ -3872,7 +3872,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.stale_after_hours": {
-    "label": "Cve risk / stale after hours",
+    "label": "CVE risk / stale after hours",
     "group": "CVE intelligence",
     "description": "Age after which accepted feed data is labeled stale, from 1 to 8760 hours",
     "disclosure": "full",
@@ -3886,7 +3886,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.http_timeout_seconds": {
-    "label": "Cve risk / http timeout seconds",
+    "label": "CVE risk / HTTP timeout seconds",
     "group": "CVE intelligence",
     "description": "Per-request timeout for an enabled bulk-feed refresh, from 3 to 120 seconds",
     "disclosure": "full",
@@ -3900,7 +3900,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.max_download_bytes": {
-    "label": "Cve risk / max download bytes",
+    "label": "CVE risk / max download bytes",
     "group": "CVE intelligence",
     "description": "Maximum compressed response accepted from one feed refresh, from 1024 to 268435456 bytes",
     "disclosure": "full",
@@ -3914,7 +3914,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.max_attempts": {
-    "label": "Cve risk / max attempts",
+    "label": "CVE risk / max attempts",
     "group": "CVE intelligence",
     "description": "Maximum refresh attempts after network or validation failures, from 1 to 5",
     "disclosure": "full",
@@ -3928,7 +3928,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.lease_seconds": {
-    "label": "Cve risk / lease seconds",
+    "label": "CVE risk / lease seconds",
     "group": "CVE intelligence",
     "description": "Minimum database-backed single-flight lease for one source refresh, from 30 to 3600 seconds. The scheduler automatically extends the effective lease to cover the configured request attempts, backoff, download size, and parsing window",
     "disclosure": "full",
@@ -3942,7 +3942,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.work_batch_size": {
-    "label": "Cve risk / work batch size",
+    "label": "CVE risk / work batch size",
     "group": "CVE intelligence",
     "description": "Maximum changed-feed work items claimed in one escalation pass, from 1 to 1000",
     "disclosure": "full",
@@ -3956,7 +3956,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.owner_batch_size": {
-    "label": "Cve risk / owner batch size",
+    "label": "CVE risk / owner batch size",
     "group": "CVE intelligence",
     "description": "Maximum owner groups processed for one changed CVE before its durable cursor yields, from 1 to 1000",
     "disclosure": "full",
@@ -3970,7 +3970,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.work_max_attempts": {
-    "label": "Cve risk / work max attempts",
+    "label": "CVE risk / work max attempts",
     "group": "CVE intelligence",
     "description": "Maximum isolated attempts for one failed escalation work item, from 1 to 20",
     "disclosure": "full",
@@ -3984,7 +3984,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.epss_activation_probability": {
-    "label": "Cve risk / epss activation probability",
+    "label": "CVE risk / EPSS activation probability",
     "group": "CVE intelligence",
     "description": "EPSS probability that activates one owner-scoped risk event after an upward crossing",
     "disclosure": "full",
@@ -3998,7 +3998,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.epss_reset_probability": {
-    "label": "Cve risk / epss reset probability",
+    "label": "CVE risk / EPSS reset probability",
     "group": "CVE intelligence",
     "description": "Lower EPSS probability that rearms a later upward event. It must remain below the activation probability",
     "disclosure": "full",
@@ -4012,7 +4012,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_mode": {
-    "label": "Cve risk / advisory mode",
+    "label": "CVE risk / advisory mode",
     "group": "CVE intelligence",
     "description": "Shared NVD advisory storage mode: disabled, local, or external. external only retains NVD results from an explicit Atlas CVE Refresh intel action; it doesn't start background CVE lookups",
     "disclosure": "full",
@@ -4026,7 +4026,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.nvd_local_path": {
-    "label": "Cve risk / nvd local path",
+    "label": "CVE risk / NVD local path",
     "group": "CVE intelligence",
     "description": "Path to an operator-managed NVD 2.0 JSON dataset when advisory_mode is local. The path is required in local mode",
     "disclosure": "full",
@@ -4040,7 +4040,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.osv_advisory_mode": {
-    "label": "Cve risk / osv advisory mode",
+    "label": "CVE risk / OSV advisory mode",
     "group": "CVE intelligence",
     "description": "Shared OSV package-applicability mode: disabled, local, or external. External mode permits only explicitly requested exact package lookups; it doesn't start background work",
     "disclosure": "full",
@@ -4054,7 +4054,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.osv_local_path": {
-    "label": "Cve risk / osv local path",
+    "label": "CVE risk / OSV local path",
     "group": "CVE intelligence",
     "description": "Path to an operator-managed full-record OSV JSON array when osv_advisory_mode is local. The path is required in local mode",
     "disclosure": "full",
@@ -4068,7 +4068,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_positive_ttl_seconds": {
-    "label": "Cve risk / advisory positive ttl seconds",
+    "label": "CVE risk / advisory positive TTL seconds",
     "group": "CVE intelligence",
     "description": "Freshness and cache lifetime for accepted NVD and OSV records, from 3600 to 2592000 seconds",
     "disclosure": "full",
@@ -4082,7 +4082,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_negative_ttl_seconds": {
-    "label": "Cve risk / advisory negative ttl seconds",
+    "label": "CVE risk / advisory negative TTL seconds",
     "group": "CVE intelligence",
     "description": "Cache lifetime for an explicit NVD or OSV lookup with no advisory record, from 300 to 604800 seconds",
     "disclosure": "full",
@@ -4096,7 +4096,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_cvss_downgrade_delta": {
-    "label": "Cve risk / advisory cvss downgrade delta",
+    "label": "CVE risk / advisory cvss downgrade delta",
     "group": "CVE intelligence",
     "description": "Minimum CVSS score decrease recorded as a material NVD change in Project Monitoring. Values must be greater than 0 and no more than 10",
     "disclosure": "full",
@@ -4110,7 +4110,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_max_local_bytes": {
-    "label": "Cve risk / advisory max local bytes",
+    "label": "CVE risk / advisory max local bytes",
     "group": "CVE intelligence",
     "description": "Largest single local NVD or OSV JSON file accepted, from 1024 to 1073741824 bytes",
     "disclosure": "full",
@@ -4124,7 +4124,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.advisory_max_records": {
-    "label": "Cve risk / advisory max records",
+    "label": "CVE risk / advisory max records",
     "group": "CVE intelligence",
     "description": "Largest number of records accepted from one local NVD or OSV dataset, from 1 to 1000000",
     "disclosure": "full",
@@ -4138,7 +4138,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "cve_risk.allowed_hosts": {
-    "label": "Cve risk / allowed hosts",
+    "label": "CVE risk / allowed hosts",
     "group": "CVE intelligence",
     "description": "Exact HTTPS hostnames allowed for fixed CVE-risk acquisition URLs. OSV queries still require its exact endpoint and reject redirects. Entries must be hostnames, not URLs",
     "disclosure": "full",
@@ -4181,7 +4181,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.base_url": {
-    "label": "Zap connector / base url",
+    "label": "Zap connector / base URL",
     "group": "Connectors",
     "description": "HTTP or HTTPS origin for the operator-managed ZAP API, without credentials, a path, query, or fragment",
     "disclosure": "withheld",
@@ -4196,7 +4196,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.api_key_secret_id": {
-    "label": "Zap connector / api key secret id",
+    "label": "Zap connector / API key secret ID",
     "group": "Connectors",
     "description": "Environment variable name that holds the ZAP API key. Production Compose provides DARKLAB_ZAP_API_KEY; the key value doesn't enter YAML, config diagnostics, or connector settings",
     "disclosure": "withheld",
@@ -4211,7 +4211,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.tls_verify": {
-    "label": "Zap connector / tls verify",
+    "label": "Zap connector / TLS verify",
     "group": "Connectors",
     "description": "Verifies the ZAP service's TLS certificate for HTTPS connections. Turning this off is an explicit operator choice",
     "disclosure": "full",
@@ -4226,7 +4226,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.allowed_target_cidrs": {
-    "label": "Zap connector / allowed target cidrs",
+    "label": "Zap connector / allowed target CIDRs",
     "group": "Connectors",
     "description": "IPv4 and IPv6 networks ZAP may receive as scan targets. The app and scanner-side policy must both resolve every hostname entirely inside this list",
     "disclosure": "full",
@@ -4241,7 +4241,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.scope_policy_url": {
-    "label": "Zap connector / scope policy url",
+    "label": "Zap connector / scope policy URL",
     "group": "Connectors",
     "description": "Exact HTTPS endpoint for the scanner-side policy service, ending in /v1/zap-scope/review. It must share the enforcing proxy's network and DNS view",
     "disclosure": "withheld",
@@ -4256,7 +4256,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.scope_policy_token_secret_id": {
-    "label": "Zap connector / scope policy token secret id",
+    "label": "Zap connector / scope policy token secret ID",
     "group": "Connectors",
     "description": "Environment variable name that holds the scope-policy bearer token. Production Compose provides DARKLAB_ZAP_SCOPE_POLICY_TOKEN; the token value doesn't enter YAML, plan summaries, logs, or stored jobs",
     "disclosure": "withheld",
@@ -4271,7 +4271,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "zap_connector.scope_policy_id": {
-    "label": "Zap connector / scope policy id",
+    "label": "Zap connector / scope policy ID",
     "group": "Connectors",
     "description": "Stable identity for the deployed CIDR policy. The service must return this exact value with the configured CIDR digest and proxy binding",
     "disclosure": "full",
@@ -4361,7 +4361,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector": {
-    "label": "Oast connector",
+    "label": "OAST connector",
     "group": "Connectors",
     "description": "Server-side only. Disabled-by-default safety boundary for an operator-managed private Interactsh-compatible service",
     "disclosure": "withheld",
@@ -4375,7 +4375,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.enabled": {
-    "label": "Oast connector / enabled",
+    "label": "OAST connector / enabled",
     "group": "Connectors",
     "description": "Makes the validated private OAST settings available. Enabling requires every identity, privacy, and retention field below; it doesn't allocate a callback or contact the service",
     "disclosure": "full",
@@ -4390,7 +4390,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.base_url": {
-    "label": "Oast connector / base url",
+    "label": "OAST connector / base URL",
     "group": "Connectors",
     "description": "HTTPS origin for the private service, without credentials, a path, query, or fragment. The service must use Interactsh's default 20-character correlation id and 13-character nonce lengths",
     "disclosure": "withheld",
@@ -4405,7 +4405,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.token_secret_id": {
-    "label": "Oast connector / token secret id",
+    "label": "OAST connector / token secret ID",
     "group": "Connectors",
     "description": "Environment variable name that holds the service token. Production Compose provides DARKLAB_OAST_TOKEN; the token value doesn't enter YAML, config diagnostics, or connector settings",
     "disclosure": "withheld",
@@ -4420,7 +4420,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.allowed_domain": {
-    "label": "Oast connector / allowed domain",
+    "label": "OAST connector / allowed domain",
     "group": "Connectors",
     "description": "Exact DNS suffix reserved for this private callback service, without a wildcard or IP address. The app prepends one random 33-character alphanumeric callback label using the service's default id and nonce lengths",
     "disclosure": "full",
@@ -4435,7 +4435,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.tls_verify": {
-    "label": "Oast connector / tls verify",
+    "label": "OAST connector / TLS verify",
     "group": "Connectors",
     "description": "Verifies the private service's TLS certificate. Turning this off is an explicit operator choice",
     "disclosure": "full",
@@ -4450,7 +4450,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.callback_retention_seconds": {
-    "label": "Oast connector / callback retention seconds",
+    "label": "OAST connector / callback retention seconds",
     "group": "Connectors",
     "description": "Required callback-data retention policy, from 300 to 2592000 seconds",
     "disclosure": "full",
@@ -4465,7 +4465,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "oast_connector.privacy_acknowledged": {
-    "label": "Oast connector / privacy acknowledged",
+    "label": "OAST connector / privacy acknowledged",
     "group": "Connectors",
     "description": "Must be true before the connector can be enabled, confirming the operator accepts the private service's callback-data handling and retention policy",
     "disclosure": "full",
@@ -4550,7 +4550,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "run_broker_active_stream_ttl_seconds": {
-    "label": "Run broker active stream ttl seconds",
+    "label": "Run broker active stream TTL seconds",
     "group": "Shell and execution",
     "description": "Safety TTL for active broker streams, refreshed while a run is active",
     "disclosure": "full",
@@ -4564,7 +4564,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "run_broker_completed_stream_ttl_seconds": {
-    "label": "Run broker completed stream ttl seconds",
+    "label": "Run broker completed stream TTL seconds",
     "group": "Shell and execution",
     "description": "How long completed broker streams remain replayable after history finalization before completed-run restore relies on saved history rows and artifacts",
     "disclosure": "full",
@@ -4634,7 +4634,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_enabled": {
-    "label": "Interactive pty enabled",
+    "label": "Interactive PTY enabled",
     "group": "Run execution",
     "description": "Enables guarded terminal sessions for approved interactive tools; detailed PTY limits remain in YAML",
     "disclosure": "full",
@@ -4650,7 +4650,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_max_runtime_seconds": {
-    "label": "Interactive pty max runtime seconds",
+    "label": "Interactive PTY max runtime seconds",
     "group": "Run execution",
     "description": "Maximum lifetime for an interactive PTY command before the server terminates it",
     "disclosure": "full",
@@ -4664,7 +4664,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_max_concurrent_per_session": {
-    "label": "Interactive pty max concurrent per session",
+    "label": "Interactive PTY max concurrent per session",
     "group": "Run execution",
     "description": "Maximum number of active interactive PTY commands one browser session can run at the same time",
     "disclosure": "full",
@@ -4678,7 +4678,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_input_rate_limit_per_minute": {
-    "label": "Interactive pty input rate limit per minute",
+    "label": "Interactive PTY input rate limit per minute",
     "group": "Run execution",
     "description": "Max interactive PTY input requests per minute per IP. This is separate from /runs because normal terminal typing produces many small input requests",
     "disclosure": "full",
@@ -4692,7 +4692,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_input_rate_limit_per_second": {
-    "label": "Interactive pty input rate limit per second",
+    "label": "Interactive PTY input rate limit per second",
     "group": "Run execution",
     "description": "Max interactive PTY input request burst per second per IP",
     "disclosure": "full",
@@ -4706,7 +4706,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_resize_rate_limit_per_minute": {
-    "label": "Interactive pty resize rate limit per minute",
+    "label": "Interactive PTY resize rate limit per minute",
     "group": "Run execution",
     "description": "Max interactive PTY resize requests per minute per IP. This is separate from /runs because normal browser layout changes can produce short resize bursts",
     "disclosure": "full",
@@ -4720,7 +4720,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_resize_rate_limit_per_second": {
-    "label": "Interactive pty resize rate limit per second",
+    "label": "Interactive PTY resize rate limit per second",
     "group": "Run execution",
     "description": "Max interactive PTY resize request burst per second per IP",
     "disclosure": "full",
@@ -4734,7 +4734,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_buffer_limit": {
-    "label": "Interactive pty buffer limit",
+    "label": "Interactive PTY buffer limit",
     "group": "Run execution",
     "description": "Maximum in-memory PTY events kept per local active run before older live events are dropped from the local fallback buffer",
     "disclosure": "full",
@@ -4748,7 +4748,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_input_max_bytes": {
-    "label": "Interactive pty input max bytes",
+    "label": "Interactive PTY input max bytes",
     "group": "Run execution",
     "description": "Maximum UTF-8 bytes accepted in one PTY input request before pasted or typed input is truncated",
     "disclosure": "full",
@@ -4762,7 +4762,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_heartbeat_seconds": {
-    "label": "Interactive pty heartbeat seconds",
+    "label": "Interactive PTY heartbeat seconds",
     "group": "Run execution",
     "description": "Idle heartbeat interval for PTY event streams",
     "disclosure": "full",
@@ -4776,7 +4776,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_control_poll_seconds": {
-    "label": "Interactive pty control poll seconds",
+    "label": "Interactive PTY control poll seconds",
     "group": "Run execution",
     "description": "How often the PTY owner checks for queued input and resize events",
     "disclosure": "full",
@@ -4790,7 +4790,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_stream_fetch_count": {
-    "label": "Interactive pty stream fetch count",
+    "label": "Interactive PTY stream fetch count",
     "group": "Run execution",
     "description": "Maximum Redis PTY stream entries read per fetch while serving a PTY event stream",
     "disclosure": "full",
@@ -4804,7 +4804,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_stream_maxlen": {
-    "label": "Interactive pty stream maxlen",
+    "label": "Interactive PTY stream maxlen",
     "group": "Run execution",
     "description": "Approximate maximum Redis PTY output-stream entries retained per active run",
     "disclosure": "full",
@@ -4818,7 +4818,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_snapshot_publish_bytes": {
-    "label": "Interactive pty snapshot publish bytes",
+    "label": "Interactive PTY snapshot publish bytes",
     "group": "Run execution",
     "description": "Output-byte threshold that makes the PTY owner refresh the shared terminal snapshot",
     "disclosure": "full",
@@ -4832,7 +4832,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_snapshot_publish_seconds": {
-    "label": "Interactive pty snapshot publish seconds",
+    "label": "Interactive PTY snapshot publish seconds",
     "group": "Run execution",
     "description": "Maximum interval between shared PTY snapshot refreshes while output continues",
     "disclosure": "full",
@@ -4846,7 +4846,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_snapshot_min_publish_seconds": {
-    "label": "Interactive pty snapshot min publish seconds",
+    "label": "Interactive PTY snapshot min publish seconds",
     "group": "Run execution",
     "description": "Minimum interval between shared PTY snapshot refreshes, even during heavy output bursts",
     "disclosure": "full",
@@ -4860,7 +4860,7 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "interactive_pty_snapshot_fallback_entry_limit": {
-    "label": "Interactive pty snapshot fallback entry limit",
+    "label": "Interactive PTY snapshot fallback entry limit",
     "group": "Run execution",
     "description": "Maximum plain-text fallback entries returned when an ANSI terminal snapshot is unavailable",
     "disclosure": "full",
