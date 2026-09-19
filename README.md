@@ -351,6 +351,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 ## Documentation Map
 
 - [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
+- [AGENTS.md](AGENTS.md) - Repository guidance for coding agents, including project contracts, validation, and documentation rules
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
 - [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
 - [CONFIGURATION.md](CONFIGURATION.md) - Operator reference for production `.env` and `conf/` settings, development overrides, Compose customization, storage, and host tuning

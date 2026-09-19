@@ -27,6 +27,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Configuration regression checks pin the existing loading contract.** A table-driven corpus covers effective values, nested provenance, environment precedence, warnings, derived defaults, and invalid-input outcomes.
 
+- **Coding agents have a shared repository guide.** `AGENTS.md` collects the project rules for architecture, security, UI consistency, tests, logging, documentation, and authorized Git/CI work, with links to the detailed contracts. The authorized `todo` workflow uses CI for broad validation, permits a temporary uncommitted pre-commit hook bypass with restoration, and checks pipelines between implementation slices and before final handoff. Contributor guidance uses live test inventories instead of maintaining exact totals.
+
 ### Fixed
 
 - **Operator-console helpers have explicit configuration and authentication types.** Configuration failures declare their diagnostic fields, retention accepts the shared configuration mapping, and provider verification checks that proof is present. PostgreSQL fixtures use typed row connections and quoted schema identifiers; authentication tests assert that sessions, rows, and response payloads exist before reading them.
