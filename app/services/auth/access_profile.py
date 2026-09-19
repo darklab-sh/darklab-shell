@@ -177,6 +177,8 @@ def enforce_browser_csrf(authentication_result):
         return None
     cookie_token = str(request.cookies.get(BROWSER_CSRF_COOKIE) or "")
     header_token = str(request.headers.get("X-Darklab-CSRF") or "")
+    if request.endpoint == "admin.reauthenticate":
+        header_token = header_token or str(request.form.get("csrf_token") or "")
     if not cookie_token:
         reason = "missing_cookie"
     elif not header_token:

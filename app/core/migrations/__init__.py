@@ -97,6 +97,7 @@ from . import (
     v0084_oidc_identities,
     v0085_background_pause_reasons,
     v0086_instance_operator_grants,
+    v0087_operator_reauthentication,
 )
 
 _ = baseline
@@ -188,4 +189,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0084_oidc_identities.MIGRATION,
     v0085_background_pause_reasons.MIGRATION,
     v0086_instance_operator_grants.MIGRATION,
+    v0087_operator_reauthentication.MIGRATION,
 )

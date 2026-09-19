@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import base64
+import hashlib
 import time
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
@@ -17,9 +17,12 @@ from conftest import build_test_config
 from core.database_access import get_db_connect
 from flask.testing import FlaskClient
 from joserfc import jwk, jwt
-from services.auth import oidc, oidc_cache, storage
-from services.auth import lifecycle
-from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE, resolve_browser_session
+from services.auth import lifecycle, oidc, oidc_cache, storage
+from services.auth.browser_sessions import (
+    BROWSER_CSRF_COOKIE,
+    BROWSER_SESSION_COOKIE,
+    resolve_browser_session,
+)
 from services.auth.contracts import timestamp
 
 ISSUER = "https://idp.example/realms/test"
@@ -122,9 +125,10 @@ def _config(profile="oidc_required", provisioning="automatic", subjects=None):
 
 
 def _app(monkeypatch, config):
-    import app as application_module
     import config as shell_config
     from core import database as shell_database
+
+    import app as application_module
 
     monkeypatch.setattr(shell_config, "CFG", config)
     monkeypatch.setattr(application_module, "CFG", config)
@@ -431,7 +435,8 @@ def test_fresh_oidc_sign_in_renews_absolute_deadline(monkeypatch):
             "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
             "WHERE principal_id = ? AND revoked_at IS NULL", (principal_id,),
         ).fetchone()
-    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started
+    # Provider auth_time is a signed integer timestamp, not the session creation clock.
+    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started.replace(microsecond=0)
     assert datetime.fromisoformat(replacement["absolute_expires_at"]) >= started + timedelta(hours=12)
     assert not resolve_browser_session(original_cookie, idle_seconds=1800, touch=False).valid
 

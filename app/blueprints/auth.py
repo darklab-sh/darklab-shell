@@ -10,7 +10,7 @@ import hmac
 import logging
 import secrets
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import core.process as process_state
 from config import get_theme_entry
@@ -30,8 +30,13 @@ from flask import (
     request,
 )
 from services.audit.context import request_audit_fields
-from services.auth import lifecycle
-from services.auth.access_profile import active_config, active_profile, is_restricted, safe_next_path
+from services.auth import lifecycle, oidc
+from services.auth.access_profile import (
+    active_config,
+    active_profile,
+    is_restricted,
+    safe_next_path,
+)
 from services.auth.browser_sessions import (
     BROWSER_CSRF_COOKIE,
     BROWSER_SESSION_COOKIE,
@@ -56,15 +61,18 @@ from services.auth.contracts import (
     PrincipalNotFound,
     WorkspaceAlreadyAttached,
 )
-from services.auth.rate_limit import check_anonymous_issuance, check_credential_redemption, check_failed_redemption
 from services.auth.observability import (
     log_authentication_rejected,
     log_credential_lifecycle_failed,
     log_credential_rate_limited,
     log_sign_in_form_rejected,
 )
-from services.auth import oidc
 from services.auth.oidc_diagnostics import log_oidc_failure, oidc_stage
+from services.auth.rate_limit import (
+    check_anonymous_issuance,
+    check_credential_redemption,
+    check_failed_redemption,
+)
 from services.auth.resolver import (
     AnonymousContext,
     AuthenticatedContext,
@@ -259,13 +267,15 @@ def _clear_oidc_state_cookie(response) -> None:
     )
 
 
-def _oidc_error_response(exc: BaseException, *, purpose: str | None = None):
+def _oidc_error_response(exc: BaseException, *, purpose: str | None = None, next_path: str = "/admin/"):
     if not isinstance(exc, oidc.OIDCError):
         exc = oidc.OIDCUnavailable(
             "Sign-in is temporarily unavailable.", reason="storage_failed", error_type=type(exc).__name__,
         )
     log_oidc_failure(exc, purpose=purpose)
-    response = _no_store(redirect("/auth/sign-in?oidc_error=1"))
+    destination = ("/admin/reauth?" + urlencode({"error": "1", "next": safe_next_path(next_path, fallback="/admin/")})) \
+        if purpose == "admin_reauth" else "/auth/sign-in?oidc_error=1"
+    response = _no_store(redirect(destination))
     _clear_oidc_state_cookie(response)
     return response
 
@@ -311,11 +321,16 @@ def oidc_callback():
             raise oidc.OIDCError(
                 "The provider declined the sign-in request.", stage="provider_authorization", reason="provider_denied",
             )
-        issuer, subject = oidc.exchange_code(active_config(), flow, str(request.args.get("code") or ""))
-        identity = oidc.complete_identity(active_config(), flow, issuer, subject)
+        proof = oidc.exchange_code_proof(active_config(), flow, str(request.args.get("code") or ""))
+        if flow.purpose == "admin_reauth":
+            from .admin import complete_provider_reauthentication
+            return complete_provider_reauthentication(flow, proof)
+        identity = oidc.complete_identity(active_config(), flow, proof.issuer, proof.subject)
         credential_id = ""
         oidc_identity_id = identity.id
-        authenticated_at: str | None = None
+        # A newly created browser session is not evidence of fresh provider
+        # authentication. Missing proof deliberately forces console step-up.
+        authenticated_at: str | None = proof.authenticated_at or "1970-01-01T00:00:00+00:00"
         absolute_expires_at: str | None = None
         if flow.purpose == "link":
             credential_id, authenticated_at, absolute_expires_at = oidc.linked_credential_source(flow)
@@ -330,7 +345,8 @@ def oidc_callback():
             if flow.purpose == "sign_in" and flow.browser_session_id:
                 revoke_browser_session(flow.browser_session_id, reason="OIDC sign-in rotation")
     except IdentityStorageError as exc:
-        return _oidc_error_response(exc, purpose=flow.purpose if flow is not None else None)
+        return _oidc_error_response(exc, purpose=flow.purpose if flow is not None else None,
+                                    next_path=flow.next_path if flow is not None else "/admin/")
     log.info("OIDC_BROWSER_SESSION_CREATED", extra={"principal_id": identity.principal_id, "purpose": flow.purpose})
     response = _no_store(redirect(safe_next_path(flow.next_path)))
     _set_browser_session_cookies(response, issued)

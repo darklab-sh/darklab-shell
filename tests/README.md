@@ -191,6 +191,8 @@ A practical local loop is usually:
 
 ## Suite Summaries
 
+Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
+
 These summaries explain what belongs in each layer. Use the live-listing commands above when you need the current test inventory.
 
 ### Access Profile Qualification
