@@ -9262,6 +9262,30 @@ class TestPostgresMigrations:
         assert set(SQLITE_BACKEND_ARTIFACTS).issubset(set(inventory.fts_artifacts))
         assert "CHECK (status IN ('complete', 'empty', 'failed'))" in inventory.tables["run_output_summary_status"].constraints
 
+    @pytest.mark.parametrize("quoted", [False, True])
+    def test_schema_inventory_tracks_table_and_index_renames(self, quoted):
+        from core.schema_manifest import postgres_migration_schema_inventory
+
+        def identifier(name):
+            return f'"{name}"' if quoted else name
+
+        old_table, new_table = map(identifier, ("pending_flows", "active_flows"))
+        old_index, new_index = map(identifier, ("pending_expiry", "active_expiry"))
+        inventory = postgres_migration_schema_inventory((
+            f"CREATE TABLE {old_table} (expires_at TIMESTAMPTZ NOT NULL)",
+            f"CREATE INDEX {old_index} ON {old_table} (expires_at)",
+            f"ALTER TABLE {old_table} RENAME TO {new_table}",
+            f"ALTER INDEX {old_index} RENAME TO {new_index}",
+        ))
+        assert set(inventory.tables) == {"active_flows"}
+        table = inventory.tables["active_flows"]
+        assert table.name == "active_flows"
+        assert table.create_sql == f"CREATE TABLE {new_table} (expires_at TIMESTAMPTZ NOT NULL)"
+        assert set(inventory.indexes) == {"active_expiry"}
+        index = inventory.indexes["active_expiry"]
+        assert index.name == "active_expiry" and index.table_name == "active_flows"
+        assert index.sql == f"CREATE INDEX {new_index} ON {new_table} (expires_at)"
+
     def test_schema_inventory_captures_postgres_migration_head_objects(self):
         from core.schema_manifest import POSTGRES_BACKEND_ARTIFACTS, current_postgres_migration_schema_inventory
 
@@ -18861,7 +18885,7 @@ class TestEntrypointWorkspaceRepair:
             assert state["metrics_module_loaded"] is False
 
         assert payload["factory_distinct"] is True
-        assert payload["factory_blueprint_count"] == 17
+        assert payload["factory_blueprint_count"] == 18
         assert payload["factory_override_false"] is False
         assert payload["factory_override_true"] is True
         assert payload["factory_testing_override"] is True

@@ -1759,6 +1759,23 @@ def container_smoke_test_nuclei_templates(container_smoke_test) -> None:
     )
 
 
+def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_test):
+    # Run the installed tool with the same bypass-entrypoint shape documented
+    # for a deployment that cannot start. No web/DB service is needed by it.
+    command = container_smoke_test.compose + [
+        "run", "--rm", "--no-deps", "--entrypoint", "python",
+        "-e", "ACCESS_PROFILE=invalid-private-profile", "shell", "/app/tools/check_instance_config.py",
+    ]
+    help_result = _run(command + ["--help"], timeout=60)
+    assert "--local-yaml" in help_result.stdout
+    invalid = _run(command + ["--json"], timeout=60, check=False)
+    assert invalid.returncode == 2
+    payload = json.loads(invalid.stdout)
+    assert payload["valid"] is False and payload["fields"] == ["access_profile"]
+    assert "invalid-private-profile" not in invalid.stdout + invalid.stderr
+    assert "Traceback" not in invalid.stderr
+
+
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
 

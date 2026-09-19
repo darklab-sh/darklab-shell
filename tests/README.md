@@ -121,7 +121,7 @@ for the final local backend check.
 
 Backup coverage checks the optional operator Compose copy, private permissions, manifest and checksum coverage, rejection of invalid inputs before writes, and restore behavior with both older archives and existing destination overrides. Lifecycle coverage checks that the wrapper passes the override to the archive helper.
 
-Catalog and validator coverage in `test_config_inspection.py` checks complete reviewed metadata, shared constraint bounds, fail-closed nested disclosure, sensitive count/presence summaries, bounded output, and subprocess exit behavior under broken startup configuration.
+Catalog and validator coverage in `test_config_inspection.py` checks complete reviewed metadata, shared constraint bounds, fail-closed nested disclosure, sensitive count/presence summaries, bounded output, and subprocess exit behavior under broken startup configuration. The deterministic container smoke suite also invokes the installed checker with the entrypoint bypassed and invalid configuration, proving that help and sanitized validation remain available.
 
 Configuration loader characterization in `test_config_builder.py` pins overlay and environment precedence, nested provenance, derived sizes, normalization warnings, unknown-key exclusion, and invalid-input outcomes independently of the loader implementation.
 
@@ -194,6 +194,8 @@ A practical local loop is usually:
 Operator console qualification adds exact page/data/verification denials, trusted-proxy boundaries, PAT and Team-role rejection, grant revocation, safe disclosure, `/diag` parity, and actor attribution on SQLite and Postgres. Real isolated processes prove loaded snapshots ignore later YAML/environment edits. Vitest covers literal rendering, combined filters, failed refreshes, safe returns, and out-of-order responses. `operator-console.spec.js` runs desktop/mobile credential and provider journeys in both asset modes and the PostgreSQL profile matrix. Its local fixture tool changes only each isolated server's database; it adds no HTTP fixture endpoint.
 
 Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
+
+Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, and audit rollback. Backup and database-migration fixtures preserve explicit grants. Schema inventories track the table and index renames used by the provider-flow upgrade, and populated upgrade tests preserve pending sign-in and linking flows.
 
 These summaries explain what belongs in each layer. Use the live-listing commands above when you need the current test inventory.
 
@@ -657,5 +659,3 @@ Practical note:
 - [ARCHITECTURE.md](../ARCHITECTURE.md#test-suite) - testing architecture and runtime boundaries
 - [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation contracts enforced by the meta-tests
 - [ui-capture-scenes.md](ui-capture-scenes.md) - visual-review scenes and capture workflow
-
-Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, and audit rollback. Backup and database-migration fixtures preserve explicit grants.
