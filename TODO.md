@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Unify operator access and separate metrics network permissions](#unify-operator-access-and-separate-metrics-network-permissions)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Feature Enhancements](#feature-enhancements)
 - [Research](#research)
@@ -33,6 +34,51 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile changes reviewable with explicit transition tests.
 
 Exercise open and restricted modes in a production-like staging deployment during the `release/3.0` candidate cycle, starting with `v3.0.0-rc.1`. Use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Confirm the release gates pass on both database backends and the complete documentation reflects shipped behavior before the final release.
+
+### Unify operator access and separate metrics network permissions
+
+Use the existing principal-bound operator grant for `/admin/`, `/diag`, and every `/diag/*` route. Operators should be able to use these pages from any network after signing in and completing recent verification. Replace `diagnostics_allowed_cidrs` with `metrics_allowed_cidrs` for `/metrics` only; don't introduce a replacement network restriction for operator pages.
+
+The main implementation surfaces are `app/services/auth/operator_access.py`, the request hooks in `app/app.py`, `app/blueprints/admin.py`, `app/blueprints/assets_diag.py`, `app/blueprints/assets_audit.py`, `app/blueprints/content.py`, `app/services/ai/assists.py`, and the shared configuration builder/catalog. Reuse the existing grant and browser-session services, [operator verification policy](CONFIGURATION.md#operator-settings-console), [logging contracts](docs/logging.md), and [frontend contracts](ARCHITECTURE.md#front-end-design).
+
+- [ ] **1. Establish one operator access policy without an IP gate.**
+  - Require an active principal, a current operator grant, an eligible browser-cookie session, and recent credential or signed-provider verification. Team roles, PATs, direct credential headers, and membership in the metrics allowlist must not confer operator access.
+  - Remove the CIDR dependency from `/admin/`, its verification page, and provider verification callbacks as well as diagnostics. Recheck grants and session eligibility through the shared service; keep failures closed when authentication storage is unavailable.
+  - Preserve the existing `token_required`, `oidc_required`, and `mixed` profile rules. Operator routes remain unavailable in `open`; a dedicated operator sign-in flow for public deployments is outside this task. Document that existing network-only diagnostics in open deployments will no longer be available.
+  - Apply `admin_console_reauth_minutes` consistently across operator pages, updating its description to reflect the shared verification window. Preserve absolute session deadlines and verified provider timestamps; activity and page refreshes must not extend verification.
+- [ ] **2. Make the metrics allowlist independent and migrate the old setting.**
+  - Add `metrics_allowed_cidrs` with an empty-list default. Require both `metrics_enabled` and a matching client IP for `/metrics`, retaining trusted-proxy handling. Scrapes must work without browser sign-in, operator grants, or operator verification.
+  - Accept `diagnostics_allowed_cidrs` as a deprecated metrics-only alias for one compatibility release. Normalize the alias within each configuration layer before validation: an explicit canonical key in the same layer wins, including an empty list; higher-priority layers retain their normal precedence. Preserve truthful provenance and issue a bounded deprecation warning without logging CIDR values.
+  - Cover legacy-only, canonical-only, both-key, empty-list, and cross-layer configurations. Neither key may authorize an operator page, grant a principal any privilege, or bypass an AI quota. Record the alias removal release in the migration guidance when implementing the change.
+  - Update typed configuration, the pure builder, shipped examples, the inspection catalog, standalone validation, and affected fixtures/helpers together. Expose one canonical metrics setting in the operator inventory, with accurate source and migration guidance.
+- [ ] **3. Protect the complete diagnostics route family.**
+  - Apply the shared policy before handlers read data or launch probes for `/diag`, its JSON representation, `/diag/audit`, `/diag/audit/export`, `/diag/classifier-inspector`, `/diag/classifier-drift`, and `POST /diag/ai-test`. Review the route inventory so no representation or auxiliary endpoint retains network-only access.
+  - Keep ineligible principals hidden behind the existing generic denial behavior. Distinguish sign-in from stale verification for eligible browser journeys, while invalid or revoked credentials continue to fail closed.
+  - Recheck authorization before export data is emitted and at the applicable streaming boundaries. Preserve bounded exports, redaction, and current disclosure rules; operator inspection must not grant general workspace access or configuration writes.
+  - Keep the AI test an explicit, CSRF-protected POST with bounded rate limits. Use the authenticated operator as the identity for its per-operator limit, retaining applicable provider/global protections; rendering or refreshing diagnostics must not run that test.
+- [ ] **4. Share verification, privacy, and expired-access behavior.**
+  - Generalize the current `/admin/`-specific request matching and return handling. Credential and provider verification must return to the requested operator page using validated same-origin paths, preserving useful audit filters without replaying a POST or probe.
+  - Return an explicit unauthorized JSON response and safe verification destination to background data requests instead of redirecting them to an HTML sign-in form. Update diagnostics refreshes, classifier requests, AI-test handling, and audit interactions to understand this contract.
+  - Clear displayed diagnostic/audit data on access loss, stop further protected refreshes until access is restored, and ignore stale responses that arrive afterward. Preserve browsing state only while access remains valid; information already downloaded cannot be recalled.
+  - Apply the shared private/no-store response policy to operator pages, JSON, exports, redirects, and errors. Keep cookie/session CSRF protections intact through verification and profile changes.
+- [ ] **5. Align navigation and remove the unrelated AI quota exemption.**
+  - Derive desktop/mobile diagnostics and settings navigation from the same operator eligibility policy. An eligible operator with stale verification should still be able to select a page and complete verification; a metrics-allowed client without a grant must not see operator navigation.
+  - Remove the `diagnostics_allowed_cidrs` exemption from ordinary AI-assist workspace quotas, including browser and API callers. Operators follow normal workspace/global limits; any future exemption requires a separate explicit policy and is outside this task.
+  - Preserve safe request attribution and existing rate-limit failure behavior. Update messages and documentation that currently describe an IP-based testing exemption.
+- [ ] **6. Attribute diagnostic access to the operator.**
+  - Include the authenticated principal and existing safe request context in diagnostic view, audit view/export, and AI-test records. Keep event levels, field types, and denial reasons consistent with `docs/logging.md` and the existing operator audit conventions.
+  - Record meaningful access and export outcomes without dumping configuration, audit rows, provider responses, credential material, or unreviewed filter values. Avoid multiplying log/audit volume through automatic refreshes, and preserve truthful completion/failure behavior for streamed exports.
+- [ ] **7. Qualify authorization, migration, and browser behavior.**
+  - Add focused backend coverage on SQLite and disposable Postgres for eligible operators outside the old allowlist, ungranted users inside the metrics allowlist, anonymous callers, disabled principals, revoked grants/credentials, expired sessions, stale verification, invalid authentication, and unavailable authentication storage.
+  - Exercise every protected HTML, JSON, export, and POST endpoint, including CSRF failures and revocation before export or probe execution. Verify trusted and spoofed proxy headers affect metrics access correctly and never establish operator authority.
+  - Prove an empty metrics allowlist or disabled metrics endpoint leaves eligible operator access available. Prove an allowed scraper needs no browser credentials, while neither the old nor new CIDR setting nor an operator grant bypasses ordinary AI quotas.
+  - Cover alias normalization, precedence, explicit empty overrides, deprecation warnings, catalog parity, and standalone-checker/runtime agreement. Qualify restricted-profile transitions and the explicit denial of operator pages in open mode.
+  - Add focused Vitest tests for navigation and refresh/expiry handling. Run desktop/mobile Playwright coverage in source and bundle modes across credential, mixed-provider, and provider-only profiles, plus the documented Postgres access-profile matrix. Cover direct links, verification returns, audit filters/exports, safe AI-test interaction, and content clearing after access loss.
+  - Generate assets before browser qualification and run the relevant lint, route-contract, configuration, logging, documentation, and asset checks. Keep failure artifacts and CI's flaky-test guards intact.
+- [ ] **8. Document the implemented access model and finish the migration.**
+  - Update `CONFIGURATION.md` with metrics-only CIDRs, the compatibility alias, operator grant/sign-in/recovery instructions, the shared verification window, open-profile behavior, removal of the AI quota exemption, and the actual restart/recreation requirements.
+  - Align README/FEATURES user guidance, ARCHITECTURE's authorization and route contracts, DECISIONS' rationale, `docs/logging.md`, tests/README, and relevant UI guidance. Review other maintained docs and any local release drafts for affected claims without describing unfinished behavior as shipped.
+  - Record the completed behavior and compatibility changes in the active changelog, then remove this TODO. Keep a separate follow-up TODO for retiring the deprecated alias after its documented compatibility release.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 

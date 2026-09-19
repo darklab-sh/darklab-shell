@@ -9,18 +9,8 @@
 {% endblock %}
 {% block body_class %}permalink-page diag-page admin-page{% endblock %}
 {% block content %}
-<div class="diag-topbar">
-  <header class="export-header diag-header">
-    <div class="export-header-copy diag-header-copy">
-      <h1 class="diag-header-title">Operator settings</h1>
-      <span class="diag-header-meta">{{ app_name }} · read only</span>
-    </div>
-    <div class="diag-header-actions">
-      <a href="/diag" class="btn btn-secondary btn-compact">Diagnostics</a>
-      <a href="/" class="btn btn-secondary btn-compact">Back to shell</a>
-    </div>
-  </header>
-</div>
+{% from "operator_header.html" import operator_header %}
+{{ operator_header(app_name, 'admin', 'operator settings · read only') }}
 <main class="diag-main admin-main" id="admin-console">
   <section class="admin-intro" aria-labelledby="admin-boundary">
     <div class="admin-intro-copy">

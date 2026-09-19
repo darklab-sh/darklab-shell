@@ -44,13 +44,13 @@
     },
     "diag": {
       "type": "css",
-      "path": "/static/build/diag.45272d45ca01.css",
-      "hash": "45272d45ca0174f8c1d70bf575da28850406fcde1912683540082644c1e3bc89",
+      "path": "/static/build/diag.5a8673886a4f.css",
+      "hash": "5a8673886a4f41696ba2e3f8da24fbc9573dbbd688dcd846d8b058f4fb3f815f",
       "sources": [
         "/static/css/diag.css"
       ],
       "source_hashes": {
-        "/static/css/diag.css": "9904430adbd499d6436856847394e440e0ab2cca493566e3f43d91dceee14a61"
+        "/static/css/diag.css": "abfcf765e2870e9a054b5c101f5e4b467674fba8703e8a188dd47a3197a8d713"
       }
     },
     "shell-bootstrap": {
@@ -337,13 +337,13 @@
     },
     "admin-console": {
       "type": "css",
-      "path": "/static/build/admin-console.249d8f36c59a.css",
-      "hash": "249d8f36c59a8bc5646006b52da537b7a35e5477be957ad49d7c46baa351f598",
+      "path": "/static/build/admin-console.add42a4fe46d.css",
+      "hash": "add42a4fe46dbda95a821623e2090e8161f4a8111f9bd89146a112ab26b7dde0",
       "sources": [
         "/static/css/admin-console.css"
       ],
       "source_hashes": {
-        "/static/css/admin-console.css": "701794b809d860a0861bf51378fe718d8ba8344698bca417261a6e6ae4b7c2b7"
+        "/static/css/admin-console.css": "f60faf452f1c00950178352acb3dbb9ea3bc49dc31e08d1e031c8f10391a4d2a"
       }
     },
     "admin": {

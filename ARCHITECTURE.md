@@ -925,6 +925,8 @@ Package wizard redraws reuse a focused text field when it remains on the current
 
 Autocomplete startup allows one retry after a failed network request or server error, with a 250 ms delay and no overlapping requests. Authorization, malformed JSON, and unexpected client errors remain terminal. A completed catalog is published through the shared autocomplete state before dependent workspace hints load; browser readiness checks observe that state.
 
+Diagnostics, Audit log, and Operator settings compose `operator_header.html`, which owns their app title, page subtitle, and links to the other operator pages. Diagnostics and audit freshness indicators stay outside the header in the shared top bar. Desktop overflow links open Diagnostics and Operator settings with `noopener noreferrer`; mobile navigation stays in the same tab and exposes the shared back-to-shell link.
+
 The standalone Operator settings page composes shared form controls, synchronized app-select menus, and `bindDisclosure` category and detail headers. Its controller keeps separate filtered and unfiltered category state plus keyed setting, long-value, and schema disclosure state in memory. Filtering opens matching categories; clearing filters restores unfiltered expansion. Refresh captures current focus and scroll when the response arrives, restores corresponding visible controls, and falls back to search when a focused setting disappears. A compact filter bar stays at the top on wide, tall viewports and returns to document flow on narrow or short screens. Loaded configuration timestamps use explicit UTC; refresh completion has a separate status.
 
 ### Frontend Composition

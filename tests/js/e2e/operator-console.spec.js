@@ -41,6 +41,33 @@ async function choose(page, label, option) {
   await page.getByRole('listbox').getByRole('option', { name: option, exact: true }).click();
 }
 
+async function browseOperatorPages(page, appName, width, testInfo) {
+  const pages = [
+    { path: '/admin/', subtitle: 'operator settings · read only', next: 'diagnostics' },
+    { path: '/diag', subtitle: 'operator diagnostics', next: 'audit log' },
+    { path: '/diag/audit', subtitle: 'audit log', next: 'operator settings' },
+  ];
+  for (const current of pages) {
+    await page.waitForURL(url => url.pathname === current.path, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.diag-header-title')).toHaveText(appName);
+    await expect(page.locator('.diag-header-meta')).toHaveText(current.subtitle);
+    const navigation = page.getByRole('navigation', { name: 'Operator pages' });
+    expect(await navigation.locator('.diag-nav-btn').evaluateAll(links => links.map(link => link.getAttribute('href')).sort()))
+      .toEqual(pages.filter(other => other.path !== current.path).map(other => other.path).sort());
+    for (const link of await navigation.locator('.diag-nav-btn').all()) {
+      await expect(link).toBeVisible();
+      if (width < 600) expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    }
+    if (width < 600) await expect(navigation.getByRole('link', { name: 'back to shell' })).toBeVisible();
+    else await expect(navigation.getByRole('link', { name: 'back to shell' })).toBeHidden();
+    if (current.path !== '/admin/') await expect(page.locator('.diag-refreshed-at time')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.locator('.diag-topbar').screenshot({ path: testInfo.outputPath(`operator-header-${width}-${current.path.split('/').filter(Boolean).join('-')}.png`) });
+    await navigation.getByRole('link', { name: current.next, exact: true }).click();
+  }
+  await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
+}
+
 async function browseInventory(page, inventory, width, testInfo) {
   const base = inventory.settings.find(row => row.key === 'ai_allow_full_output');
   const data = { ...inventory, warnings: [], host_settings: inventory.host_settings.slice(0, 1), settings: [
@@ -155,7 +182,8 @@ async function browseInventory(page, inventory, width, testInfo) {
 for (const width of [1280, 375]) {
   test.describe(`viewport ${width}`, () => {
     test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 });
-  test(`operator console at ${width}px`, async ({ page }, testInfo) => {
+  test(`operator console at ${width}px`, async ({ page: shellPage }, testInfo) => {
+    let page = shellPage;
     const { slot, provider } = fixtureInfo(testInfo.project.name);
     if (!slot) {
       expect((await page.request.get('/admin/')).status()).toBe(404);
@@ -184,13 +212,20 @@ for (const width of [1280, 375]) {
         await page.locator('[data-menu-action="admin"]').click();
       } else {
         await page.locator('#rail-more-btn').click();
+        const opened = page.context().waitForEvent('page');
         await page.locator('[data-action="admin"]').click();
+        page = await opened;
+        await page.waitForLoadState('domcontentloaded');
+        expect(await page.evaluate(() => window.opener)).toBeNull();
+        expect(new URL(shellPage.url()).pathname).toBe('/');
+        await ensurePromptReady(shellPage);
       }
       await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
       const inventory = (await browserRead(page, '/admin/settings')).body;
       expect(inventory.observation.kind).toBe("serving web worker's loaded configuration");
       expect(inventory.settings.find(row => row.key === 'oidc_client_secret').effective.mode).toBe('withheld');
       expect(JSON.stringify(inventory)).not.toContain('playwright-only-secret');
+      await browseOperatorPages(page, inventory.settings.find(row => row.key === 'app_name').effective.value, width, testInfo);
       await page.getByLabel('Search settings').fill('ai_base_url');
       await expect(page.locator('[data-key="ai_base_url"]')).toContainText('Not configured');
       await choose(page, 'Source', 'Host · not observed');

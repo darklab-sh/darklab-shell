@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 mmayhew */
 /* SPDX-License-Identifier: AGPL-3.0-only */
 
-body.admin-page .diag-main.admin-main, body.admin-page .diag-header { max-width: 1100px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 24px; }
+body.admin-page .diag-main.admin-main { max-width: 1100px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 24px; }
 body.admin-page { height: auto; overflow-anchor: none; }
 body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex: none; }
 .admin-intro, .admin-setting { border: 1px solid var(--border); border-radius: var(--radius-card, 8px); padding: 18px; background: var(--panel); }
@@ -21,7 +21,7 @@ body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex:
 .admin-results-toolbar, .admin-results-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .admin-results-toolbar { justify-content: space-between; margin-top: 14px; }
 .admin-results-toolbar p { margin: 0; }
-.admin-page .btn { min-height: 44px; }
+.admin-main .btn { min-height: 44px; }
 .admin-category { margin-top: 16px; }
 .admin-group-title { margin: 0; font-size: 15px; }
 .admin-disclosure-trigger { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; white-space: normal; text-align: left; line-height: 1.5; }
@@ -50,10 +50,9 @@ body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex:
   .admin-page :is(button, input, pre) { scroll-margin-block: 24px; }
 }
 @media (max-width: 760px) {
-  body.admin-page .diag-main.admin-main, body.admin-page .diag-header { padding: 16px; }
+  body.admin-page .diag-main.admin-main { padding: 16px; }
   .admin-filters { grid-template-columns: 1fr; }
   .admin-filters .form-control, .admin-filters .app-select-trigger { font-size: 16px; }
   .admin-setting, .admin-intro { padding: 14px; }
   .admin-metadata > div { grid-template-columns: 1fr; gap: 2px; }
-  .admin-page .diag-header, .admin-page .diag-header-actions { flex-wrap: wrap; }
 }
