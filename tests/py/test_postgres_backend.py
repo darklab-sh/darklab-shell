@@ -1952,6 +1952,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0083",
         "0084",
         "0085",
+        "0086",
     ]
     assert applied_again == []
     table_rows = conn.execute(
