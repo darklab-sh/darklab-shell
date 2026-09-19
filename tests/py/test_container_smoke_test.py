@@ -308,7 +308,7 @@ def _cleanup_compose_project_resources(project: str) -> None:
     )
     container_ids = [line.strip() for line in containers.stdout.splitlines() if line.strip()]
     if container_ids:
-        _run(["docker", "rm", "-f", *container_ids], timeout=60, check=False)
+        _run(["docker", "rm", "--force", "--volumes", *container_ids], timeout=60, check=False)
 
     networks = _run(
         ["docker", "network", "ls", "--filter", f"label={label}", "--format", "{{.ID}}"],
@@ -1682,7 +1682,9 @@ def container_smoke_test():
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
             if logs.stdout.strip():
                 print("[container-smoke-test] container logs:\n" + logs.stdout, flush=True)
-            subprocess.run(["docker", "rm", "-f", runtime_container_name], cwd=ROOT, capture_output=True, text=True)
+            subprocess.run(
+                ["docker", "rm", "--force", "--volumes", runtime_container_name], cwd=ROOT, capture_output=True, text=True
+            )
             print(f"[container-smoke-test] stopping services: {project}", flush=True)
             subprocess.run(compose + ["down", "--rmi", "local", "--volumes"], cwd=ROOT, capture_output=True, text=True)
             _cleanup_compose_project_resources(project)
@@ -1813,7 +1815,7 @@ def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):
         assert completed, f"TruffleHog did not report scan completion: {result.stderr}"
         assert completed[-1]["chunks"] >= 1
     finally:
-        _run(["docker", "rm", "--force", name], timeout=30, check=False)
+        _run(["docker", "rm", "--force", "--volumes", name], timeout=30, check=False)
 
 
 def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):

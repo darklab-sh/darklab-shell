@@ -1738,7 +1738,7 @@ release-public-smoke:
         || release_check_failed public_compose_runtime durable_data_marker present missing
   after_script:
     - |
-      docker rm -f "darklab-release-probe-${CI_JOB_ID}" >/dev/null 2>&1 || true
+      docker rm --force --volumes "darklab-release-probe-${CI_JOB_ID}" >/dev/null 2>&1 || true
       if [ -f "$CI_PROJECT_DIR/release-install/compose.yaml" ]; then
         cleanup_compose() {
           if [ -f "$CI_PROJECT_DIR/release-compose-smoke.override.yaml" ]; then

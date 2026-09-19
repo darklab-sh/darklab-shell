@@ -31,6 +31,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
+
+- **Backup exports reject missing Docker volume sources.** The helper checks source volumes before export, so a misspelled or unavailable source fails instead of creating an empty named volume and recording an empty export. Existing source volumes remain in place.
+
 - **Operator pages share consistent headers and navigation.** Diagnostics, Audit log, and Operator settings show the app name, a page subtitle, and links to the other two pages. The desktop overflow menu opens Operator settings in a separate tab or window, keeping the shell available.
 
 - **Operator settings stay easy to browse as the inventory grows.** Group, source, and warning filters respond immediately, including styled dropdown and keyboard selection after refresh. Expandable groups show match counts, Clear filters restores the earlier browsing view, and refresh preserves expanded details, focus, and scroll. Compact cards separate loaded sources from host configuration locations and explain accepted values in plain language; desktop filters stay within reach and mobile controls remain touch-safe. Failed or expired refreshes still clear the inventory.

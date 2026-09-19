@@ -1030,5 +1030,70 @@ def test_workspace_volume_source_with_container_exports_with_docker_cp(tmp_path,
     assert (tmp_path / "stage" / "workspaces" / "team_abc" / "notes.txt").read_text(encoding="utf-8") == "shared\n"
 
 
+def _copy_named_volume_source(ctx, source_kind, stage):
+    if source_kind == "workspaces":
+        source = backup_system._parse_workspace_source("volume:backup-source", "/workspaces")
+        backup_system.copy_workspace(ctx, source, stage)
+    else:
+        source = backup_system._parse_data_source("volume:backup-source", "/data")
+        backup_system.copy_data_dir(ctx, source, stage, exclude=set())
+
+
+@pytest.mark.parametrize("source_kind", ["data", "workspaces"])
+@pytest.mark.parametrize("inspection_error", ["No such volume: backup-source", "Docker access denied"])
+def test_named_volume_export_stops_when_source_inspection_fails(tmp_path, monkeypatch, source_kind, inspection_error):
+    ctx = backup_system.BackupContext(
+        args=backup_system.parse_args(["--output-dir", str(tmp_path)]),
+        output_dir=tmp_path,
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        assert command[:3] == ["docker", "volume", "inspect"]
+        return subprocess.CompletedProcess(command, 1, "", inspection_error)
+
+    monkeypatch.setattr(backup_system.subprocess, "run", fake_run)
+    stage = tmp_path / "stage"
+    with pytest.raises(backup_system.BackupError, match="backup source volume inspection failed"):
+        _copy_named_volume_source(ctx, source_kind, stage)
+
+    assert len(calls) == 1
+    assert calls[0][-1] == "backup-source"
+    assert not stage.exists()
+    assert not ctx.included
+
+
+@pytest.mark.parametrize("source_kind", ["data", "workspaces"])
+def test_named_volume_export_copies_an_existing_source(tmp_path, monkeypatch, source_kind):
+    ctx = backup_system.BackupContext(
+        args=backup_system.parse_args(["--output-dir", str(tmp_path)]),
+        output_dir=tmp_path,
+    )
+    calls = []
+    stage = tmp_path / "stage"
+    destination = stage / source_kind
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        if command[:3] == ["docker", "volume", "inspect"]:
+            assert not destination.exists()
+            return subprocess.CompletedProcess(command, 0, "backup-source\n", "")
+        assert command[:3] == ["docker", "run", "--rm"]
+        assert len(calls) == 2 and calls[0][-1] == "backup-source"
+        assert "backup-source:/source:ro" in command
+        assert f"{destination}:/backup" in command
+        (destination / "marker.txt").write_text("preserved\n", encoding="utf-8")
+        return subprocess_completed(command)
+
+    monkeypatch.setattr(backup_system.subprocess, "run", fake_run)
+    _copy_named_volume_source(ctx, source_kind, stage)
+
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "preserved\n"
+    assert ctx.included[-1]["source"] == "backup-source"
+    assert ctx.included[-1]["file_count"] == 1
+    assert len(calls) == 2
+
+
 def subprocess_completed(command):
     return subprocess.CompletedProcess(command, 0, "", "")
