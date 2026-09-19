@@ -1795,6 +1795,27 @@ def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
 
 
+def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):
+    name = "trufflehog-smoke-" + uuid.uuid4().hex[:12]
+    try:
+        result = _run([
+            "docker", "run", "--rm", "--name", name,
+            "--network", "none", "--read-only", "--user", "scanner:appuser",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+            "--entrypoint", "sh", container_smoke_test.image_tag, "-c",
+            "set -eu; mkdir /tmp/trufflehog-fixture; "
+            "printf 'An ordinary file without credentials.\\n' > /tmp/trufflehog-fixture/readme.txt; "
+            "exec trufflehog --no-update --no-verification --json filesystem /tmp/trufflehog-fixture",
+        ], timeout=60)
+        assert not result.stdout.strip(), "the innocuous fixture must not produce secret findings"
+        events = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+        completed = [event for event in events if event.get("msg") == "finished scanning"]
+        assert completed, f"TruffleHog did not report scan completion: {result.stderr}"
+        assert completed[-1]["chunks"] >= 1
+    finally:
+        _run(["docker", "rm", "--force", name], timeout=30, check=False)
+
+
 def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):
     session_id = _new_smoke_session_id()
     definition = {
