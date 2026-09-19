@@ -158,6 +158,8 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 The operator verification form at `/admin/reauth` requires an eligible browser session and the allowed diagnostics network. Credential re-entry must belong to the same principal. Provider verification requests fresh sign-in and checks the signed authentication time; a silent provider session without that proof cannot qualify. Successful verification rotates the browser session while preserving its original absolute expiry. Reads refresh ordinary activity but never verified authentication time: the 30-minute console freshness and 30-minute idle defaults deliberately measure different things. Idle or absolute expiry requires a new ordinary sign-in.
 
+Provider sign-in time and verified provider authentication time are tracked separately. Ordinary sign-in still allows **Sign out everywhere** for five minutes, even when the provider omits `auth_time`. Console access requires recent signed provider proof; existing sessions without that proof must verify again.
+
 Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
 
 The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.

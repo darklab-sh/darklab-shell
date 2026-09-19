@@ -75,6 +75,7 @@ class ResolvedBrowserSession:
     credential_expires_at: str | None
     absolute_expires_at: str
     authenticated_at: str
+    provider_authenticated_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,7 @@ def create_browser_session(
     absolute_seconds: int,
     replace_session_id: str = "",
     authenticated_at: str | None = None,
+    provider_authenticated_at: str | None = None,
     absolute_expires_at: str | None = None,
     now: datetime | None = None,
     conn: Any | None = None,
@@ -275,8 +277,8 @@ def create_browser_session(
         active_conn.execute(
             "INSERT INTO browser_sessions "
             "(id, principal_id, credential_id, oidc_identity_id, signing_key_version, csrf_digest, created_at, "
-            "authenticated_at, last_seen_at, absolute_expires_at, revoked_at, revocation_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')",
+            "authenticated_at, provider_authenticated_at, last_seen_at, absolute_expires_at, revoked_at, revocation_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')",
             (
                 session_id,
                 principal_id,
@@ -286,6 +288,7 @@ def create_browser_session(
                 _csrf_digest(csrf_token),
                 created,
                 timestamp(_as_utc(authenticated_at)) if authenticated_at else created,
+                timestamp(_as_utc(provider_authenticated_at)) if provider_authenticated_at else None,
                 created,
                 timestamp(expires_at),
             ),
@@ -471,6 +474,8 @@ def resolve_browser_session(
                 ),
                 absolute_expires_at=timestamp(_as_utc(data["absolute_expires_at"])),
                 authenticated_at=timestamp(_as_utc(data["authenticated_at"])),
+                provider_authenticated_at=(timestamp(_as_utc(data["provider_authenticated_at"]))
+                                           if data.get("provider_authenticated_at") else None),
             ),
         )
 

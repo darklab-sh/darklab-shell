@@ -328,9 +328,9 @@ def oidc_callback():
         identity = oidc.complete_identity(active_config(), flow, proof.issuer, proof.subject)
         credential_id = ""
         oidc_identity_id = identity.id
-        # A newly created browser session is not evidence of fresh provider
-        # authentication. Missing proof deliberately forces console step-up.
-        authenticated_at: str | None = proof.authenticated_at or "1970-01-01T00:00:00+00:00"
+        # Ordinary sign-in recency and signed provider proof have distinct
+        # policies. Missing auth_time only forces operator-console step-up.
+        authenticated_at: str | None = None
         absolute_expires_at: str | None = None
         if flow.purpose == "link":
             credential_id, authenticated_at, absolute_expires_at = oidc.linked_credential_source(flow)
@@ -340,6 +340,7 @@ def oidc_callback():
                 principal_id=identity.principal_id, absolute_seconds=_session_cookie_seconds(),
                 replace_session_id=flow.browser_session_id, credential_id=credential_id,
                 oidc_identity_id=oidc_identity_id, authenticated_at=authenticated_at,
+                provider_authenticated_at=proof.authenticated_at if oidc_identity_id else None,
                 absolute_expires_at=absolute_expires_at,
             )
             if flow.purpose == "sign_in" and flow.browser_session_id:

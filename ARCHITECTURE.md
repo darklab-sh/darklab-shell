@@ -2611,6 +2611,8 @@ The separate `/admin/` page and `/admin/settings` payload use the captured resul
 
 `services/auth/operator_access.py` enforces the network and profile gates before authentication hooks can disclose console availability. A current principal grant, cookie session, and verified freshness are required; Team roles and direct credentials/PATs confer no console authority. Credential and signed-provider step-up rotate a locked, revalidated source session with its original absolute deadline. Successful inventory reads record a bounded actor-attributed audit event; client-side filtering creates no audit traffic. The standalone ES module renders only the redacted response with text nodes, ignores stale requests, and clears inventory on access loss or refresh failure. It publishes no inventory through browser bootstrap configuration or persistent browser storage.
 
+Browser sessions retain the ordinary `authenticated_at` sign-in clock for existing recency policies. The separate nullable `provider_authenticated_at` stores only a verified provider claim and drives console freshness for OIDC sessions. Missing claims and pre-upgrade sessions remain unknown; migration never infers provider proof from a session creation timestamp. Privilege-change rotation carries both clocks without changing the original absolute expiry.
+
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob. The full theme contract lives in its own top-level section below.
 
 ---

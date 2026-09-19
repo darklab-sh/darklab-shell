@@ -223,6 +223,7 @@ def rotate_browser_session_after_privilege_change(response):
         absolute_seconds=absolute_seconds,
         replace_session_id=context.browser_session_id,
         authenticated_at=context.browser_session_authenticated_at,
+        provider_authenticated_at=context.browser_session_provider_authenticated_at,
         absolute_expires_at=context.browser_session_absolute_expires_at,
     )
     response.set_cookie(

@@ -20,7 +20,7 @@ from services.assets.diagnostics import (
     diag_database_stats,
     diag_table_storage_breakdown,
     diag_usage_stats,
-    format_bytes as _storage_fmt_bytes,
+    format_bytes as _diag_fmt_bytes,
 )
 from services.ai.client import AIClientError
 from services.ai.diagnostics import provider_probe as ai_provider_probe
@@ -52,11 +52,6 @@ def _require_diag_access() -> str:
         log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
         abort(404)
     return client_ip
-
-
-def _diag_fmt_bytes(n) -> str:
-    """Short byte size: '12.4 KB', '3.0 MB', etc. Used by the vendor probe."""
-    return _storage_fmt_bytes(n)
 
 
 def _diag_row_value(row, key: str, index: int, default=None):

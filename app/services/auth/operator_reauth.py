@@ -48,7 +48,7 @@ def rotate_verified_session(
                     or credential_context.credential_type != "portable" or config["access_profile"] == "oidc_required"):
                 raise OperatorReauthenticationError("verification is unavailable")
             credential_id, identity_id = credential_context.credential_id, ""
-            authenticated_at = timestamp(active_now)
+            provider_authenticated_at = None
         else:
             if config["access_profile"] not in {"oidc_required", "mixed"} or not source["oidc_identity_id"]:
                 raise OperatorReauthenticationError("verification is unavailable")
@@ -56,11 +56,12 @@ def rotate_verified_session(
                     or not provider_proof.authenticated_at):
                 raise OperatorReauthenticationError("verification is unavailable")
             credential_id, identity_id = "", source["oidc_identity_id"]
-            authenticated_at = provider_proof.authenticated_at
+            provider_authenticated_at = provider_proof.authenticated_at
         issued = browser_sessions.create_browser_session(
             principal_id=context.principal_id, credential_id=credential_id, oidc_identity_id=identity_id,
             absolute_seconds=int(config["browser_session_absolute_hours"]) * 3600,
-            replace_session_id=context.browser_session_id, authenticated_at=authenticated_at,
+            replace_session_id=context.browser_session_id, authenticated_at=timestamp(active_now),
+            provider_authenticated_at=provider_authenticated_at,
             absolute_expires_at=source["absolute_expires_at"], now=active_now, conn=conn,
         )
         fields = request_fields or {}

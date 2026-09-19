@@ -40,8 +40,9 @@ def main():
         from core.database_access import get_db_connect
         from services.auth.contracts import timestamp
         with get_db_connect()() as conn:
-            conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE principal_id = ?",
-                         (timestamp(datetime.now(timezone.utc) - timedelta(hours=2)), args.principal))
+            stale = timestamp(datetime.now(timezone.utc) - timedelta(hours=2))
+            conn.execute("UPDATE browser_sessions SET authenticated_at = ?, provider_authenticated_at = ? WHERE principal_id = ?",
+                         (stale, stale, args.principal))
             conn.commit()
 
 

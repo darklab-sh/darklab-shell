@@ -45,7 +45,8 @@ def navigation_eligible():
 
 
 def fresh(context, *, now=None):
-    value = context.browser_session_authenticated_at
+    value = (context.browser_session_provider_authenticated_at if context.credential_type == "oidc"
+             else context.browser_session_authenticated_at)
     if not value:
         return False
     try:

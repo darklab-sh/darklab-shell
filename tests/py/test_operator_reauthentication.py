@@ -173,8 +173,8 @@ def test_expiry_is_evaluated_after_waiting_for_locks(operator_db, monkeypatch):
         )
 
 
-def provider_setup(operator_db, monkeypatch):
-    config = _config().with_overrides({
+def provider_setup(operator_db, monkeypatch, profile="oidc_required"):
+    config = _config(profile).with_overrides({
         "database_backend": operator_db.cfg["database_backend"], "database_url": operator_db.cfg["database_url"],
         "data_dir": operator_db.cfg["data_dir"], "diagnostics_allowed_cidrs": ["127.0.0.0/8"],
     })
@@ -236,14 +236,81 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
     assert "private" in result.headers["Cache-Control"]
 
 
-def test_missing_provider_auth_time_never_looks_fresh(operator_db, monkeypatch):
-    app, client, provider, _state, _principal = provider_setup(operator_db, monkeypatch)
-    provider.claim_omissions.add("auth_time")
+@pytest.mark.parametrize("profile", ["mixed", "oidc_required"])
+@pytest.mark.parametrize("proof", ["missing", "stale"])
+def test_provider_proof_does_not_change_ordinary_sign_in_recency(operator_db, monkeypatch, profile, proof):
+    _app, client, provider, _state, _principal = provider_setup(operator_db, monkeypatch, profile)
+    if proof == "missing":
+        provider.claim_omissions.add("auth_time")
+    else:
+        provider.claim_overrides["auth_time"] = int(datetime.now(timezone.utc).timestamp()) - 3600
     assert _callback(client, _start(client, provider)).status_code == 302
     session = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
                                                        idle_seconds=1800, touch=False).session
-    with app.test_request_context("/admin/"):
-        assert not operator_access.fresh(SimpleNamespace(browser_session_authenticated_at=session.authenticated_at))
+    assert datetime.fromisoformat(session.authenticated_at) > datetime.now(timezone.utc) - timedelta(minutes=1)
+    assert (session.provider_authenticated_at is None) == (proof == "missing")
+    assert client.get("/projects", base_url=ORIGIN).status_code == 200
+    inspection = client.get("/admin/settings", base_url=ORIGIN)
+    assert inspection.status_code == 401 and inspection.json["error"] == "reauthentication_required"
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?",
+                     (timestamp(datetime.now(timezone.utc) - timedelta(minutes=6)), session.id))
+        conn.commit()
+    stale = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
+                        headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+    assert stale.status_code == 403
+    assert stale.json["error"] == "recent_authentication_required"
+    assert _callback(client, _start(client, provider)).status_code == 302
+    assert client.get("/admin/settings", base_url=ORIGIN).json["error"] == "reauthentication_required"
+    revoked = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
+                          headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+    assert revoked.status_code == 200 and revoked.json["revoked_sessions"] >= 1
+
+
+def test_provider_proof_upgrade_preserves_sessions_without_inventing_freshness(operator_db, monkeypatch):
+    from core.database_backend import DatabaseBackend
+    from core.migrations.v0088_provider_authentication_time import MIGRATION
+
+    _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
+    cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    session = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False).session
+    assert session.provider_authenticated_at
+    with get_db_connect()() as conn:
+        conn.execute("ALTER TABLE browser_sessions DROP COLUMN provider_authenticated_at")
+        before = dict(conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone())
+        for statement in MIGRATION.statements_for(DatabaseBackend(operator_db.backend)):
+            conn.execute(statement)
+        after = dict(conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone())
+        conn.commit()
+    assert after.pop("provider_authenticated_at") is None
+    assert after == before
+    resolved = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False)
+    assert resolved.valid and resolved.session.authenticated_at == session.authenticated_at
+    assert client.get("/admin/settings", base_url=ORIGIN).json["error"] == "reauthentication_required"
+
+
+def test_team_rotation_preserves_provider_proof_without_refreshing_console_access(operator_db, monkeypatch):
+    _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
+    old = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
+                                                   idle_seconds=1800, touch=False).session
+    proof_time = timestamp(datetime.now(timezone.utc) - timedelta(minutes=31))
+    with get_db_connect()() as conn:
+        conn.execute("UPDATE browser_sessions SET provider_authenticated_at = ? WHERE id = ?", (proof_time, old.id))
+        conn.commit()
+    for number in range(2):
+        response = client.post("/session/teams", base_url=ORIGIN, json={"name": f"Provider Team {number}"},
+                               headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
+        assert response.status_code == 201
+        replacement = browser_sessions.resolve_browser_session(
+            _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE), idle_seconds=1800, touch=False,
+        ).session
+        assert replacement.id != old.id
+        assert replacement.authenticated_at == old.authenticated_at
+        assert replacement.provider_authenticated_at == proof_time
+        assert replacement.absolute_expires_at == old.absolute_expires_at
+        inspection = client.get("/admin/settings", base_url=ORIGIN)
+        assert inspection.status_code == 401 and inspection.json["error"] == "reauthentication_required"
+        old = replacement
 
 
 @pytest.mark.parametrize("path", ["/admin/", "/admin/settings", "/admin/reauth", "/auth/oidc/callback?state=admin_test"])

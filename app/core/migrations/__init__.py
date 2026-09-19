@@ -98,6 +98,7 @@ from . import (
     v0085_background_pause_reasons,
     v0086_instance_operator_grants,
     v0087_operator_reauthentication,
+    v0088_provider_authentication_time,
 )
 
 _ = baseline
@@ -190,4 +191,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0085_background_pause_reasons.MIGRATION,
     v0086_instance_operator_grants.MIGRATION,
     v0087_operator_reauthentication.MIGRATION,
+    v0088_provider_authentication_time.MIGRATION,
 )

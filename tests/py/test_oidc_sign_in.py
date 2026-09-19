@@ -435,8 +435,7 @@ def test_fresh_oidc_sign_in_renews_absolute_deadline(monkeypatch):
             "SELECT authenticated_at, absolute_expires_at FROM browser_sessions "
             "WHERE principal_id = ? AND revoked_at IS NULL", (principal_id,),
         ).fetchone()
-    # Provider auth_time is a signed integer timestamp, not the session creation clock.
-    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started.replace(microsecond=0)
+    assert datetime.fromisoformat(replacement["authenticated_at"]) >= started
     assert datetime.fromisoformat(replacement["absolute_expires_at"]) >= started + timedelta(hours=12)
     assert not resolve_browser_session(original_cookie, idle_seconds=1800, touch=False).valid
 

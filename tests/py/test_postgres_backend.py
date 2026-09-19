@@ -1954,6 +1954,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "0085",
         "0086",
         "0087",
+        "0088",
     ]
     assert applied_again == []
     table_rows = conn.execute(
@@ -8307,8 +8308,8 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
         "SELECT octet_length(verifier_digest) AS digest_bytes FROM credentials"
     ).fetchone()["digest_bytes"] == 32
     assert conn.execute(
-        "SELECT credential_id FROM browser_sessions"
-    ).fetchone()["credential_id"] == "crd_" + "3" * 32
+        "SELECT credential_id, provider_authenticated_at FROM browser_sessions"
+    ).fetchone() == {"credential_id": "crd_" + "3" * 32, "provider_authenticated_at": None}
     assert conn.execute("SELECT preferences FROM session_preferences").fetchone()["preferences"] == {
         "theme": "dark",
         "atlas": {"enabled": True},
