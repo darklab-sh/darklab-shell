@@ -35,9 +35,10 @@ def rotate_verified_session(
         if not operator_grants.has_grant(context.principal_id, conn=conn):
             raise OperatorReauthenticationError("verification is unavailable")
         if credential_context:
-            suffix = " FOR UPDATE" if DatabaseBackend(get_db_backend()) == DatabaseBackend.POSTGRES else ""
-            conn.execute("SELECT id FROM credentials WHERE id = ?" + suffix,
-                         (credential_context.credential_id,)).fetchone()
+            query = ("SELECT id FROM credentials WHERE id = ? FOR UPDATE"
+                     if DatabaseBackend(get_db_backend()) == DatabaseBackend.POSTGRES
+                     else "SELECT id FROM credentials WHERE id = ?")
+            conn.execute(query, (credential_context.credential_id,)).fetchone()
         source = browser_sessions.lock_rotation_source(
             conn, session_id=context.browser_session_id, principal_id=context.principal_id,
             idle_seconds=int(config["browser_session_idle_minutes"]) * 60, now=now,

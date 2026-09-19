@@ -24,8 +24,9 @@ def lock_principal(conn: Any, principal_id: str) -> dict[str, Any]:
     backend = DatabaseBackend(getattr(conn, "database_backend", None) or get_db_backend())
     if backend == DatabaseBackend.SQLITE and not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
-    suffix = " FOR UPDATE" if backend == DatabaseBackend.POSTGRES else ""
-    row = conn.execute("SELECT id, status FROM principals WHERE id = ?" + suffix, (principal_id,)).fetchone()
+    query = ("SELECT id, status FROM principals WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+             else "SELECT id, status FROM principals WHERE id = ?")
+    row = conn.execute(query, (principal_id,)).fetchone()
     if row is None:
         raise PrincipalNotFound("principal not found")
     return dict(row)

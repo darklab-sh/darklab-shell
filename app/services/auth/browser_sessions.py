@@ -346,17 +346,22 @@ def lock_rotation_source(
     Evaluate expiry after lock acquisition, through the rotation commit.
     """
     backend = DatabaseBackend(getattr(conn, "database_backend", None) or get_db_backend())
-    suffix = " FOR UPDATE" if backend == DatabaseBackend.POSTGRES else ""
     if backend == DatabaseBackend.SQLITE and not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
     row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session_id,)).fetchone()
     if row is None or row["principal_id"] != principal_id:
         raise BrowserSessionError("the source session is unavailable")
     if row["credential_id"]:
-        conn.execute("SELECT id FROM credentials WHERE id = ?" + suffix, (row["credential_id"],)).fetchone()
+        query = ("SELECT id FROM credentials WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+                 else "SELECT id FROM credentials WHERE id = ?")
+        conn.execute(query, (row["credential_id"],)).fetchone()
     else:
-        conn.execute("SELECT id FROM oidc_identities WHERE id = ?" + suffix, (row["oidc_identity_id"],)).fetchone()
-    locked = conn.execute("SELECT * FROM browser_sessions WHERE id = ?" + suffix, (session_id,)).fetchone()
+        query = ("SELECT id FROM oidc_identities WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+                 else "SELECT id FROM oidc_identities WHERE id = ?")
+        conn.execute(query, (row["oidc_identity_id"],)).fetchone()
+    query = ("SELECT * FROM browser_sessions WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+             else "SELECT * FROM browser_sessions WHERE id = ?")
+    locked = conn.execute(query, (session_id,)).fetchone()
     if (locked is None or locked["credential_id"] != row["credential_id"]
             or locked["oidc_identity_id"] != row["oidc_identity_id"]):
         raise BrowserSessionError("the source session is unavailable")
