@@ -51,7 +51,8 @@ def rotate_verified_session(
             credential_id, identity_id = credential_context.credential_id, ""
             provider_authenticated_at = None
         else:
-            if config["access_profile"] not in {"oidc_required", "mixed"} or not source["oidc_identity_id"]:
+            if (provider_proof is None or config["access_profile"] not in {"oidc_required", "mixed"}
+                    or not source["oidc_identity_id"]):
                 raise OperatorReauthenticationError("verification is unavailable")
             if (provider_proof.issuer != source["oidc_issuer"] or provider_proof.subject != source["oidc_subject"]
                     or not provider_proof.authenticated_at):

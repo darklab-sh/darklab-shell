@@ -157,6 +157,9 @@ _MAX_CONFIG_LOG_PATH_CHARS = 240
 class ConfigLoadError(RuntimeError):
     """Raised when app config cannot be loaded into a valid model."""
 
+    events: tuple[tuple[str, str, dict[str, Any]], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+
 
 def _config_log_value(value: object, limit: int) -> str:
     normalized = "".join(

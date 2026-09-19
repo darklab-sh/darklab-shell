@@ -29,6 +29,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Operator-console helpers have explicit configuration and authentication types.** Configuration failures declare their diagnostic fields, retention accepts the shared configuration mapping, and provider verification checks that proof is present. PostgreSQL fixtures use typed row connections and quoted schema identifiers; authentication tests assert that sessions, rows, and response payloads exist before reading them.
+
 - **The bundled TruffleHog uses a patched AMQP dependency.** Its pinned source release is built with `amqp091-go` v1.13.0 to address AMQP parser and TLS vulnerabilities. The image build verifies the dependency embedded in the executable and includes its license notice.
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.

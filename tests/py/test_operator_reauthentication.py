@@ -87,6 +87,7 @@ def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(opera
     assert signed.status_code == 302 and signed.headers["Location"] == "/admin/"
     cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
     replacement = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False).session
+    assert replacement is not None
     assert replacement.id != original.id
     assert replacement.absolute_expires_at == original.absolute_expires_at
     assert browser_sessions.resolve_browser_session(original.cookie_value, idle_seconds=1800).state == "revoked"
@@ -119,7 +120,9 @@ def test_verification_cannot_revive_a_revoked_or_expired_source(operator_db, mon
         operator_reauth.rotate_verified_session(source_context(bundle, original), app.config["DARKLAB_CONFIG"],
                                                 credential_context=proof, now=now)
     with get_db_connect()() as conn:
-        assert conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()["count"] == 1
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
 
 
 @pytest.mark.parametrize("provider", [False, True])
@@ -182,7 +185,9 @@ def provider_setup(operator_db, monkeypatch, profile="oidc_required"):
     app = app_for(monkeypatch, config)
     client = app.test_client()
     assert _callback(client, _start(client, provider)).status_code == 302
-    principal = client.get("/auth/principal", base_url=ORIGIN).get_json()["principal"]["id"]
+    principal_payload = client.get("/auth/principal", base_url=ORIGIN).get_json()
+    assert principal_payload is not None
+    principal = principal_payload["principal"]["id"]
     operator_grants.set_grant(principal, granted=True)
     csrf = _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)
     response = client.post("/admin/reauth", base_url=ORIGIN, data={"csrf_token": csrf, "next": "/admin/?view=host"})
@@ -198,11 +203,13 @@ def test_provider_step_up_binds_state_and_preserves_original_deadline_without_st
     _app, client, _provider, state, principal = provider_setup(operator_db, monkeypatch)
     old_cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
     old = browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800, touch=False).session
+    assert old is not None
     client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE, domain="shell.example")
     result = _callback(client, state)
     assert result.status_code == 302 and result.headers["Location"] == "/admin/?view=host"
     new = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
                                                     idle_seconds=1800, touch=False).session
+    assert new is not None
     assert new.principal_id == principal and new.absolute_expires_at == old.absolute_expires_at
     assert new.id != old.id
     assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
@@ -232,7 +239,9 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
     assert not any(value.startswith(browser_sessions.BROWSER_SESSION_COOKIE + "=")
                    for value in result.headers.getlist("Set-Cookie"))
     with get_db_connect()() as conn:
-        assert conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()["count"] == 1
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
     assert "private" in result.headers["Cache-Control"]
 
 
@@ -247,11 +256,14 @@ def test_provider_proof_does_not_change_ordinary_sign_in_recency(operator_db, mo
     assert _callback(client, _start(client, provider)).status_code == 302
     session = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
                                                        idle_seconds=1800, touch=False).session
+    assert session is not None
     assert datetime.fromisoformat(session.authenticated_at) > datetime.now(timezone.utc) - timedelta(minutes=1)
     assert (session.provider_authenticated_at is None) == (proof == "missing")
     assert client.get("/projects", base_url=ORIGIN).status_code == 200
     inspection = client.get("/admin/settings", base_url=ORIGIN)
-    assert inspection.status_code == 401 and inspection.json["error"] == "reauthentication_required"
+    inspection_payload = inspection.json
+    assert inspection_payload is not None
+    assert inspection.status_code == 401 and inspection_payload["error"] == "reauthentication_required"
     with get_db_connect()() as conn:
         conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?",
                      (timestamp(datetime.now(timezone.utc) - timedelta(minutes=6)), session.id))
@@ -259,12 +271,18 @@ def test_provider_proof_does_not_change_ordinary_sign_in_recency(operator_db, mo
     stale = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
                         headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
     assert stale.status_code == 403
-    assert stale.json["error"] == "recent_authentication_required"
+    stale_payload = stale.json
+    assert stale_payload is not None
+    assert stale_payload["error"] == "recent_authentication_required"
     assert _callback(client, _start(client, provider)).status_code == 302
-    assert client.get("/admin/settings", base_url=ORIGIN).json["error"] == "reauthentication_required"
+    inspection_payload = client.get("/admin/settings", base_url=ORIGIN).json
+    assert inspection_payload is not None
+    assert inspection_payload["error"] == "reauthentication_required"
     revoked = client.post("/auth/sessions/revoke-all", base_url=ORIGIN,
                           headers={"X-Darklab-CSRF": _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)})
-    assert revoked.status_code == 200 and revoked.json["revoked_sessions"] >= 1
+    revoked_payload = revoked.json
+    assert revoked_payload is not None
+    assert revoked.status_code == 200 and revoked_payload["revoked_sessions"] >= 1
 
 
 def test_provider_proof_upgrade_preserves_sessions_without_inventing_freshness(operator_db, monkeypatch):
@@ -274,25 +292,34 @@ def test_provider_proof_upgrade_preserves_sessions_without_inventing_freshness(o
     _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
     cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
     session = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False).session
+    assert session is not None
     assert session.provider_authenticated_at
     with get_db_connect()() as conn:
         conn.execute("ALTER TABLE browser_sessions DROP COLUMN provider_authenticated_at")
-        before = dict(conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone())
+        before_row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone()
+        assert before_row is not None
+        before = dict(before_row)
         for statement in MIGRATION.statements_for(DatabaseBackend(operator_db.backend)):
             conn.execute(statement)
-        after = dict(conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone())
+        after_row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session.id,)).fetchone()
+        assert after_row is not None
+        after = dict(after_row)
         conn.commit()
     assert after.pop("provider_authenticated_at") is None
     assert after == before
     resolved = browser_sessions.resolve_browser_session(cookie, idle_seconds=1800, touch=False)
+    assert resolved.session is not None
     assert resolved.valid and resolved.session.authenticated_at == session.authenticated_at
-    assert client.get("/admin/settings", base_url=ORIGIN).json["error"] == "reauthentication_required"
+    inspection_payload = client.get("/admin/settings", base_url=ORIGIN).json
+    assert inspection_payload is not None
+    assert inspection_payload["error"] == "reauthentication_required"
 
 
 def test_team_rotation_preserves_provider_proof_without_refreshing_console_access(operator_db, monkeypatch):
     _app, client, _provider, _state, _principal = provider_setup(operator_db, monkeypatch)
     old = browser_sessions.resolve_browser_session(_client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE),
                                                    idle_seconds=1800, touch=False).session
+    assert old is not None
     proof_time = timestamp(datetime.now(timezone.utc) - timedelta(minutes=31))
     with get_db_connect()() as conn:
         conn.execute("UPDATE browser_sessions SET provider_authenticated_at = ? WHERE id = ?", (proof_time, old.id))
@@ -304,12 +331,15 @@ def test_team_rotation_preserves_provider_proof_without_refreshing_console_acces
         replacement = browser_sessions.resolve_browser_session(
             _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE), idle_seconds=1800, touch=False,
         ).session
+        assert replacement is not None
         assert replacement.id != old.id
         assert replacement.authenticated_at == old.authenticated_at
         assert replacement.provider_authenticated_at == proof_time
         assert replacement.absolute_expires_at == old.absolute_expires_at
         inspection = client.get("/admin/settings", base_url=ORIGIN)
-        assert inspection.status_code == 401 and inspection.json["error"] == "reauthentication_required"
+        inspection_payload = inspection.json
+        assert inspection_payload is not None
+        assert inspection.status_code == 401 and inspection_payload["error"] == "reauthentication_required"
         old = replacement
 
 
@@ -355,7 +385,9 @@ def test_logout_committed_during_rotation_cannot_be_undone(operator_db, monkeypa
         with pytest.raises(IdentityStorageError):
             future.result(timeout=10)
     with get_db_connect()() as conn:
-        assert conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()["count"] == 1
+        row = conn.execute("SELECT COUNT(*) AS count FROM browser_sessions").fetchone()
+        assert row is not None
+        assert row["count"] == 1
 
 
 def test_provider_flow_upgrade_preserves_pending_sign_in_and_link(operator_db):
