@@ -34,6 +34,22 @@ def test_audit_routes_use_top_level_urls(operator_db, monkeypatch):
         assert request(client, old_path).status_code == 404
 
 
+def test_diagnostics_distinguishes_withheld_configuration_from_unset(operator_db, monkeypatch):
+    import config_inspection
+
+    _app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch)
+    entries = {**config_inspection.catalog()}
+    entries["command_timeout_seconds"] = {**entries["command_timeout_seconds"], "disclosure": "withheld"}
+    monkeypatch.setattr(config_inspection, "catalog", lambda: entries)
+    data = request(client, "/diag?format=json").get_json()
+    assert data["config"]["command_timeout_seconds"] is None
+    assert data["config_withheld"] == ["command_timeout_seconds"]
+    html = request(client, "/diag").get_data(as_text=True)
+    row = html.split('command_timeout_seconds</td>', 1)[1].split('</tr>', 1)[0]
+    assert "Value withheld" in row
+    assert "—" not in row
+
+
 @pytest.mark.parametrize("path", PATHS)
 def test_every_operator_route_denies_network_only_access(operator_db, monkeypatch, path):
     app, client, bundle, _issued = credential_setup(operator_db, monkeypatch)

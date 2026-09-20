@@ -192,6 +192,7 @@ def _frontend_config_payload():
 @content_bp.route("/")
 def index():
     current_theme = _current_theme_entry()
+    frontend_config = _frontend_config_payload()
     log.info(
         "PAGE_LOAD",
         extra={
@@ -202,7 +203,7 @@ def index():
     )
     return render_template(
         "index.html",
-        operator_console_enabled=navigation_eligible(),
+        operator_console_enabled=frontend_config["diag_enabled"],
         app_name=_config.CFG["app_name"],
         project_name=_config.PROJECT_NAME,
         version=_config.APP_VERSION,
@@ -213,7 +214,7 @@ def index():
         current_theme_css=current_theme["vars"],
         theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
         fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
-        frontend_config=_frontend_config_payload(),
+        frontend_config=frontend_config,
         workspace_enabled=bool(_config.CFG.get("workspace_enabled", False)),
     )
 

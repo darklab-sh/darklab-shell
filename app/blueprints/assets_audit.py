@@ -74,6 +74,10 @@ def _audit_log_filter_context(filters: AuditEventFilters) -> dict[str, Any]:
 
 
 _AUDIT_EVENT_ACTION_HINTS = {
+    "instance_operator.grant": "operator access granted",
+    "instance_operator.revoke": "operator access revoked",
+    "instance_operator.view": "operator settings inspected",
+    "instance_operator.reauthenticate": "operator identity verified",
     "build": "build",
     "change": "change",
     "config_change": "config change",
@@ -112,9 +116,10 @@ def _audit_event_type_options() -> list[dict[str, str]]:
         spec = EVENT_SPECS[event_type]
         action = event_type.split(".", 1)[-1]
         hint = _AUDIT_EVENT_ACTION_HINTS.get(action, action.replace("_", " "))
+        description = _AUDIT_EVENT_ACTION_HINTS.get(event_type, f"{spec.target_type.value.replace('_', ' ')} {hint}")
         options.append({
             "value": event_type,
-            "label": f"{event_type} - {spec.target_type.value.replace('_', ' ')} {hint}",
+            "label": f"{event_type} - {description}",
             "target_type": spec.target_type.value,
         })
     return options

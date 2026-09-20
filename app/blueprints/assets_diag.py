@@ -447,7 +447,7 @@ def diag():
         "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
     from config_inspection import diagnostic_values
-    result["config"], result["config_truncated"] = diagnostic_values(result["config"], CFG)
+    result["config"], result["config_truncated"], result["config_withheld"] = diagnostic_values(result["config"], CFG)
     result["raw_packets"] = raw_packet_diagnostics(CFG)
 
     # ── AI assists ───────────────────────────────────────────────────────────
