@@ -3,7 +3,6 @@
 
 """Read-only operator console and verified session step-up."""
 
-import logging
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -15,6 +14,7 @@ from services.auth import lifecycle, oidc, operator_access, operator_reauth
 from services.auth.access_profile import active_config
 from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
 from services.auth.contracts import IdentityStorageError
+from services.auth.observability import log_operator_reauthentication_failed
 from services.auth.oidc_diagnostics import log_oidc_failure
 from services.auth.resolver import AuthenticatedContext, redeem_portable_credential
 
@@ -26,7 +26,6 @@ from .auth import (
 )
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
-log = logging.getLogger("shell")
 
 
 @admin_bp.route("/reauth", methods=["GET", "POST"])
@@ -73,7 +72,7 @@ def reauthenticate():
                         request_fields=request_audit_fields(request),
                     )
                 except IdentityStorageError:
-                    log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={"reason": "source_unavailable"})
+                    log_operator_reauthentication_failed("source_unavailable")
                     return redirect("/admin/reauth?" + urlencode({"next": next_path, "error": "1"}))
                 response = redirect(next_path)
                 _set_browser_session_cookies(response, issued)
@@ -82,9 +81,7 @@ def reauthenticate():
                 limited = _redemption_limit(secret, failed=True)
                 if result.failed and limited.allowed:
                     lifecycle.record_authentication_failure(result, request_fields=request_audit_fields(request))
-            log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={
-                "reason": "credential_rejected" if limited.allowed else "rate_limited",
-            })
+            log_operator_reauthentication_failed("credential_rejected" if limited.allowed else "rate_limited")
             error = "Verification failed. Use an active credential for this account."
             status = 400
             if not limited.allowed:

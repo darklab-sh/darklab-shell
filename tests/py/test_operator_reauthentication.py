@@ -130,7 +130,10 @@ def test_limited_reauthentication_reports_throttling_without_verifying(operator_
 
     _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
     records = []
-    monkeypatch.setattr(admin, "log", SimpleNamespace(warning=lambda event, *, extra: records.append((event, extra))))
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
+    monkeypatch.setattr(observability, "log", SimpleNamespace(
+        warning=lambda event, *, extra: records.append((event, extra)), isEnabledFor=lambda _level: False,
+    ))
     monkeypatch.setattr(admin, "_redemption_limit", lambda _secret: CredentialRateLimitResult(False, retry_after=20))
     monkeypatch.setattr(admin, "redeem_portable_credential", lambda _secret: pytest.fail("Limited request verified a credential"))
     response = client.post("/admin/reauth", base_url=ORIGIN, data={
@@ -138,7 +141,10 @@ def test_limited_reauthentication_reports_throttling_without_verifying(operator_
     })
     assert response.status_code == 429 and response.headers["Retry-After"] == "20"
     assert b"Too many attempts" in response.data
-    assert records == [("INSTANCE_OPERATOR_REAUTH_FAILED", {"reason": "rate_limited"})]
+    assert len(records) == 1 and records[0][0] == "INSTANCE_OPERATOR_REAUTH_FAILED"
+    assert records[0][1]["reason"] == "rate_limited" and records[0][1]["http_status"] == 429
+    assert records[0][1]["endpoint"] == "admin.reauthenticate"
+    assert records[0][1]["request_id"] != "unknown"
 
 
 @pytest.mark.parametrize("change", ["grant", "principal", "session", "credential", "absolute", "idle"])
@@ -507,3 +513,49 @@ def test_provider_flow_upgrade_preserves_pending_sign_in_and_link(operator_db):
         apply_migration(conn, upgrade, backend=backend)
         after = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
         assert before == after
+
+
+@pytest.mark.parametrize("reason,status", [
+    ("profile", 404), ("ineligible", 404), ("source_unavailable", 302),
+    ("credential_rejected", 400), ("rate_limited", 429),
+])
+def test_operator_warning_repeats_use_fixed_keys_and_safe_context(monkeypatch, reason, status):
+    from flask import Flask
+
+    app = Flask(__name__)
+    records = []
+    clock = [100.0]
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
+    monkeypatch.setattr(observability, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(observability, "log", SimpleNamespace(
+        warning=lambda event, *, extra: records.append((event, extra)), isEnabledFor=lambda _level: False,
+    ))
+
+    @app.get("/admin/settings")
+    def protected():
+        if status == 404:
+            return operator_access.hidden_response(reason)
+        observability.log_operator_reauthentication_failed(reason)
+        return "", status
+
+    client = app.test_client()
+    for index in range(100):
+        response = client.get(
+            f"/admin/settings?search=private-query-{index}",
+            environ_overrides={"darklab_request_id": f"request-{index}", "REMOTE_ADDR": "192.0.2.1"},
+        )
+        assert response.status_code == status
+    assert len(records) == 1
+    event, fields = records[0]
+    assert event == ("INSTANCE_OPERATOR_ACCESS_DENIED" if status == 404 else "INSTANCE_OPERATOR_REAUTH_FAILED")
+    assert fields == {"reason": reason, "http_status": status, "request_id": "request-0",
+                      "endpoint": "protected", "suppressed_repeat_count": 0}
+    clock[0] += 60
+    assert client.get("/admin/settings").status_code == status
+    assert len(records) == 2 and records[1][1]["suppressed_repeat_count"] == 99
+    for index in range(100):
+        observability.log_operator_access_denied(f"private-reason-{index}")
+        observability.log_operator_reauthentication_failed(f"private-reason-{index}")
+    assert len(observability._WARNING_STATE) <= 3
+    assert "private-" not in repr(records) + repr(observability._WARNING_STATE)
+    assert "192.0.2.1" not in repr(records) + repr(observability._WARNING_STATE)

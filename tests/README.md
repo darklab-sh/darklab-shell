@@ -205,7 +205,7 @@ The open-profile Project journey confirms that creating and linking a Project do
 
 The desktop and mobile screenshot packs also use a separate restricted-profile server and a disposable operator grant for their diagnostics, settings, and audit scenes. Each operator capture applies the selected theme. The shared fixture helper revokes that grant after capture.
 
-Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, safe warning/error classification for rejected proof versus outages, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
+Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, safe warning/error classification for rejected proof versus outages, bounded repeated-denial warnings, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
 
 Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, bounded local grant listing, audit rollback, and fresh CLI processes that preserve JSON stdout and log committed changes on stderr with audit storage enabled or disabled. Backup and database-migration fixtures preserve explicit grants. Schema inventories track the table and index renames used by the provider-flow upgrade, and populated upgrade tests preserve pending sign-in and linking flows.
 

@@ -11,7 +11,7 @@ from flask import current_app, g, jsonify, redirect, request
 
 from .access_profile import active_config, active_profile, safe_next_path
 from .operator_grants import has_grant
-from .observability import _request_value
+from .observability import _request_value, log_operator_access_denied
 from .resolver import AuthenticatedContext, AuthenticationState, resolve_authentication
 
 log = logging.getLogger("shell")
@@ -76,7 +76,7 @@ def private_response(response):
 
 def hidden_response(reason):
     request.environ["darklab_operator_denied"] = True
-    log.warning("INSTANCE_OPERATOR_ACCESS_DENIED", extra={"reason": reason, "http_status": 404})
+    log_operator_access_denied(reason)
     return current_app.response_class(status=404)
 
 

@@ -93,6 +93,17 @@ def log_browser_csrf_rejected(reason: str) -> None:
     _warning("BROWSER_CSRF_REJECTED", code, reason=code, http_status=403)
 
 
+def log_operator_access_denied(reason: str) -> None:
+    code = reason if reason in {"profile", "ineligible"} else "ineligible"
+    _warning("INSTANCE_OPERATOR_ACCESS_DENIED", code, reason=code, http_status=404)
+
+
+def log_operator_reauthentication_failed(reason: str) -> None:
+    statuses = {"source_unavailable": 302, "credential_rejected": 400, "rate_limited": 429}
+    code = reason if reason in statuses else "credential_rejected"
+    _warning("INSTANCE_OPERATOR_REAUTH_FAILED", code, reason=code, http_status=statuses[code])
+
+
 def log_sign_in_form_rejected() -> None:
     if not log.isEnabledFor(logging.DEBUG) or not has_request_context():
         return

@@ -285,8 +285,8 @@ The current event inventory is:
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
 | INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
-| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected or throttled | fixed `credential_rejected`, `rate_limited`, or `source_unavailable` reason only |
-| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
+| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected or throttled | fixed `credential_rejected`, `rate_limited`, or `source_unavailable` reason, numeric http_status, request_id, endpoint, suppressed_repeat_count; sampled per reason each minute, no credential or proof |
+| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status, request_id, endpoint, suppressed_repeat_count; sampled per reason each minute, no inventory or search text |
 | ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | initial or live operator authority check unavailable | bounded exception class as reason, fixed initial_check/live_check stage, numeric http_status, request_id, endpoint, permitted principal_id/credential_id and ip; no exception details or traceback |
 | WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |
 | INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; local CLI diagnostics use stderr and repeated unchanged operations are quiet | principal_id, source, granted |
