@@ -14,7 +14,7 @@ from services.audit.recorder import record_event
 from services.storage.transactions import run_transaction
 
 from . import browser_sessions, operator_grants
-from .contracts import IdentityStorageError, timestamp
+from .contracts import IdentityStorageError, PrincipalNotFound, timestamp
 
 log = logging.getLogger("shell")
 
@@ -31,7 +31,10 @@ def rotate_verified_session(
         raise OperatorReauthenticationError("verification is unavailable")
 
     def operation(conn):
-        operator_grants.lock_principal(conn, context.principal_id)
+        try:
+            operator_grants.lock_principal(conn, context.principal_id)
+        except PrincipalNotFound:
+            raise OperatorReauthenticationError("verification is unavailable") from None
         if not operator_grants.has_grant(context.principal_id, conn=conn):
             raise OperatorReauthenticationError("verification is unavailable")
         if credential_context:
@@ -39,10 +42,13 @@ def rotate_verified_session(
                      if DatabaseBackend(get_db_backend()) == DatabaseBackend.POSTGRES
                      else "SELECT id FROM credentials WHERE id = ?")
             conn.execute(query, (credential_context.credential_id,)).fetchone()
-        source = browser_sessions.lock_rotation_source(
-            conn, session_id=context.browser_session_id, principal_id=context.principal_id,
-            idle_seconds=int(config["browser_session_idle_minutes"]) * 60, now=now,
-        )
+        try:
+            source = browser_sessions.lock_rotation_source(
+                conn, session_id=context.browser_session_id, principal_id=context.principal_id,
+                idle_seconds=int(config["browser_session_idle_minutes"]) * 60, now=now,
+            )
+        except browser_sessions.BrowserSessionError:
+            raise OperatorReauthenticationError("verification is unavailable") from None
         active_now = now or datetime.now(timezone.utc)
         if credential_context:
             if (credential_context.principal_id != context.principal_id

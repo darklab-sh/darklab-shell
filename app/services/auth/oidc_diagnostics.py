@@ -34,7 +34,7 @@ _REASONS = frozenset({
     "signing_key_unknown", "claim_missing", "audience_mismatch", "nonce_mismatch", "subject_invalid",
     "issued_at_invalid", "token_claim_invalid", "authorized_party_mismatch", "recent_provider_required",
     "identity_already_linked", "workspace_already_linked", "workspace_disabled", "provisioning_denied",
-    "credential_session_unavailable", "alternative_credential_required",
+    "credential_session_unavailable", "alternative_credential_required", "operator_source_unavailable",
 })
 
 

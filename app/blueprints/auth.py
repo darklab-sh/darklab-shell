@@ -30,7 +30,7 @@ from flask import (
     request,
 )
 from services.audit.context import request_audit_fields
-from services.auth import lifecycle, oidc
+from services.auth import lifecycle, oidc, operator_reauth
 from services.auth.access_profile import (
     active_config,
     active_profile,
@@ -268,7 +268,12 @@ def _clear_oidc_state_cookie(response) -> None:
 
 
 def _oidc_error_response(exc: BaseException, *, purpose: str | None = None, next_path: str = "/admin/"):
-    if not isinstance(exc, oidc.OIDCError):
+    if isinstance(exc, operator_reauth.OperatorReauthenticationError):
+        exc = oidc.OIDCError(
+            "Verification is unavailable.", stage="identity_binding", reason="operator_source_unavailable",
+            error_type=type(exc).__name__,
+        )
+    elif not isinstance(exc, oidc.OIDCError):
         exc = oidc.OIDCUnavailable(
             "Sign-in is temporarily unavailable.", reason="storage_failed", error_type=type(exc).__name__,
         )

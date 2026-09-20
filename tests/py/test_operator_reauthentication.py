@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from datetime import datetime, timedelta, timezone
+import logging
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -10,7 +11,9 @@ from admin_helpers import operator_db as _operator_db
 from core.database_access import get_db_connect
 from services.auth import (
     browser_sessions,
+    observability,
     oidc,
+    oidc_diagnostics,
     operator_access,
     operator_grants,
     operator_reauth,
@@ -260,9 +263,20 @@ def test_provider_step_up_binds_state_and_preserves_original_deadline_without_st
     assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
 
 
-@pytest.mark.parametrize("failure", ["missing", "old", "future", "subject", "state", "revoked", "profile", "provider"])
+@pytest.mark.parametrize("failure", [
+    "missing", "old", "future", "subject", "state", "revoked", "session", "session_without_cookie",
+    "profile", "provider", "storage",
+])
 def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, monkeypatch, failure):
     app, client, provider, state, principal = provider_setup(operator_db, monkeypatch)
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger = logging.Logger("operator-step-up-test", logging.WARNING)
+    logger.addHandler(handler)
+    monkeypatch.setattr(oidc_diagnostics, "log", logger)
+    monkeypatch.setattr(observability, "log", logger)
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
     if failure == "missing":
         provider.claim_omissions.add("auth_time")
     elif failure == "old":
@@ -275,14 +289,35 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
         client.delete_cookie(oidc.OIDC_STATE_COOKIE, domain="shell.example", path="/auth/oidc/callback")
     elif failure == "revoked":
         operator_grants.set_grant(principal, granted=False)
+    elif failure in {"session", "session_without_cookie"}:
+        browser_sessions.revoke_principal_browser_sessions(principal, reason="test")
+        if failure == "session_without_cookie":
+            client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE, domain="shell.example")
     elif failure == "profile":
         app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides(
             {"access_profile": "open", "oidc_provisioning": "disabled"}
         )
     elif failure == "provider":
         provider.available = False
+    elif failure == "storage":
+        def unavailable(*_args, **_kwargs):
+            raise IdentityStorageError("private-storage-sentinel")
+        monkeypatch.setattr(operator_grants, "lock_principal", unavailable)
     result = _callback(client, state)
     assert result.status_code in (302, 404)
+    terminals = [record for record in records if record.msg in {"OIDC_AUTH_FAILED", "OIDC_PROVIDER_FAILED"}]
+    if failure != "profile":
+        assert len(terminals) == 1
+        record = terminals[0]
+        assert record.purpose == ("unknown" if failure == "state" else "admin_reauth")
+        assert record.levelno == (logging.ERROR if failure in {"provider", "storage"} else logging.WARNING)
+        if failure in {"subject", "revoked", "session", "session_without_cookie"}:
+            assert record.stage == "identity_binding" and record.reason == "operator_source_unavailable"
+        elif failure == "storage":
+            assert record.reason == "storage_failed"
+        assert record.exc_info is None and record.stack_info is None
+        assert "private-storage-sentinel" not in str(record.__dict__)
+        assert provider.subject not in str(record.__dict__)
     if failure in {"missing", "old", "future"}:
         query = parse_qs(urlsplit(result.headers["Location"]).query)
         assert query["error"] == ["provider_freshness"]
