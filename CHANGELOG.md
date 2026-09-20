@@ -13,6 +13,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.0.1] - Unreleased
 
+**Upgrade note:** Diagnostics, Audit log, and Operator settings now require a restricted sign-in profile and an explicit principal grant. Open-profile installations no longer expose these pages. To retain operator access, choose a restricted profile and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect.
+
 ### Added
 
 - **Managed installations can manage access and check configuration through `darklab-deploy`.** The `access` commands preserve principal safeguards and provide private host credential files with recovery after interrupted transfers. `config check` evaluates current or candidate YAML without starting the application or applying changes. Both commands select the installation's Compose files and preserve safe output for automation.
@@ -61,7 +63,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Operator-console helpers have explicit configuration and authentication types.** Configuration failures declare their diagnostic fields, retention accepts the shared configuration mapping, and provider verification checks that proof is present. PostgreSQL fixtures use typed row connections and quoted schema identifiers; authentication tests assert that sessions, rows, and response payloads exist before reading them.
 
-- **The bundled TruffleHog uses a patched AMQP dependency.** Its pinned source release is built with `amqp091-go` v1.13.0 to address AMQP parser and TLS vulnerabilities. The image build verifies the dependency embedded in the executable and includes its license notice.
+- **The bundled TruffleHog uses a patched AMQP dependency.** TruffleHog v3.97.5 includes `amqp091-go` v1.13.0 upstream to address AMQP parser and TLS vulnerabilities, removing the local dependency override. The image build verifies the dependency embedded in the executable and includes its license notice.
 
 - **Managed backups now include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
 

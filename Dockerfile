@@ -27,7 +27,7 @@ ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
 ARG FFUF_VERSION=v2.2.1
-ARG TRUFFLEHOG_VERSION=v3.97.0
+ARG TRUFFLEHOG_VERSION=v3.97.5
 ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
@@ -64,7 +64,7 @@ ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
-ARG APP_VERSION=3.0.0
+ARG APP_VERSION=3.0.1
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
@@ -195,11 +195,10 @@ RUN git clone --depth 1 --branch "${GOSU_VERSION}" \
     rm -rf /tmp/gosu
 ARG TRUFFLEHOG_AMQP_VERSION
 COPY scripts/container/verify_go_dependency.sh /usr/local/bin/verify-go-dependency
-# Keep TruffleHog's source release while fixing its AMQP parser/TLS dependency.
+# Verify the patched AMQP dependency shipped by the pinned upstream release.
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" \
         https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog && \
-    go -C /tmp/trufflehog get "github.com/rabbitmq/amqp091-go@${TRUFFLEHOG_AMQP_VERSION}" && \
     go -C /tmp/trufflehog install && \
     sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog \
         github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}" && \
