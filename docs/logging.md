@@ -286,7 +286,9 @@ The current event inventory is:
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
 | INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
 | WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected | fixed reason only |
-| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | console network, profile, or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
+| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
+| ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | operator authentication storage unavailable | exception class as reason, numeric http_status; no exception details |
+| WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |
 | INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; repeated unchanged operations are quiet | principal_id, source, granted |
 | INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
 | INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
@@ -415,7 +417,6 @@ The current event inventory is:
 | INFO | `WATCHER_BASELINE_ACCEPTED` | watcher service | watcher_id, baseline_run_id, session |
 | INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
-| INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
 | INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, assist_status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
 | INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
 | INFO | `AI_WORKER_STARTED` | AI worker startup | — |
@@ -443,7 +444,13 @@ The current event inventory is:
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |
 | INFO | `PROJECT_LINK_REMOVED` | Project unlink route | project_id, entity_type, entity_id, cleanup flags, unlinked/curated/kept counts |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
-| INFO | `DIAG_VIEWED` | `diag()` | ip |
+| INFO / DEBUG | `DIAG_VIEWED` | diagnostics view / automatic refresh | principal_id, credential_id, request_id, resolved ip; background XHR reads use DEBUG |
+| INFO / DEBUG | `DIAG_AUDIT_VIEWED` | operator audit view / background read | operator context, event_count, limit, offset, has_more, audit_log_enabled, filter_count, filter_keys; no filter values |
+| INFO | `DIAG_AUDIT_EXPORTED` | fully consumed operator audit stream | operator context, format, limit, event_count, truncated, filter_count, filter_keys |
+| WARNING | `DIAG_AUDIT_EXPORT_INTERRUPTED` | cancelled, failed, or access-revoked export | operator context, format, limit, filter_count, filter_keys, fixed reason; no completed event |
+| INFO | `AI_DIAG_TEST_COMPLETED` | explicit operator AI test completes | principal_id, credential_id, request_id, resolved ip |
+| WARNING | `AI_DIAG_TEST_REJECTED` | shared operator or global AI test limit | operator context, fixed reason, numeric http_status |
+| WARNING | `METRICS_DENIED` | client outside metrics allowlist | resolved ip only; no configured CIDRs |
 | WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
 | WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
 | WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
@@ -538,7 +545,6 @@ The current event inventory is:
 | ERROR | `ATLAS_QUICK_LOOKUP_OPEN_FAILED` | desktop rail, mobile menu, or keyboard shortcut through `/log` | ip, session, context, client_message, client_details with source and stage |
 | WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, client_details with bounded error_name, stage, status, run_id, route |
 | WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, client_details with bounded error_name, status, left_run_id, right_run_id, route, compare_request_error |
-| WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | HTTP rate-limit handlers | ip, request_id, path, limit_policy, scope |
@@ -569,7 +575,7 @@ The current event inventory is:
 | WARN | `AI_PROVIDER_SCHEMA_RETRY` | AI provider JSON validation | variant, attempt, model, finish_reason, output_chars, error_type, provider_truncated |
 | WARN | `AI_SUGGESTION_SECRET_LOOKUP_FAILED` | AI suggestion validation | session, env, error_type (+ traceback) |
 | WARN | `AI_SUGGESTIONS_REJECTED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
-| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, http_status |
+| WARNING | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | principal_id, credential_id, request_id, ip, provider, model, error_code, numeric http_status |
 | WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, http_status, latency_ms |
 | WARN | `AI_COORDINATION_RELEASE_SKIPPED` | AI Redis coordination release | reason |
 | WARN | `AI_COORDINATION_RELEASE_FAILED` | AI Redis coordination release | (+ traceback) |

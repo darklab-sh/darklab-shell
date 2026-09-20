@@ -6,7 +6,11 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+import signal
 import stat
+import subprocess
+import sys
+from textwrap import dedent
 import threading
 from types import SimpleNamespace
 
@@ -204,16 +208,53 @@ def test_ca_changes_replace_one_private_file_and_cleanup_removes_it(tmp_path, mo
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="fork lifecycle applies to Unix workers")
-def test_child_reset_does_not_remove_parent_trust_directory(tmp_path, monkeypatch):
+def test_child_reset_does_not_remove_parent_trust_directory(tmp_path):
     directory = tmp_path / "parent-trust"
     directory.mkdir()
-    monkeypatch.setattr(oidc_cache, "_TRUST_DIRECTORY", str(directory))
-    pid = os.fork()
-    if pid == 0:
-        try:
-            oidc_cache._cleanup_trust_bundle()
-        finally:
+    # Keep the real fork hook covered without inheriting pytest's live threads.
+    script = dedent("""
+        import os
+        from pathlib import Path
+        import sys
+        import threading
+        import traceback
+
+        from services.auth import oidc_cache
+
+        directory = Path(sys.argv[1])
+        oidc_cache._TRUST_DIRECTORY = str(directory)
+        assert threading.active_count() == 1
+        pid = os.fork()
+        if pid == 0:
+            try:
+                assert oidc_cache._PID == os.getpid()
+                assert oidc_cache._TRUST_DIRECTORY is None
+                oidc_cache._cleanup_trust_bundle()
+            except BaseException:
+                traceback.print_exc()
+                os._exit(1)
             os._exit(0)
-    _, status = os.waitpid(pid, 0)
-    assert os.waitstatus_to_exitcode(status) == 0
-    assert directory.is_dir()
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0, f"Forked child failed: {status}"
+        assert directory.is_dir(), "Child cleanup removed the parent's trust directory"
+    """)
+    with subprocess.Popen(
+        [sys.executable, "-W", "error::DeprecationWarning", "-c", script, str(directory)],
+        cwd=Path(__file__).resolve().parents[2] / "app",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except BaseException:
+            # The forked child shares the pipes, even if its parent has exited.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            raise
+    assert process.returncode == 0, stderr or stdout
+    assert not directory.exists(), "Parent exit did not clean up its own trust directory"

@@ -439,6 +439,8 @@ Configuration inspection reports one serving worker's startup snapshot, rather t
 
 A reviewed disclosure catalog fails closed and distinguishes safe full values, approved summaries, and withheld values. Principal-bound operator grants stay independent of workspace and Team permissions. Fresh credential/provider verification preserves the original session deadline, so repeated step-up cannot renew absolute access indefinitely. Configuration remains host-owned; the console exposes no mutation or restart authority.
 
+Settings, diagnostics, and audit share that identity policy from any network. Metrics scrapers remain identity-free and use their own IP allowlist. Keeping these permissions separate avoids treating a trusted proxy or shared network as operator authority, and prevents monitoring access from bypassing workspace AI quotas. The legacy CIDR setting is normalized per configuration layer so migration preserves existing override precedence without retaining network-based operator access.
+
 ### Two-User Security Model
 
 **The container runs two unprivileged users: `appuser` for the web process and `scanner` for all user-submitted commands.**

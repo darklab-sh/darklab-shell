@@ -37,7 +37,7 @@
     </div>
     {% endif %}
 
-    <form class="diag-audit-filter-form" method="get" action="/diag/audit">
+    <form class="diag-audit-filter-form" method="get" action="/audit">
       <div class="diag-audit-filter-grid">
         <label class="diag-field">
           <span>Event type</span>
@@ -92,9 +92,9 @@
       </div>
       <div class="diag-classifier-actions">
         <button class="btn btn-primary btn-compact" type="submit">Apply</button>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit">Clear</a>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}">CSV</a>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}">JSON</a>
+        <a class="btn btn-secondary btn-compact" href="/audit">Clear</a>
+        <a class="btn btn-secondary btn-compact" href="/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}">CSV</a>
+        <a class="btn btn-secondary btn-compact" href="/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}">JSON</a>
       </div>
     </form>
 
@@ -171,13 +171,19 @@
 
     <div class="diag-audit-pagination">
       {% if data.offset > 0 %}
-      <a class="btn btn-secondary btn-compact" href="/diag/audit{% if data.previous_query %}?{{ data.previous_query }}{% endif %}">Previous</a>
+      <a class="btn btn-secondary btn-compact" href="/audit{% if data.previous_query %}?{{ data.previous_query }}{% endif %}">Previous</a>
       {% endif %}
       {% if data.has_more %}
-      <a class="btn btn-secondary btn-compact" href="/diag/audit?{{ data.next_query }}">Next</a>
+      <a class="btn btn-secondary btn-compact" href="/audit?{{ data.next_query }}">Next</a>
       {% endif %}
       <span class="diag-muted">Exports cap at {{ data.export_max_rows }} rows and mark truncation when filters match more.</span>
     </div>
   </section>
 </main>
+{% endblock %}
+
+{% block body_scripts %}
+{% for src in asset_bundle('operator-pages') %}
+<script type="{{ asset_bundle_script_type('operator-pages') }}" src="{{ src }}"></script>
+{% endfor %}
 {% endblock %}

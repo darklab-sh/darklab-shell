@@ -28,6 +28,11 @@ Capture tests are gated behind `RUN_CAPTURE=1` through the dedicated configs in
 `.tooling/playwright.capture.{desktop,mobile}.config.js`, so the pack never runs
 as part of `npm run test:e2e`.
 
+Each pack starts a separate restricted-profile server for the diagnostics scene.
+That scene signs in with a disposable credential and grants operator access in
+the isolated test database. The grant is revoked after the screenshot; ordinary
+shell scenes use the open-profile server.
+
 ## Output layout
 
 ```text

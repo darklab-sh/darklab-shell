@@ -26,7 +26,7 @@ def get_client(*, use_forwarded_for=True):
 
 
 def _allowed_metrics(client):
-    with mock.patch.dict(config.CFG, {"diagnostics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True}):
+    with mock.patch.dict(config.CFG, {"metrics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True}):
         return client.get("/metrics")
 
 
@@ -61,13 +61,13 @@ class _RedisMetricsClient:
 class TestMetricsEndpoint:
     def test_ip_gate_denies_non_allowlisted_callers(self):
         client = get_client(use_forwarded_for=False)
-        with mock.patch.dict(config.CFG, {"diagnostics_allowed_cidrs": ["10.0.0.0/8"], "metrics_enabled": True}):
+        with mock.patch.dict(config.CFG, {"metrics_allowed_cidrs": ["10.0.0.0/8"], "metrics_enabled": True}):
             resp = client.get("/metrics")
         assert resp.status_code == 404
 
     def test_disabled_route_returns_404_even_when_allowlisted(self):
         client = get_client(use_forwarded_for=False)
-        with mock.patch.dict(config.CFG, {"diagnostics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": False}):
+        with mock.patch.dict(config.CFG, {"metrics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": False}):
             resp = client.get("/metrics")
         assert resp.status_code == 404
 

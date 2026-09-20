@@ -156,7 +156,7 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 ## Principal Access Operations
 
-The operator verification form at `/admin/reauth` requires an eligible browser session and the allowed diagnostics network. Credential re-entry must belong to the same principal. Provider verification requests fresh sign-in and checks the signed authentication time; a silent provider session without that proof cannot qualify. Successful verification rotates the browser session while preserving its original absolute expiry. Reads refresh ordinary activity but never verified authentication time: the 30-minute console freshness and 30-minute idle defaults deliberately measure different things. Idle or absolute expiry requires a new ordinary sign-in.
+The operator verification form at `/admin/reauth` requires an eligible browser session and a current operator grant. Credential re-entry must belong to the same principal. Provider verification requests fresh sign-in and checks the signed authentication time; a silent provider session without that proof cannot qualify. Successful verification rotates the browser session while preserving its original absolute expiry. Reads refresh ordinary activity but never verified authentication time: the 30-minute operator verification window and 30-minute idle defaults deliberately measure different things. Idle or absolute expiry requires a new ordinary sign-in.
 
 Provider sign-in time and verified provider authentication time are tracked separately. Ordinary sign-in still allows **Sign out everywhere** for five minutes, even when the provider omits `auth_time`. Console access requires recent signed provider proof; existing sessions without that proof must verify again.
 
@@ -324,21 +324,22 @@ Public share permalinks are disabled by default in every restricted profile: sna
 
 ## Operator Settings Console
 
-Explicitly granted operators can open **Operator settings** from the desktop more menu or mobile menu, or go directly to `/admin/`. The desktop menu opens a separate tab or window, like Diagnostics; mobile opens the page in place with a back-to-shell link. Diagnostics, Audit log, and Operator settings share a header with links to the other two pages. Search by setting name or description and combine the group, source, and warning filters. Groups start collapsed with setting counts; filtering opens matching groups, and clearing filters restores your earlier expanded groups. Expand all and Collapse all control the visible groups. Refresh preserves expanded guidance, permitted long values, focus, and scroll where the setting remains available. This page is read only: it has no edit, reveal, save, or restart controls.
+Explicitly granted operators can open **Operator settings**, **diag**, and **audit log** from the desktop More menu or mobile menu, or go directly to `/admin/`, `/diag`, and `/audit`. Desktop menu links open a separate tab or window; mobile opens the page in place with a back-to-shell link. Diagnostics, Audit log, and Operator settings share a header with links to the other two pages. Search by setting name or description and combine the group, source, and warning filters. Groups start collapsed with setting counts; filtering opens matching groups, and clearing filters restores your earlier expanded groups. Expand all and Collapse all control the visible groups. Refresh preserves expanded guidance, permitted long values, focus, and scroll where the setting remains available. This page is read only: it has no edit, reveal, save, or restart controls.
 
 **Loaded from** identifies the winning source, including built-in defaults, shipped `config.yaml`, local `config.local.yaml`, or the supported environment variable. **Defaults and host configuration** explains where to configure the setting, its accepted values, and which processes need a restart. Usual paths distinguish source checkouts (`app/conf/config.local.yaml`) from packaged deployments (`conf/config.local.yaml`); custom directories may differ. Environment values take precedence, but the worker cannot identify their original host file. A host `.env` participates only when the deployment uses or passes that variable. Raw schema is available in a separate disclosure.
 
 The console is unavailable by default. To enable access:
 
-1. Configure `diagnostics_allowed_cidrs` for the operator network in `conf/config.local.yaml`. Set `trusted_proxy_cidrs` only for proxies you control; forwarded client addresses are honored only from those peers.
-2. Choose `token_required`, `oidc_required`, or `mixed` in the host configuration. Follow [restricted browser access](#restricted-browser-access), including HTTPS, bootstrap/provider setup, and profile-transition precautions before switching a live deployment.
-3. Apply the required container recreation through the deployment workflow. Production startup copies local overlays into a private snapshot; a web-worker reload cannot read later host edits. See [reload behavior](#config-file-reload-behavior).
-4. Establish an active principal and run `docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
-5. Sign in at `/admin/`. Use `operator-status` or `operator-revoke` through the same local tool to inspect or remove access. If account access is lost, follow [local recovery](#issuing-credentials-and-recovering-access), then review the principal's grant.
+1. Choose `token_required`, `oidc_required`, or `mixed` in the host configuration. Follow [restricted browser access](#restricted-browser-access), including HTTPS, bootstrap/provider setup, and profile-transition precautions before switching a live deployment.
+2. Apply the required container recreation through the deployment workflow. Production startup copies local overlays into a private snapshot; a web-worker reload cannot read later host edits. See [reload behavior](#config-file-reload-behavior).
+3. Establish an active principal and run `docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
+4. Sign in at `/admin/`. Use `operator-status` or `operator-revoke` through the same local tool to inspect or remove access. If account access is lost, follow [local recovery](#issuing-credentials-and-recovering-access), then review the principal's grant.
 
-Every page, inventory, and verification request checks the network, restricted profile, browser session, active principal, grant, and authentication freshness. Out-of-range clients and ineligible principals receive a generic 404. API tokens and direct credential headers cannot open the console. Missing or expired sessions require sign-in; stale verification requires credential re-entry or a fresh provider authentication. The [verification policy](#principal-access-operations) preserves the original absolute session deadline. An idle tab may retain information already delivered; its next refresh clears the view if access has been lost.
+The same access policy protects `/admin/`, `/diag`, `/audit`, and their child routes, from any network. Each request checks the restricted profile, browser session, active principal, operator grant, and recent verification. Open profiles and ineligible principals receive a generic 404; team roles, API tokens, direct credential headers, and metrics permissions don't qualify. Missing or expired sessions require sign-in; stale verification requires credential re-entry or fresh provider authentication. The [verification policy](#principal-access-operations) preserves the original absolute session deadline. Activity and automatic refreshes don't renew verification.
 
-The page labels its result as the **serving web worker's loaded configuration**, with process identity and load time. Refresh samples whichever worker handles the request; it does not establish agreement across web or background workers. Host deployment settings are listed separately as unobserved. The same [reviewed disclosure rules](#validating-instance-configuration) protect the page, JSON inventory, and local checker: secrets are withheld, sensitive lists show counts, and the AI endpoint shows only whether it is configured. Existing `/diag` cards retain their separate access policy and permitted values.
+Operator responses are private and aren't cached. Background requests receive a JSON authorization error and a safe sign-in or verification destination. Verification returns to the requested page, retaining audit filters without replaying a probe or export. Visible pages check access every ten seconds and when returning to the tab; access loss clears displayed data, stops protected refreshes, and discards pending results. Previously downloaded data can't be recalled.
+
+The page labels its result as the **serving web worker's loaded configuration**, with process identity and load time. Refresh samples whichever worker handles the request; it does not establish agreement across web or background workers. Host deployment settings are listed separately as unobserved. The same [reviewed disclosure rules](#validating-instance-configuration) protect the page, JSON inventory, and local checker: secrets are withheld, sensitive lists show counts, and the AI endpoint shows only whether it is configured. Diagnostics shares the access policy and retains its existing permitted values.
 
 ## Validating Instance Configuration
 
@@ -375,7 +376,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `admin_console_reauth_minutes` | `30` | Verified authentication age allowed for the operator console, from 5 through 60 minutes. Browser idle and absolute deadlines still apply |
+| `admin_console_reauth_minutes` | `30` | Verified authentication age allowed for settings, diagnostics, and audit pages, from 5 through 60 minutes. Browser idle and absolute deadlines still apply |
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
 | `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their personal workspace |
@@ -386,8 +387,8 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, `/metrics`, and the `/admin/` console. Console access additionally requires a restricted profile, eligible browser session, explicit principal grant, and verified freshness. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies |
-| `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
+| `metrics_allowed_cidrs` | `[]` | IPs / CIDRs allowed to scrape `/metrics` when metrics are enabled. An empty list disables scrapes. Forwarded client IPs are honored only from `trusted_proxy_cidrs`. This setting grants no operator access or AI quota exemption |
+| `metrics_enabled` | `true` | Enables `/metrics` for addresses allowed by `metrics_allowed_cidrs`, independently of operator pages and browser sign-in |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_ai_provider_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60]` | Prometheus AI provider duration histogram buckets, in seconds |
@@ -398,7 +399,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `ai_next_commands_max_output_tokens` | `180` | Provider output cap for next-command JSON responses. This is higher than summaries because suggestions need enough room to close valid JSON |
 | `ai_max_concurrent` | `1` | Global provider-call concurrency target for the AI worker path |
 | `ai_max_queue_depth` | `20` | Maximum queued/in-progress assist backlog before writes should return busy |
-| `ai_rate_limit_per_session_hour` | `5` | Per-workspace AI write limit enforced through Redis before new assists are queued. Clients allowed by `diagnostics_allowed_cidrs` bypass this workspace quota only |
+| `ai_rate_limit_per_session_hour` | `5` | Per-workspace AI write limit enforced through Redis before new assists are queued. Applies to all workspaces, including operator requests |
 | `ai_rate_limit_global_per_minute` | `2` | Deployment-wide AI write limit enforced through Redis so multiple workers cannot overload a local model |
 | `ai_allow_full_output` | `false` | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
 | `ai_require_private_base_url` | `true` | Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR |
@@ -413,7 +414,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `permalink_retention_days` | `365` | Delete runs, snapshots, and related run-output artifacts older than this many days at startup and during the scheduler worker's daily retention pass. `0` means unlimited retention |
 | `audit_log_enabled` | `true` | Server-side only. Enables audit event recording. When set to `false`, the audit recorder writes no rows and normal product writes continue; the app logs this once at startup so operators know the compliance trail is disabled |
 | `audit_retention_days` | `90` | Server-side only. Delete audit event rows older than this many days on startup and periodically while the app is running. `0` means unlimited retention |
-| `audit_export_max_rows` | `10000` | Server-side only. Maximum number of audit rows `/diag/audit` CSV/JSON exports return in one request. Values above `200000` are capped, and truncated exports include a marker row or flag |
+| `audit_export_max_rows` | `10000` | Server-side only. Maximum number of audit rows `/audit` CSV/JSON exports return in one request. Values above `200000` are capped, and truncated exports include a marker row or flag |
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
@@ -1745,16 +1746,24 @@ Non-Compose source runs export `INTERACTIVE_PTY_ENABLED=true`. Multi-worker depl
 
 ### Enable Diagnostics
 
+Follow [operator access setup](#operator-settings-console) to choose a restricted profile, grant a principal, and sign in. The grant covers diagnostics, audit, and settings from any network. Open deployments don't expose operator pages, including deployments that previously enabled diagnostics with a network allowlist.
+
+Metrics has its own network permission and needs no browser identity or operator grant:
+
 ```yaml
 # conf/config.local.yaml
-diagnostics_allowed_cidrs:
+metrics_allowed_cidrs:
   - 192.0.2.10/32
 trusted_proxy_cidrs:
   - 127.0.0.1/32
   - ::1/128
 ```
 
-The same allowlist gates Prometheus metrics. Keep the process-level scratch directory in `.env`:
+Only list proxies you control in `trusted_proxy_cidrs`; other peers can't supply a trusted forwarded client address.
+
+For the 3.0.1 compatibility release, `diagnostics_allowed_cidrs` is accepted as a deprecated **metrics-only** alias. Rename it to `metrics_allowed_cidrs` before upgrading to 3.1.0, which removes the alias. The canonical key wins when both appear in the same configuration layer, including an explicit empty list. Normal layer precedence still applies: a local alias overrides a shipped canonical value. The checker and operator inventory show only the canonical setting, its actual winning source, and a deprecation warning without CIDR values. Neither name grants operator access or bypasses AI limits. Apply YAML changes through the documented [container recreation workflow](#config-file-reload-behavior).
+
+Keep the process-level scratch directory in `.env`:
 
 ```env
 PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -1783,7 +1792,7 @@ scrape_configs:
 
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
 
-Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-workspace AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
+Ordinary AI assists follow the same workspace and global limits for every caller. The explicit diagnostics **Test prompt** action uses a separate limit of one request per operator per minute, shared across workers through Redis, plus the global AI write limit. Opening or refreshing diagnostics never submits a test prompt; the action requires the current operator session and CSRF protection.
 
 ### Tune Atlas Import Limits
 

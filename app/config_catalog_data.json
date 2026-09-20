@@ -92,9 +92,9 @@
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
   "admin_console_reauth_minutes": {
-    "label": "Admin console reauth minutes",
+    "label": "Operator verification minutes",
     "group": "Browser access",
-    "description": "Minutes since verified authentication before the operator console requires another identity check. Activity does not refresh this deadline.",
+    "description": "Minutes since verified authentication before operator settings, diagnostics, and audit pages require another identity check. Activity and refreshes do not renew verification or absolute session deadlines.",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
@@ -478,7 +478,7 @@
   "audit_export_max_rows": {
     "label": "Audit export max rows",
     "group": "Shell and execution",
-    "description": "Server-side only. Maximum number of audit rows /diag/audit CSV/JSON exports return in one request. Values above 200000 are capped, and truncated exports include a marker row or flag",
+    "description": "Server-side only. Maximum number of audit rows /audit CSV/JSON exports return in one request. Values above 200000 are capped, and truncated exports include a marker row or flag",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
@@ -533,15 +533,15 @@
     ],
     "apply": "Restart affected application processes after changing YAML. Recreate containers to refresh staged local overlays or environment; worker reloads cannot see later host-file edits."
   },
-  "diagnostics_allowed_cidrs": {
-    "label": "Diagnostics allowed CIDRs",
-    "group": "Network and logging",
-    "description": "IPs / CIDRs that may access /diag, /diag/audit, /metrics, and the /admin/ console. Console access additionally requires a restricted profile, eligible browser session, explicit principal grant, and verified freshness. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so X-Forwarded-For is honored only when the direct peer is inside trusted_proxy_cidrs. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a diag button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies",
+  "metrics_allowed_cidrs": {
+    "label": "Metrics allowed CIDRs",
+    "group": "Metrics",
+    "description": "IPs and CIDRs allowed to scrape /metrics without signing in. An empty list disables scrapes. Forwarded client IPs are trusted only through trusted_proxy_cidrs. This setting grants no operator access or AI quota exemption. The deprecated diagnostics_allowed_cidrs alias is metrics-only and is removed in 3.1.0; an explicit metrics_allowed_cidrs in the same YAML layer wins, including an empty list.",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
     "environment": [],
-    "yaml": "diagnostics_allowed_cidrs",
+    "yaml": "metrics_allowed_cidrs",
     "processes": [
       "web"
     ],
@@ -550,7 +550,7 @@
   "metrics_enabled": {
     "label": "Metrics enabled",
     "group": "Metrics",
-    "description": "Enables the Prometheus /metrics endpoint for callers allowed by diagnostics_allowed_cidrs. Set to false to hide /metrics while keeping /diag available",
+    "description": "Enables Prometheus /metrics for callers allowed by metrics_allowed_cidrs. Operator pages use their own principal and browser-session policy.",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
@@ -847,7 +847,7 @@
   "ai_rate_limit_per_session_hour": {
     "label": "AI rate limit per session hour",
     "group": "AI assists",
-    "description": "Per-workspace AI write limit enforced through Redis before new assists are queued. Clients allowed by diagnostics_allowed_cidrs bypass this workspace quota only",
+    "description": "Per-workspace AI write limit enforced through Redis before new assists are queued. Applies equally to operators and ordinary users.",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,

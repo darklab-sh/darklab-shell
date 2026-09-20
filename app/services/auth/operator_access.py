@@ -1,34 +1,35 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""CIDR-first, browser-only instance inspection boundary."""
+"""Browser-only, principal-bound policy for every operator page."""
 
 import logging
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from flask import current_app, g, jsonify, redirect, request
 
 from .access_profile import active_config, active_profile, safe_next_path
 from .operator_grants import has_grant
-from .resolver import AuthenticatedContext, AuthenticationState
+from .resolver import AuthenticatedContext, AuthenticationState, resolve_authentication
 
 log = logging.getLogger("shell")
 
 
 def is_operator_request():
     return (request.path == "/admin" or request.path.startswith("/admin/")
+            or request.path == "/diag" or request.path.startswith("/diag/")
+            or request.path == "/audit" or request.path.startswith("/audit/")
             or (request.path == "/auth/oidc/callback" and request.args.get("state", "").startswith("admin_")))
 
 
-def network_profile_allowed():
-    from core.helpers import get_client_ip, ip_is_in_cidrs
-    return (ip_is_in_cidrs(get_client_ip(), active_config().get("diagnostics_allowed_cidrs", []))
-            and active_profile() in {"token_required", "oidc_required", "mixed"})
+def profile_allowed():
+    return active_profile() in {"token_required", "oidc_required", "mixed"}
 
 
 def browser_eligible(context):
-    if not isinstance(context, AuthenticatedContext) or context.authentication_method != "browser_cookie":
+    if (not profile_allowed() or not isinstance(context, AuthenticatedContext)
+            or context.authentication_method != "browser_cookie"):
         return False
     if active_profile() == "oidc_required" and context.credential_type != "oidc":
         return False
@@ -38,10 +39,15 @@ def browser_eligible(context):
 
 
 def navigation_eligible():
-    if not network_profile_allowed():
+    if not profile_allowed():
         return False
-    from core.helpers import get_authentication_result
-    return browser_eligible(get_authentication_result().context)
+    from core.helpers import AuthenticationRejected, get_authentication_result
+    try:
+        return browser_eligible(get_authentication_result().context)
+    except AuthenticationRejected:
+        raise
+    except Exception:
+        return False
 
 
 def fresh(context, *, now=None):
@@ -73,11 +79,39 @@ def hidden_response(reason):
     return current_app.response_class(status=404)
 
 
+def return_path(value):
+    """Return to an operator document, never replay a data request or probe."""
+    parsed = urlsplit(safe_next_path(value, fallback="/admin/"))
+    if parsed.path in {"/admin", "/admin/", "/admin/settings", "/admin/reauth"}:
+        query = urlencode([(key, item[:256]) for key, item in parse_qsl(parsed.query[:4096])
+                           if key in {"view", "search", "group", "source", "warnings"}][:20])
+        return "/admin/" + ("?" + query if query else "")
+    if parsed.path == "/audit" or parsed.path.startswith("/audit/"):
+        path = "/audit"
+    elif parsed.path == "/diag" or parsed.path.startswith("/diag/"):
+        path = "/diag"
+    else:
+        return "/admin/"
+    keys = {"event_type", "actor", "actor_member_id", "actor_session_hash", "owner_session_hash",
+            "session_id", "team_id", "project_id", "target_type", "target_id", "correlation_id",
+            "date_from", "date_to", "limit", "offset"} if path == "/audit" else {"tz_offset"}
+    query = urlencode([(key, item[:256]) for key, item in parse_qsl(parsed.query[:4096]) if key in keys][:20])
+    return path + ("?" + query if query else "")
+
+
+def data_request():
+    return (request.path in {"/admin/settings", "/admin/access", "/diag/classifier-inspector",
+                             "/diag/classifier-drift", "/diag/ai-test"}
+            or request.args.get("format") == "json"
+            or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            or request.accept_mimetypes.best == "application/json")
+
+
 def require_authentication(*, reauthenticate=False):
     destination = "/admin/reauth" if reauthenticate else "/auth/sign-in"
-    path = safe_next_path(request.values.get("next"), fallback="/admin/") if request.path == "/admin/reauth" else "/admin/"
+    path = return_path(request.values.get("next") if request.path in {"/admin/reauth", "/admin/access"} else request.full_path)
     destination += "?" + urlencode({"next": path})
-    if request.path == "/admin/settings":
+    if data_request():
         return jsonify({"error": "reauthentication_required" if reauthenticate else "sign_in_required",
                         "destination": destination}), 401
     return redirect(destination)
@@ -86,23 +120,59 @@ def require_authentication(*, reauthenticate=False):
 def enforce_operator_access():
     if not is_operator_request():
         return None
-    # This is deliberately before authentication resolution and grant queries.
-    if not network_profile_allowed():
-        return hidden_response("network_or_profile")
+    if not profile_allowed():
+        return hidden_response("profile")
     if request.path == "/auth/oidc/callback":
         # The matched Lax state cookie binds a provider return to the source
         # session. Strict browser-session cookies need not survive that return.
         return None
-    from core.helpers import get_authentication_result
-    authentication = get_authentication_result()
-    if authentication.state in {AuthenticationState.DISABLED_PRINCIPAL, AuthenticationState.REVOKED_CREDENTIAL}:
+    from core.helpers import AuthenticationRejected, get_authentication_result
+    try:
+        authentication = get_authentication_result()
+        eligible = browser_eligible(authentication.context)
+    except AuthenticationRejected:
+        raise
+    except Exception as exc:
+        request.environ["darklab_operator_denied"] = True
+        log.error("INSTANCE_OPERATOR_ACCESS_UNAVAILABLE", extra={"reason": type(exc).__name__, "http_status": 503})
+        return jsonify({"error": "operator_access_unavailable"}), 503
+    if authentication.failed and authentication.state != AuthenticationState.EXPIRED_CREDENTIAL:
         return hidden_response("ineligible")
     context = authentication.context
-    if not isinstance(context, AuthenticatedContext) or context.authentication_method != "browser_cookie":
+    if authentication.state in {AuthenticationState.NO_CREDENTIAL, AuthenticationState.EXPIRED_CREDENTIAL}:
         return require_authentication()
-    if not browser_eligible(context):
+    if not eligible:
         return hidden_response("ineligible")
     g.operator_context = context
     if request.endpoint != "admin.reauthenticate" and not fresh(context):
         return require_authentication(reauthenticate=True)
     return None
+
+
+class OperatorAccessLost(RuntimeError):
+    """A protected operation can no longer emit data or launch a probe."""
+
+
+def recheck_access():
+    """Re-resolve live authority at export and probe boundaries without the request cache."""
+    try:
+        if not profile_allowed():
+            raise OperatorAccessLost("operator access unavailable")
+        authentication = resolve_authentication(
+            request.headers, cookies=request.cookies,
+            browser_session_idle_seconds=int(active_config().get("browser_session_idle_minutes", 30)) * 60,
+        )
+        if authentication.failed or not browser_eligible(authentication.context) or not fresh(authentication.context):
+            raise OperatorAccessLost("operator access unavailable")
+    except OperatorAccessLost:
+        raise
+    except Exception:
+        raise OperatorAccessLost("operator access unavailable") from None
+
+
+def log_context():
+    from core.helpers import get_client_ip
+    context = getattr(g, "operator_context", None)
+    return {"principal_id": getattr(context, "principal_id", ""),
+            "credential_id": getattr(context, "credential_id", ""),
+            "ip": get_client_ip(), "request_id": str(request.environ.get("darklab_request_id") or "")}

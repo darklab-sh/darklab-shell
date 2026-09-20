@@ -9,7 +9,7 @@ const template = readFileSync(path.resolve(process.cwd(), 'app/templates/diag_au
 
 describe('diagnostics audit viewer template', () => {
   it('keeps the filter and export controls in the real template', () => {
-    expect(template).toContain('<form class="diag-audit-filter-form" method="get" action="/diag/audit">')
+    expect(template).toContain('<form class="diag-audit-filter-form" method="get" action="/audit">')
     expect(template).toContain('name="event_type"')
     expect(template).toContain('name="actor"')
     expect(template).toContain('name="team_id"')
@@ -20,10 +20,10 @@ describe('diagnostics audit viewer template', () => {
     expect(template).toContain('name="date_from"')
     expect(template).toContain('name="date_to"')
     expect(template).toContain(
-      'href="/diag/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}"',
+      'href="/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}"',
     )
     expect(template).toContain(
-      'href="/diag/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}"',
+      'href="/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}"',
     )
   })
 
