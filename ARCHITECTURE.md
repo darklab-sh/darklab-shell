@@ -2615,7 +2615,7 @@ The Docker bridge remains the supported network model. The root entrypoint loads
 
 ---
 
-Instance inspection grants live in `instance_operator_grants`, keyed by principal id with cascading principal deletion. They carry no workspace or Team authority. Local grant changes lock the principal and record a fail-closed audit event in the same transaction; success logging follows commit. Database snapshots and the shared table discovery used for SQLite-to-Postgres migration preserve these records.
+Instance inspection grants live in `instance_operator_grants`, keyed by principal id with cascading principal deletion. They carry no workspace or Team authority. The local `operator-list` command pages current grants by principal id and reports disabled principals as ineligible without exposing credential or identity-provider data. Local grant changes lock the principal and record a fail-closed audit event in the same transaction; success logging follows commit. Database snapshots and the shared table discovery used for SQLite-to-Postgres migration preserve these records.
 
 ## Configuration Surfaces
 

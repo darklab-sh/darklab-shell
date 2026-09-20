@@ -174,6 +174,7 @@ def test_operation_help_needs_no_docker_or_database(deployment, args):
         "status",
         "operator-grant",
         "operator-status",
+        "operator-list",
         "operator-revoke",
         "issue",
         "recover",

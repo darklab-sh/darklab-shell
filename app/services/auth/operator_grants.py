@@ -19,6 +19,38 @@ from .contracts import PrincipalDisabled, PrincipalNotFound, timestamp
 log = logging.getLogger("shell")
 
 
+def _status(principal_id: str, data) -> dict[str, Any]:
+    granted = data["granted_at"] is not None and data["revoked_at"] is None
+    return {
+        "principal_id": principal_id,
+        "principal_status": str(data["status"]),
+        "granted": granted,
+        "eligible": granted and data["status"] == "active",
+        "granted_at": str(data["granted_at"]) if data["granted_at"] else None,
+        "revoked_at": str(data["revoked_at"]) if data["revoked_at"] else None,
+    }
+
+
+def list_grants(*, limit: int = 100, after: str = "", connect=None) -> dict[str, Any]:
+    """Inspect current grants, including disabled principals, in bounded pages."""
+    if not 1 <= limit <= 1000 or len(after) > 256:
+        raise ValueError("limit must be 1–1000 and after must be a principal id")
+
+    def operation(conn):
+        rows = conn.execute(
+            "SELECT p.id, p.status, g.granted_at, g.revoked_at "
+            "FROM instance_operator_grants g JOIN principals p ON p.id = g.principal_id "
+            "WHERE g.revoked_at IS NULL AND p.id > ? ORDER BY p.id LIMIT ?",
+            (after, limit + 1),
+        ).fetchall()
+        return {
+            "operators": [_status(str(row["id"]), row) for row in rows[:limit]],
+            "next_after": str(rows[limit - 1]["id"]) if len(rows) > limit else None,
+        }
+
+    return run_read(operation, connect=connect)
+
+
 def lock_principal(conn: Any, principal_id: str) -> dict[str, Any]:
     """Serialize grant changes and session step-up against this principal."""
     backend = DatabaseBackend(getattr(conn, "database_backend", None) or get_db_backend())
@@ -41,16 +73,7 @@ def grant_status(principal_id: str, *, conn=None, connect=None) -> dict[str, Any
         ).fetchone()
         if row is None:
             raise PrincipalNotFound("principal not found")
-        data = dict(row)
-        granted = data["granted_at"] is not None and data["revoked_at"] is None
-        return {
-            "principal_id": principal_id,
-            "principal_status": str(data["status"]),
-            "granted": granted,
-            "eligible": granted and data["status"] == "active",
-            "granted_at": str(data["granted_at"]) if data["granted_at"] else None,
-            "revoked_at": str(data["revoked_at"]) if data["revoked_at"] else None,
-        }
+        return _status(principal_id, row)
 
     return operation(conn) if conn is not None else run_read(operation, connect=connect)
 

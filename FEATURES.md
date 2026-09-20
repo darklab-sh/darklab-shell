@@ -1721,7 +1721,7 @@ Managed installations also provide `darklab-deploy access` for principal access 
 
 Each snapshot identifies the web worker that served it and when that worker loaded configuration. Refreshing does not prove that every worker agrees, and deployment settings that the worker cannot observe are clearly marked. The local configuration checker can validate a proposed YAML overlay even when the web application cannot start.
 
-Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console).
+Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. Local administrators can list current grants with `darklab-deploy access operator-list`, including grants retained for disabled accounts. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console).
 
 ---
 

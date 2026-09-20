@@ -92,6 +92,10 @@ def _parser() -> argparse.ArgumentParser:
         operator = commands.add_parser(command, help="Manage the explicit instance settings inspection grant.")
         operator.add_argument("principal_id")
 
+    operators = commands.add_parser("operator-list", help="List current instance inspection grants.")
+    operators.add_argument("--limit", type=int, default=100, help="Page size, from 1 to 1000 (default: 100).")
+    operators.add_argument("--after", default="", help="Continue after the previous page's next_after principal id.")
+
     issue = commands.add_parser("issue", help="Issue a portable credential or PAT.")
     issue.add_argument("principal_id")
     issue.add_argument("--type", choices=("portable", "pat"), default="portable")
@@ -146,6 +150,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command == "operator-list":
+        return operator_grants.list_grants(limit=args.limit, after=args.after)
     if args.command == "operator-status":
         return operator_grants.grant_status(args.principal_id)
     if args.command in {"operator-grant", "operator-revoke"}:

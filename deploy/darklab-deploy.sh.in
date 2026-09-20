@@ -1044,6 +1044,7 @@ Commands (principal and credential ids are non-secret identifiers):
   bootstrap --output-file HOST_PATH [--label LABEL]
   status PRINCIPAL
   operator-grant PRINCIPAL | operator-status PRINCIPAL | operator-revoke PRINCIPAL
+  operator-list [--limit 1..1000] [--after PRINCIPAL]
   issue PRINCIPAL --output-file HOST_PATH [--type portable|pat] [--scope SCOPE ...]
   recover PRINCIPAL --confirm-principal PRINCIPAL --output-file HOST_PATH
   rotate PRINCIPAL CREDENTIAL --output-file HOST_PATH
@@ -1276,7 +1277,7 @@ access_command() {
     access_operation=$1
     shift
     case "$access_operation" in
-        bootstrap|status|operator-grant|operator-status|operator-revoke|issue|recover|expiry|rotate|revoke|disable|enable|revoke-all-sessions|rotate-session-signing-key|retrieve) ;;
+        bootstrap|status|operator-grant|operator-status|operator-revoke|operator-list|issue|recover|expiry|rotate|revoke|disable|enable|revoke-all-sessions|rotate-session-signing-key|retrieve) ;;
         *) access_usage >&2; fail "unknown access command: $access_operation" ;;
     esac
     access_output=""

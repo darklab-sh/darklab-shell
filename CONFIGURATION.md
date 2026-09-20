@@ -160,7 +160,7 @@ The operator verification form at `/admin/reauth` requires an eligible browser s
 
 Provider sign-in time and verified provider authentication time are tracked separately. Ordinary sign-in still allows **Sign out everywhere** for five minutes, even when the provider omits `auth_time`. Operator pages require an integer `auth_time` in the signed ID token from fresh authentication (`max_age=0`, `prompt=login`). In `oidc_required` and for provider sessions in `mixed`, configure and verify that claim before granting operator access. A provider that omits it can still support ordinary sign-in, but cannot verify operator access; the verification page explains this requirement instead of suggesting repeated retries.
 
-Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
+Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. `operator-list` lists current grants, including disabled principals whose grants are retained but ineligible. Results contain safe identifiers, status, and grant timestamps. The default page holds 100 grants; use `--limit` (1–1000) and pass a returned `next_after` to `--after` until it is null. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
 
 Use `./darklab-deploy access` for local recovery and incident response in a managed installation. It selects the installation beside the helper, checks its managed files and image, and uses its `.env`, `compose.yaml`, and optional `compose.operator.yaml`, even when called from another directory. It runs the packaged principal tool in the running `shell` service with its configured execution identity. An unhealthy service is allowed; a missing or stopped service is reported without starting, upgrading, or retrying an operation. `access --help` works without Docker or database access.
 
@@ -176,6 +176,7 @@ Host access to this deployment command is separate from a browser operator grant
 ./darklab-deploy access rotate-session-signing-key
 ./darklab-deploy access operator-grant prn_example
 ./darklab-deploy access operator-status prn_example
+./darklab-deploy access operator-list
 ./darklab-deploy access operator-revoke prn_example
 ```
 

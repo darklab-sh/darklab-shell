@@ -207,7 +207,7 @@ The desktop and mobile screenshot packs also use a separate restricted-profile s
 
 Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
 
-Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, and audit rollback. Backup and database-migration fixtures preserve explicit grants. Schema inventories track the table and index renames used by the provider-flow upgrade, and populated upgrade tests preserve pending sign-in and linking flows.
+Operator-grant qualification uses `test_operator_grants.py` on SQLite and disposable Postgres, including idempotency, disabled-principal handling, bounded local grant listing, and audit rollback. Backup and database-migration fixtures preserve explicit grants. Schema inventories track the table and index renames used by the provider-flow upgrade, and populated upgrade tests preserve pending sign-in and linking flows.
 
 These summaries explain what belongs in each layer. Use the live-listing commands above when you need the current test inventory.
 
