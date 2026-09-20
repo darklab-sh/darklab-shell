@@ -1798,7 +1798,7 @@ scrape_configs:
 
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
 
-Ordinary AI assists follow the same workspace and global limits for every caller. The explicit diagnostics **Test prompt** action uses a separate limit of one request per operator per minute, shared across workers through Redis, plus the global AI write limit. Opening or refreshing diagnostics never submits a test prompt; the action requires the current operator session and CSRF protection.
+Ordinary AI assists follow the same workspace and global limits for every caller. The explicit diagnostics **Test prompt** action uses a separate limit of one request per operator per minute, shared across workers through Redis, plus the global AI write limit. A request rejected because global capacity is full leaves the operator’s one-minute allowance available. Opening or refreshing diagnostics never submits a test prompt; the action requires the current operator session and CSRF protection.
 
 ### Tune Atlas Import Limits
 

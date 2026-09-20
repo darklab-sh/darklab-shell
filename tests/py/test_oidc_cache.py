@@ -86,26 +86,32 @@ def test_unknown_key_refreshes_once_but_wrong_signature_does_not(monkeypatch):
     provider = LocalProvider(monkeypatch)
     flow = _flow(provider)
     expected = (ISSUER, provider.subject)
-    assert oidc.exchange_code(_config(), flow, "local-code") == expected
-    assert oidc.exchange_code(_config(), flow, "local-code") == expected
+    proof = oidc.exchange_code_proof(_config(), flow, "local-code")
+    assert (proof.issuer, proof.subject) == expected
+    assert proof.authenticated_at
+    proof = oidc.exchange_code_proof(_config(), flow, "local-code")
+    assert (proof.issuer, proof.subject) == expected
+    assert proof.authenticated_at
     assert len(provider.get_calls) == 2  # One discovery document and one JWKS.
     provider.private_key = jwk.RSAKey.generate_key(2048, private=True, auto_kid=True)
     provider.signing_key = provider.private_key
-    assert oidc.exchange_code(_config(), flow, "local-code") == expected
+    proof = oidc.exchange_code_proof(_config(), flow, "local-code")
+    assert (proof.issuer, proof.subject) == expected
+    assert proof.authenticated_at
     assert len(provider.get_calls) == 3
     kid = provider.private_key.kid
     assert kid is not None
     provider.signing_key = jwk.RSAKey.generate_key(2048, {"kid": kid}, private=True)
     with pytest.raises(oidc.OIDCError, match="could not be verified"):
-        oidc.exchange_code(_config(), flow, "local-code")
+        oidc.exchange_code_proof(_config(), flow, "local-code")
     assert len(provider.get_calls) == 3
     provider.signing_key = jwk.RSAKey.generate_key(2048, private=True, auto_kid=True)
     with pytest.raises(oidc.OIDCError, match="could not be verified"):
-        oidc.exchange_code(_config(), flow, "local-code")
+        oidc.exchange_code_proof(_config(), flow, "local-code")
     assert len(provider.get_calls) == 4  # An unknown ID gets exactly one refresh.
     provider.available = False
     with pytest.raises(oidc.OIDCUnavailable, match="code exchange"):
-        oidc.exchange_code(_config(), flow, "local-code")
+        oidc.exchange_code_proof(_config(), flow, "local-code")
     assert len(provider.get_calls) == 4
 
 
@@ -114,7 +120,7 @@ def test_expired_keys_are_refetched_and_empty_key_sets_are_not_cached(monkeypatc
     now = [1_000.0]
     monkeypatch.setattr(oidc_cache, "time", SimpleNamespace(monotonic=lambda: now[0]))
     flow = _flow(provider)
-    oidc.exchange_code(_config(), flow, "local-code")
+    oidc.exchange_code_proof(_config(), flow, "local-code")
     now[0] += oidc_cache.PROVIDER_CACHE_SECONDS
     original_get = oidc.requests.get
 
@@ -124,8 +130,10 @@ def test_expired_keys_are_refetched_and_empty_key_sets_are_not_cached(monkeypatc
     with monkeypatch.context() as patch:
         patch.setattr(oidc.requests, "get", empty_keys)
         with pytest.raises(oidc.OIDCError, match="signing key set"):
-            oidc.exchange_code(_config(), flow, "local-code")
-    assert oidc.exchange_code(_config(), flow, "local-code") == (ISSUER, provider.subject)
+            oidc.exchange_code_proof(_config(), flow, "local-code")
+    proof = oidc.exchange_code_proof(_config(), flow, "local-code")
+    assert (proof.issuer, proof.subject) == (ISSUER, provider.subject)
+    assert proof.authenticated_at
     assert len(provider.get_calls) == 4
 
 

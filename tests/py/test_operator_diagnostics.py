@@ -154,20 +154,28 @@ def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch):
 
 def test_operator_probe_limit_is_shared_by_identity_and_fails_closed(monkeypatch):
     from core import process
+    from services.ai import coordination
     from services.ai.coordination import AICoordinationUnavailable, check_operator_test_rate_limit
     from conftest import build_test_config
     cfg = build_test_config({"ai_rate_limit_global_per_minute": 2})
     redis = process._FakeRedisClient()
+    now = [125.0]
+    monkeypatch.setattr(coordination.time, "time", lambda: now[0])
     assert check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
     assert not check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
     assert check_operator_test_rate_limit("operator-two", cfg=cfg, redis_client=redis).allowed
     denied = check_operator_test_rate_limit("operator-three", cfg=cfg, redis_client=redis)
     assert not denied.allowed and "busy" in denied.message
+    now[0] = 181.0  # Global capacity is free while the first operator's slot is still held.
+    assert check_operator_test_rate_limit("operator-three", cfg=cfg, redis_client=redis).allowed
+    assert not check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
+    assert check_operator_test_rate_limit("operator-four", cfg=cfg, redis_client=redis).allowed
     def unavailable(*args, **kwargs):
         raise ConnectionError("private")
     monkeypatch.setattr(redis, "set", unavailable)
     with pytest.raises(AICoordinationUnavailable, match="AI coordination is unavailable"):
-        check_operator_test_rate_limit("operator-four", cfg=cfg, redis_client=redis)
+        check_operator_test_rate_limit("operator-five", cfg=cfg.with_overrides({"ai_rate_limit_global_per_minute": 10}),
+                                       redis_client=redis)
 
 
 def test_metrics_scrapes_are_independent_of_operator_identity(operator_db, monkeypatch):

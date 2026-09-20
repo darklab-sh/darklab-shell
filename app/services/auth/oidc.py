@@ -445,11 +445,6 @@ def exchange_code_proof(config: Mapping[str, Any], flow: OIDCFlow, code: str) ->
         return OIDCProof(str(config["oidc_issuer"]), subject, authenticated_at)
 
 
-def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple[str, str]:
-    proof = exchange_code_proof(config, flow, code)
-    return proof.issuer, proof.subject
-
-
 def _create_principal(conn: Any) -> str:
     principal_id = new_identifier("principal")
     workspace_id = new_identifier("workspace")
