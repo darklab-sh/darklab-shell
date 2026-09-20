@@ -203,7 +203,7 @@ Operator diagnostics coverage checks every route representation, shared grant an
 
 The open-profile Project journey confirms that creating and linking a Project does not open the operator audit viewer at `/audit`. Audit rendering and `/audit/export` download assertions run with a granted browser session in `operator-console.spec.js`; its local fixture seeds a completed run on the selected test backend, and ordinary authenticated requests create the Project and its audit event. Backend checks cover the canonical routes, private responses, and safe return paths that preserve audit filters after verification.
 
-The desktop and mobile screenshot packs also use a separate restricted-profile server and a disposable operator grant for their diagnostics scene. The shared fixture helper revokes that grant after capture.
+The desktop and mobile screenshot packs also use a separate restricted-profile server and a disposable operator grant for their diagnostics, settings, and audit scenes. Each operator capture applies the selected theme. The shared fixture helper revokes that grant after capture.
 
 Operator verification tests run on isolated SQLite and Postgres schemas. They cover signed provider proof, credential identity, CSRF/state failures, default-closed request ordering, revocation during verification, and repeated rotations at the original absolute deadline. The Postgres lane also exercises concurrent logout against rotation.
 
@@ -538,7 +538,7 @@ Both demo specs also read from one named visual-history fixture in `tests/js/e2e
 
 ### UI Screenshot Capture
 
-Standalone Playwright specs generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). The 51 desktop and 44 mobile scenes cover the shell, workspace Access, Files, reusable Workflows, Project Overview, Monitoring and digest settings, Assessment planning, Web Surface, reports, Atlas and Quick Lookup, run comparison, History, themes, sharing, and operator diagnostics. They are guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only through the wrapper. The wrapper accepts `--asset-bundle-mode source|bundle` when a capture needs to compare local source assets with the committed release bundles.
+Standalone Playwright specs generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). The 53 desktop and 46 mobile scenes cover the shell, workspace Access, Files, reusable Workflows, Project Overview, Monitoring and digest settings, Assessment planning, Web Surface, reports, Atlas and Quick Lookup, run comparison, History, themes, sharing, operator diagnostics, settings, and the audit viewer. They are guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only through the wrapper. The wrapper accepts `--asset-bundle-mode source|bundle` when a capture needs to compare local source assets with the committed release bundles.
 
 ```bash
 scripts/capture_ui_screenshots.sh

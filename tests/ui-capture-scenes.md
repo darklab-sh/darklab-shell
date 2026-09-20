@@ -28,8 +28,8 @@ Capture tests are gated behind `RUN_CAPTURE=1` through the dedicated configs in
 `.tooling/playwright.capture.{desktop,mobile}.config.js`, so the pack never runs
 as part of `npm run test:e2e`.
 
-Each pack starts a separate restricted-profile server for the diagnostics scene.
-That scene signs in with a disposable credential and grants operator access in
+Each pack starts a separate restricted-profile server for the diagnostics, Operator settings, and Audit log scenes.
+Each scene signs in with a disposable credential and grants operator access in
 the isolated test database. The grant is revoked after the screenshot; ordinary
 shell scenes use the open-profile server.
 
@@ -154,6 +154,8 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 49 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
 | 50 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
 | 51 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
+| 52 | `operator-settings-page` | `/admin/` | Filtered operator inventory with guidance expanded. | Card and category surfaces contrast with the page; worker provenance, filter controls, accepted values, and host guidance remain readable. |
+| 53 | `operator-audit-page` | `/audit` | Granted operator audit viewer. | Shared operator navigation, filters, event rows, and export controls use the selected theme consistently. |
 
 ## Mobile pack
 
@@ -207,6 +209,8 @@ Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 �
 | 42 | `snapshot-page` | `/share/:id` | Mobile snapshot landing page. | Header metadata stacks vertically; save menu reachable; prompt prefix matches the shell's. |
 | 43 | `permalink-page` | `/history/:id` | Mobile permalink landing page. | Same as snapshot page plus the run permalink semantics. |
 | 44 | `diag-page` | `/diag` | Mobile diag page. | `.diag-topbar` sibling wrapper keeps the sticky header legible on iOS Safari (the unscoped `mobile.css:84` rule that used to collapse the header is avoided by this structure); back-button visible at mobile/touch breakpoints. |
+| 45 | `operator-settings-page` | `/admin/` | Mobile filtered settings with guidance expanded. | Stacked filters and metadata fit the viewport; card backgrounds remain visible and touch controls stay usable. |
+| 46 | `operator-audit-page` | `/audit` | Mobile operator audit viewer. | Shared navigation includes the shell return link; filters, rows, and export controls remain accessible without page overflow. |
 
 ## Reporting regressions
 

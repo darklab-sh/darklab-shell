@@ -12,11 +12,14 @@ export function controlOperator(action, slot, principal) {
     resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.runtime.json`), principal], { stdio: 'pipe', encoding: 'utf8' })
 }
 
-export async function withOperatorCapture(page, testInfo, capture) {
+export async function withOperatorCapture(page, testInfo, capture, { route = '/diag', themeName } = {}) {
   const { operatorBaseURL, operatorSlot } = testInfo.project.metadata
   const credential = readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${operatorSlot}.credential`), 'utf8').trim()
   await page.context().clearCookies()
-  const target = new URL('/diag', operatorBaseURL).href
+  if (themeName) await page.context().addCookies([{
+    name: 'pref_theme_name', value: themeName.replace(/\.ya?ml$/i, '') + '.yaml', url: operatorBaseURL,
+  }])
+  const target = new URL(route, operatorBaseURL).href
   await page.goto(target, { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible()
   await page.getByLabel('Access credential').fill(credential)
