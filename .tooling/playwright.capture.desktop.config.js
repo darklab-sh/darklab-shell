@@ -23,6 +23,11 @@ export default defineConfig({
     trace: 'off',
     video: { mode: 'off' },
   },
-  projects: [{ name: 'capture-desktop' }],
-  webServer: buildIsolatedWebServer(5010, 'capture-desktop'),
+  projects: [{ name: 'capture-desktop', metadata: {
+    operatorBaseURL: 'http://127.0.0.1:5012', operatorSlot: 'capture-desktop-operator',
+  } }],
+  webServer: [
+    buildIsolatedWebServer(5010, 'capture-desktop'),
+    buildIsolatedWebServer(5012, 'capture-desktop-operator', 'token_required'),
+  ],
 })

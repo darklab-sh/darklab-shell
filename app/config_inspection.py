@@ -119,11 +119,13 @@ def safe_warnings(warnings):
     entries = catalog()
     return [{"key": item.get("key") if item.get("key") in entries else "unknown input key",
              "event": item.get("event") if item.get("event") in {
-                 "APP_NAME_TRUNCATED", "CONFIG_VALUE_DROPPED", "CONFIG_VALUE_DEFAULTED", "CONFIG_VALUE_CLAMPED"
+                 "APP_NAME_TRUNCATED", "CONFIG_VALUE_DROPPED", "CONFIG_VALUE_DEFAULTED", "CONFIG_VALUE_CLAMPED",
+                 "CONFIG_ALIAS_DEPRECATED"
              } else "CONFIG_INPUT_WARNING",
              "reason": item.get("reason") if item.get("reason") in {
                  "above_maximum_chars", "invalid_cidr", "invalid_domain_suffix", "invalid_int", "invalid_bool",
-                 "invalid_redaction_rule", "below_minimum", "above_maximum", "below_database_pool_min", "invalid_mb"
+                 "invalid_redaction_rule", "below_minimum", "above_maximum", "below_database_pool_min", "invalid_mb",
+                 "deprecated_alias"
              } else "input ignored or normalized"}
             for item in warnings[:MAX_WARNINGS]]
 

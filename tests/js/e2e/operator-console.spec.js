@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { execFileSync } from 'child_process';
 import { test, expect } from '@playwright/test';
 import { ensurePromptReady } from './helpers.js';
+import { controlOperator as control } from './operator_helpers.js';
 
 test.setTimeout(120_000);
 function fixtureInfo(project) {
@@ -15,25 +15,20 @@ function fixtureInfo(project) {
   if (project.includes('oidc')) return { slot: pg ? 'pg-mixed' : 'oidc-qualification', provider: true };
   return { slot: '', provider: false };
 }
-function control(action, slot, principal) {
-  const python = existsSync('.venv/bin/python') ? resolve('.venv/bin/python') : 'python3';
-  execFileSync(python, [resolve('scripts/test-support/playwright/operator_fixture.py'), action,
-    resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.runtime.json`), principal], { stdio: 'pipe' });
-}
 async function browserRead(page, path) {
   return page.evaluate(async url => {
     const response = await fetch(url, { credentials: 'same-origin' });
     return { status: response.status, body: response.headers.get('content-type')?.includes('application/json') ? await response.json() : null };
   }, path);
 }
-async function verify(page, provider, credential) {
+async function verify(page, provider, credential, path = '/admin/') {
   if (provider) await page.getByRole('button', { name: /identity provider/i }).click();
   else {
     await page.getByLabel('Access credential').fill(credential);
     await page.getByRole('button', { name: 'Verify access', exact: true }).click();
   }
-  await page.waitForURL(url => url.pathname === '/admin/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
+  await page.waitForURL(url => url.pathname === path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  if (path === '/admin/') await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
 }
 
 async function choose(page, label, option) {
@@ -196,6 +191,8 @@ async function withOperator(shellPage, testInfo, width, run, { fromMenu = false 
   if (!slot) {
     expect((await page.request.get('/admin/')).status()).toBe(404);
     expect((await page.request.get('/admin/settings')).status()).toBe(404);
+    expect((await page.request.get('/diag')).status()).toBe(404);
+    expect((await page.request.get('/diag/audit')).status()).toBe(404);
     return;
   }
   const credential = provider ? '' : readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
@@ -236,6 +233,8 @@ async function withOperator(shellPage, testInfo, width, run, { fromMenu = false 
     const inventory = (await browserRead(page, '/admin/settings')).body;
     expect(inventory.observation.kind).toBe("serving web worker's loaded configuration");
     expect(inventory.settings.find(row => row.key === 'oidc_client_secret').effective.mode).toBe('withheld');
+    expect(inventory.settings.find(row => row.key === 'metrics_allowed_cidrs').effective.value).toEqual([]);
+    expect(inventory.settings.some(row => row.key === 'diagnostics_allowed_cidrs')).toBe(false);
     expect(JSON.stringify(inventory)).not.toContain('playwright-only-secret');
     await run({ page, inventory, slot, principal, provider, credential });
   } finally {
@@ -245,13 +244,54 @@ async function withOperator(shellPage, testInfo, width, run, { fromMenu = false 
 
 for (const width of [1280, 375]) {
   test.describe(`viewport ${width}`, () => {
-    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 });
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600, timezoneId: 'Asia/Tokyo' });
 
     test(`operator navigation at ${width}px`, async ({ page }, testInfo) => {
       await withOperator(page, testInfo, width, async ({ page: operatorPage, inventory }) => {
         await browseOperatorPages(operatorPage,
           inventory.settings.find(row => row.key === 'app_name').effective.value, width, testInfo);
       }, { fromMenu: true });
+    });
+
+    test(`operator audit menu navigation at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      if (!fixtureInfo(testInfo.project.name).slot) {
+        await shellPage.goto('/');
+        await ensurePromptReady(shellPage);
+        await expect(shellPage.locator('[data-action="audit"], [data-menu-action="audit"]')).toHaveCount(0);
+        return;
+      }
+      await withOperator(shellPage, testInfo, width, async ({ page }) => {
+        await page.goto('/');
+        await ensurePromptReady(page);
+        const mobile = width === 375;
+        await page.locator(mobile ? '#hamburger-btn' : '#rail-more-btn').click();
+        const menu = page.locator(mobile ? '#mobile-menu-sheet' : '#rail-more-menu');
+        const attribute = mobile ? 'data-menu-action' : 'data-action';
+        for (const action of ['admin', 'diag', 'audit']) {
+          await expect(menu.locator(`[${attribute}="${action}"]`)).toBeVisible();
+        }
+        const audit = menu.locator(`[${attribute}="audit"]`);
+        let auditPage = page;
+        if (mobile) {
+          expect((await audit.boundingBox()).height).toBeGreaterThanOrEqual(44);
+          await audit.tap();
+          expect(page.context().pages()).toHaveLength(1);
+        } else {
+          await expect(audit).toHaveAttribute('href', '/diag/audit');
+          await expect(audit).toHaveAttribute('target', '_blank');
+          await expect(audit).toHaveAttribute('rel', 'noopener noreferrer');
+          const opened = page.waitForEvent('popup');
+          await audit.press('Enter');
+          auditPage = await opened;
+          await auditPage.waitForLoadState('domcontentloaded');
+          expect(await auditPage.evaluate(() => window.opener)).toBeNull();
+          await expect(menu).toBeHidden();
+          expect(new URL(page.url()).pathname).toBe('/');
+          await ensurePromptReady(page);
+        }
+        await expect(auditPage).toHaveURL(/\/diag\/audit$/);
+        await expect(auditPage.locator('.diag-header-meta')).toHaveText('audit log');
+      });
     });
 
     test(`operator settings controls at ${width}px`, async ({ page: shellPage }, testInfo) => {
@@ -276,6 +316,119 @@ for (const width of [1280, 375]) {
       });
     });
 
+    test(`diagnostics layout, explicit probes, and access loss at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      await withOperator(shellPage, testInfo, width, async ({ page, slot, principal, provider, credential }) => {
+        const navigations = [];
+        page.on('request', request => {
+          if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+            const url = new URL(request.url());
+            if (url.pathname === '/diag') navigations.push(url.pathname + url.search);
+          }
+        });
+        let probes = 0;
+        await page.route('**/diag/ai-test', async route => {
+          probes += 1;
+          expect(route.request().method()).toBe('POST');
+          expect(route.request().headers()['x-darklab-csrf']).toBeTruthy();
+          await route.fulfill({ json: { ok: true, payload: { status: 'ok', message: 'Fixture probe completed' } } });
+        });
+        await page.goto('/diag');
+        await expect(page).toHaveURL(/\/diag\?tz_offset=-540$/);
+        expect(navigations).toEqual(['/diag', '/diag?tz_offset=-540']);
+        const storage = page.locator('.diag-section.s-storage');
+        await expect(storage).toContainText('Storage breakdown');
+        await expect(storage.locator('.diag-storage-table tbody tr').first()).toBeVisible();
+        expect(probes).toBe(0);
+        await page.locator('[data-diag-ai-test-form] button').click();
+        await expect(page.locator('.diag-ai-test-result')).toContainText('Fixture probe completed');
+        expect(probes).toBe(1);
+        await page.setViewportSize({ width: 850, height: 900 });
+        if (width === 375) {
+          await expect(page.locator('.diag-back-btn')).toBeVisible();
+          await page.locator('.diag-back-btn').click();
+          await ensurePromptReady(page);
+          await page.goto('/diag?tz_offset=0');
+        } else await expect(page.locator('.diag-back-btn')).toBeHidden();
+        control('stale', slot, principal);
+        await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+        await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
+        await verify(page, provider, credential, '/diag');
+        await expect(storage).toContainText('Storage breakdown');
+        expect(probes).toBe(1);
+        control('revoke', slot, principal);
+        await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+        await expect(page.locator('main')).toHaveText('Operator access is unavailable.');
+        await expect(storage).toHaveCount(0);
+      });
+    });
+
+    test(`operator audit viewer records project actions at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      await withOperator(shellPage, testInfo, width, async ({ page, slot, principal }) => {
+        const { run_id: runId } = JSON.parse(control('seed-run', slot, principal));
+        await page.goto('/');
+        await ensurePromptReady(page);
+        const projectId = await page.evaluate(async runId => {
+          const created = await apiFetch('/projects', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: `Playwright Operator Audit ${Date.now()}` }),
+          });
+          if (!created.ok) throw new Error(`Project creation failed: ${created.status}`);
+          const { project } = await created.json();
+          const linked = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity_type: 'run', entity_id: runId, source: 'manual' }),
+          });
+          if (!linked.ok) throw new Error(`Project link failed: ${linked.status}`);
+          return project.id;
+        }, runId);
+        const response = await page.goto(`/diag/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
+        expect(response.status()).toBe(200);
+        await expect(page.locator('body.diag-page')).toBeVisible();
+        const auditRow = page.locator('.diag-audit-table tbody tr', { hasText: projectId }).first();
+        await expect(auditRow).toContainText('project.link');
+        await expect(auditRow).toContainText(`project:${projectId}`);
+        await auditRow.locator('.diag-audit-details summary').click();
+        const details = auditRow.locator('.diag-audit-details pre');
+        await expect(details).toContainText('"event_type": "project.link"');
+        await expect(details).toContainText('"source": "manual"');
+        const audit = await browserRead(page, `/diag/audit?format=json&event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
+        expect(audit.status).toBe(200);
+        expect(audit.body.events.some(event => event.actor_principal_id === principal && event.project_id === projectId)).toBe(true);
+        for (const format of ['CSV', 'JSON']) {
+          const href = await page.getByRole('link', { name: format, exact: true }).getAttribute('href');
+          const url = new URL(href, page.url());
+          expect(url.pathname).toBe('/diag/audit/export');
+          expect(Object.fromEntries(url.searchParams)).toEqual({ event_type: 'project.link', project_id: projectId,
+            ...(format === 'JSON' ? { format: 'json' } : {}) });
+        }
+      });
+    });
+
+    test(`audit verification preserves filters and protects downloads at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      await withOperator(shellPage, testInfo, width, async ({ page, slot, principal, provider, credential }) => {
+        await page.goto('/diag/audit?event_type=instance_operator.view');
+        await expect(page.locator('.diag-audit-table tbody tr').first()).toBeVisible();
+        control('stale', slot, principal);
+        await page.getByRole('link', { name: 'JSON', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
+        await verify(page, provider, credential, '/diag/audit');
+        expect(new URL(page.url()).searchParams.get('event_type')).toBe('instance_operator.view');
+        const completed = page.waitForEvent('download');
+        await page.getByRole('link', { name: 'JSON', exact: true }).click();
+        const download = await completed;
+        expect(await download.failure()).toBeNull();
+        const chunks = [];
+        for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        expect(data.events.length).toBeGreaterThan(0);
+        expect(data.events.every(event => event.event_type === 'instance_operator.view')).toBe(true);
+        control('revoke', slot, principal);
+        await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+        await expect(page.locator('main')).toHaveText('Operator access is unavailable.');
+        await expect(page.locator('.diag-audit-table')).toHaveCount(0);
+      });
+    });
+
     test(`operator verification and revocation at ${width}px`, async ({ page: shellPage }, testInfo) => {
       await withOperator(shellPage, testInfo, width, async ({ page, slot, principal, provider, credential }) => {
         await page.route('**/admin/settings', route => route.fulfill({ status: 503, body: '{}' }), { times: 1 });
@@ -291,8 +444,8 @@ for (const width of [1280, 375]) {
         expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain('playwright-only-secret');
         control('revoke', slot, principal);
         await page.getByRole('button', { name: 'Refresh snapshot' }).click();
-        await expect(page.locator('#admin-results')).toBeEmpty();
-        await expect(page.locator('#admin-status')).toHaveText('Operator access is unavailable.');
+        await expect(page.locator('[data-key]')).toHaveCount(0);
+        await expect(page.getByRole('status')).toHaveText('Operator access is unavailable.');
       });
     });
   });

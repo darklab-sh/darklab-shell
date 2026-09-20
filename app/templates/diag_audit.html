@@ -181,3 +181,9 @@
   </section>
 </main>
 {% endblock %}
+
+{% block body_scripts %}
+{% for src in asset_bundle('operator-pages') %}
+<script type="{{ asset_bundle_script_type('operator-pages') }}" src="{{ src }}"></script>
+{% endfor %}
+{% endblock %}

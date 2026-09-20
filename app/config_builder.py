@@ -918,7 +918,7 @@ _NORMALIZED_LIST_KEYS = {
     "share_redaction_rules",
     "output_entity_extra_domain_suffixes",
 }
-_STRING_LIST_KEYS = {"trusted_proxy_cidrs", "diagnostics_allowed_cidrs", "welcome_status_labels"}
+_STRING_LIST_KEYS = {"trusted_proxy_cidrs", "metrics_allowed_cidrs", "welcome_status_labels"}
 _FLOAT_LIST_KEYS = {
     "metrics_histogram_buckets_run_duration",
     "metrics_histogram_buckets_http_duration",
@@ -978,9 +978,10 @@ class AppConfig(MutableMapping[str, Any]):
 
     def __setitem__(self, key: str, value: Any) -> None:
         data = self.model_dump()
-        data[key] = value
+        overlay = _normalize_config_layer({key: value})
+        data.update(overlay)
         provenance = dict(self._provenance)
-        _record_value_provenance({key: value}, provenance, "runtime mutation")
+        _record_value_provenance(overlay, provenance, "runtime mutation")
         self._commit_candidate(data, provenance)
 
     def __delitem__(self, key: str) -> None:
@@ -1018,6 +1019,7 @@ class AppConfig(MutableMapping[str, Any]):
         data = self.model_dump()
         provenance = dict(self._provenance)
         if overrides:
+            overrides = _normalize_config_layer(overrides)
             _merge_dict_data(data, overrides)
             _record_value_provenance(overrides, provenance, "test overrides")
         parsed = self._validate_candidate(data, provenance)
@@ -1491,7 +1493,7 @@ def config_defaults() -> dict[str, Any]:
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
-        "diagnostics_allowed_cidrs":  [],
+        "metrics_allowed_cidrs":      [],
         "metrics_enabled":            True,
         "prometheus_multiproc_dir":   "/tmp/darklab_shell-prom",
         "metrics_histogram_buckets_run_duration": [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600],
@@ -1811,6 +1813,22 @@ def config_defaults() -> dict[str, Any]:
     }
 
 
+def _normalize_config_layer(overlay):
+    """Resolve the deprecated diagnostics key before layers are merged."""
+    layer = deepcopy(overlay)
+    if "diagnostics_allowed_cidrs" in layer:
+        legacy = layer.pop("diagnostics_allowed_cidrs")
+        layer.setdefault("metrics_allowed_cidrs", legacy)
+        warning = {"event": "CONFIG_ALIAS_DEPRECATED", "key": "metrics_allowed_cidrs",
+                   "reason": "deprecated_alias", "alias": "diagnostics_allowed_cidrs",
+                   "removal_version": "3.1.0"}
+        state = _state()
+        if warning not in state.warnings:
+            state.warnings.append(warning)
+            state.log.warning("CONFIG_ALIAS_DEPRECATED", extra=warning)
+    return layer
+
+
 def _build_config(layers, environment):
     defaults = config_defaults()
     schema_defaults = deepcopy(defaults)
@@ -1818,7 +1836,7 @@ def _build_config(layers, environment):
     provenance: dict[str, str] = {}
     _record_default_provenance(defaults, provenance)
     for source, overlay in layers:
-        _merge_config_overlay(defaults, deepcopy(overlay), source=source,
+        _merge_config_overlay(defaults, _normalize_config_layer(overlay), source=source,
                               provenance=provenance, allowed_paths=allowed_paths)
     applied_env_names = []
     for env_name, key in ENVIRONMENT_KEYS.items():

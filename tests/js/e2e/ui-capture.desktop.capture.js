@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
+import { withOperatorCapture } from './operator_helpers.js'
 
 import {
   browserSessionId,
@@ -940,9 +941,8 @@ const scenes = [
     slug: 'diag-page',
     title: 'Diag page',
     route: '/diag',
+    operator: true,
     run: async (page) => {
-      await page.context().clearCookies()
-      await page.goto('/diag', { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.diag-page')).toBeVisible()
     },
   },
@@ -960,15 +960,19 @@ test('desktop screenshot capture pack', async ({ page }, testInfo) => {
   for (const themeName of themes) {
     for (const [index, scene] of scenes.entries()) {
       await test.step(`${themeLabel(themeName)} :: ${scene.title}`, async () => {
-        await scene.run(page, themeName, testInfo)
-        await saveCapture(page, manifest, {
-          ui: 'desktop',
-          themeName,
-          order: index + 1,
-          slug: scene.slug,
-          title: scene.title,
-          route: scene.route,
-        })
+        const capture = async () => {
+          await scene.run(page, themeName, testInfo)
+          await saveCapture(page, manifest, {
+            ui: 'desktop',
+            themeName,
+            order: index + 1,
+            slug: scene.slug,
+            title: scene.title,
+            route: scene.route,
+          })
+        }
+        if (scene.operator) await withOperatorCapture(page, testInfo, capture)
+        else await capture()
       })
     }
   }

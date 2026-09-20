@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.e30b7b901554.js",
-      "hash": "5f9572ae7e43e534f8da49f6e00bb80b65b113074f3cb75e0f4de5f0f395e93c",
+      "path": "/static/build/shell-bootstrap.c1eb7a1ce866.js",
+      "hash": "d590f838bf729159dd7f37aac768a49c6fe99aeb00e6f0356fec6cc81ecb5720",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -213,7 +213,7 @@
         "/static/js/features/history/history_rows.js": "de4cb4f30b1f08a77a0bab9982aacab7936df142945191291852a8075a4289c2",
         "/static/js/features/history/history_run_modal_state_bridge.js": "e1caf887ace97ebca74619e1ee21b145a31370250518d767885e37b4144dd063",
         "/static/js/features/history/history_search.js": "62ab11c6383da3848cef26152c69ac0c0ebdbeb4699427148b84fa400f7572de",
-        "/static/js/features/mobile/mobile_menu_actions.js": "8e634123491151090cf586f929f6d76b077c966332484864bbdfeb618c580f5f",
+        "/static/js/features/mobile/mobile_menu_actions.js": "e148567a151a3897c28050c5dd7b1a99f9294fab6df68e76f2d028ca8dce6bf5",
         "/static/js/features/mobile/mobile_shell_layout.js": "94e84b4c86f45a2a69ad5313f63df900d94d786e9b62690cd02ebe2288d40fc4",
         "/static/js/features/mobile/mobile_shell_layout_bridge.js": "2dc56cc7210e3e5b13deb8d4c4cdeef495fab7a9602bb82d8c9a5e46ee3fc08e",
         "/static/js/features/preferences/browser_logout.js": "af0003d725f4a0953ff54e5829ed0661aec0970e7676f01e2cd2aa20c54d04bb",
@@ -262,7 +262,7 @@
         "/static/js/search_bridge.js": "8a774d59113b3c7aa2393065b3e13f05ac3e5daf6fe9f3352a2a7138be5beba2",
         "/static/js/session.js": "47b220da6ea5b7267811a5ca2dc102677197f2ce554d3f1f8cf98f1bb47c3ac4",
         "/static/js/shell_bootstrap.entry.js": "fbe928bcd8f4ba33b4c764e650a27de0394727fe84624e50cfd8982119f44be2",
-        "/static/js/shell_chrome.js": "b01b23fbb6fc321b941624583a95fc9dbf3053072a943d30e45511621490c2af",
+        "/static/js/shell_chrome.js": "d997d616a7dda3b74ca2867380a8567f20a2ab4ed7e2511b51162354e85a759d",
         "/static/js/tabs.js": "e6e9ad4feefb6b7054323ba99fff9f7b8c3783022f72445f35e69648b12d9b5c",
         "/static/js/tabs_bridge.js": "5bccc06d44264563ae9e8737da2fa08786f3449383b627e2be047832c08b5609",
         "/static/js/ui/cleanup_reasons.js": "51a7d0c8cd780bc72234b7d4bf0b0ad69f1cf9bdd143a157fa0cccd719d54d4c",
@@ -348,12 +348,13 @@
     },
     "admin": {
       "type": "esm",
-      "path": "/static/build/admin.bb736b0f4a38.js",
-      "hash": "bb736b0f4a38f9eec4f2fc9f911856bdd6ce6baa8bdec2e48ca57657853ad6ed",
+      "path": "/static/build/admin.d5adc37af1d6.js",
+      "hash": "d5adc37af1d66c7ad00cd8cbbe84e968286a0d07fe8836db6ccbacf721794c3a",
       "sources": [
         "/static/js/admin.entry.js",
         "/static/js/core/dom.js",
         "/static/js/core/state.js",
+        "/static/js/features/admin/operator_access.js",
         "/static/js/features/admin/operator_console.js",
         "/static/js/features/admin/operator_settings_view.js",
         "/static/js/features/history/history_panel_bridge.js",
@@ -373,9 +374,10 @@
         "/static/js/welcome_bridge.js"
       ],
       "source_hashes": {
-        "/static/js/admin.entry.js": "fa6f0985a9d7c371e75873ba0a24df3d780d082d437a06498ff78830cb10f497",
+        "/static/js/admin.entry.js": "20000bac8417122e9e204ece194efb0da3e32147e46e03f5dbcebaf47bd174ab",
         "/static/js/core/dom.js": "f1680f5e57c4e91a01cc904c6508c4144fcb25c3f801fdf7597b87947c63f210",
         "/static/js/core/state.js": "07016305ab506b6fd4737a6b95a9c71a757beada67c6e1c82a63ab5a2ff8510c",
+        "/static/js/features/admin/operator_access.js": "fcf996b15f47a119f031a0277a7507f7329ed79b1693776c911bc09a3493ba01",
         "/static/js/features/admin/operator_console.js": "e7e488c1c37fffac3081181b6b1e0e62580081c0c87dba67b5095453c319a1ff",
         "/static/js/features/admin/operator_settings_view.js": "eff5a9599c6d317e5caeef3827eafd41fc088cbb48155beaa76bc2cb0bda0f89",
         "/static/js/features/history/history_panel_bridge.js": "f305ed2892bb453e299b6550d9c15aa84ac67a706a86b935a5f4f318c94bed9a",
@@ -396,6 +398,34 @@
       },
       "entries": [
         "/static/js/admin.entry.js"
+      ]
+    },
+    "operator-pages": {
+      "type": "esm",
+      "path": "/static/build/operator-pages.20e9a2fc5db5.js",
+      "hash": "20e9a2fc5db5235b97dfb8dc66fc90f957b849d80175a1020113defcfb147ae5",
+      "sources": [
+        "/static/js/features/admin/operator_access.js",
+        "/static/js/features/diagnostics/ai_test.js",
+        "/static/js/features/diagnostics/audit_exports.js",
+        "/static/js/features/diagnostics/classifier.js",
+        "/static/js/features/diagnostics/command_cells.js",
+        "/static/js/features/diagnostics/drift.js",
+        "/static/js/features/diagnostics/refresh.js",
+        "/static/js/operator_pages.entry.js"
+      ],
+      "source_hashes": {
+        "/static/js/features/admin/operator_access.js": "fcf996b15f47a119f031a0277a7507f7329ed79b1693776c911bc09a3493ba01",
+        "/static/js/features/diagnostics/ai_test.js": "b444885dc473fcd33b423f22acdfcaf4deafbe171336e35a41b299a018830cad",
+        "/static/js/features/diagnostics/audit_exports.js": "6c9612cc27f6b70162b126a89c7cbcc5f78cafd41bf6bf123f0b6a212ab7f90d",
+        "/static/js/features/diagnostics/classifier.js": "c0383fdfa9270efa0b443f506ce07c1e23ea9c27d185d7d878eeebe0b5c945bd",
+        "/static/js/features/diagnostics/command_cells.js": "7253a15b1571fb5a7c45a79e18a8eafd4511d1f39686df67d1b3991191839760",
+        "/static/js/features/diagnostics/drift.js": "bd851aee49ca8d77d0608a68651773484e4faf62157e9cf8b6f447c4cddb9e82",
+        "/static/js/features/diagnostics/refresh.js": "9daf9d455b19e42a056ea4fe8a246b21ebfa49ffcc855b2ada8235485a67048a",
+        "/static/js/operator_pages.entry.js": "527686649b512924aa10f584ec7c565823a1835ffbdbea0150544330a4e6a74c"
+      },
+      "entries": [
+        "/static/js/operator_pages.entry.js"
       ]
     }
   },

@@ -57,7 +57,7 @@ def source_context(bundle, issued):
 
 
 def credential_setup(operator_db, monkeypatch):
-    cfg = operator_db.cfg.with_overrides({"access_profile": "token_required", "diagnostics_allowed_cidrs": ["127.0.0.0/8"]})
+    cfg = operator_db.cfg.with_overrides({"access_profile": "token_required", "metrics_allowed_cidrs": ["127.0.0.0/8"]})
     app = app_for(monkeypatch, cfg)
     bundle = create_identity()
     operator_grants.set_grant(bundle.principal.id, granted=True)
@@ -179,7 +179,7 @@ def test_expiry_is_evaluated_after_waiting_for_locks(operator_db, monkeypatch):
 def provider_setup(operator_db, monkeypatch, profile="oidc_required"):
     config = _config(profile).with_overrides({
         "database_backend": operator_db.cfg["database_backend"], "database_url": operator_db.cfg["database_url"],
-        "data_dir": operator_db.cfg["data_dir"], "diagnostics_allowed_cidrs": ["127.0.0.0/8"],
+        "data_dir": operator_db.cfg["data_dir"], "metrics_allowed_cidrs": ["127.0.0.0/8"],
     })
     provider = LocalProvider(monkeypatch)
     app = app_for(monkeypatch, config)
@@ -215,7 +215,7 @@ def test_provider_step_up_binds_state_and_preserves_original_deadline_without_st
     assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
 
 
-@pytest.mark.parametrize("failure", ["missing", "old", "future", "subject", "state", "revoked", "network", "provider"])
+@pytest.mark.parametrize("failure", ["missing", "old", "future", "subject", "state", "revoked", "profile", "provider"])
 def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, monkeypatch, failure):
     app, client, provider, state, principal = provider_setup(operator_db, monkeypatch)
     if failure == "missing":
@@ -230,8 +230,10 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
         client.delete_cookie(oidc.OIDC_STATE_COOKIE, domain="shell.example", path="/auth/oidc/callback")
     elif failure == "revoked":
         operator_grants.set_grant(principal, granted=False)
-    elif failure == "network":
-        app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({"diagnostics_allowed_cidrs": []})
+    elif failure == "profile":
+        app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides(
+            {"access_profile": "open", "oidc_provisioning": "disabled"}
+        )
     elif failure == "provider":
         provider.available = False
     result = _callback(client, state)
@@ -344,12 +346,11 @@ def test_team_rotation_preserves_provider_proof_without_refreshing_console_acces
 
 
 @pytest.mark.parametrize("path", ["/admin/", "/admin/settings", "/admin/reauth", "/auth/oidc/callback?state=admin_test"])
-@pytest.mark.parametrize("closed", ["network", "profile"])
-def test_closed_console_never_resolves_authentication_or_grants(operator_db, monkeypatch, path, closed):
+def test_closed_console_never_resolves_authentication_or_grants(operator_db, monkeypatch, path):
     from core import helpers
     cfg = operator_db.cfg.with_overrides({
-        "access_profile": "open" if closed == "profile" else "token_required",
-        "diagnostics_allowed_cidrs": ["127.0.0.0/8"] if closed == "profile" else [],
+        "access_profile": "open",
+        "metrics_allowed_cidrs": ["127.0.0.0/8"],
     })
     app = app_for(monkeypatch, cfg)
     def forbidden(*args, **kwargs):

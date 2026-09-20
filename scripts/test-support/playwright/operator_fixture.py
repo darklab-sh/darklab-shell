@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 
 ENV_KEYS = ("APP_DATA_DIR", "APP_CONF_DIR", "APP_LOCAL_CONF_DIR", "ACCESS_PROFILE", "DATABASE_BACKEND",
@@ -17,7 +18,7 @@ ENV_KEYS = ("APP_DATA_DIR", "APP_CONF_DIR", "APP_LOCAL_CONF_DIR", "ACCESS_PROFIL
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("record", "grant", "revoke", "stale"))
+    parser.add_argument("action", choices=("record", "grant", "revoke", "stale", "seed-run"))
     parser.add_argument("metadata")
     parser.add_argument("principal", nargs="?")
     args = parser.parse_args()
@@ -36,6 +37,8 @@ def main():
     from services.auth.operator_grants import set_grant
     if args.action in {"grant", "revoke"}:
         set_grant(args.principal, granted=args.action == "grant")
+    elif args.action == "seed-run":
+        seed_run(args.principal)
     else:
         from core.database_access import get_db_connect
         from services.auth.contracts import timestamp
@@ -44,6 +47,25 @@ def main():
             conn.execute("UPDATE browser_sessions SET authenticated_at = ?, provider_authenticated_at = ? WHERE principal_id = ?",
                          (stale, stale, args.principal))
             conn.commit()
+
+
+def seed_run(principal_id):
+    """Seed only a completed run; the browser creates and links the real Project."""
+    from core.database_access import get_db_connect
+    from services.auth.contracts import timestamp
+    from services.auth.storage import get_personal_workspace
+    run_id = "run_operator_e2e_" + uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+    with get_db_connect()() as conn:
+        workspace = get_personal_workspace(principal_id, conn=conn)
+        conn.execute(
+            "INSERT INTO runs (id, personal_workspace_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, output_line_count) VALUES (?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
+            (run_id, workspace.id, "dig projects.playwright.example +short",
+             timestamp(now - timedelta(seconds=1)), timestamp(now)),
+        )
+        conn.commit()
+    print(json.dumps({"run_id": run_id}))
 
 
 if __name__ == "__main__":

@@ -114,6 +114,24 @@ def principal_owner(label: str | None = None) -> str:
     return principal_identity(label).owner_id
 
 
+def operator_browser_client(app):
+    """Sign in a granted operator with real cookies on a disposable test app."""
+    from conftest import build_test_config
+    from services.auth import browser_sessions, operator_grants, storage
+
+    app.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": "token_required"})
+    bundle = storage.create_principal_with_credential()
+    operator_grants.set_grant(bundle.principal.id, granted=True)
+    issued = browser_sessions.create_browser_session(
+        principal_id=bundle.principal.id, credential_id=bundle.credential.metadata.id, absolute_seconds=43200,
+    )
+    client = app.test_client()
+    client.set_cookie(browser_sessions.BROWSER_SESSION_COOKIE, issued.cookie_value)
+    client.set_cookie(browser_sessions.BROWSER_CSRF_COOKIE, issued.csrf_token)
+    client.environ_base["HTTP_X_DARKLAB_CSRF"] = issued.csrf_token
+    return client
+
+
 def persisted_principal(conn: Any, label: str) -> PersistedPrincipalFixture:
     """Insert a production-shaped principal and workspace on an explicit connection."""
     normalized = str(label or "test-principal")

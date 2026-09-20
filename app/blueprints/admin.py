@@ -12,7 +12,7 @@ from core.helpers import current_theme_name, get_authentication_result
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request
 from services.audit.context import request_audit_fields
 from services.auth import lifecycle, oidc, operator_access, operator_reauth
-from services.auth.access_profile import active_config, safe_next_path
+from services.auth.access_profile import active_config
 from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
 from services.auth.contracts import IdentityStorageError
 from services.auth.oidc_diagnostics import log_oidc_failure
@@ -32,7 +32,7 @@ log = logging.getLogger("shell")
 @admin_bp.route("/reauth", methods=["GET", "POST"])
 def reauthenticate():
     context = g.operator_context
-    next_path = safe_next_path(request.values.get("next"), fallback="/admin/")
+    next_path = operator_access.return_path(request.values.get("next"))
     error = "Verification couldn't be completed. Please try again." if request.args.get("error") else ""
     status = 200
     limited = None
@@ -61,8 +61,8 @@ def reauthenticate():
                 try:
                     # Recheck eligibility after credential verification, before
                     # the transactional session/grant validation and rotation.
-                    if not operator_access.network_profile_allowed():
-                        return operator_access.hidden_response("network_or_profile")
+                    if not operator_access.profile_allowed():
+                        return operator_access.hidden_response("profile")
                     issued = operator_reauth.rotate_verified_session(
                         context, active_config(), credential_context=result.context,
                         request_fields=request_audit_fields(request),
@@ -96,8 +96,8 @@ def reauthenticate():
 
 
 def complete_provider_reauthentication(flow, proof):
-    if not operator_access.network_profile_allowed():
-        return operator_access.hidden_response("network_or_profile")
+    if not operator_access.profile_allowed():
+        return operator_access.hidden_response("profile")
     # Strict session cookies may be absent on a cross-site callback. The
     # consumed flow and matched HttpOnly state cookie identify the source;
     # an explicitly present different/invalid session must never override it.
@@ -111,7 +111,7 @@ def complete_provider_reauthentication(flow, proof):
     issued = operator_reauth.rotate_verified_session(
         source, active_config(), provider_proof=proof, request_fields=request_audit_fields(request),
     )
-    response = redirect(safe_next_path(flow.next_path, fallback="/admin/"))
+    response = redirect(operator_access.return_path(flow.next_path))
     _set_browser_session_cookies(response, issued)
     _clear_oidc_state_cookie(response)
     return response
@@ -128,3 +128,9 @@ def index():
 def settings():
     from services.operator_console import loaded_settings
     return jsonify(loaded_settings(g.operator_context, request_audit_fields(request)))
+
+
+@admin_bp.get("/access")
+def access_status():
+    """The shared request boundary verifies access without reading settings or creating view events."""
+    return "", 204
