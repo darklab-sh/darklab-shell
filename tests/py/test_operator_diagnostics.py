@@ -8,7 +8,7 @@ import pytest
 
 from admin_helpers import operator_db as _operator_db
 from core.database_access import get_db_connect
-from services.auth import operator_access, operator_grants
+from services.auth import browser_sessions, operator_access, operator_grants
 from services.auth.contracts import IdentityStorageError, timestamp
 from test_operator_reauthentication import ORIGIN, credential_setup
 
@@ -129,15 +129,24 @@ def test_live_check_failure_returns_unavailable_and_one_safe_error(operator_db, 
 
 
 @pytest.mark.parametrize("format", ["csv", "json"])
-@pytest.mark.parametrize("failure", ["revoked", "storage"])
+@pytest.mark.parametrize("failure", ["revoked", "session", "verification", "storage"])
 def test_export_stops_after_access_failure_and_never_logs_completion(operator_db, monkeypatch, caplog, format, failure):
     import blueprints.assets as assets
     caplog.set_level("INFO", logger="shell")
-    _app, client, bundle, _issued = credential_setup(operator_db, monkeypatch)
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
     def pages(*args, **kwargs):
         yield {"events": [{"id": "first-safe-row"}], "truncated": False}
         if failure == "revoked":
             operator_grants.set_grant(bundle.principal.id, granted=False)
+        elif failure == "session":
+            browser_sessions.revoke_browser_session(issued.id, reason="test logout")
+            assert operator_grants.has_grant(bundle.principal.id)
+        elif failure == "verification":
+            with get_db_connect()() as conn:
+                conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?",
+                             (timestamp(datetime.now(timezone.utc) - timedelta(hours=1)), issued.id))
+                conn.commit()
+            assert operator_grants.has_grant(bundle.principal.id)
         else:
             def unavailable(*args, **kwargs):
                 raise OSError("PRIVATE_STORAGE_DETAILS")

@@ -122,6 +122,11 @@ def test_fresh_grant_command_logs_only_committed_changes_to_stderr(operator_db, 
     env = {**os.environ, "APP_CONF_DIR": str(config), "APP_LOCAL_CONF_DIR": str(config),
            "DATABASE_BACKEND": operator_db.backend,
            "DATABASE_URL": str(operator_db.cfg.get("database_url") or "")}
+    if operator_db.backend == "postgres":
+        from psycopg.conninfo import conninfo_to_dict
+        # The pool adds its JIT setting through PGOPTIONS, which takes precedence
+        # over DSN options. Keep the subprocess in the fixture's isolated schema.
+        env["PGOPTIONS"] = conninfo_to_dict(env["DATABASE_URL"])["options"]
     program = """
 import sys
 sys.path.insert(0, "scripts/operations")
