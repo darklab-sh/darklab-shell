@@ -179,32 +179,32 @@ async function browseInventory(page, inventory, width, testInfo) {
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
 }
 
-for (const width of [1280, 375]) {
-  test.describe(`viewport ${width}`, () => {
-    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 });
-  test(`operator console at ${width}px`, async ({ page: shellPage }, testInfo) => {
-    let page = shellPage;
-    const { slot, provider } = fixtureInfo(testInfo.project.name);
-    if (!slot) {
-      expect((await page.request.get('/admin/')).status()).toBe(404);
-      expect((await page.request.get('/admin/settings')).status()).toBe(404);
-      return;
-    }
-    const credential = provider ? '' : readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
-    await page.goto('/admin/');
-    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-    if (provider) await page.getByRole('link', { name: /identity provider/i }).click();
-    else {
-      await page.getByLabel('Access credential').fill(credential);
-      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    }
-    await page.waitForURL(url => url.pathname === '/admin/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    const identity = await browserRead(page, '/auth/principal');
-    expect(identity.status).toBe(200);
-    const principal = identity.body.principal.id;
-    expect((await browserRead(page, '/admin/settings')).status).toBe(404);
-    control('grant', slot, principal);
-    try {
+// Keep navigation, inventory interactions, and authorization in separate browser
+// journeys so one case does not spend its timeout on unrelated checks.
+async function withOperator(shellPage, testInfo, width, run, { fromMenu = false } = {}) {
+  let page = shellPage;
+  const { slot, provider } = fixtureInfo(testInfo.project.name);
+  if (!slot) {
+    expect((await page.request.get('/admin/')).status()).toBe(404);
+    expect((await page.request.get('/admin/settings')).status()).toBe(404);
+    return;
+  }
+  const credential = provider ? '' : readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
+  await page.goto('/admin/');
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  if (provider) await page.getByRole('link', { name: /identity provider/i }).click();
+  else {
+    await page.getByLabel('Access credential').fill(credential);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  }
+  await page.waitForURL(url => url.pathname === '/admin/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  const identity = await browserRead(page, '/auth/principal');
+  expect(identity.status).toBe(200);
+  const principal = identity.body.principal.id;
+  expect((await browserRead(page, '/admin/settings')).status).toBe(404);
+  control('grant', slot, principal);
+  try {
+    if (fromMenu) {
       await page.goto('/');
       await ensurePromptReady(page);
       if (width === 375) {
@@ -220,47 +220,71 @@ for (const width of [1280, 375]) {
         expect(new URL(shellPage.url()).pathname).toBe('/');
         await ensurePromptReady(shellPage);
       }
-      await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
-      const inventory = (await browserRead(page, '/admin/settings')).body;
-      expect(inventory.observation.kind).toBe("serving web worker's loaded configuration");
-      expect(inventory.settings.find(row => row.key === 'oidc_client_secret').effective.mode).toBe('withheld');
-      expect(JSON.stringify(inventory)).not.toContain('playwright-only-secret');
-      await browseOperatorPages(page, inventory.settings.find(row => row.key === 'app_name').effective.value, width, testInfo);
-      await page.getByLabel('Search settings').fill('ai_base_url');
-      await expect(page.locator('[data-key="ai_base_url"]')).toContainText('Not configured');
-      await choose(page, 'Source', 'Host · not observed');
-      await expect(page.locator('#admin-results')).toContainText('No settings match');
-      await choose(page, 'Source', 'All sources');
-      await page.getByLabel('Search settings').fill('browser_session');
-      await expect(page.locator('#admin-count')).toContainText('2 of');
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      if (width === 375) {
-        for (const control of await page.locator('#admin-refresh, .admin-filters .app-select-trigger').all()) {
-          expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44);
-        }
-      }
-      await page.getByLabel('Search settings').focus();
-      await expect(page.getByLabel('Search settings')).toBeFocused();
-      await page.screenshot({ path: testInfo.outputPath(`operator-console-${width}.png`), fullPage: true });
-      await browseInventory(page, inventory, width, testInfo);
-      await page.route('**/admin/settings', route => route.fulfill({ status: 503, body: '{}' }), { times: 1 });
-      await page.getByRole('button', { name: 'Refresh snapshot' }).click();
-      await expect(page.locator('#admin-results')).toBeEmpty();
-      await expect(page.locator('#admin-status')).toContainText('Try refreshing');
-      await page.getByRole('button', { name: 'Refresh snapshot' }).click();
-      await expect(page.locator('#admin-status')).toContainText('Snapshot loaded');
-      control('stale', slot, principal);
-      await page.getByRole('button', { name: 'Refresh snapshot' }).click();
-      await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
-      await verify(page, provider, credential);
-      expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain('playwright-only-secret');
-      control('revoke', slot, principal);
-      await page.getByRole('button', { name: 'Refresh snapshot' }).click();
-      await expect(page.locator('#admin-results')).toBeEmpty();
-      await expect(page.locator('#admin-status')).toHaveText('Operator access is unavailable.');
-    } finally {
-      control('revoke', slot, principal);
+    } else {
+      await page.reload({ waitUntil: 'domcontentloaded' });
     }
-  });
+    await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
+    const inventory = (await browserRead(page, '/admin/settings')).body;
+    expect(inventory.observation.kind).toBe("serving web worker's loaded configuration");
+    expect(inventory.settings.find(row => row.key === 'oidc_client_secret').effective.mode).toBe('withheld');
+    expect(JSON.stringify(inventory)).not.toContain('playwright-only-secret');
+    await run({ page, inventory, slot, principal, provider, credential });
+  } finally {
+    control('revoke', slot, principal);
+  }
+}
+
+for (const width of [1280, 375]) {
+  test.describe(`viewport ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 });
+
+    test(`operator navigation at ${width}px`, async ({ page }, testInfo) => {
+      await withOperator(page, testInfo, width, async ({ page: operatorPage, inventory }) => {
+        await browseOperatorPages(operatorPage,
+          inventory.settings.find(row => row.key === 'app_name').effective.value, width, testInfo);
+      }, { fromMenu: true });
+    });
+
+    test(`operator settings controls at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      await withOperator(shellPage, testInfo, width, async ({ page, inventory }) => {
+        await page.getByLabel('Search settings').fill('ai_base_url');
+        await expect(page.locator('[data-key="ai_base_url"]')).toContainText('Not configured');
+        await choose(page, 'Source', 'Host · not observed');
+        await expect(page.locator('#admin-results')).toContainText('No settings match');
+        await choose(page, 'Source', 'All sources');
+        await page.getByLabel('Search settings').fill('browser_session');
+        await expect(page.locator('#admin-count')).toContainText('2 of');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        if (width === 375) {
+          for (const control of await page.locator('#admin-refresh, .admin-filters .app-select-trigger').all()) {
+            expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.getByLabel('Search settings').focus();
+        await expect(page.getByLabel('Search settings')).toBeFocused();
+        await page.screenshot({ path: testInfo.outputPath(`operator-console-${width}.png`), fullPage: true });
+        await browseInventory(page, inventory, width, testInfo);
+      });
+    });
+
+    test(`operator verification and revocation at ${width}px`, async ({ page: shellPage }, testInfo) => {
+      await withOperator(shellPage, testInfo, width, async ({ page, slot, principal, provider, credential }) => {
+        await page.route('**/admin/settings', route => route.fulfill({ status: 503, body: '{}' }), { times: 1 });
+        await page.getByRole('button', { name: 'Refresh snapshot' }).click();
+        await expect(page.locator('#admin-results')).toBeEmpty();
+        await expect(page.locator('#admin-status')).toContainText('Try refreshing');
+        await page.getByRole('button', { name: 'Refresh snapshot' }).click();
+        await expect(page.locator('#admin-status')).toContainText('Snapshot loaded');
+        control('stale', slot, principal);
+        await page.getByRole('button', { name: 'Refresh snapshot' }).click();
+        await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
+        await verify(page, provider, credential);
+        expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain('playwright-only-secret');
+        control('revoke', slot, principal);
+        await page.getByRole('button', { name: 'Refresh snapshot' }).click();
+        await expect(page.locator('#admin-results')).toBeEmpty();
+        await expect(page.locator('#admin-status')).toHaveText('Operator access is unavailable.');
+      });
+    });
   });
 }

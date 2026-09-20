@@ -93,19 +93,24 @@ test.describe('restricted access profile', () => {
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   })
 
-  test('keeps invalid credentials off the page and signs out every browser through Access', async ({ page, browser }) => {
+  test('keeps invalid credentials off the sign-in page', async ({ page }) => {
     await openSignIn(page)
     await page.getByLabel('Access credential').fill('not-a-credential')
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByRole('alert')).toContainText("isn't valid")
     await expect(page.getByLabel('Access credential')).toHaveValue('')
+  })
 
-    await signIn(page)
-    const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  test('signs out every browser through Access', async ({ page, browser, baseURL }) => {
+    const peerContext = await browser.newContext({ baseURL })
     const peer = await peerContext.newPage()
     try {
-      await openSignIn(peer)
-      await signIn(peer)
+      // These are independent browser sessions. Both must finish signing in
+      // before revocation starts, but neither needs to wait for the other.
+      await Promise.all([page, peer].map(async browserPage => {
+        await openSignIn(browserPage)
+        await signIn(browserPage)
+      }))
       await openRailAction(page, 'options')
       await page.locator('#options-tab-access').click()
       const revoked = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/sessions/revoke-all')

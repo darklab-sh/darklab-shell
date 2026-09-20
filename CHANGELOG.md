@@ -31,6 +31,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Browser qualification keeps independent workflows within their test budgets.** Operator navigation, settings controls, and access verification run as separate journeys, as do credential management, restoration, and invalid-input checks. The mobile Access test waits for its action to become usable and covers a deliberately held module download. Existing timeout limits and CI's rejection of flaky results stay in place.
+
 - **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
 
 - **Backup exports reject missing Docker volume sources.** The helper checks source volumes before export, so a misspelled or unavailable source fails instead of creating an empty named volume and recording an empty export. Existing source volumes remain in place.
