@@ -137,7 +137,11 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
     await expect(page.getByRole('link', { name: 'Continue with identity provider' })).toHaveCount(0)
     await page.unroute('**/auth/principal')
     await page.getByLabel('Access credential').fill(operatorCredential())
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await Promise.all([
+      page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded' }),
+      page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+    ])
+    await ensurePromptReady(page)
     await expect(page.locator('#options-panel-access')).toBeVisible()
     await expect(page.locator('#options-tab-access')).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(url => url.pathname === '/' && !url.searchParams.has('options'))

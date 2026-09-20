@@ -1144,6 +1144,13 @@ def _docker_cp(ctx: BackupContext, container: str, source_path: str, destination
 def _export_docker_volume(ctx: BackupContext, volume_name: str, destination: Path) -> None:
     if not DOCKER_VOLUME_RE.match(volume_name):
         raise BackupError(f"invalid Docker volume name: {volume_name}")
+    # Docker's -v option creates missing named volumes, even for read-only mounts.
+    _run(
+        ctx,
+        ["docker", "volume", "inspect", "--format", "{{.Name}}", volume_name],
+        label="Docker backup source volume inspection",
+        timeout=ctx.args.command_timeout,
+    )
     destination.mkdir(parents=True, exist_ok=True)
     command = [
         "docker",
