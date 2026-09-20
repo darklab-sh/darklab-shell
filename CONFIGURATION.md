@@ -162,21 +162,21 @@ Provider sign-in time and verified provider authentication time are tracked sepa
 
 Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
 
-The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.
+Use `./darklab-deploy access` for local recovery and incident response in a managed installation. It selects the installation beside the helper, checks its managed files and image, and uses its `.env`, `compose.yaml`, and optional `compose.operator.yaml`, even when called from another directory. It runs the packaged principal tool in the running `shell` service with its configured execution identity. An unhealthy service is allowed; a missing or stopped service is reported without starting, upgrading, or retrying an operation. `access --help` works without Docker or database access.
 
-Run it through the installed Compose project:
+Host access to this deployment command is separate from a browser operator grant. The Python tool still owns confirmations, lockout protection, disabled-principal checks, transactions, and audit records. Commands print safe JSON metadata on stdout and deployment diagnostics on stderr:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py expiry prn_example crd_example 2026-12-31T23:59:59Z
-docker compose exec -T shell python /app/tools/manage_principal_access.py revoke prn_example crd_example --reason "lost device" --pause-related-work
-docker compose exec -T shell python /app/tools/manage_principal_access.py disable prn_example --reason "incident review"
-docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py revoke-all-sessions prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
-docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py operator-status prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py operator-revoke prn_example
+./darklab-deploy access status prn_example
+./darklab-deploy access expiry prn_example crd_example 2026-12-31T23:59:59Z
+./darklab-deploy access revoke prn_example crd_example --reason "lost device" --pause-related-work
+./darklab-deploy access disable prn_example --reason "incident review"
+./darklab-deploy access enable prn_example
+./darklab-deploy access revoke-all-sessions prn_example
+./darklab-deploy access rotate-session-signing-key
+./darklab-deploy access operator-grant prn_example
+./darklab-deploy access operator-status prn_example
+./darklab-deploy access operator-revoke prn_example
 ```
 
 `status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
@@ -185,15 +185,26 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py operat
 
 For CLI and integration tokens, follow [Create a PAT](docs/api.md#create-a-pat). It covers browser and operator issuance, permissions, expiry, private one-time output, and verification with `darklab whoami`.
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
+`bootstrap`, `issue`, `rotate`, and `recover` accept `--output-file HOST_PATH`. The helper reserves a new owner-only host file before issuing access, retrieves the one-time credential without displaying it, and removes the private container copy after the host file is saved. Existing files, directories, and symlinks are rejected. Relative output paths use your current working directory, not the installation directory. JSON identifies the saved host path as `secret_file`, with `secret_file_location: "host"`; it never contains the credential. Use the principal ID recorded by bootstrap, or returned by `darklab whoami` with an existing PAT, and verify it with `status` before changing access.
+
+If a transfer fails or is interrupted, the helper removes incomplete host output and reports the retained private container path when available. If no credential file exists, it removes the unused staging directory and asks you to inspect principal status. An empty file is preserved because issuance may still be running. Access may already have been issued: the failure does not roll back the mutation. Retrieve that file into a new destination instead of repeating issuance or recovery:
+
+```bash
+./darklab-deploy access retrieve /data/.darklab-access-example/credential \
+  --output-file ./retrieved-access.credential
+```
+
+For source development or troubleshooting, the underlying command remains available as `docker compose exec -T shell python /app/tools/manage_principal_access.py ...`. Its `--secret-file` names a new private file inside the container and requires manual retrieval and cleanup. The deployment wrapper forwards that option for advanced use, but rejects combining it with `--output-file`.
 
 To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   issue prn_example --type portable --label "Additional device" \
-  --secret-file /data/additional-device.credential
+  --output-file ./additional-device.credential
 ```
+
+To replace one credential, use `./darklab-deploy access rotate prn_example crd_example --output-file ./replacement.credential`. Review the returned metadata and update that credential's clients before removing the local copy.
 
 **Recovery revokes every portable credential, PAT, and browser session for the principal.** It also pauses schedules and watchers, mutes notification channels, and disables Project digests created or last changed with those newly revoked credentials. This happens automatically; `recover` has no option to keep that work running. Existing provider links and workspace data stay in place.
 
@@ -202,16 +213,12 @@ Before recovery, review the principal's credentials and related work in **Option
 For a full access reset, replace both occurrences of `prn_example` with the intended principal ID and choose a new output filename:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   recover prn_example --confirm-principal prn_example \
-  --label "Recovered access" --secret-file /data/recovered-access.credential
-
-umask 077
-docker compose cp shell:/data/recovered-access.credential ./recovered-access.credential
-chmod 600 ./recovered-access.credential
+  --label "Recovered access" --output-file ./recovered-access.credential
 ```
 
-Save and verify the copied credential in the operator's secret store, then remove both temporary copies. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
+Save and verify the credential in the operator's secret store, then remove the local temporary file. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
 
 For provider-only deployments, enable `mixed` before using a portable credential to sign in. Use `issue` when the purpose is only to regain a browser path for repairing a provider link; use `recover` when all existing credentials and sessions must be invalidated.
 
@@ -245,20 +252,16 @@ docker compose up -d --force-recreate shell
 
 #### Bootstrap credential-required access
 
-A fresh restricted deployment has no public bootstrap endpoint. Create the first principal from inside the running application container and write the one-time credential to a new path under the private `/data` mount:
+A fresh restricted deployment has no public bootstrap endpoint. Use the deployment helper to create the first principal in the running application container and save the one-time credential to a new private host file:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   bootstrap \
   --label "Initial operator access" \
-  --secret-file /data/initial-operator.credential
-
-docker compose cp shell:/data/initial-operator.credential ./initial-operator.credential
-chmod 600 ./initial-operator.credential
-docker compose exec -T shell rm /data/initial-operator.credential
+  --output-file ./initial-operator.credential
 ```
 
-The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the copied credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
+The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
 
 #### Session lifetime and sign-out
 
@@ -332,7 +335,7 @@ The console is unavailable by default. To enable access:
 
 1. Choose `token_required`, `oidc_required`, or `mixed` in the host configuration. Follow [restricted browser access](#restricted-browser-access), including HTTPS, bootstrap/provider setup, and profile-transition precautions before switching a live deployment.
 2. Apply the required container recreation through the deployment workflow. Production startup copies local overlays into a private snapshot; a web-worker reload cannot read later host edits. See [reload behavior](#config-file-reload-behavior).
-3. Establish an active principal and run `docker compose exec -T shell python /app/tools/manage_principal_access.py operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
+3. Establish an active principal and run `./darklab-deploy access operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
 4. Sign in at `/admin/`. Use `operator-status` or `operator-revoke` through the same local tool to inspect or remove access. If account access is lost, follow [local recovery](#issuing-credentials-and-recovering-access), then review the principal's grant.
 
 The same access policy protects `/admin/`, `/diag`, `/audit`, and their child routes, from any network. Each request checks the restricted profile, browser session, active principal, operator grant, and recent verification. Open profiles and ineligible principals receive a generic 404; team roles, API tokens, direct credential headers, and metrics permissions don't qualify. Missing or expired sessions require sign-in; stale verification requires credential re-entry or fresh provider authentication. The [verification policy](#principal-access-operations) preserves the original absolute session deadline. Activity and automatic refreshes don't renew verification.
@@ -343,24 +346,25 @@ The page labels its result as the **serving web worker's loaded configuration**,
 
 ## Validating Instance Configuration
 
-The image includes a local checker that uses the same configuration rules as startup. It prints a fresh evaluation of the inputs supplied to that command, including safe values, source layers, and normalization warnings. It doesn't report the configuration loaded by any existing web or background worker.
+Use `./darklab-deploy config check` to validate a managed installation, including when the application is stopped or its configuration prevents startup. The command uses the installed image and the same configuration rules as startup. It prints a fresh evaluation of supplied inputs, including reviewed values, source layers, and normalization warnings; existing web and background workers can have different loaded settings.
 
 ```bash
-docker compose exec -T shell python /app/tools/check_instance_config.py
-docker compose exec -T shell python /app/tools/check_instance_config.py --json --strict
+./darklab-deploy config check
+./darklab-deploy config check --json --strict
+./darklab-deploy config check --local-yaml ./candidate.yaml --json
 ```
 
-Use `--local-yaml /path/to/candidate.yaml` to replace the local YAML input with a candidate file. The command reads the shipped configuration and supported environment overrides as usual; an environment override can still win over the candidate. It never writes settings, parses the host `.env`, creates keys, or initializes the database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`.
+The helper selects the installation beside itself and applies its `.env` and optional `compose.operator.yaml`. It runs the packaged checker in a disposable container with an explicit Python entrypoint, without starting services or running entrypoint maintenance. The installation's current local YAML is supplied explicitly when present; an absent optional overlay uses the existing defaults. `--local-yaml` replaces that overlay with a host file relative to your current directory. The checker reads the input through a read-only pipe, so no temporary YAML copy, host-to-daemon path translation, or extra bind mount is needed for a candidate. Missing or unreadable candidates fail without creating paths. Temporary containers and their anonymous volumes are removed after completion or interruption.
 
-For a stopped deployment or invalid configuration that prevents startup, bypass the normal entrypoint. Mount the candidate read-only at an explicit path:
+Supported environment overrides still win over YAML, including candidate files. Checking does not apply settings, write configuration, create keys, or initialize or migrate a database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`; deployment diagnostics stay on stderr. Image selection, published ports, worker counts, and other host-only settings still need Compose/startup validation.
+
+For development or troubleshooting, invoke `/app/tools/check_instance_config.py` directly. When bypassing normal startup, supply the local input explicitly:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint python \
+docker compose run --rm --no-deps -T --entrypoint python3 \
   --volume "$PWD/conf/config.local.yaml:/candidate/config.local.yaml:ro" \
   shell /app/tools/check_instance_config.py --local-yaml /candidate/config.local.yaml --json
 ```
-
-That command sees the environment supplied by Compose. It doesn't run the entrypoint's overlay staging, so the explicit candidate mount is the local input being checked. Image selection, published ports, worker counts, and other host-only settings are listed as unobserved and still require their own Compose/startup checks.
 
 The inspection catalog allows only reviewed full values, declared summaries, or withheld values. Custom redaction rules and provider subject allowlists expose counts only; the AI endpoint exposes presence only. Credentials and protected references remain withheld. Unknown input values never appear in diagnostics. Long permitted values have explicit truncation markers, and inspection doesn't offer a secret reveal.
 

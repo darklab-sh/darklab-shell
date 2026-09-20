@@ -1715,6 +1715,8 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Purpose:** help authorized operators understand loaded settings and how to change their host configuration safely.
 
+Managed installations also provide `darklab-deploy access` for principal access and private credential-file retrieval, and `darklab-deploy config check` for validation while the app is running or stopped. These host commands use the selected installation and preserve the same access safeguards and configuration rules. See [operator guidance](CONFIGURATION.md#principal-access-operations).
+
 **Behavior:** authorized operators can inspect configuration from the desktop or mobile **Operator settings** menu. The desktop menu keeps the shell open in its original tab, and shared page headers let you move between settings, diagnostics, and the audit log. Browse collapsed groups with setting counts, combine search with group, source, and warning filters, or clear every filter at once. Matching groups open automatically; clearing filters restores your earlier browsing view. Refresh keeps expanded details and your place. Compact cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive values stay withheld or show only an approved count or presence indicator; there is no reveal or edit action.
 
 Each snapshot identifies the web worker that served it and when that worker loaded configuration. Refreshing does not prove that every worker agrees, and deployment settings that the worker cannot observe are clearly marked. The local configuration checker can validate a proposed YAML overlay even when the web application cannot start.
