@@ -5,11 +5,28 @@
 
 import logging
 
+from gunicorn.glogging import Logger
 from prometheus_client import multiprocess
 
 from core.database_backend import close_postgres_pool
+from core.log_streams import console_handlers
 
 log = logging.getLogger("shell")
+
+
+class ConsoleSeverityLogger(Logger):
+    """Split Gunicorn process logs while retaining its format and file options."""
+
+    def _set_handler(self, log, output, fmt, stream=None):
+        if log is self.error_log and output == "-":
+            for handler in console_handlers(fmt):
+                handler._gunicorn = True
+                log.addHandler(handler)
+        else:
+            super()._set_handler(log, output, fmt, stream)
+
+
+logger_class = ConsoleSeverityLogger
 
 
 def post_worker_init(_worker):
