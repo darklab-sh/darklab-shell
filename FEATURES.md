@@ -1715,19 +1715,33 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Purpose:** help authorized operators understand loaded settings and how to change their host configuration safely.
 
-Managed installations also provide `darklab-deploy access` for principal access and private credential-file retrieval, and `darklab-deploy config check` for validation while the app is running or stopped. These host commands use the selected installation and preserve the same access safeguards and configuration rules. See [operator guidance](CONFIGURATION.md#principal-access-operations).
+### Browsing settings
 
-**Behavior:** authorized operators can inspect configuration from the desktop or mobile **Operator settings** menu. The desktop menu keeps the shell open in its original tab, and shared page headers let you move between settings, diagnostics, and the audit log. Browse collapsed groups with setting counts, combine search with group, source, and warning filters, or clear every filter at once. Matching groups open automatically; clearing filters restores your earlier browsing view. The page address keeps your filters through reloads and verification. Refresh keeps expanded details and your place. Compact cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive values stay withheld or show only an approved count or presence indicator; there is no reveal or edit action.
+Open **Operator settings** from the desktop or mobile menu. The desktop menu keeps the shell open in its original tab, and shared page headers let you move between settings, diagnostics, and the audit log.
 
-Each snapshot identifies the web worker that served it and when that worker loaded configuration. Refreshing does not prove that every worker agrees, and deployment settings that the worker cannot observe are clearly marked. The local configuration checker can validate a proposed YAML overlay even when the web application cannot start.
+- Browse collapsed groups with setting counts, or combine search with group, source, and warning filters. Matching groups open automatically; clearing filters restores your earlier browsing view.
+- The page address keeps your filters through reloads and verification. Refresh preserves expanded details and your place.
+- Cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive settings show only an approved count, presence indicator, or withheld marker. There is no reveal or edit action.
 
-Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. Local administrators can list current grants with `darklab-deploy access operator-list`, including grants retained for disabled accounts. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console).
+### Understanding loaded values
+
+Each snapshot identifies the web worker that served it and when its configuration was loaded, including when it inherited configuration from another process. Refreshing samples one worker; it doesn't prove that every worker agrees. Deployment settings and defaults that the worker can't observe are clearly marked.
+
+### Access requirements
+
+Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. Visible pages clear displayed information and stop protected refreshes after access is lost. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console) for the shared settings, diagnostics, and audit policy.
+
+### Host validation and access commands
+
+Managed installations provide `darklab-deploy config check` to validate current or proposed configuration while the app is running or stopped. A fresh check evaluates the supplied inputs; it doesn't inspect running workers or apply changes. See [configuration validation](CONFIGURATION.md#validating-instance-configuration).
+
+Use `darklab-deploy access` for principal access and private credential-file retrieval. Local administrators can list current grants with `operator-list`, including grants retained for disabled accounts. These commands use the selected installation and preserve the same access safeguards. See [principal access operations](CONFIGURATION.md#principal-access-operations).
 
 ---
 
 ## Operator Diagnostics
 
-**Purpose:** restricted operator-only surfaces for inspecting current runtime health and scraping trendable Prometheus metrics without opening a shell session.
+**Purpose:** inspect runtime health in the operator browser pages, and monitor trends through separately authorized Prometheus metrics.
 
 **Behavior:**
 
@@ -1765,11 +1779,7 @@ For Prometheus, configure `metrics_allowed_cidrs` separately. See [metrics setup
 
 ### JSON output
 
-Append `?format=json` to get the same data as a JSON object, suitable for scripting or monitoring integrations:
-
-```bash
-curl http://localhost:8888/diag?format=json
-```
+Open `/diag?format=json` in the same HTTPS browser session to view diagnostics as JSON. It requires an eligible, recently verified operator session, just like the page; portable credentials and API tokens don't provide access. For routine monitoring, use the independently authorized [Prometheus metrics](#prometheus-metrics) endpoint.
 
 ### Prometheus metrics
 

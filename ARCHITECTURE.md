@@ -881,7 +881,7 @@ Apply rechecks the preview inside the write transaction and rejects stale member
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/admin/` | Read-only operator settings page, gated by network, restricted profile, current browser session, explicit grant, and verified freshness. |
+| `GET` | `/admin/` | Read-only operator settings page requiring a restricted profile, current browser session, explicit grant, and verified freshness. |
 | `GET` | `/admin/settings` | Versioned redacted snapshot of the serving web worker's loaded configuration. |
 | `GET` | `/admin/access` | Rechecks current operator eligibility and verification without loading inventory; returns private 204 or the shared authorization error. |
 | `GET` | `/admin/reauth` | Renders same-principal operator verification. |
@@ -2541,7 +2541,7 @@ The formatter supports human-readable `text` output and newline-delimited GELF 1
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, browser-access profile and session lifetimes, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session. Restricted deployments require browser authentication before the CIDR gate is evaluated.
+- `/diag` is the operator-facing structured view that surfaces runtime config, browser-access profile and session lifetimes, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session. Access uses the shared principal, browser-session, grant, and recent-verification policy described below; CIDR controls apply only to `/metrics`.
 - `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, active Project assessment cycles, check transitions, derived evidence matches, action outcomes, parser outcomes, ZAP/OAST connector outcomes and durations, durable workflow execution and step outcomes/durations, workflow capture failures/cancellations/recovery, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, Postgres pool health, AI provider duration/outcome/cache/suggestion metrics, durable AI queue-health gauges, AI Redis coordination key pressure, intel provider outcomes/cache size, CVE risk feed and NVD advisory acquisition outcomes/record counts/age, changed-CVE work outcomes, risk escalations, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.

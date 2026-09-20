@@ -6,7 +6,7 @@ This operator and developer reference describes darklab_shell log levels, output
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
 
-Application and background-worker DEBUG/INFO records go to stdout; WARNING, ERROR, and CRITICAL records go to stderr. Each record uses one stream, including any traceback, and the configured `log_level` still controls which records are emitted. Text and GELF output use the same routing. Gunicorn's own master and worker process logs follow that policy from startup while retaining Gunicorn's native format and `--log-level`. Explicit Gunicorn file destinations or custom logging configurations keep their requested behavior; optional access logs retain their separate settings. Collect both container streams to retain warnings and failures.
+Application and background-worker DEBUG/INFO records go to stdout; WARNING, ERROR, and CRITICAL records go to stderr. Each record uses one stream, including any traceback, and the configured `log_level` still controls which records are emitted. Text and GELF output use the same routing. Gunicorn's own master and worker process logs follow that policy from startup while retaining Gunicorn's native format and `--log-level`. Explicit Gunicorn file destinations or custom logging configurations keep their requested behavior; optional access logs retain their separate settings. Collect both container streams to retain warnings and failures. Local principal-access commands send all configured application logs to stderr so stdout remains a single JSON result.
 
 The container entrypoint runs before that logger exists, so its Nuclei cache bootstrap writes fixed plain-text progress and success markers to stdout and failure markers to stderr. `NUCLEI_TEMPLATE_BOOTSTRAP_STARTED` begins an empty-cache install, `NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED` confirms that a manifest was created, and `NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED` records a disabled or already-populated cache. `NUCLEI_TEMPLATE_BOOTSTRAP_FAILED` reports only a fixed reason and, when the update process exits unsuccessfully, its numeric status. It never includes template contents, provider responses, commands, targets, credentials, or operator-authored values.
 
@@ -70,8 +70,7 @@ The logging layer supports two output formats selected by `log_format` in instal
   - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
 
 Container log transport and the application formatter are intentionally
-separate controls. A host-local collector can forward container standard
-output, while `log_format: gelf` controls whether the application itself emits
+separate controls. A host-local collector must forward both container stdout and stderr, while `log_format: gelf` controls whether the application itself emits
 GELF-shaped records or plain text.
 
 ### Field type contract

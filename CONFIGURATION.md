@@ -195,7 +195,19 @@ If a transfer fails or is interrupted, the helper removes incomplete host output
   --output-file ./retrieved-access.credential
 ```
 
-For source development or troubleshooting, the underlying command remains available as `docker compose exec -T shell python /app/tools/manage_principal_access.py ...`. Its `--secret-file` names a new private file inside the container and requires manual retrieval and cleanup. The deployment wrapper forwards that option for advanced use, but rejects combining it with `--output-file`.
+In an installed release, the underlying tool is `/app/tools/manage_principal_access.py`. Its `--secret-file` names a new private file inside the container and requires manual retrieval and cleanup. The deployment wrapper forwards that option for advanced use, but rejects combining it with `--output-file`.
+
+For a running source-development stack, use `compose.dev.yaml`. That stack stages the application's source into `/app` and doesn't retain the image's packaged `/app/tools` directory. Copy the checkout's access script into the container's temporary directory, then run it there:
+
+```bash
+docker compose -f compose.dev.yaml exec -T shell mkdir -p /tmp/darklab-tools
+docker compose -f compose.dev.yaml cp scripts/operations/manage_principal_access.py \
+  shell:/tmp/darklab-tools/manage_principal_access.py
+docker compose -f compose.dev.yaml exec -T shell \
+  python3 /tmp/darklab-tools/manage_principal_access.py --help
+```
+
+Replace `--help` with the required access operation. Recopy the script after recreating the development container. Use a private container `--secret-file` for issuance and retrieve it manually; the managed installation's host-output wrapper isn't part of this source-development workflow.
 
 To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
 
@@ -360,13 +372,22 @@ The helper selects the installation beside itself and applies its `.env` and opt
 
 Supported environment overrides still win over YAML, including candidate files. Checking does not apply settings, write configuration, create keys, or initialize or migrate a database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`; deployment diagnostics stay on stderr. Image selection, published ports, worker counts, and other host-only settings still need Compose/startup validation.
 
-For development or troubleshooting, invoke `/app/tools/check_instance_config.py` directly. When bypassing normal startup, supply the local input explicitly:
+For installed-image troubleshooting, the packaged checker can run directly from the installation directory. This example requires an existing `conf/config.local.yaml`; include `-f compose.operator.yaml` after `-f compose.yaml` if that override is present:
 
 ```bash
-docker compose run --rm --no-deps -T --entrypoint python3 \
+docker compose --env-file .env -f compose.yaml run --rm --no-deps -T --entrypoint python3 \
   --volume "$PWD/conf/config.local.yaml:/candidate/config.local.yaml:ro" \
   shell /app/tools/check_instance_config.py --local-yaml /candidate/config.local.yaml --json
 ```
+
+In a source checkout, use the repository virtual environment and source paths instead. From the repository root:
+
+```bash
+APP_CONF_DIR="$PWD/app/conf" APP_LOCAL_CONF_DIR="$PWD/app/conf" \
+  .venv/bin/python scripts/operations/check_instance_config.py --json
+```
+
+This reads shipped YAML and `app/conf/config.local.yaml` when present. Add `--local-yaml ./candidate.yaml` to substitute a proposed overlay. Supply the intended supported environment overrides in the command's process environment; the checker doesn't load `.env` itself. Neither command reports what an existing worker has loaded. The source-development Compose stack needs its normal entrypoint to populate `/app`, so bypassing it to run an installed `/app/tools` path isn't a source-checkout alternative.
 
 The inspection catalog allows only reviewed full values, declared summaries, or withheld values. Custom redaction rules and provider subject allowlists expose counts only; the AI endpoint exposes presence only. Credentials and protected references remain withheld. Unknown input values never appear in diagnostics. Long permitted values have explicit truncation markers, and inspection doesn't offer a secret reveal.
 
