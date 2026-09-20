@@ -289,7 +289,7 @@ The current event inventory is:
 | WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
 | ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | initial or live operator authority check unavailable | bounded exception class as reason, fixed initial_check/live_check stage, numeric http_status, request_id, endpoint, permitted principal_id/credential_id and ip; no exception details or traceback |
 | WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |
-| INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; repeated unchanged operations are quiet | principal_id, source, granted |
+| INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; local CLI diagnostics use stderr and repeated unchanged operations are quiet | principal_id, source, granted |
 | INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
 | INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
 | INFO | `CREDENTIAL_ROTATED` | committed immediate credential replacement | principal_id, credential_id, previous_credential_id, credential_type, scope_count, source, request_id |

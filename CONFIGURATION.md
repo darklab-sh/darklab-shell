@@ -164,7 +164,7 @@ Instance inspection grants are explicit principal records. Bootstrap and Team ro
 
 Use `./darklab-deploy access` for local recovery and incident response in a managed installation. It selects the installation beside the helper, checks its managed files and image, and uses its `.env`, `compose.yaml`, and optional `compose.operator.yaml`, even when called from another directory. It runs the packaged principal tool in the running `shell` service with its configured execution identity. An unhealthy service is allowed; a missing or stopped service is reported without starting, upgrading, or retrying an operation. `access --help` works without Docker or database access.
 
-Host access to this deployment command is separate from a browser operator grant. The Python tool still owns confirmations, lockout protection, disabled-principal checks, transactions, and audit records. Commands print safe JSON metadata on stdout and deployment diagnostics on stderr:
+Host access to this deployment command is separate from a browser operator grant. Local access commands keep JSON results on stdout and send configured application logs to stderr, including completed grant changes. The Python tool still owns confirmations, lockout protection, disabled-principal checks, transactions, and audit records. Commands print safe JSON metadata on stdout and deployment diagnostics on stderr:
 
 ```bash
 ./darklab-deploy access status prn_example

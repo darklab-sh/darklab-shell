@@ -18,6 +18,7 @@ APP_ROOT = ROOT / "app"
 sys.path.insert(0, str(APP_ROOT))
 
 from config import CFG  # noqa: E402
+from core.logging_setup import configure_logging  # noqa: E402
 from runtime_bootstrap import init_database  # noqa: E402
 from services.auth import lifecycle, operator_grants  # noqa: E402
 from services.auth.suspended_work import operator_suspended_work  # noqa: E402
@@ -255,7 +256,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     try:
         _require_container()
-        payload = run(_parser().parse_args(argv))
+        args = _parser().parse_args(argv)
+        configure_logging(CFG, stderr_only=True)
+        payload = run(args)
     except (RuntimeError, ValueError, PermissionError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
