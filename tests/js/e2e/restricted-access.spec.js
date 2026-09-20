@@ -34,7 +34,7 @@ async function signIn(page) {
 
 
 test.describe('restricted access profile', () => {
-  test('redeems once into an HttpOnly session, protects mutations, and signs out', async ({ page, context }) => {
+  test('redeems into an HttpOnly session and protects mutations', async ({ page, context }) => {
     await openSignIn(page)
     await page.evaluate(() => {
       localStorage.setItem('access_credential', 'legacy-script-readable-value')
@@ -79,7 +79,11 @@ test.describe('restricted access profile', () => {
       return { protected: protectedResponse.status, allowed: allowedResponse.status }
     })
     expect(statuses).toEqual({ protected: 403, allowed: 201 })
+  })
 
+  test('signs out the current browser through Access', async ({ page }) => {
+    await openSignIn(page)
+    await signIn(page)
     await openRailAction(page, 'options')
     await page.locator('#options-tab-access').click()
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
@@ -125,16 +129,16 @@ test.describe('restricted access profile', () => {
     }
   })
 
-  test('retries a failed rail logout and leaves another browser signed in', async ({ page, browser, context, request }) => {
-    // Three complete sign-ins share this budget, including the peer browser.
+  test('retries a failed rail logout and leaves another browser signed in', async ({ page, browser, context, request, baseURL }) => {
+    // Two independent sessions exercise logout failure recovery and isolation.
     test.setTimeout(60_000)
-    await openSignIn(page)
-    await signIn(page)
-    const peerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+    const peerContext = await browser.newContext({ baseURL })
     const peer = await peerContext.newPage()
     try {
-      await openSignIn(peer)
-      await signIn(peer)
+      await Promise.all([page, peer].map(async browserPage => {
+        await openSignIn(browserPage)
+        await signIn(browserPage)
+      }))
       const session = (await context.cookies()).find(cookie => cookie.name === 'darklab_browser_session')
       expect(session).toBeTruthy()
       await page.route('**/auth/logout', route => route.fulfill({ status: 503 }), { times: 1 })
@@ -152,11 +156,19 @@ test.describe('restricted access profile', () => {
       })
       expect(replay.status()).toBe(401)
       expect(await peer.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
-      await signIn(page)
-      expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
     } finally {
       await peerContext.close()
     }
+  })
+
+  test('can sign in again after rail logout', async ({ page }) => {
+    await openSignIn(page)
+    await signIn(page)
+    await openRailAction(page, 'logout')
+    await page.locator('#confirm-host').getByRole('button', { name: 'Log out', exact: true }).click()
+    await page.waitForURL(/\/auth\/sign-in/, { waitUntil: 'domcontentloaded' })
+    await signIn(page)
+    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
   })
 
   for (const width of [1280, 375]) test.describe(`private sharing at ${width}px`, () => {

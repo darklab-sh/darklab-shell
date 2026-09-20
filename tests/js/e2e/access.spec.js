@@ -11,10 +11,8 @@ test.beforeEach(async ({ page }) => {
   await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(accessTestIpOffset++) })
 })
 
-async function resetAnonymousBrowser(page) {
+async function openAnonymousBrowser(page) {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.evaluate(() => localStorage.clear())
-  await page.reload({ waitUntil: 'domcontentloaded' })
   await ensurePromptReady(page)
 }
 
@@ -88,7 +86,7 @@ async function expectRedemptionSpacing(page) {
 }
 
 test.describe('workspace Access', () => {
-  test.beforeEach(async ({ page }) => resetAnonymousBrowser(page))
+  test.beforeEach(async ({ page }) => openAnonymousBrowser(page))
 
   test('restores a kept workspace from a browser holding its retired anonymous identity', async ({ page }) => {
     // Allow the complete keep/reload/restore journey to finish on a busy runner.
@@ -313,7 +311,7 @@ test.describe('workspace Access', () => {
     }
   })
 
-  test('rejects invalid credentials from storage and the redemption form', async ({ page }) => {
+  test('removes invalid credentials received from browser storage', async ({ page }) => {
     await openAccess(page)
     await page.evaluate(() => {
       localStorage.setItem('access_credential', 'not-a-valid-credential')
@@ -325,7 +323,10 @@ test.describe('workspace Access', () => {
     await chooseConfirmAction(page, 'remove')
     await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
     await expectAccessActions(page, 'anonymous')
+  })
 
+  test('rejects an invalid credential in the redemption form', async ({ page }) => {
+    await openAccess(page)
     await page.locator('#options-access-use-btn').click()
     await expectRedemptionSpacing(page)
     await page.locator('#options-access-redemption-input').fill('not-a-credential')
@@ -352,7 +353,7 @@ test.describe('mobile workspace Access', () => {
       await route.continue()
     })
     try {
-      await resetAnonymousBrowser(page)
+      await openAnonymousBrowser(page)
       await page.locator('#hamburger-btn').click()
       await page.locator('#mobile-menu-sheet [data-menu-action="access"]').click()
       await requestedModule
@@ -410,7 +411,7 @@ test.describe('mobile workspace Access', () => {
   })
 
   test('opens from the mobile identity summary and keeps actions touch-safe', async ({ page }) => {
-    await resetAnonymousBrowser(page)
+    await openAnonymousBrowser(page)
     await page.locator('#hamburger-btn').click()
     const accessItem = page.locator('#mobile-menu-sheet [data-menu-action="access"]')
     await expect(accessItem.locator('#mobile-menu-access-state')).toHaveText('Anonymous')

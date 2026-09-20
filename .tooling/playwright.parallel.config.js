@@ -153,7 +153,8 @@ const projects = [
 export default defineConfig({
   testDir,
   fullyParallel: false,
-  workers: Math.min(7, projects.length),
+  // Auth-profile projects share this total budget with the open-profile shards.
+  workers: Math.min(process.env.CI ? 3 : 7, projects.length),
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),

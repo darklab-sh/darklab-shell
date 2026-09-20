@@ -63,7 +63,16 @@ async function browseOperatorPages(page, appName, width, testInfo) {
     if (current.path !== '/admin/') await expect(page.locator('.diag-refreshed-at time')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.locator('.diag-topbar').screenshot({ path: testInfo.outputPath(`operator-header-${width}-${current.path.split('/').filter(Boolean).join('-')}.png`) });
+    // The last link starts a new page and its asynchronous settings request.
+    const settings = current.next === 'operator settings'
+      ? page.waitForResponse(response => new URL(response.url()).pathname === '/admin/settings')
+      : null;
     await navigation.getByRole('link', { name: current.next, exact: true }).click();
+    if (settings) {
+      const response = await settings;
+      expect(response.status()).toBe(200);
+      await response.finished();
+    }
   }
   await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.');
 }

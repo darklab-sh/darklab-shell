@@ -31,6 +31,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Browser CI reduces contention across concurrent test projects.** The parallel suite caps CI execution at three workers in total, including the dedicated sign-in projects. Comparison, assessment-batch, output-menu, and logout checks use independent journeys; settings and sign-in checks wait for the relevant response or navigation, and the assessment polling check verifies focus after the monitor is replaced. Test deadlines and failure-on-flaky safeguards remain unchanged.
+
 - **Browser qualification keeps independent workflows within their test budgets.** Operator navigation, settings controls, and access verification run as separate journeys, as do credential management, restoration, and invalid-input checks. The mobile Access test waits for its action to become usable and covers a deliberately held module download. Existing timeout limits and CI's rejection of flaky results stay in place.
 
 - **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
