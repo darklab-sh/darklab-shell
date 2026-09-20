@@ -17,7 +17,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Operators can inspect loaded settings from a read-only desktop and mobile console.** Explicitly granted browser sessions can search reviewed values, source layers, warnings, and host apply guidance. Sensitive settings show approved summaries or withheld markers, snapshots identify the serving worker, and refresh clears stale information after access loss. Existing diagnostics retain their permitted field exposure.
 
-- **Operator verification preserves session limits.** Credential and provider step-up verify the same account, recheck current access, and rotate live browser sessions without extending their original absolute deadline. Console requests enforce the network boundary before identity lookup and keep responses private. Signed provider proof is tracked separately from ordinary sign-in recency, so providers that omit it can still use existing session-revocation controls.
+- **Operator verification preserves session limits.** Credential and provider step-up verify the same account, recheck current access, and rotate live browser sessions without extending their original absolute deadline. Operator requests enforce the restricted profile before identity lookup and keep responses private. Signed provider proof is tracked separately from ordinary sign-in recency, so providers that omit it can still use existing session-revocation controls.
 
 - **Instance inspection grants are explicit and auditable.** Local operators can grant, inspect, and revoke principal-bound access independently of Team roles. Grants persist through both database backends, backups, and database migration; repeated operations are predictable and disabled principals cannot receive access.
 
@@ -29,7 +29,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Coding agents have a shared repository guide.** `AGENTS.md` collects the project rules for architecture, security, UI consistency, tests, logging, documentation, and authorized Git/CI work, with links to the detailed contracts. The authorized `todo` workflow uses CI for broad validation, permits a temporary uncommitted pre-commit hook bypass with restoration, and checks pipelines between implementation slices and before final handoff. Contributor guidance uses live test inventories instead of maintaining exact totals.
 
+### Changed
+
+- **Settings, diagnostics, and audit share one operator access policy.** A current principal grant, eligible browser session, and recent credential or provider verification allow access from any network. All three pages are available from the desktop More menu and mobile menu. The audit viewer is at `/audit`, with CSV and JSON downloads at `/audit/export`. Open profiles, Team roles, direct credentials, and PATs don't qualify. Verification preserves useful audit filters, protected requests return safe sign-in destinations, and visible pages clear data and stop refreshes after access loss. Audit exports recheck authorization while streaming; diagnostic records attribute access to the operator without logging filter values. Regression checks cover operator-only navigation, keyboard command expansion, open-profile audit denial, and real Project actions in the granted-operator viewer; diagnostics screenshot scenes use disposable operator grants.
+
+- **Metrics network permissions are independent of operator access.** `metrics_allowed_cidrs` controls `/metrics` only. The deprecated `diagnostics_allowed_cidrs` alias remains metrics-only for 3.0.1, with per-layer precedence, truthful source reporting, and a bounded warning; upgrade guidance identifies its removal in 3.1.0. Neither setting bypasses ordinary AI workspace quotas. Explicit diagnostic AI tests use a shared per-operator limit and retain the global limit and CSRF protection.
+
 ### Fixed
+
+- **OIDC fork coverage runs independently of pytest's background threads.** A fresh Python process exercises the real child-reset hook with deprecation warnings treated as errors. Child failures reach pytest, and a timeout cleans up both processes so a deadlock can't hang the suite or leave a child behind.
 
 - **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Startup and container checks cover both streams, including fatal configuration failures and worker exceptions.
 

@@ -14,7 +14,7 @@ from flask import has_request_context
 
 from config import resolve_effective_cfg
 from core.database_access import get_db_connect
-from core.helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs
+from core.helpers import get_client_ip, get_log_session_id
 from core.output_signals import extract_target
 from core.process import active_run_belongs_to_scope, active_runs_for_session
 from services.ai import ai_cfg
@@ -211,21 +211,12 @@ def enqueue_next_commands_assist(
 
 
 def _enforce_ai_write_rate_limit(session_id: str, cfg: Mapping[str, Any], *, variant: str) -> None:
-    bypass_session_limit, client_ip = _diagnostics_client_bypasses_session_limit(cfg)
+    client_ip = get_client_ip() if has_request_context() else ""
     try:
-        result = check_ai_route_rate_limit(session_id, cfg=cfg, bypass_session_limit=bypass_session_limit)
+        result = check_ai_route_rate_limit(session_id, cfg=cfg)
     except AICoordinationUnavailable as exc:
         raise AIAssistRouteError("ai_unavailable", str(exc), status_code=503) from exc
     if result.allowed:
-        if bypass_session_limit:
-            log.info(
-                "AI_RATE_LIMIT_SESSION_BYPASSED",
-                extra={
-                    "ip": client_ip,
-                    "session": get_log_session_id(session_id),
-                    "variant": variant,
-                },
-            )
         return
     log.warning(
         "AI_RATE_LIMIT_REJECTED",
@@ -235,7 +226,7 @@ def _enforce_ai_write_rate_limit(session_id: str, cfg: Mapping[str, Any], *, var
             "variant": variant,
             "error_code": result.error_code,
             "retry_after_seconds": result.retry_after_seconds,
-            "bypass_session_limit": bypass_session_limit,
+            "bypass_session_limit": False,
         },
     )
     app_metrics.record_ai_request(variant, "rate_limited", error_code=result.error_code)
@@ -244,16 +235,6 @@ def _enforce_ai_write_rate_limit(session_id: str, cfg: Mapping[str, Any], *, var
         result.message or "AI assists are rate limited.",
         status_code=429,
     )
-
-
-def _diagnostics_client_bypasses_session_limit(cfg: Mapping[str, Any]) -> tuple[bool, str]:
-    if not has_request_context():
-        return False, ""
-    client_ip = get_client_ip()
-    allowed_cidrs = cfg.get("diagnostics_allowed_cidrs") or []
-    if ip_is_in_cidrs(client_ip, allowed_cidrs):
-        return True, client_ip
-    return False, client_ip
 
 
 def _log_enqueue_result(

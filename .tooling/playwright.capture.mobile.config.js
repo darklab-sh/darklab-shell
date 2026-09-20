@@ -27,6 +27,11 @@ export default defineConfig({
     trace: 'off',
     video: { mode: 'off' },
   },
-  projects: [{ name: 'capture-mobile' }],
-  webServer: buildIsolatedWebServer(5011, 'capture-mobile'),
+  projects: [{ name: 'capture-mobile', metadata: {
+    operatorBaseURL: 'http://127.0.0.1:5013', operatorSlot: 'capture-mobile-operator',
+  } }],
+  webServer: [
+    buildIsolatedWebServer(5011, 'capture-mobile'),
+    buildIsolatedWebServer(5013, 'capture-mobile-operator', 'token_required'),
+  ],
 })

@@ -7761,10 +7761,14 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
 
     monkeypatch.setattr(assets_diagnostics, "_database_backend", lambda: DatabaseBackend.POSTGRES)
     monkeypatch.setattr(assets_diagnostics, "_database_context", _postgres_db_connect)
+    from core import database
+    monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(database, "db_connect", _postgres_db_connect)
 
     with monkeypatch.context() as patcher:
-        patcher.setitem(config.CFG, "diagnostics_allowed_cidrs", ["127.0.0.1/32"])
-        resp = app.test_client().get("/diag?format=json")
+        patcher.setitem(config.CFG, "metrics_allowed_cidrs", ["127.0.0.1/32"])
+        from identity_helpers import operator_browser_client
+        resp = operator_browser_client(app).get("/diag?format=json")
     data = json.loads(resp.data)
 
     assert resp.status_code == 200
@@ -7813,7 +7817,7 @@ def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_sch
     monkeypatch.setattr(database, "db_connect", _postgres_db_connect)
 
     with monkeypatch.context() as patcher:
-        patcher.setitem(config.CFG, "diagnostics_allowed_cidrs", ["127.0.0.1/32"])
+        patcher.setitem(config.CFG, "metrics_allowed_cidrs", ["127.0.0.1/32"])
         patcher.setitem(config.CFG, "metrics_enabled", True)
         resp = app.test_client().get("/metrics")
     body = resp.get_data(as_text=True)

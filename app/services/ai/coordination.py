@@ -110,6 +110,19 @@ def check_ai_route_rate_limit(
     return AIRateLimitResult(allowed=True)
 
 
+def check_operator_test_rate_limit(principal_id: str, *, cfg=None, redis_client=None) -> AIRateLimitResult:
+    """Share one test per operator per minute across workers, plus the global AI bucket."""
+    store = _redis_store(redis_client)
+    try:
+        allowed = store.set(f"{_KEY_PREFIX}:rate:operator-test:{_key_part(principal_id)}", "1", nx=True, ex=60)
+    except Exception:
+        raise AICoordinationUnavailable("AI coordination is unavailable.") from None
+    if not allowed:
+        return AIRateLimitResult(False, "ai_rate_limited", "AI tests are limited to once per minute per operator.", 60)
+    # Diagnostics has its own principal bucket; ordinary workspace writes never bypass their quota.
+    return check_ai_route_rate_limit(principal_id, cfg=cfg, redis_client=store, bypass_session_limit=True)
+
+
 @contextmanager
 def enqueue_lock(
     session_id: str,

@@ -1333,7 +1333,7 @@ class TestRequestResponseDebugEvents:
                 get_client().get("/status")
                 with mock.patch.dict(
                     shell_app_module.CFG,
-                    {"diagnostics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True},
+                    {"metrics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True},
                 ):
                     get_client(use_forwarded_for=False).get("/metrics")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]

@@ -44,6 +44,7 @@ from identity_helpers import (
     browser_identity_headers,
     principal_identity,
     principal_owner,
+    operator_browser_client,
 )
 import blueprints.assets as shell_assets
 import blueprints.history as history_routes
@@ -515,19 +516,24 @@ class TestIndexRoute:
         assert extra["local_path"].endswith("static/js/does-not-exist.js")
         assert extra["fallback_version"] == shell_app_module.APP_VERSION
 
-    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
-        client = get_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["203.0.113.0/24"]}):
-            body = client.get("/").get_data(as_text=True)
-        assert 'id="rail-diag-btn"' in body
-        assert 'href="/diag"' in body
-        assert 'target="_blank"' in body
-        assert 'rel="noopener noreferrer"' in body
-        assert 'data-menu-action="diag"' in body
-        rail_match = re.search(r'<a class="([^"]*)" data-action="diag" id="rail-diag-btn"', body)
+    @pytest.mark.parametrize("granted_operator", [False, True])
+    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self, granted_operator):
+        app = _test_app()
+        client = operator_browser_client(app) if granted_operator else app.test_client()
+        app.config["DARKLAB_CONFIG"] = build_test_config({
+            "access_profile": "token_required" if granted_operator else "open",
+            "metrics_allowed_cidrs": [] if granted_operator else ["203.0.113.0/24"],
+        })
+        client.environ_base["REMOTE_ADDR"] = "203.0.113.19"
+        body = client.get("/").get_data(as_text=True)
+        rail_match = re.search(r'<a class="([^"]*)" data-action="diag" id="rail-diag-btn"([^>]*)>', body)
         mobile_match = re.search(r'<button type="button" class="([^"]*)" data-menu-action="diag"', body)
-        assert rail_match and "u-hidden" not in rail_match.group(1)
-        assert mobile_match and "u-hidden" not in mobile_match.group(1)
+        assert rail_match and mobile_match
+        assert 'href="/diag"' in rail_match.group(2)
+        assert 'target="_blank"' in rail_match.group(2)
+        assert 'rel="noopener noreferrer"' in rail_match.group(2)
+        assert ("u-hidden" not in rail_match.group(1)) is granted_operator
+        assert ("u-hidden" not in mobile_match.group(1)) is granted_operator
 
     def test_quick_lookup_navigation_sits_beside_atlas(self):
         body = get_client().get("/").get_data(as_text=True)
@@ -545,7 +551,7 @@ class TestIndexRoute:
 
     def test_bootstrapped_app_config_matches_config_route(self):
         client = get_client(use_forwarded_for=False)
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/").get_data(as_text=True)
             config_payload = json.loads(client.get("/config").data)
         match = re.search(
@@ -14399,28 +14405,30 @@ class TestConfigRoute:
 
     def test_diag_enabled_false_when_cidrs_empty(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
     def test_diag_enabled_false_when_client_ip_not_in_cidrs(self):
         client = get_client(use_forwarded_for=False)
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["10.0.0.0/8"]}):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
-    def test_diag_enabled_true_when_client_ip_in_cidrs(self):
-        client = get_client(use_forwarded_for=False)
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+    def test_diag_enabled_for_operator_without_metrics_permission(self):
+        from identity_helpers import operator_browser_client
+        client = operator_browser_client(_test_app())
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is True
 
-    def test_diag_enabled_uses_trusted_forwarded_for_when_present(self):
-        client = get_client(use_forwarded_for=True)
+    def test_diag_enabled_for_operator_with_forwarded_ip(self):
+        from identity_helpers import operator_browser_client
+        client = operator_browser_client(_test_app())
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+                "metrics_allowed_cidrs": ["203.0.113.0/24"],
                 "trusted_proxy_cidrs": ["127.0.0.1/32"],
             },
         ):
@@ -14432,7 +14440,7 @@ class TestConfigRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+                "metrics_allowed_cidrs": ["203.0.113.0/24"],
                 "trusted_proxy_cidrs": ["10.0.0.0/8"],
             },
         ):
@@ -14759,12 +14767,10 @@ class TestVendorAssets:
 
 
 class TestDiagRoute:
-    """Operator diagnostics endpoint — IP-gated, returns 404 when unconfigured."""
+    """Diagnostics use a principal grant and a recently verified browser session."""
 
     def _allowed_client(self, *, init_db: bool = True):
-        """Test client whose remote_addr (127.0.0.1) matches the allowed CIDR."""
-        # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
-        return _test_app(init_db=init_db).test_client()
+        return operator_browser_client(_test_app(init_db=init_db))
 
     def _record_audit_event(
         self,
@@ -14802,34 +14808,26 @@ class TestDiagRoute:
         assert audit_id
         return audit_target_id
 
-    def test_returns_404_when_cidrs_empty(self):
+    def test_operator_access_with_empty_metrics_allowlist(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
-            with mock.patch.object(logging.getLogger("shell"), "warning") as mock_warn:
-                resp = client.get("/diag")
-        assert resp.status_code == 404
-        mock_warn.assert_called_once()
-        event = mock_warn.call_args[0][0]
-        assert event == "DIAG_DENIED"
-        assert mock_warn.call_args[1]["extra"]["ip"] == "127.0.0.1"
-        assert mock_warn.call_args[1]["extra"]["allowed_cidrs"] == []
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
+            assert client.get("/diag").status_code == 200
 
-    def test_returns_404_when_cidrs_not_set(self):
+    def test_operator_access_without_metrics_setting(self):
         client = self._allowed_client()
-        cfg_without_key = {k: v for k, v in config.CFG.items() if k != "diagnostics_allowed_cidrs"}
+        cfg_without_key = {k: v for k, v in config.CFG.items() if k != "metrics_allowed_cidrs"}
         with mock.patch.dict("config.CFG", cfg_without_key, clear=True):
-            resp = client.get("/diag")
-        assert resp.status_code == 404
+            assert client.get("/diag").status_code == 200
 
     def test_returns_404_when_client_ip_not_in_cidrs(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["10.0.0.0/8"]}):
             resp = client.get("/diag")
         assert resp.status_code == 404
 
     def test_returns_200_when_client_ip_in_cidrs(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
@@ -14849,7 +14847,7 @@ class TestDiagRoute:
             "config.CFG",
             {
                 "asset_bundle_mode": "bundle",
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
             },
         ):
             body = client.get("/diag").get_data(as_text=True)
@@ -14871,7 +14869,7 @@ class TestDiagRoute:
 
     def test_response_has_expected_top_level_keys(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert set(data.keys()) >= {"app", "config", "db", "redis", "broker", "pty", "assets", "ai", "tools"}
 
@@ -14880,7 +14878,7 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "app_name": "test shell",
             },
         ):
@@ -14890,7 +14888,7 @@ class TestDiagRoute:
 
     def test_config_section_contains_operational_keys(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         cfg = data["config"]
         for key in (
@@ -14914,7 +14912,7 @@ class TestDiagRoute:
 
     def test_pty_section_contains_operator_metrics(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
             body = client.get("/diag").get_data(as_text=True)
         pty = data["pty"]
@@ -14937,7 +14935,7 @@ class TestDiagRoute:
             "classifier_command": "masscan -p 1-1000 192.168.1.3",
             "classifier_line": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
         }
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag", query_string=query).data)
             fast_data = json.loads(
                 client.get(
@@ -15043,7 +15041,7 @@ class TestDiagRoute:
                 grouped.add(key)
         assert not seen_twice, f"config keys appear in multiple groups: {seen_twice}"
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         emitted = set(data["config"].keys())
         assert data["config"]["assessment_intrusive_actions_enabled"] is False
@@ -15070,7 +15068,7 @@ class TestDiagRoute:
             },
         }
         enabled_cfg = {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "metrics_allowed_cidrs": ["127.0.0.1/32"],
             "raw_packet_scanning_enabled": True,
         }
         with (
@@ -15136,7 +15134,7 @@ class TestDiagRoute:
 
     def test_html_response_renders_config_group_labels(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/diag").get_data(as_text=True)
         for label, _keys in shell_assets._DIAG_CONFIG_GROUPS:
             assert label in body, f"config group label '{label}' not rendered"
@@ -15147,63 +15145,44 @@ class TestDiagRoute:
 
     def test_ai_test_route_runs_prompt_and_rate_limits_repeats(self):
         client = self._allowed_client()
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.update(
-            {
-                "198.51.100.10": 900.0,
-                "198.51.100.11": 980.0,
-            }
-        )
         payload = {"ok": True, "payload": {"status": "ok", "message": "pong"}}
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
-            with mock.patch("blueprints.assets.ai_run_test_prompt", return_value=payload) as test_prompt:
-                with mock.patch("blueprints.assets.time.monotonic", side_effect=[999.0, 1000.0, 1001.0, 1001.0]):
-                    first = client.post("/diag/ai-test")
-                    second = client.post("/diag/ai-test")
-
+        with (
+            mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+            mock.patch("blueprints.assets.ai_run_test_prompt", return_value=payload) as test_prompt,
+        ):
+            first = client.post("/diag/ai-test")
+            second = client.post("/diag/ai-test", environ_base={"REMOTE_ADDR": "198.51.100.10"})
         assert first.status_code == 200
         assert first.get_json() == payload
         assert second.status_code == 429
-        assert "198.51.100.10" not in shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT
-        assert shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT["198.51.100.11"] == 980.0
         test_prompt.assert_called_once()
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
 
     def test_ai_test_route_logs_provider_failures(self):
         from services.ai.client import AIClientError
 
         client = self._allowed_client()
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
-        cfg = {
-            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
-            "ai_provider": "openai_compatible",
-            "ai_model": "Llama-3.1-8B-Instruct",
-        }
-        with mock.patch.dict("config.CFG", cfg):
-            with mock.patch(
-                "blueprints.assets.ai_run_test_prompt",
-                side_effect=AIClientError("ai_unavailable", "provider down", status=503),
-            ):
-                with mock.patch.object(shell_assets.log, "warning") as warning:
-                    resp = client.post("/diag/ai-test")
-
+        cfg = {"ai_provider": "openai_compatible", "ai_model": "Llama-3.1-8B-Instruct"}
+        with (
+            mock.patch.dict("config.CFG", cfg),
+            mock.patch.object(process, "redis_client", process._FakeRedisClient()),
+            mock.patch("blueprints.assets.ai_run_test_prompt",
+                       side_effect=AIClientError("ai_unavailable", "provider down", status=503)),
+            mock.patch.object(shell_assets.log, "warning") as warning,
+        ):
+            resp = client.post("/diag/ai-test")
         assert resp.status_code == 502
         assert resp.get_json()["error_code"] == "ai_unavailable"
         warning.assert_called_once_with(
             "AI_DIAG_TEST_FAILED",
-            extra={
-                "ip": "127.0.0.1",
-                "provider": "openai_compatible",
-                "model": "Llama-3.1-8B-Instruct",
-                "error_code": "ai_unavailable",
-                "http_status": 503,
-            },
+            extra={"ip": "127.0.0.1", "provider": "openai_compatible", "model": "Llama-3.1-8B-Instruct",
+                   "error_code": "ai_unavailable", "http_status": 503, "principal_id": mock.ANY,
+                   "credential_id": mock.ANY, "request_id": mock.ANY},
         )
-        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
+        assert warning.call_args.kwargs["extra"]["principal_id"]
 
     def test_db_section_ok_and_has_counts(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert data["db"]["ok"] is True
         assert isinstance(data["db"]["runs"], int)
@@ -15214,7 +15193,7 @@ class TestDiagRoute:
 
     def test_db_section_error_on_db_failure(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch("services.assets.diagnostics._database_context", side_effect=Exception("db down")):
                 data = json.loads(client.get("/diag?format=json").data)
         assert data["db"]["ok"] is False
@@ -15222,7 +15201,7 @@ class TestDiagRoute:
 
     def test_redis_section_reflects_client_presence(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
@@ -15280,7 +15259,7 @@ class TestDiagRoute:
                 "clients": {"connected_clients": 3, "rejected_connections": 0},
             },
         )
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
         stats = data["redis"]["stats"]
@@ -15298,7 +15277,7 @@ class TestDiagRoute:
         assert stats["persistence"]["rdb_last_save_human"].endswith(" ago")
         assert stats["evicted_keys"] == 0
         assert stats["clients"]["connected"] == 3
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 body = client.get("/diag").get_data(as_text=True)
         assert "RDB saved" in body
@@ -15309,7 +15288,7 @@ class TestDiagRoute:
     def test_redis_stats_absent_when_ping_fails(self):
         client = self._allowed_client()
         fake = self._fake_redis_client(ping_exc=ConnectionError("redis unreachable"))
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
         assert data["redis"]["ok"] is False
@@ -15329,7 +15308,7 @@ class TestDiagRoute:
             get_map={"procmeta:r2": json.dumps({"session_id": "s2", "run_id": "r2"})},
             sismember_map={"sessionprocs:s2": set()},
         )
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
         assert data["redis"]["stats"]["orphans"] == {"probed": 1, "orphaned": 1, "cleaned": 1}
@@ -15349,7 +15328,7 @@ class TestDiagRoute:
                 "sessionprocs:*": [],
             },
         )
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 data = json.loads(client.get("/diag?format=json").data)
         runstream_ns = next(ns for ns in data["redis"]["stats"]["namespaces"] if ns["name"] == "runstream")
@@ -15358,7 +15337,7 @@ class TestDiagRoute:
 
     def test_broker_section_reports_in_process_mode_when_redis_unconfigured(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", None):
                 data = json.loads(client.get("/diag?format=json").data)
         broker = data["broker"]
@@ -15381,7 +15360,7 @@ class TestDiagRoute:
         client = self._allowed_client()
         fake = self._fake_redis_client()
         # `broker_mode()` reads the process-level Redis client dynamically.
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 with mock.patch.object(process, "redis_client", fake):
                     data = json.loads(client.get("/diag?format=json").data)
@@ -15394,7 +15373,7 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "run_broker_enabled": False,
             },
         ):
@@ -15413,7 +15392,7 @@ class TestDiagRoute:
         try:
             shell_broker._memory_store.publish(run_id, "stdout", {"line": "hi"})
             shell_broker._memory_store.publish(run_id, "stdout", {"line": "again"})
-            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
                 with mock.patch.object(shell_assets, "redis_client", None):
                     data = json.loads(client.get("/diag?format=json").data)
             fb = data["broker"]["fallback"]
@@ -15432,7 +15411,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_file_size_and_human(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         db = data["db"]
         assert isinstance(db["size"], int) and db["size"] > 0
@@ -15444,7 +15423,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_journal_mode(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         # SQLite returns one of: delete, truncate, persist, memory, wal, off.
         assert data["db"]["journal_mode"] in {
@@ -15458,7 +15437,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_freelist_and_reclaimable_bytes(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         db = data["db"]
         assert isinstance(db["page_count"], int) and db["page_count"] > 0
@@ -15469,7 +15448,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_per_table_row_counts(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         tables = data["db"]["tables"]
         assert isinstance(tables, list) and tables
@@ -15484,7 +15463,7 @@ class TestDiagRoute:
 
     def test_db_storage_breakdown_reports_buckets(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         storage = data["db"]["storage"]
         assert isinstance(storage["dbstat_available"], bool)
@@ -15621,7 +15600,7 @@ class TestDiagRoute:
 
     def test_html_response_renders_storage_breakdown_section(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/diag").get_data(as_text=True)
         assert "Storage breakdown" in body
         assert "Runs and transcripts" in body
@@ -15658,7 +15637,7 @@ class TestDiagRoute:
         `snapshots` are still surfaced at db.* even though they are also
         listed inside `tables`."""
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert isinstance(data["db"]["runs"], int)
         assert isinstance(data["db"]["snapshots"], int)
@@ -15668,7 +15647,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_fts_orphan_count(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert isinstance(data["db"]["fts_orphans"], int)
         assert data["db"]["fts_orphans"] >= 0
@@ -15708,7 +15687,7 @@ class TestDiagRoute:
 
     def test_db_section_reports_ping_and_probe_timings(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag?format=json")
             data = json.loads(resp.data)
         assert data["db"]["ok"] is True
@@ -15721,14 +15700,14 @@ class TestDiagRoute:
         assert data["db"]["ping_human"]
         assert data["db"]["probe_human"]
 
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/diag").get_data(as_text=True)
         assert "ping " in body
         assert "diag probe " in body
 
     def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         for label in ("ansi_up", "jspdf", "fonts"):
             entry = data["assets"][label]
@@ -15742,7 +15721,7 @@ class TestDiagRoute:
         monkeypatch.setattr(shell_assets, "_ANSI_UP_JS", tmp_path / "missing_ansi_up.js")
         monkeypatch.setattr(shell_assets, "_JSPDF_JS", tmp_path / "missing_jspdf.js")
         monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         for label in ("ansi_up", "jspdf", "fonts"):
             entry = data["assets"][label]
@@ -15753,7 +15732,7 @@ class TestDiagRoute:
         """The HEAD probe surfaces the actual served Content-Length, so
         a zero-byte or partial file is visible without shelling in."""
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         # The size reported by the probe matches a direct GET against the URL.
         for label in ("ansi_up", "jspdf"):
@@ -15765,7 +15744,7 @@ class TestDiagRoute:
 
     def test_assets_probe_reports_size_human_in_short_form(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         for label in ("ansi_up", "jspdf", "fonts"):
             human = data["assets"][label]["size_human"]
@@ -15783,7 +15762,7 @@ class TestDiagRoute:
 
     def test_tools_section_has_present_and_missing_lists(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         assert isinstance(data["tools"]["present"], list)
         assert isinstance(data["tools"]["missing"], list)
@@ -15791,7 +15770,7 @@ class TestDiagRoute:
     def test_tools_present_contains_known_binary(self):
         """curl is allowed and installed in the dev environment."""
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         # At minimum, basic tools available in dev should appear in present
         present = data["tools"]["present"]
@@ -15805,7 +15784,7 @@ class TestDiagRoute:
 
     def test_tools_present_entries_carry_name_and_path_only(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
         present = data["tools"]["present"]
         if not present:
@@ -15817,7 +15796,7 @@ class TestDiagRoute:
 
     def test_tools_probe_does_not_read_binary_mtime(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
                 with mock.patch(
                     "blueprints.assets.os.path.getmtime",
@@ -15830,7 +15809,7 @@ class TestDiagRoute:
 
     def test_tools_html_omits_stale_counts_and_age_suffixes(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
                 body = client.get("/diag").get_data(as_text=True)
         assert "diag-chip-age" not in body
@@ -15849,7 +15828,7 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+                "metrics_allowed_cidrs": ["10.0.0.0/8"],
                 "trusted_proxy_cidrs": ["127.0.0.1/32"],
             },
         ):
@@ -15861,16 +15840,16 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+                "metrics_allowed_cidrs": ["10.0.0.0/8"],
                 "trusted_proxy_cidrs": ["192.0.2.0/24"],
             },
         ):
             resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
-        assert resp.status_code == 404
+        assert resp.status_code == 200
 
     def test_diag_viewed_logged_on_success(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(logging.getLogger("shell"), "info") as mock_info:
                 resp = client.get("/diag")
         assert resp.status_code == 200
@@ -15880,9 +15859,9 @@ class TestDiagRoute:
         assert viewed_call[1]["extra"]["ip"] == "127.0.0.1"
 
     def test_audit_route_requires_diag_access(self):
-        client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
-            resp = client.get("/diag/audit")
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
+            resp = client.get("/audit")
         assert resp.status_code == 404
 
     def test_audit_html_lists_events_and_disabled_banner(self):
@@ -15892,11 +15871,11 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "audit_log_enabled": False,
             },
         ):
-            resp = client.get(f"/diag/audit?target_id={target_id}")
+            resp = client.get(f"/audit?target_id={target_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         _assert_html_document_contract(
@@ -15917,7 +15896,7 @@ class TestDiagRoute:
         assert target_id in body
         assert f'href="/projects/{target_id}"' not in body
         assert "Diag Operator" in body
-        assert '<form class="diag-audit-filter-form" method="get" action="/diag/audit">' in body
+        assert '<form class="diag-audit-filter-form" method="get" action="/audit">' in body
         assert '<div class="diag-audit-table-wrap">' in body
         assert '<table class="diag-table diag-audit-table">' in body
         assert '<col class="diag-audit-col-target">' in body
@@ -15969,10 +15948,10 @@ class TestDiagRoute:
             created=f"{next_date_text}T00:00:00+00:00",
         )
         actor_display_fragment = actor_display_name[-12:].lower()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets.log, "info") as log_info:
                 resp = client.get(
-                    "/diag/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
+                    "/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
                     f"&team_id={quote(team_id)}&target_type=project"
                     f"&date_from={audit_date_text}&date_to={audit_date_text}"
                     "&actor=" + quote(actor_display_fragment)
@@ -15997,13 +15976,7 @@ class TestDiagRoute:
             "target_type",
             "team_id",
         ]
-        assert viewed_extra["filter_values"] == {
-            "date_from": audit_date_text,
-            "date_to": audit_date_text,
-            "event_type": "project.link",
-            "target_type": "project",
-            "team_id": team_id,
-        }
+        assert "filter_values" not in viewed_extra
         assert "diag-audit-owner" not in json.dumps(viewed_extra)
         assert actor_display_fragment not in json.dumps(viewed_extra)
         assert payload["events"][0]["target_href"] == ""
@@ -16020,9 +15993,9 @@ class TestDiagRoute:
         assert details_payload["target"]["href"] == ""
         assert details_payload["details"]["source"] == "test"
 
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             member_resp = client.get(
-                "/diag/audit?format=json&event_type=project.link"
+                "/audit?format=json&event_type=project.link"
                 f"&team_id={quote(team_id)}&target_type=project"
                 f"&date_from={audit_date_text}&date_to={audit_date_text}"
                 "&actor=" + quote(actor_member_id[-12:])
@@ -16039,8 +16012,8 @@ class TestDiagRoute:
             target_type="run",
             target_id=run_id,
         )
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
-            resp = client.get(f"/diag/audit?format=json&target_id={run_id}")
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get(f"/audit?format=json&target_id={run_id}")
         payload = resp.get_json()
         assert resp.status_code == 200
         assert [event["target_id"] for event in payload["events"]] == [run_id]
@@ -16064,11 +16037,11 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "audit_export_max_rows": 1,
             },
         ):
-            resp = client.get(f"/diag/audit/export?correlation_id={correlation_id}")
+            resp = client.get(f"/audit/export?correlation_id={correlation_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert "text/csv" in resp.content_type
@@ -16113,7 +16086,7 @@ class TestDiagRoute:
             mock.patch.dict(
                 "config.CFG",
                 {
-                    "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                    "metrics_allowed_cidrs": ["127.0.0.1/32"],
                     "audit_export_max_rows": 2,
                 },
             ),
@@ -16123,7 +16096,7 @@ class TestDiagRoute:
                 "info",
             ) as log_info,
         ):
-            resp = client.get("/diag/audit/export?event_type=project.link")
+            resp = client.get("/audit/export?event_type=project.link")
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert len(page_calls) == 1
@@ -16141,7 +16114,7 @@ class TestDiagRoute:
         assert exported_extra["truncated"] is True
         assert exported_extra["filter_count"] == 1
         assert exported_extra["filter_keys"] == ["event_type"]
-        assert exported_extra["filter_values"] == {"event_type": "project.link"}
+        assert "filter_values" not in exported_extra
 
     def test_audit_json_export_prompts_download(self):
         client = self._allowed_client()
@@ -16160,11 +16133,11 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "audit_export_max_rows": 1,
             },
         ):
-            resp = client.get(f"/diag/audit/export?format=json&correlation_id={correlation_id}")
+            resp = client.get(f"/audit/export?format=json&correlation_id={correlation_id}")
         payload = resp.get_json()
         assert resp.status_code == 200
         assert "application/json" in resp.content_type
@@ -16180,7 +16153,7 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "app_name": "diag test shell",
             },
         ):
@@ -16190,24 +16163,34 @@ class TestDiagRoute:
         assert "operator diagnostics" in body
         assert 'class="btn btn-secondary btn-compact diag-back-btn"' in body
         assert 'href="/"' in body
-        assert 'href="/diag/audit"' in body
+        assert 'href="/audit"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
 
-    def test_top_command_cells_are_keyboard_expandable(self):
-        """Top Commands cells render as accessible toggle buttons (tabindex=0,
-        role=button, aria-expanded=false) with a delegated tap handler so
-        an operator on mobile can read the full command without `title=`
-        hover affordances."""
+    @pytest.mark.parametrize("asset_mode", ["source", "bundle"])
+    def test_top_command_cells_are_keyboard_expandable(self, asset_mode):
+        """Command cells expose button semantics and load the operator page module."""
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
-            body = client.get("/diag").get_data(as_text=True)
-        if '<td class="diag-cmd-cell"' not in body:
-            pytest.skip("no top-command rows in the dev DB to assert against")
+        stats = assets_diagnostics.diag_usage_stats(0)
+        assert stats["ok"]
+        stats["top_by_freq"] = [{"command": "echo keyboard-fixture", "count": 1}]
+        with (
+            mock.patch.dict("config.CFG", {"asset_bundle_mode": asset_mode}),
+            mock.patch("blueprints.assets_diag.diag_usage_stats", return_value=stats),
+        ):
+            response = client.get("/diag")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert '>echo keyboard-fixture</td>' in body
         assert 'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"' in body, (
             "top-command cells must carry the expand-button accessibility attrs"
         )
-        assert "toggleCmdCell" in body, "tap-to-expand handler missing from page script"
+        if asset_mode == "source":
+            source = "/static/js/operator_pages.entry.js"
+        else:
+            manifest = json.loads((Path(__file__).resolve().parents[2] / "app/static/build/manifest.json").read_text())
+            source = manifest["bundles"]["operator-pages"]["path"]
+        assert f'<script type="module" src="{source}"></script>' in body
 
     def test_top_command_cells_render_full_untruncated_command(self):
         """The 48-char server-side `truncate` is gone — full text reaches
@@ -16229,7 +16212,7 @@ class TestDiagRoute:
                 )
                 conn.commit()
             client = self._allowed_client(init_db=False)
-            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
                 body = client.get("/diag").get_data(as_text=True)
             # Full command appears at least twice: in `title=` and as cell text.
             # If the old truncate were still in play we would only see it in title.
@@ -16242,7 +16225,7 @@ class TestDiagRoute:
 
     def test_html_response_carries_live_indicator_and_no_refresh_toggle(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/diag").get_data(as_text=True)
         assert "diag-live-indicator" in body
         assert "Refreshed at" in body
@@ -16255,7 +16238,7 @@ class TestDiagRoute:
         with mock.patch.dict(
             "config.CFG",
             {
-                "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+                "metrics_allowed_cidrs": ["127.0.0.1/32"],
                 "share_redaction_enabled": True,
                 "share_redaction_rules": [],
             },
@@ -16266,7 +16249,7 @@ class TestDiagRoute:
 
     def test_json_format_param_returns_json(self):
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag?format=json")
         assert "application/json" in resp.content_type
         data = json.loads(resp.data)
@@ -23295,7 +23278,7 @@ class TestHistoryRoute:
                     "ai_max_queue_depth": 1000,
                     "ai_rate_limit_per_session_hour": 20,
                     "ai_rate_limit_global_per_minute": 20,
-                    "diagnostics_allowed_cidrs": [],
+                    "metrics_allowed_cidrs": ["127.0.0.1/32"],
                     "share_redaction_enabled": False,
                 }
                 for cfg_patch, path, expected_status, expected_error in (

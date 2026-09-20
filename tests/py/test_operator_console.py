@@ -93,6 +93,9 @@ def test_settings_only_disclose_reviewed_values_and_audit_the_actor(operator_db,
         "missing_grant",
         "revoked_grant",
         "revoked_session",
+        "revoked_credential",
+        "invalid",
+        "absolute",
         "disabled",
         "anonymous",
         "direct_credential",
@@ -105,7 +108,9 @@ def test_settings_only_disclose_reviewed_values_and_audit_the_actor(operator_db,
 def test_console_authorization_and_navigation(operator_db, monkeypatch, cause):
     app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
     install_snapshot(monkeypatch)
-    assert b'data-action="admin"' in client.get("/", base_url=ORIGIN).data
+    navigation = (b'data-action="admin"', b'data-action="diag"', b'data-action="audit"', b'data-menu-action="audit"')
+    shell = client.get("/", base_url=ORIGIN).data
+    assert all(item in shell for item in navigation)
     headers = {}
     if cause in {"missing_grant", "team_owner"}:
         with get_db_connect()() as conn:
@@ -115,6 +120,8 @@ def test_console_authorization_and_navigation(operator_db, monkeypatch, cause):
 
                 create_team(conn, name="Operator team", creator_principal_id=bundle.principal.id)
             conn.commit()
+    elif cause == "invalid":
+        headers["X-Darklab-Credential"] = "invalid-credential"
     elif cause == "revoked_session":
         browser_sessions.revoke_browser_session(issued.id, reason="test")
     elif cause == "revoked_grant":
@@ -143,22 +150,31 @@ def test_console_authorization_and_navigation(operator_db, monkeypatch, cause):
                 conn.execute(
                     "UPDATE principals SET status = 'disabled', disabled_at = ? WHERE id = ?", (old, bundle.principal.id)
                 )
+            elif cause == "revoked_credential":
+                conn.execute("UPDATE credentials SET revoked_at = ? WHERE id = ?", (old, bundle.credential.metadata.id))
+            elif cause == "absolute":
+                conn.execute("UPDATE browser_sessions SET created_at = ?, absolute_expires_at = ? WHERE id = ?",
+                             (timestamp(datetime.now(timezone.utc) - timedelta(hours=3)), old, issued.id))
             elif cause == "stale":
                 conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?", (old, issued.id))
             else:
                 conn.execute("UPDATE browser_sessions SET last_seen_at = ? WHERE id = ?", (old, issued.id))
             conn.commit()
-    response = client.get("/admin/settings", headers=headers, base_url=ORIGIN)
-    assert response.status_code == (
-        404 if cause in {"missing_grant", "revoked_grant", "revoked_session", "team_owner", "disabled"} else 401
-    )
-    assert "settings" not in (response.get_json(silent=True) or {})
-    assert response.headers["Cache-Control"] == "private, no-store"
+    for path in ("/admin/settings", "/diag?format=json", "/audit?format=json", "/diag/classifier-inspector"):
+        response = client.get(path, headers=headers, base_url=ORIGIN)
+        assert response.status_code == (
+            404 if cause in {"missing_grant", "revoked_grant", "revoked_session", "team_owner",
+                             "disabled", "direct_credential", "pat", "revoked_credential", "invalid"} else 401
+        )
+        assert "settings" not in (response.get_json(silent=True) or {})
+        assert response.headers["Cache-Control"] == "private, no-store"
     if cause == "stale":
         assert response.get_json()["error"] == "reauthentication_required"
-        assert b'data-action="admin"' in client.get("/", base_url=ORIGIN).data
+        shell = client.get("/", base_url=ORIGIN).data
+        assert all(item in shell for item in navigation)
     else:
-        assert b'data-action="admin"' not in client.get("/", headers=headers, base_url=ORIGIN).data
+        shell = client.get("/", headers=headers, base_url=ORIGIN).data
+        assert all(item not in shell for item in (b'data-action="admin"', b'data-action="audit"', b'data-menu-action="audit"'))
     if response.status_code == 401 and cause != "stale":
         assert response.get_json()["error"] == "sign_in_required"
         assert response.get_json()["destination"].startswith("/auth/sign-in?next=")
@@ -213,14 +229,14 @@ def test_diagnostics_keeps_existing_config_disclosure():
         ("203.0.113.9", "192.0.2.9", False),
     ],
 )
-def test_operator_network_uses_only_trusted_forwarding(operator_db, monkeypatch, peer, forwarded, allowed):
+def test_operator_access_is_independent_of_network_and_forwarded_ip(operator_db, monkeypatch, peer, forwarded, allowed):
     from test_operator_reauthentication import app_for
 
     _app, _client, _bundle, issued = credential_setup(operator_db, monkeypatch)
     cfg = operator_db.cfg.with_overrides(
         {
             "access_profile": "token_required",
-            "diagnostics_allowed_cidrs": ["192.0.2.0/24"],
+            "metrics_allowed_cidrs": ["192.0.2.0/24"],
             "trusted_proxy_cidrs": ["10.0.0.0/24"],
         }
     )
@@ -232,5 +248,5 @@ def test_operator_network_uses_only_trusted_forwarding(operator_db, monkeypatch,
         response = client.get(
             path, base_url=ORIGIN, headers={"X-Forwarded-For": forwarded}, environ_overrides={"REMOTE_ADDR": peer}
         )
-        assert response.status_code == (200 if allowed else 404)
+        assert response.status_code == 200
         assert response.headers["Cache-Control"] == "private, no-store"

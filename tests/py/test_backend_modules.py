@@ -1481,7 +1481,7 @@ class TestAIAssistContextAndStorage:
             **cfg,
             "ai_rate_limit_per_session_hour": 1,
             "ai_rate_limit_global_per_minute": 20,
-            "diagnostics_allowed_cidrs": [],
+            "metrics_allowed_cidrs": [],
         }
         with _test_app().test_request_context("/", environ_base={"REMOTE_ADDR": "198.51.100.10"}):
             with (

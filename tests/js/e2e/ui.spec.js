@@ -1099,30 +1099,16 @@ test.describe('project workspace modal', () => {
     return { runRow, command: seededRun.command }
   }
 
-  test('records project actions in the diagnostics audit viewer', async ({ page }, testInfo) => {
+  test('project actions do not grant access to the diagnostics audit viewer in open mode', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await openProjectsModal(page)
     const projectId = await createActiveProject(page, `Playwright Audit ${Date.now()}`)
     await linkExternalRunToOpenProject(page, testInfo)
 
-    await page.goto(`/diag/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
-    await expect(page.locator('body.diag-page')).toBeVisible()
-    const auditRow = page.locator('.diag-audit-table tbody tr', {
-      hasText: projectId,
-    }).first()
-    await expect(auditRow).toContainText('project.link', { timeout: 15_000 })
-    await expect(auditRow).toContainText(`project:${projectId}`)
-    await auditRow.locator('.diag-audit-details summary').click()
-    await expect(auditRow.locator('.diag-audit-details pre')).toContainText('"event_type": "project.link"')
-    await expect(auditRow.locator('.diag-audit-details pre')).toContainText('"source": "manual"')
-    await expect(page.getByRole('link', { name: 'CSV' })).toHaveAttribute(
-      'href',
-      new RegExp(`/diag/audit/export\\?event_type=project\\.link&project_id=${projectId}`),
-    )
-    await expect(page.getByRole('link', { name: 'JSON' })).toHaveAttribute(
-      'href',
-      new RegExp(`/diag/audit/export\\?format=json&event_type=project\\.link&project_id=${projectId}`),
-    )
+    const response = await page.goto(`/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
+    expect(response.status()).toBe(404)
+    await expect(page.locator('body.diag-page')).toHaveCount(0)
+    await expect(page.locator('.diag-audit-table')).toHaveCount(0)
   })
 
   test('opens Project Activity and filters project-link rows', async ({ page }, testInfo) => {
