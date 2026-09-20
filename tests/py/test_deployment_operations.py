@@ -87,7 +87,10 @@ if "-c" in args:
         if os.environ.get("FAKE_SWAP_OUTPUT"):
             output = Path(os.environ["FAKE_SWAP_OUTPUT"])
             output.unlink()
-            output.symlink_to(state / "untouched")
+            if os.environ.get("FAKE_SWAP_KIND") == "file":
+                output.write_text("keep")
+            else:
+                output.symlink_to(state / "untouched")
         if os.environ.get("FAKE_COPY_EXIT"):
             sys.stdout.write("partial")
             exit_code("FAKE_COPY_EXIT")
@@ -292,7 +295,7 @@ def test_output_rejections_happen_before_issuance(deployment, tmp_path, kind):
     assert not mutations(log)
 
 
-@pytest.mark.parametrize("failure", ["copy", "interrupt", "replace"])
+@pytest.mark.parametrize("failure", ["copy", "interrupt", "replace", "replace-file"])
 def test_failed_transfer_preserves_retrievable_secret_without_reissuing(deployment, tmp_path, failure):
     _install, state, log, run = deployment
     output = tmp_path / "output"
@@ -301,11 +304,17 @@ def test_failed_transfer_preserves_retrievable_secret_without_reissuing(deployme
         "copy": {"FAKE_COPY_EXIT": "8"},
         "interrupt": {"FAKE_ACCESS_INTERRUPT": "1"},
         "replace": {"FAKE_SWAP_OUTPUT": str(output)},
+        "replace-file": {"FAKE_SWAP_OUTPUT": str(output), "FAKE_SWAP_KIND": "file"},
     }[failure]
     result = run("access", "bootstrap", "--output-file", str(output), overrides=overrides)
     assert result.returncode != 0
     assert "may have been issued" in result.stderr and "access retrieve" in result.stderr
-    assert not output.exists() if failure != "replace" else output.is_symlink()
+    if failure == "replace":
+        assert output.is_symlink()
+    elif failure == "replace-file":
+        assert output.read_text() == "keep"
+    else:
+        assert not output.exists()
     assert (state / "credential").read_text() == SECRET + "\n"
     assert (state / "untouched").read_text() == "keep"
     assert len(mutations(log)) == 1
@@ -315,6 +324,45 @@ def test_failed_transfer_preserves_retrievable_secret_without_reissuing(deployme
     assert recovered.read_text() == SECRET + "\n" and not (state / "credential").exists()
     assert len(mutations(log)) == 1
     assert SECRET not in result.stdout + result.stderr + log.read_text()
+
+
+@pytest.mark.parametrize("style", ["gnu", "bsd", "failed", "invalid", "different-device"])
+def test_output_identity_supports_host_stat_formats_and_fails_closed(deployment, tmp_path, style):
+    _install, _state, log, run = deployment
+    stat_tool = tmp_path / "bin/stat"
+    stat_tool.write_text(
+        f"#!{sys.executable}\n"
+        + """
+import os, sys
+from pathlib import Path
+style = os.environ["FAKE_STAT_STYLE"]
+if style == "failed" or (style == "bsd" and sys.argv[1] != "-f"):
+    raise SystemExit(1)
+assert sys.argv[1:3] == (["-f", "%d:%i"] if style == "bsd" else ["-c", "%d:%i"])
+info = os.stat(sys.argv[3], follow_symlinks=False)
+if style == "invalid":
+    print(info.st_ino)
+else:
+    device = info.st_dev + (style == "different-device" and Path(sys.argv[3]).name == "output")
+    print(f"{device}:{info.st_ino}")
+"""
+    )
+    stat_tool.chmod(0o755)
+    output = tmp_path / "output"
+    result = run("access", "bootstrap", "--output-file", str(output), overrides={"FAKE_STAT_STYLE": style})
+    if style in {"gnu", "bsd"}:
+        assert result.returncode == 0, result.stderr
+        assert output.read_text() == SECRET + "\n"
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    else:
+        assert result.returncode == 1 and not result.stdout
+        assert not mutations(log)
+        if style != "different-device":
+            assert not output.exists()
+    captured = result.stdout + result.stderr
+    if log.exists():
+        captured += log.read_text()
+    assert SECRET not in captured
 
 
 @pytest.mark.parametrize(

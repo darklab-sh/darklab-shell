@@ -39,6 +39,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Deployment access commands pass shell lint across toolchain versions.** Host credential checks compare device and inode through GNU or BSD `stat`, retain file-replacement and symlink protections, and reject unreadable identity metadata. Explicit conditionals remain compatible with older ShellCheck versions.
+
 - **OIDC fork coverage runs independently of pytest's background threads.** A fresh Python process exercises the real child-reset hook with deprecation warnings treated as errors. Child failures reach pytest, and a timeout cleans up both processes so a deadlock can't hang the suite or leave a child behind.
 
 - **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Startup and container checks cover both streams, including fatal configuration failures and worker exceptions.

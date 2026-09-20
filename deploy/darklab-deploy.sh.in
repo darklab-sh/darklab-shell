@@ -1181,11 +1181,35 @@ except Exception:
 ' "$@"
 }
 
+access_file_identity() {
+    # GNU and BSD stat use different format flags. Compare device and inode;
+    # inode alone can collide across filesystems. Neither form follows symlinks.
+    if access_identity=$(stat -c '%d:%i' "$1" 2>/dev/null); then
+        :
+    else
+        access_identity=$(stat -f '%d:%i' "$1" 2>/dev/null) || return 1
+    fi
+    case "$access_identity" in
+        ''|*[!0-9:]*|:*|*:|*:*:*) return 1 ;;
+        *:*) printf '%s\n' "$access_identity" ;;
+        *) return 1 ;;
+    esac
+}
+
+access_output_matches() {
+    if [ ! -f "$access_output" ] || [ -L "$access_output" ]; then
+        return 1
+    fi
+    access_output_identity=$(access_file_identity "$access_output") || return 1
+    access_witness_identity=$(access_file_identity "$access_stage/credential") || return 1
+    [ "$access_output_identity" = "$access_witness_identity" ]
+}
+
 access_output_cleanup() {
     access_exit=$?
     trap - 0 HUP INT TERM
     if [ "$access_saved" != true ]; then
-        if [ ! -L "$access_output" ] && [ "$access_output" -ef "$access_stage/credential" ]; then
+        if access_output_matches; then
             rm -f "$access_output"
         fi
         if [ -n "$access_private_path" ]; then
@@ -1213,8 +1237,9 @@ access_with_output() {
     trap 'exit 143' TERM
     ln -n "$access_stage/credential" "$access_output" 2>/dev/null \
         || fail "could not reserve a new host output destination"
-    [ -f "$access_output" ] && [ ! -L "$access_output" ] && [ "$access_output" -ef "$access_stage/credential" ] \
-        || fail "host output destination changed during reservation"
+    if ! access_output_matches; then
+        fail "host output destination changed during reservation"
+    fi
     access_receipt="$access_stage/result.json"
     if [ "$access_operation" = retrieve ]; then
         [ "$#" -eq 1 ] || fail "retrieve requires one retained container path and --output-file"
@@ -1233,8 +1258,9 @@ access_with_output() {
         fi
     fi
     access_file read "$access_private_path" >&3 || fail "credential retrieval failed"
-    [ ! -L "$access_output" ] && [ "$access_output" -ef "$access_stage/credential" ] \
-        || fail "host output destination changed during transfer"
+    if ! access_output_matches; then
+        fail "host output destination changed during transfer"
+    fi
     sync || fail "could not persist the host credential file"
     access_saved=true
     if ! access_file finish "$access_private_path" "$access_output" < "$access_receipt"; then
@@ -1263,7 +1289,9 @@ access_command() {
         case "$access_arg" in
             --help|-h) access_usage; return ;;
             --output-file)
-                [ "$access_scan" -gt 0 ] && [ -z "$access_output" ] || fail "--output-file requires one host path"
+                if [ "$access_scan" -eq 0 ] || [ -n "$access_output" ]; then
+                    fail "--output-file requires one host path"
+                fi
                 access_output=$1
                 shift
                 access_scan=$((access_scan - 1))
@@ -1282,9 +1310,14 @@ access_command() {
         [ "$access_secret_option" = false ] || fail "--output-file and --secret-file cannot be combined"
         case "$access_operation" in bootstrap|issue|rotate|recover|retrieve) ;; *) fail "this access command does not produce a credential file" ;; esac
         case "$access_output" in /*) ;; *) access_output="$PWD/$access_output" ;; esac
-        [ ! -e "$access_output" ] && [ ! -L "$access_output" ] || fail "host output destination already exists"
+        if [ -e "$access_output" ] || [ -L "$access_output" ]; then
+            fail "host output destination already exists"
+        fi
         command -v sync >/dev/null 2>&1 || fail "credential retrieval requires sync"
         command -v ln >/dev/null 2>&1 || fail "credential retrieval requires ln"
+        command -v stat >/dev/null 2>&1 || fail "credential retrieval requires stat"
+        access_file_identity "$script_dir/darklab-deploy" >/dev/null \
+            || fail "could not inspect host file identity with stat"
     elif [ "$access_operation" = retrieve ]; then
         fail "retrieve requires --output-file HOST_PATH"
     fi
@@ -1354,7 +1387,10 @@ config_command() {
         case "$config_arg" in
             --help|-h) config_usage; return ;;
             --local-yaml)
-                [ "$config_scan" -gt 0 ] && [ -z "$config_candidate" ] || { config_usage >&2; exit 2; }
+                if [ "$config_scan" -eq 0 ] || [ -n "$config_candidate" ]; then
+                    config_usage >&2
+                    exit 2
+                fi
                 config_candidate=$1
                 shift
                 config_scan=$((config_scan - 1))
