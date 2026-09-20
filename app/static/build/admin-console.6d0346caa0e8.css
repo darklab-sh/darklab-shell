@@ -5,7 +5,7 @@
 body.admin-page .diag-main.admin-main { max-width: 1100px; width: 100%; box-sizing: border-box; margin: 0 auto; padding: 24px; }
 body.admin-page { height: auto; overflow-anchor: none; }
 body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex: none; }
-.admin-intro, .admin-setting { border: 1px solid var(--border); border-radius: var(--radius-card, 8px); padding: 18px; background: var(--panel); }
+.admin-intro, .admin-setting { border: 1px solid var(--border); border-radius: 8px; padding: 18px; background: var(--surface); }
 .admin-intro { display: grid; gap: 18px; }
 .admin-intro-copy { display: grid; gap: 10px; }
 .admin-intro h2 { font-size: 16px; }
@@ -27,7 +27,7 @@ body.admin-page .diag-main.admin-main { display: block; overflow: visible; flex:
 .admin-group-title { margin: 0; font-size: 15px; }
 .admin-disclosure-trigger { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; white-space: normal; text-align: left; line-height: 1.5; }
 .admin-disclosure-indicator { flex: 0 0 12px; }
-.admin-category > .admin-group-title > .admin-disclosure-trigger { border: 1px solid var(--border); background: var(--panel); }
+.admin-category > .admin-group-title > .admin-disclosure-trigger { border: 1px solid var(--border); background: var(--surface); }
 .admin-disclosure-panel { display: grid; gap: 14px; padding: 12px 0 0; }
 .admin-disclosure-panel.u-hidden { display: none; }
 .admin-category > .admin-disclosure-panel { gap: 12px; }
