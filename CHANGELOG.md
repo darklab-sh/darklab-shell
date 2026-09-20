@@ -15,6 +15,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Managed installations can manage access and check configuration through `darklab-deploy`.** The `access` commands preserve principal safeguards and provide private host credential files with recovery after interrupted transfers. `config check` evaluates current or candidate YAML without starting the application or applying changes. Both commands select the installation's Compose files and preserve safe output for automation.
+
 - **Operators can inspect loaded settings from a read-only desktop and mobile console.** Explicitly granted browser sessions can search reviewed values, source layers, warnings, and host apply guidance. Sensitive settings show approved summaries or withheld markers, snapshots identify the serving worker, and refresh clears stale information after access loss. Existing diagnostics retain their permitted field exposure.
 
 - **Operator verification preserves session limits.** Credential and provider step-up verify the same account, recheck current access, and rotate live browser sessions without extending their original absolute deadline. Operator requests enforce the restricted profile before identity lookup and keep responses private. Signed provider proof is tracked separately from ordinary sign-in recency, so providers that omit it can still use existing session-revocation controls.

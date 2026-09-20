@@ -64,23 +64,19 @@ To create your first token, sign into the browser and open **Options → Access 
 
 You can rotate or revoke tokens from the same Access panel. Rotation keeps the label, permissions, and existing expiry, shows the replacement once, and waits for you to save it before asking to revoke the old token. Update each integration that uses the token. Rotating a token does not extend its lifetime; use **Expiry** when you intend to change it.
 
-For operator-issued access, use the [in-container principal tool](../CONFIGURATION.md#principal-access-operations). Use the principal ID recorded by operator bootstrap, or returned by `darklab whoami` with an existing PAT. Check that ID with `status` before issuing another token. This example creates a token for reading Project data; it doesn't grant Project writes or command execution:
+For operator-issued access, use the [deployment access commands](../CONFIGURATION.md#principal-access-operations). Use the principal ID recorded by operator bootstrap, or returned by `darklab whoami` with an existing PAT. Check that ID with `status` before issuing another token. This example creates a token for reading Project data; it doesn't grant Project writes or command execution:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access status prn_example
+./darklab-deploy access \
   issue prn_example --type pat --label "Project inventory" \
   --scope identity:read --scope projects:read \
-  --secret-file /data/project-inventory.pat
-
-umask 077
-docker compose cp shell:/data/project-inventory.pat ./project-inventory.pat
-chmod 600 ./project-inventory.pat
+  --output-file ./project-inventory.pat
 ```
 
 Repeat `--scope` for each required permission. An explicit list replaces the default scopes. Omitting `--expires-at` gives the token its 90-day default; an explicit ISO 8601 deadline must be between 1 and 365 days after issuance. Portable browser credentials are a different type and can't authenticate API v1 requests.
 
-The output path must be new; the tool creates an owner-only file and prints only safe metadata. Transfer that file through an operator-controlled secret store to the intended client. Load it with `read -r DARKLAB_PAT < ./project-inventory.pat`, export the variable, and run `darklab whoami` against the intended `DARKLAB_API_URL` to verify the principal and permissions. Then unset the variable and remove the temporary container and local copies after confirming the token is stored securely. Issue a separate token for each integration so its permissions and revocation can be managed independently.
+The host output path must be new; the helper saves an owner-only file and prints only safe metadata. Relative paths use your current directory. If retrieval fails, use the reported `access retrieve` command to recover the retained file without issuing another token. Transfer that file through an operator-controlled secret store to the intended client. Load it with `read -r DARKLAB_PAT < ./project-inventory.pat`, export the variable, and run `darklab whoami` against the intended `DARKLAB_API_URL` to verify the principal and permissions. Then unset the variable and remove the local temporary file after confirming the token is stored securely. Issue a separate token for each integration so its permissions and revocation can be managed independently.
 
 ### Use a PAT
 
