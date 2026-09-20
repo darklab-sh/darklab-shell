@@ -126,9 +126,10 @@ def enforce_operator_access():
         # The matched Lax state cookie binds a provider return to the source
         # session. Strict browser-session cookies need not survive that return.
         return None
-    from core.helpers import AuthenticationRejected, get_authentication_result
+    from core.helpers import AuthenticationRejected, get_authentication_result, record_failed_authentication
     try:
         authentication = get_authentication_result()
+        record_failed_authentication(authentication)
         eligible = browser_eligible(authentication.context)
     except AuthenticationRejected:
         raise
