@@ -107,7 +107,7 @@ require_nonempty() {
 cleanup() {
     container exec "$shell" sh -c \
         'chmod -R a+rwX /data /workspaces' >/dev/null 2>&1 || true
-    container rm -f "$shell" "$redis" "$postgres" >/dev/null 2>&1 || true
+    container rm --force --volumes "$shell" "$redis" "$postgres" >/dev/null 2>&1 || true
     if [ "$mount_mode" = "volume" ]; then
         container volume rm "$overlay_volume" "$data_volume" \
             "$workspace_volume" >/dev/null 2>&1 || true
@@ -329,7 +329,7 @@ container exec --user appuser:appuser "$shell" test -f /workspaces/release-bind-
     || verification_failed runtime_restart workspace_bind_marker present missing
 
 if [ "${VERIFY_POSTGRES_STARTUP:-0}" = 1 ]; then
-    container rm -f "$shell" >/dev/null
+    container rm --force --volumes "$shell" >/dev/null
     container volume create "$postgres_volume" >/dev/null
     container run -d \
         --name "$postgres" \

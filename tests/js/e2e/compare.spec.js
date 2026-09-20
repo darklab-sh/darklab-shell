@@ -8,6 +8,7 @@ import { join } from 'path'
 import {
   browserSessionId,
   closeHistory,
+  ensurePromptReady,
   clickHistoryRunMenuAction,
   openHistoryWithEntries,
 } from './helpers.js'
@@ -347,16 +348,14 @@ async function expectComparisonRendered(page, fixture) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
-  await page.reload()
-  await page.locator('#cmd').waitFor({ state: 'attached' })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await ensurePromptReady(page)
 })
 
 test.describe('run comparison launch paths', () => {
   test.describe.configure({ timeout: 90_000 })
 
-  test('opens chronological comparison from History, Project, HUD, and Findings', async ({ page }, testInfo) => {
+  test('opens History comparison with output, findings, and playbook navigation', async ({ page }, testInfo) => {
     const sessionId = await browserSessionId(page)
     const fixture = seedCompareFixture(testInfo, { sessionId })
 
@@ -414,6 +413,11 @@ test.describe('run comparison launch paths', () => {
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
     await page.locator('#workflows-overlay .workflows-close').click()
     await closeHistory(page)
+  })
+
+  test('opens chronological comparison from a Project', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
 
     const project = await createProjectWithLinkedRuns(
       page,
@@ -434,6 +438,11 @@ test.describe('run comparison launch paths', () => {
     await expectComparisonRendered(page, fixture)
     await closeComparison(page)
     await page.locator('#project-workspace-overlay .project-workspace-close').click()
+  })
+
+  test('opens comparison for the restored run from the HUD', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
 
     await openHistoryWithEntries(page)
     await page
@@ -452,6 +461,21 @@ test.describe('run comparison launch paths', () => {
     await expectComparisonRendered(page, fixture)
     await closeComparison(page)
     await expect(hudCompare).toBeFocused()
+  })
+
+  test('opens findings-only comparison for the restored run', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
+
+    await openHistoryWithEntries(page)
+    await page
+      .locator('.history-entry')
+      .filter({ hasText: fixture.command })
+      .first()
+      .locator('[data-action="restore"]')
+      .click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText(fixture.currentChangedText)
+    await closeHistory(page)
 
     const findingsCompare = page.locator('[data-search-compare-findings="1"]')
     await expect(findingsCompare).toBeVisible()

@@ -31,6 +31,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Masscan's deterministic smoke check reaches its test container directly.** The fixture supplies the target's Docker MAC address, avoiding Masscan's default gateway path and its dependence on the runner's forwarding policy. Packet traces and the required SYN-ACK preserve evidence of a real successful scan.
+
+- **Browser CI reduces contention across concurrent test projects.** The parallel suite caps CI execution at three workers in total, including the dedicated sign-in projects. Comparison, assessment-batch, output-menu, and logout checks use independent journeys; settings and sign-in checks wait for the relevant response or navigation, and the assessment polling check verifies focus after the monitor is replaced. Test deadlines and failure-on-flaky safeguards remain unchanged.
+
+- **Browser qualification keeps independent workflows within their test budgets.** Operator navigation, settings controls, and access verification run as separate journeys, as do credential management, restoration, and invalid-input checks. The mobile Access test waits for its action to become usable and covers a deliberately held module download. Existing timeout limits and CI's rejection of flaky results stay in place.
+
+- **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
+
+- **Backup exports reject missing Docker volume sources.** The helper checks source volumes before export, so a misspelled or unavailable source fails instead of creating an empty named volume and recording an empty export. Existing source volumes remain in place.
+
 - **Operator pages share consistent headers and navigation.** Diagnostics, Audit log, and Operator settings show the app name, a page subtitle, and links to the other two pages. The desktop overflow menu opens Operator settings in a separate tab or window, keeping the shell available.
 
 - **Operator settings stay easy to browse as the inventory grows.** Group, source, and warning filters respond immediately, including styled dropdown and keyboard selection after refresh. Expandable groups show match counts, Clear filters restores the earlier browsing view, and refresh preserves expanded details, focus, and scroll. Compact cards separate loaded sources from host configuration locations and explain accepted values in plain language; desktop filters stay within reach and mobile controls remain touch-safe. Failed or expired refreshes still clear the inventory.

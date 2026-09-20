@@ -210,6 +210,14 @@ async function installAssessmentBatchLifecycleFixture(page, { holdLoadingStates 
     retryBody: null,
     preview: null,
   }
+  state.holdNextPoll = () => {
+    let release
+    let requested
+    const held = new Promise(resolve => { release = resolve })
+    const started = new Promise(resolve => { requested = resolve })
+    state.pollGate = { held, requested }
+    return { started, release }
+  }
   // Keep transient loading states visible until the test has checked them.
   const previewHeld = new Promise(resolve => { state.releasePreview = resolve })
   const templateRefreshHeld = new Promise(resolve => { state.releaseTemplateRefresh = resolve })
@@ -418,6 +426,12 @@ async function installAssessmentBatchLifecycleFixture(page, { holdLoadingStates 
     if ([batchId, retryBatchId].some(id => path === `/assessment-batches/${id}`)
         && request.method() === 'GET') {
       const id = path.endsWith(`/${retryBatchId}`) ? retryBatchId : batchId
+      const gate = state.pollGate
+      if (gate) {
+        state.pollGate = null
+        gate.requested()
+        await gate.held
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -513,6 +527,24 @@ async function installAssessmentBatchLifecycleFixture(page, { holdLoadingStates 
   return state
 }
 
+async function restoreRunningAssessmentBatch(page) {
+  const fixture = await installAssessmentBatchLifecycleFixture(page)
+  const { project, assessment } = await startNetworkAssessment(page, `Assessment Batch ${Date.now()}`)
+  const section = assessment.locator('.project-assessment-batch')
+  fixture.projectId = project.id
+  fixture.assessmentId = await section.getAttribute('data-assessment-id')
+  expect(fixture.assessmentId).toBeTruthy()
+  // Seed the same durable backend response used after the launch test. Each
+  // monitor/recovery journey gets its own real Project and assessment cycle.
+  fixture.launched = true
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await ensurePromptReady(page)
+  await openAssessment(page)
+  await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+  await expect(section).toContainText('Recent activity')
+  return { fixture, section, explorerBody: page.locator('#project-explorer-body') }
+}
+
 test.describe('project assessment qualification', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -594,7 +626,7 @@ test.describe('project assessment qualification', () => {
     )
   })
 
-  test('previews starts restores and cancels a bounded assessment batch', async ({ page }) => {
+  test('previews, refreshes templates, and starts a bounded assessment batch', async ({ page }) => {
     test.setTimeout(90_000)
     const fixture = await installAssessmentBatchLifecycleFixture(page, { holdLoadingStates: true })
     const { assessment } = await startNetworkAssessment(
@@ -717,23 +749,36 @@ test.describe('project assessment qualification', () => {
     await expect(section).toContainText('Assessment batch')
     await expect(section).toContainText('Running')
     await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+  })
 
-    const scrollBeforePoll = await explorerBody.evaluate((node) => {
-      node.scrollTop = node.scrollHeight
-      return node.scrollTop
+  test('restores an active assessment batch and preserves monitor focus across polling', async ({ page }) => {
+    test.setTimeout(90_000)
+    const { fixture, section, explorerBody } = await restoreRunningAssessmentBatch(page)
+    await explorerBody.evaluate(node => {
+      node.style.height = '220px'
+      node.style.overflow = 'auto'
     })
-    expect(scrollBeforePoll).toBeGreaterThan(0)
-    await section.getByRole('button', { name: 'Open run' }).evaluate((node) => {
-      node.focus({ preventScroll: true })
-    })
-    const polledBatch = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'GET'
-        && url.pathname === '/assessment-batches/wfx_assessment_batch_playwright'
-    })
-    expect((await polledBatch).status()).toBe(200)
-    await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePoll)
+    // Hold a real scheduled poll, then observe its DOM replacement. A response
+    // header alone doesn't establish that the monitor has finished rendering.
+    const poll = fixture.holdNextPoll()
+    await poll.started
+    try {
+      const scrollBeforePoll = await explorerBody.evaluate((node) => {
+        node.scrollTop = node.scrollHeight
+        return node.scrollTop
+      })
+      expect(scrollBeforePoll).toBeGreaterThan(0)
+      const previousMonitor = await section.locator('.project-assessment-batch-monitor').elementHandle()
+      await section.getByRole('button', { name: 'Open run' }).evaluate(node => node.focus({ preventScroll: true }))
+      await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
+      poll.release()
+      await expect.poll(() => previousMonitor.evaluate(node => node.isConnected)).toBe(false)
+      await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePoll)
+      await previousMonitor.dispose()
+    } finally {
+      poll.release()
+    }
 
     await page.keyboard.press('Escape')
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
@@ -760,7 +805,11 @@ test.describe('project assessment qualification', () => {
     await expect(restored).toContainText('ping -c 4 -W 2 127.0.0.1')
     await expect(restored.getByRole('button', { name: 'Open run' })).toBeVisible()
     await expect(restored).toContainText('Recent activity')
+  })
 
+  test('cancels a restored assessment batch and previews a bounded retry', async ({ page }) => {
+    test.setTimeout(90_000)
+    const { fixture, section: restored } = await restoreRunningAssessmentBatch(page)
     await restored.getByRole('button', { name: 'Cancel batch' }).click()
     await expect(page.locator('#confirm-host')).toContainText(
       'Active commands receive a cancellation request',

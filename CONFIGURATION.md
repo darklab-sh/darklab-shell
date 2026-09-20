@@ -1641,6 +1641,8 @@ This option is only for a Postgres backup restored into a fresh install that's s
 
 The underlying `scripts/operations/backup_system.py` helper is also available to development checkouts and custom test environments. It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
 
+Explicit Docker volume sources must already exist and be accessible. The helper checks them before export and stops if inspection fails. Export reads the source volume without removing it.
+
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 
 When `--keep-days` is set, the manifest records the cutoff, candidates examined, removal candidates, and inspection failures. Retention runs only after the new backup is published, then prints the actual removed and failure totals for cron logs. Candidate metadata or removal failures are warnings rather than silent skips. Expected operator errors stay concise; unexpected script failures also print a traceback with the failing function and line.
