@@ -20,6 +20,8 @@ Commands:
   install --bundle DIR --target DIR
                                  Install a verified bundle (used internally by setup.sh)
   status                         Validate managed files and show the installed release
+  access COMMAND [OPTIONS]       Manage principal access and retrieve credentials
+  config check [OPTIONS]         Evaluate configuration without starting the app
   backup [--keep-days DAYS]      Create and verify a SQLite or Postgres backup
   restore [--adopt-backend] BACKUP
                                  Restore a backup; adoption allows Postgres on a fresh install
@@ -1034,6 +1036,395 @@ Operator-owned .env, compose.operator.yaml (when present), conf/, data/, workspa
 EOF
 }
 
+access_usage() {
+    cat <<'HELP'
+Usage: darklab-deploy access COMMAND [OPTIONS]
+
+Commands (principal and credential ids are non-secret identifiers):
+  bootstrap --output-file HOST_PATH [--label LABEL]
+  status PRINCIPAL
+  operator-grant PRINCIPAL | operator-status PRINCIPAL | operator-revoke PRINCIPAL
+  issue PRINCIPAL --output-file HOST_PATH [--type portable|pat] [--scope SCOPE ...]
+  recover PRINCIPAL --confirm-principal PRINCIPAL --output-file HOST_PATH
+  rotate PRINCIPAL CREDENTIAL --output-file HOST_PATH
+  expiry PRINCIPAL CREDENTIAL TIMESTAMP|none
+  revoke PRINCIPAL CREDENTIAL --reason REASON [--confirm-lockout] [--pause-related-work]
+  disable PRINCIPAL --reason REASON | enable PRINCIPAL
+  revoke-all-sessions PRINCIPAL | rotate-session-signing-key
+  retrieve CONTAINER_PATH --output-file HOST_PATH
+
+The Python tool validates operation options and required confirmations.
+--output-file creates a new private host file, relative to your current directory.
+For advanced use, --secret-file keeps the Python tool's container-path meaning.
+Do not combine --output-file and --secret-file. Credentials are never printed.
+Access needs a running shell container; it does not start or upgrade one.
+
+Examples:
+  ./darklab-deploy access bootstrap --output-file ./initial-access.credential
+  ./darklab-deploy access status prn_example
+  ./darklab-deploy access operator-grant prn_example
+  ./darklab-deploy access operator-status prn_example
+HELP
+}
+
+config_usage() {
+    cat <<'HELP'
+Usage: darklab-deploy config check [--json] [--strict] [--local-yaml HOST_PATH]
+
+Evaluate this installation's configuration using its installed image.
+The application can be stopped. This does not apply changes or start services.
+--local-yaml supplies a host candidate, relative to your current directory.
+Environment overrides still take precedence over local YAML.
+Results describe fresh inputs, not a running worker's loaded configuration.
+Host-only settings still need Docker Compose validation.
+Exit codes: 0 valid, 1 strict warnings, 2 invalid or unreadable input.
+
+Examples:
+  ./darklab-deploy config check
+  ./darklab-deploy config check --json --strict
+  ./darklab-deploy config check --local-yaml ./candidate.yaml
+HELP
+}
+
+operations_preflight() {
+    require_common_tools
+    managed_status >/dev/null
+    docker info >/dev/null 2>&1 || fail "Docker is unavailable or permission was denied"
+    if [ -L "$script_dir/compose.operator.yaml" ] && [ ! -f "$script_dir/compose.operator.yaml" ]; then
+        fail "operator Compose override is unreadable"
+    fi
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" config --quiet \
+        >/dev/null 2>&1 || fail "deployment Compose configuration is invalid"
+    # Read only the shell image from Compose's normalized serialization. Do not
+    # print resolved environment values or require a host Python installation.
+    operations_image=$(deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
+        config --format yaml 2>/dev/null | awk '
+            /^  shell:$/ { shell_service=1; next }
+            shell_service && /^  [^ ]/ { exit }
+            shell_service && /^    image: / { sub(/^    image: /, ""); print; exit }
+        ')
+    [ "$operations_image" = "$installed_image" ] \
+        || fail "resolved shell image does not match the installed release"
+}
+
+access_preflight() {
+    operations_preflight
+    access_container=$(deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
+        ps --status running -q shell) || fail "could not find the running shell service"
+    case "$access_container" in
+        ''|*[!a-f0-9]*) fail "access requires exactly one running shell container" ;;
+    esac
+    access_image=$(docker container inspect --format '{{.Config.Image}}' "$access_container") \
+        || fail "could not inspect the running shell service"
+    [ "$access_image" = "$installed_image" ] || fail "running shell image does not match the installed release"
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
+        exec -T shell python3 -c 'from pathlib import Path; raise SystemExit(not Path("/app/tools/manage_principal_access.py").is_file())' \
+        >/dev/null 2>&1 || fail "running shell lacks Python or the packaged principal access tool"
+}
+
+# Only file transport lives here. Credential issuance and policy stay in the
+# packaged access tool. No secret is passed through an argument or environment.
+access_file() {
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" exec -T shell python3 -c '
+import json, os, re, stat, sys, tempfile
+from pathlib import Path
+try:
+    action = sys.argv[1]
+    if action == "prepare":
+        directory = tempfile.mkdtemp(prefix=".darklab-access-", dir="/data")
+        print(directory + "/credential")
+    else:
+        path = Path(sys.argv[2])
+        if not re.fullmatch(r"/data/\.darklab-access-[a-zA-Z0-9_-]+/credential", str(path)):
+            raise ValueError()
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(directory)
+            if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise ValueError()
+            if action == "discard-unused":
+                try:
+                    info = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    info = None
+                # An empty file can belong to an in-flight issuance after the
+                # Docker client disconnects. Only remove an unused directory.
+                if info is None:
+                    os.rmdir(path.parent)
+                    print("empty")
+                else:
+                    print("retained")
+                raise SystemExit(0)
+            descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            with os.fdopen(descriptor, "rb") as source:
+                info = os.fstat(source.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077
+                        or info.st_nlink != 1 or not 0 < info.st_size <= 4096):
+                    raise ValueError()
+                if action == "read":
+                    sys.stdout.buffer.write(source.read())
+                    sys.stdout.buffer.flush()
+                elif action == "finish":
+                    payload = json.loads(sys.stdin.read(1048576))
+                    payload["secret_file"] = sys.argv[3]
+                    payload["secret_file_location"] = "host"
+                    os.unlink(path.name, dir_fd=directory)
+                    os.rmdir(path.parent)
+                    print(json.dumps(payload, sort_keys=True))
+                else:
+                    raise ValueError()
+        finally:
+            os.close(directory)
+except Exception:
+    print("darklab-deploy: private credential file transfer failed", file=sys.stderr)
+    raise SystemExit(1)
+' "$@"
+}
+
+access_file_identity() {
+    # GNU and BSD stat use different format flags. Compare device and inode;
+    # inode alone can collide across filesystems. Neither form follows symlinks.
+    if access_identity=$(stat -c '%d:%i' "$1" 2>/dev/null); then
+        :
+    else
+        access_identity=$(stat -f '%d:%i' "$1" 2>/dev/null) || return 1
+    fi
+    case "$access_identity" in
+        ''|*[!0-9:]*|:*|*:|*:*:*) return 1 ;;
+        *:*) printf '%s\n' "$access_identity" ;;
+        *) return 1 ;;
+    esac
+}
+
+access_output_matches() {
+    if [ ! -f "$access_output" ] || [ -L "$access_output" ]; then
+        return 1
+    fi
+    access_output_identity=$(access_file_identity "$access_output") || return 1
+    access_witness_identity=$(access_file_identity "$access_stage/credential") || return 1
+    [ "$access_output_identity" = "$access_witness_identity" ]
+}
+
+access_output_cleanup() {
+    access_exit=$?
+    trap - 0 HUP INT TERM
+    if [ "$access_saved" != true ]; then
+        if access_output_matches; then
+            rm -f "$access_output"
+        fi
+        if [ -n "$access_private_path" ]; then
+            printf '%s\n' 'darklab-deploy: access may have been issued; do not repeat the mutation.' >&2
+            access_retained=$(access_file discard-unused "$access_private_path" 2>/dev/null) || access_retained=unknown
+            if [ "$access_retained" = empty ]; then
+                printf '%s\n' 'darklab-deploy: no credential file was retained; inspect principal status before proceeding.' >&2
+            else
+                printf 'darklab-deploy: retrieve the retained private file with: ./darklab-deploy access retrieve %s --output-file HOST_PATH\n' \
+                    "$access_private_path" >&2
+            fi
+        fi
+    fi
+    rm -rf "$access_stage"
+    exit "$access_exit"
+}
+
+access_with_output() {
+    access_saved=false
+    access_private_path=""
+    access_receipt=""
+    trap access_output_cleanup 0
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    ln -n "$access_stage/credential" "$access_output" 2>/dev/null \
+        || fail "could not reserve a new host output destination"
+    if ! access_output_matches; then
+        fail "host output destination changed during reservation"
+    fi
+    access_receipt="$access_stage/result.json"
+    if [ "$access_operation" = retrieve ]; then
+        [ "$#" -eq 1 ] || fail "retrieve requires one retained container path and --output-file"
+        access_private_path=$1
+        printf '{}\n' > "$access_receipt"
+    else
+        access_private_path=$(access_file prepare) || fail "could not reserve a private container credential path"
+        if deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" exec -T shell \
+            python3 /app/tools/manage_principal_access.py "$access_operation" "$@" \
+            --secret-file "$access_private_path" > "$access_receipt"; then
+            :
+        else
+            access_status=$?
+            cat "$access_receipt"
+            exit "$access_status"
+        fi
+    fi
+    access_file read "$access_private_path" >&3 || fail "credential retrieval failed"
+    if ! access_output_matches; then
+        fail "host output destination changed during transfer"
+    fi
+    sync || fail "could not persist the host credential file"
+    access_saved=true
+    if ! access_file finish "$access_private_path" "$access_output" < "$access_receipt"; then
+        printf 'darklab-deploy: credential saved to %s; private container copy may remain at %s\n' \
+            "$access_output" "$access_private_path" >&2
+        exit 1
+    fi
+    printf 'darklab-deploy: credential saved to %s\n' "$access_output" >&2
+}
+
+access_command() {
+    case "${1:-help}" in help|--help|-h) access_usage; return ;; esac
+    access_operation=$1
+    shift
+    case "$access_operation" in
+        bootstrap|status|operator-grant|operator-status|operator-revoke|issue|recover|expiry|rotate|revoke|disable|enable|revoke-all-sessions|rotate-session-signing-key|retrieve) ;;
+        *) access_usage >&2; fail "unknown access command: $access_operation" ;;
+    esac
+    access_output=""
+    access_secret_option=false
+    access_scan=$#
+    while [ "$access_scan" -gt 0 ]; do
+        access_arg=$1
+        shift
+        access_scan=$((access_scan - 1))
+        case "$access_arg" in
+            --help|-h) access_usage; return ;;
+            --output-file)
+                if [ "$access_scan" -eq 0 ] || [ -n "$access_output" ]; then
+                    fail "--output-file requires one host path"
+                fi
+                access_output=$1
+                shift
+                access_scan=$((access_scan - 1))
+                [ -n "$access_output" ] || fail "--output-file requires a nonempty host path"
+                ;;
+            --output-file=*)
+                [ -z "$access_output" ] || fail "use --output-file only once"
+                access_output=${access_arg#*=}
+                [ -n "$access_output" ] || fail "--output-file requires a nonempty host path"
+                ;;
+            --secret-file|--secret-file=*) access_secret_option=true; set -- "$@" "$access_arg" ;;
+            *) set -- "$@" "$access_arg" ;;
+        esac
+    done
+    if [ -n "$access_output" ]; then
+        [ "$access_secret_option" = false ] || fail "--output-file and --secret-file cannot be combined"
+        case "$access_operation" in bootstrap|issue|rotate|recover|retrieve) ;; *) fail "this access command does not produce a credential file" ;; esac
+        case "$access_output" in /*) ;; *) access_output="$PWD/$access_output" ;; esac
+        if [ -e "$access_output" ] || [ -L "$access_output" ]; then
+            fail "host output destination already exists"
+        fi
+        command -v sync >/dev/null 2>&1 || fail "credential retrieval requires sync"
+        command -v ln >/dev/null 2>&1 || fail "credential retrieval requires ln"
+        command -v stat >/dev/null 2>&1 || fail "credential retrieval requires stat"
+        access_file_identity "$script_dir/darklab-deploy" >/dev/null \
+            || fail "could not inspect host file identity with stat"
+    elif [ "$access_operation" = retrieve ]; then
+        fail "retrieve requires --output-file HOST_PATH"
+    fi
+    access_preflight
+    if [ -n "$access_output" ]; then
+        # A private file and atomic hard link reserve the destination without
+        # following or overwriting an existing file. The witness stays private.
+        (
+            umask 077
+            access_stage=$(mktemp -d "$(dirname "$access_output")/.darklab-access.XXXXXXXX")
+            trap 'rm -rf "$access_stage"' 0
+            access_with_output "$@" 3> "$access_stage/credential"
+        )
+    else
+        deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" exec -T shell \
+            python3 /app/tools/manage_principal_access.py "$access_operation" "$@"
+    fi
+}
+
+config_check_cleanup() {
+    config_exit=$?
+    trap - 0 HUP INT TERM
+    docker container rm --force --volumes "$config_container" >/dev/null 2>&1 || true
+    exit "$config_exit"
+}
+
+config_check_run() {
+    config_container="darklab-config-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    trap config_check_cleanup 0
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
+        run --rm --no-deps -T --pull never --name "$config_container" --entrypoint python3 shell -c '
+import os, subprocess, sys
+from pathlib import Path
+args = sys.argv[2:]
+checker = "/app/tools/check_instance_config.py"
+try:
+    if not Path(checker).is_file():
+        print("darklab-deploy: installed image lacks the configuration checker", file=sys.stderr)
+        raise SystemExit(2)
+    if sys.argv[1] == "input":
+        # The checker reads the pipe directly: no candidate file is writable.
+        args += ["--local-yaml", "/dev/stdin"]
+    else:
+        local = Path(os.environ.get("APP_LOCAL_CONF_DIR") or "/config") / "config.local.yaml"
+        if local.exists():
+            args += ["--local-yaml", str(local)]
+    raise SystemExit(subprocess.run([sys.executable, checker, *args], check=False).returncode)
+except OSError:
+    print("darklab-deploy: configuration evaluation could not run", file=sys.stderr)
+    raise SystemExit(2)
+' "$config_input" "$@"
+}
+
+config_command() {
+    case "${1:-help}" in help|--help|-h) config_usage; return ;; esac
+    [ "$1" = check ] || { config_usage >&2; fail "unknown config command: $1"; }
+    shift
+    config_candidate=""
+    config_scan=$#
+    while [ "$config_scan" -gt 0 ]; do
+        config_arg=$1
+        shift
+        config_scan=$((config_scan - 1))
+        case "$config_arg" in
+            --help|-h) config_usage; return ;;
+            --local-yaml)
+                if [ "$config_scan" -eq 0 ] || [ -n "$config_candidate" ]; then
+                    config_usage >&2
+                    exit 2
+                fi
+                config_candidate=$1
+                shift
+                config_scan=$((config_scan - 1))
+                [ -n "$config_candidate" ] || { config_usage >&2; exit 2; }
+                ;;
+            --local-yaml=*)
+                [ -z "$config_candidate" ] || { config_usage >&2; exit 2; }
+                config_candidate=${config_arg#*=}
+                [ -n "$config_candidate" ] || { config_usage >&2; exit 2; }
+                ;;
+            *) set -- "$@" "$config_arg" ;;
+        esac
+    done
+    if [ -z "$config_candidate" ]; then
+        if [ -e "$script_dir/conf/config.local.yaml" ] || [ -L "$script_dir/conf/config.local.yaml" ]; then
+            config_candidate="$script_dir/conf/config.local.yaml"
+        fi
+    fi
+    if [ -n "$config_candidate" ] && { [ ! -f "$config_candidate" ] || [ ! -r "$config_candidate" ]; }; then
+        printf '%s\n' 'darklab-deploy: local YAML input is missing or unreadable' >&2
+        exit 2
+    fi
+    operations_preflight
+    # Stream host inputs through a read-only pipe. This also works when
+    # the Docker daemon sees different host paths from this client.
+    if [ -n "$config_candidate" ]; then
+        config_input=input
+        (config_check_run "$@" < "$config_candidate")
+    else
+        config_input=current
+        (config_check_run "$@" < /dev/null)
+    fi
+}
+
 command_name=${1:-}
 [ -n "$command_name" ] || { usage; exit 2; }
 shift
@@ -1046,6 +1437,12 @@ case "$command_name" in
         require_common_tools
         [ "$#" -eq 0 ] || fail "status does not accept options"
         managed_status
+        ;;
+    access)
+        access_command "$@"
+        ;;
+    config)
+        config_command "$@"
         ;;
     backup)
         require_common_tools

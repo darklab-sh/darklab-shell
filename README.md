@@ -273,6 +273,8 @@ The installed `release-manifest.json` records both registry index references, th
 
 ### Storage and Lifecycle
 
+Use `./darklab-deploy access` to manage principal access and save new credentials to private host files. Use `./darklab-deploy config check` to validate configuration even while the app is stopped. See [principal access operations](CONFIGURATION.md#principal-access-operations) and [configuration validation](CONFIGURATION.md#validating-instance-configuration) for examples.
+
 Production installations use `darklab-deploy` for backups; development checkouts use the repository backup helper. See [backup and restore](CONFIGURATION.md#operator-backups) for the supported lifecycle.
 
 `/data` is durable and contains the default SQLite database, saved output artifacts, and the app-owned vault key. Files workspaces use temporary storage by default and are wiped when the shell container restarts; configure the volume backend before relying on Files for durable evidence. Redis stores coordination and cache state, so a restart can interrupt active work but does not replace the durable database.
