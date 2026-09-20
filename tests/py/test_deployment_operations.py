@@ -405,6 +405,45 @@ def test_config_current_or_missing_overlay_works_without_running_service(deploym
     assert not any("ps" in call or "up" in call for call in commands(log))
 
 
+@pytest.mark.parametrize("selected_valid", [True, False])
+@pytest.mark.parametrize("selection", ["local_root", "mount"])
+def test_config_current_uses_compose_selected_overlay(deployment, tmp_path, selected_valid, selection):
+    install, _state, log, run = deployment
+    original = install / "conf/config.local.yaml"
+    original.write_text("access_profile: wrong\n" if selected_valid else "app_name: unused host file\n")
+    selected = tmp_path / "selected configuration"
+    selected.mkdir()
+    (selected / "config.local.yaml").write_text(
+        "app_name: selected overlay\n" if selected_valid else "access_profile: wrong\n"
+    )
+    # The fake Compose boundary exposes the environment/mount selected by the override;
+    # the actual embedded command and configuration checker perform all input selection.
+    if selection == "local_root":
+        (install / "compose.operator.yaml").write_text(
+            "services:\n  shell:\n    environment:\n      APP_LOCAL_CONF_DIR: /custom-config\n"
+        )
+        environment = {"FAKE_CONFIG_ENV": json.dumps({"APP_LOCAL_CONF_DIR": str(selected)})}
+    else:
+        (install / "compose.operator.yaml").write_text(
+            "services:\n  shell:\n    volumes:\n      - ./selected:/config:ro\n"
+        )
+        environment = {"FAKE_LOCAL": str(selected)}
+    result = run("config", "check", "--json", overrides=environment)
+    assert result.returncode == (0 if selected_valid else 2), result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["valid"] is selected_valid
+    if selected_valid:
+        row = next(row for row in payload["settings"] if row["key"] == "app_name")
+        assert row["effective"]["value"] == "selected overlay"
+    else:
+        # An explicit candidate still intentionally replaces the selected invalid overlay.
+        candidate = run("config", "check", "--local-yaml", str(original), "--json", overrides=environment)
+        assert candidate.returncode == 0, candidate.stderr
+        row = next(row for row in json.loads(candidate.stdout)["settings"] if row["key"] == "app_name")
+        assert row["effective"]["value"] == "unused host file"
+    assert all(str(install / "compose.operator.yaml") in call for call in commands(log) if "run" in call)
+
+
 def test_config_environment_overrides_candidate_and_interruption_cleans_container(deployment, tmp_path):
     _install, _state, log, run = deployment
     candidate = tmp_path / "input.yaml"

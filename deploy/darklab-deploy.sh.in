@@ -1353,7 +1353,7 @@ config_check_run() {
     trap 'exit 143' TERM
     deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         run --rm --no-deps -T --pull never --name "$config_container" --entrypoint python3 shell -c '
-import os, subprocess, sys
+import subprocess, sys
 from pathlib import Path
 args = sys.argv[2:]
 checker = "/app/tools/check_instance_config.py"
@@ -1364,10 +1364,8 @@ try:
     if sys.argv[1] == "input":
         # The checker reads the pipe directly: no candidate file is writable.
         args += ["--local-yaml", "/dev/stdin"]
-    else:
-        local = Path(os.environ.get("APP_LOCAL_CONF_DIR") or "/config") / "config.local.yaml"
-        if local.exists():
-            args += ["--local-yaml", str(local)]
+    # Without a candidate, the checker resolves the overlay from the container
+    # Compose-selected environment and mounts, exactly as configuration loading does.
     raise SystemExit(subprocess.run([sys.executable, checker, *args], check=False).returncode)
 except OSError:
     print("darklab-deploy: configuration evaluation could not run", file=sys.stderr)
@@ -1405,11 +1403,6 @@ config_command() {
             *) set -- "$@" "$config_arg" ;;
         esac
     done
-    if [ -z "$config_candidate" ]; then
-        if [ -e "$script_dir/conf/config.local.yaml" ] || [ -L "$script_dir/conf/config.local.yaml" ]; then
-            config_candidate="$script_dir/conf/config.local.yaml"
-        fi
-    fi
     if [ -n "$config_candidate" ] && { [ ! -f "$config_candidate" ] || [ ! -r "$config_candidate" ]; }; then
         printf '%s\n' 'darklab-deploy: local YAML input is missing or unreadable' >&2
         exit 2
