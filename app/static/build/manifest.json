@@ -348,8 +348,8 @@
     },
     "admin": {
       "type": "esm",
-      "path": "/static/build/admin.d5adc37af1d6.js",
-      "hash": "d5adc37af1d66c7ad00cd8cbbe84e968286a0d07fe8836db6ccbacf721794c3a",
+      "path": "/static/build/admin.d91b7f22b066.js",
+      "hash": "d91b7f22b066ae2200fe89b31a754b1fc9f6e956e58d426ea179006984a958a1",
       "sources": [
         "/static/js/admin.entry.js",
         "/static/js/core/dom.js",
@@ -377,9 +377,9 @@
         "/static/js/admin.entry.js": "20000bac8417122e9e204ece194efb0da3e32147e46e03f5dbcebaf47bd174ab",
         "/static/js/core/dom.js": "f1680f5e57c4e91a01cc904c6508c4144fcb25c3f801fdf7597b87947c63f210",
         "/static/js/core/state.js": "07016305ab506b6fd4737a6b95a9c71a757beada67c6e1c82a63ab5a2ff8510c",
-        "/static/js/features/admin/operator_access.js": "fcf996b15f47a119f031a0277a7507f7329ed79b1693776c911bc09a3493ba01",
-        "/static/js/features/admin/operator_console.js": "e7e488c1c37fffac3081181b6b1e0e62580081c0c87dba67b5095453c319a1ff",
-        "/static/js/features/admin/operator_settings_view.js": "eff5a9599c6d317e5caeef3827eafd41fc088cbb48155beaa76bc2cb0bda0f89",
+        "/static/js/features/admin/operator_access.js": "4dc894bf89be4268cb681f3cc2d5de761816894aa5b8039070c9b35f25e2676c",
+        "/static/js/features/admin/operator_console.js": "031b3818cfcceb63748ec2f4a5c4891f567240751add7b7736b412ac21283072",
+        "/static/js/features/admin/operator_settings_view.js": "5d1382d44d973a449934197add273bd25eade9ec2c389978d3b458638efb8bb3",
         "/static/js/features/history/history_panel_bridge.js": "f305ed2892bb453e299b6550d9c15aa84ac67a706a86b935a5f4f318c94bed9a",
         "/static/js/features/history/history_recall_bridge.js": "f3c38fcd523eba11a3ee390cf0373317030c3c966272ff704c065081f1f86905",
         "/static/js/features/mobile/mobile_shell_layout.js": "94e84b4c86f45a2a69ad5313f63df900d94d786e9b62690cd02ebe2288d40fc4",
@@ -402,8 +402,8 @@
     },
     "operator-pages": {
       "type": "esm",
-      "path": "/static/build/operator-pages.8786f9f22818.js",
-      "hash": "8786f9f228182e2cf0f5682b5f5fe48fdaa4f6610e0ef4a646a1f0f69881cafd",
+      "path": "/static/build/operator-pages.af353a958356.js",
+      "hash": "af353a958356a0a4dab1e9b2d512a80d552f1f3a4623ab128a53b1c4aa7ec2d1",
       "sources": [
         "/static/js/features/admin/operator_access.js",
         "/static/js/features/diagnostics/ai_test.js",
@@ -415,7 +415,7 @@
         "/static/js/operator_pages.entry.js"
       ],
       "source_hashes": {
-        "/static/js/features/admin/operator_access.js": "fcf996b15f47a119f031a0277a7507f7329ed79b1693776c911bc09a3493ba01",
+        "/static/js/features/admin/operator_access.js": "4dc894bf89be4268cb681f3cc2d5de761816894aa5b8039070c9b35f25e2676c",
         "/static/js/features/diagnostics/ai_test.js": "b444885dc473fcd33b423f22acdfcaf4deafbe171336e35a41b299a018830cad",
         "/static/js/features/diagnostics/audit_exports.js": "05cbdc4a41ac7f998139a83298bbab1062faa7286ec72ba9e88b41127f5c5c8b",
         "/static/js/features/diagnostics/classifier.js": "c0383fdfa9270efa0b443f506ce07c1e23ea9c27d185d7d878eeebe0b5c945bd",

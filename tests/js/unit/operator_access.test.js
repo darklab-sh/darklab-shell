@@ -9,11 +9,22 @@ const response = (status, body = {}) => ({ status, ok: status < 400, headers: ne
   json: async () => body, text: async () => JSON.stringify(body), clone: () => response(status, body) });
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/');
   document.body.innerHTML = '<main><p>PRIVATE_DIAGNOSTICS</p><input value="PRIVATE_FILTER"></main><div class="diag-refreshed-at">now</div>';
 });
 afterEach(() => { document.cookie = 'darklab_csrf=; Max-Age=0; Path=/'; vi.useRealTimers(); });
 
 describe('operator page access', () => {
+  it('keeps the current document filters when a data request requires verification', async () => {
+    window.history.replaceState(null, '', '/admin/?search=port&source=host&private=discard');
+    const navigate = vi.fn();
+    const access = createOperatorAccess({ navigate, fetcher: async () => response(401, {
+      destination: '/admin/reauth?next=%2Fadmin%2F',
+    }) });
+    await expect(access.fetch('/admin/settings')).rejects.toThrow();
+    expect(new URL(navigate.mock.calls[0][0], window.location.origin).searchParams.get('next'))
+      .toBe('/admin/?search=port&source=host');
+  });
   it.each([401, 403, 404])('clears data, stops requests and validates the destination after %s', async status => {
     const navigate = vi.fn();
     const fetcher = vi.fn(async () => response(status, { error: 'reauthentication_required', destination: '/admin/reauth?next=%2Fdiag' }));
