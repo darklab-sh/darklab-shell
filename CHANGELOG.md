@@ -37,6 +37,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **OIDC fork coverage runs independently of pytest's background threads.** A fresh Python process exercises the real child-reset hook with deprecation warnings treated as errors. Child failures reach pytest, and a timeout cleans up both processes so a deadlock can't hang the suite or leave a child behind.
+
 - **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Startup and container checks cover both streams, including fatal configuration failures and worker exceptions.
 
 - **Masscan's deterministic smoke check reaches its test container directly.** The fixture supplies the target's Docker MAC address, avoiding Masscan's default gateway path and its dependence on the runner's forwarding policy. Packet traces and the required SYN-ACK preserve evidence of a real successful scan.
