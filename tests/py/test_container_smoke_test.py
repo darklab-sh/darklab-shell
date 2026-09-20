@@ -79,6 +79,7 @@ TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
 class _ContainerSmokeEnvironment(str):
     restricted_url: str
     raw_target_ip: str
+    raw_target_mac: str
     allowed_target_ip: str
     compose: list[str]
     image_tag: str
@@ -89,6 +90,7 @@ class _ContainerSmokeEnvironment(str):
         *,
         restricted_url: str,
         raw_target_ip: str,
+        raw_target_mac: str,
         allowed_target_ip: str,
         compose: list[str],
         image_tag: str,
@@ -96,6 +98,7 @@ class _ContainerSmokeEnvironment(str):
         instance = str.__new__(cls, base_url)
         instance.restricted_url = restricted_url
         instance.raw_target_ip = raw_target_ip
+        instance.raw_target_mac = raw_target_mac
         instance.allowed_target_ip = allowed_target_ip
         instance.compose = compose
         instance.image_tag = image_tag
@@ -1575,17 +1578,22 @@ def container_smoke_test():
                     timeout=30,
                 ).stdout.strip()
                 assert raw_target_container, "raw-target container id was not available"
-                raw_target_ip = _run(
+                raw_target_networks = json.loads(_run(
                     [
                         "docker",
                         "inspect",
                         "--format",
-                        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                        "{{json .NetworkSettings.Networks}}",
                         raw_target_container,
                     ],
                     timeout=30,
-                ).stdout.strip()
+                ).stdout)
+                assert len(raw_target_networks) == 1, "raw-target must use one test network"
+                raw_target_network = next(iter(raw_target_networks.values()))
+                raw_target_ip = raw_target_network["IPAddress"]
+                raw_target_mac = raw_target_network["MacAddress"]
                 assert raw_target_ip, "raw-target container address was not available"
+                assert raw_target_mac, "raw-target container MAC address was not available"
                 allowed_target_container = _run(
                     compose + ["ps", "-q", "allowed-target"],
                     timeout=30,
@@ -1674,6 +1682,7 @@ def container_smoke_test():
                 base_url,
                 restricted_url=restricted_url,
                 raw_target_ip=raw_target_ip,
+                raw_target_mac=raw_target_mac,
                 allowed_target_ip=allowed_target_ip,
                 compose=compose,
                 image_tag=image_tag,
@@ -1964,8 +1973,12 @@ def test_container_smoke_test_raw_naabu_and_masscan_find_test_owned_port(contain
             ("8888",),
         ),
         (
-            f"masscan -p 8888 --rate 100 {container_smoke_test.raw_target_ip}",
-            ("Discovered open port 8888/tcp", container_smoke_test.raw_target_ip),
+            # Masscan otherwise sends even same-subnet probes to the gateway MAC.
+            # Address this bridge peer directly so host forwarding policy cannot
+            # turn a healthy test-owned target into a false closed-port result.
+            f"masscan -p 8888 --rate 100 --router-mac {container_smoke_test.raw_target_mac} "
+            f"--packet-trace {container_smoke_test.raw_target_ip}",
+            ("Discovered open port 8888/tcp", container_smoke_test.raw_target_ip, "SYN-ACK"),
         ),
     )
     for command, expected_output in scanner_commands:
