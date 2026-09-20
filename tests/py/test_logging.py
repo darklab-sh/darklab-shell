@@ -120,8 +120,8 @@ def _run_config_startup(
     )
 
 
-def _gelf_records(stderr: str) -> list[dict]:
-    return [json.loads(line) for line in stderr.splitlines() if line.startswith("{")]
+def _gelf_records(output: str) -> list[dict]:
+    return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
 
 
 def get_client(*, use_forwarded_for=True):
@@ -528,13 +528,10 @@ class TestConfigureLogging:
         configure_logging({})
         assert self._logger().level == logging.INFO
 
-    def test_log_level_debug_and_assessment_events_use_pipeline(self):
+    def test_log_level_debug_and_assessment_events_use_pipeline(self, capsys):
         configure_logging({"log_level": "DEBUG"})
         assert self._logger().level == logging.DEBUG
-        output = io.StringIO()
-        handler = self._logger().handlers[0]
-        assert isinstance(handler, logging.StreamHandler)
-        handler.setStream(output)
+        capsys.readouterr()
 
         assessment_profiles.log.info(
             "ASSESSMENT_PROFILE_CATALOG_LOADED",
@@ -545,11 +542,11 @@ class TestConfigureLogging:
             extra={"session": "masked-session"},
         )
 
-        rendered = output.getvalue()
-        assert "ASSESSMENT_PROFILE_CATALOG_LOADED" in rendered
-        assert "profile_count=5" in rendered
-        assert "ACTIVE_ASSESSMENT_BATCH_MONITOR_ERROR" in rendered
-        assert "session=masked-session" in rendered
+        captured = capsys.readouterr()
+        assert "ASSESSMENT_PROFILE_CATALOG_LOADED" in captured.out
+        assert "profile_count=5" in captured.out
+        assert "ACTIVE_ASSESSMENT_BATCH_MONITOR_ERROR" in captured.err
+        assert "session=masked-session" in captured.err
 
     def test_log_level_warn_from_cfg(self):
         configure_logging({"log_level": "WARN"})
@@ -574,14 +571,14 @@ class TestConfigureLogging:
         _, kwargs = mock_info.call_args
         assert kwargs["extra"]["app_version"] == shell_app_module.APP_VERSION
 
-    def test_exactly_one_handler_attached(self):
+    def test_two_console_handlers_attached(self):
         configure_logging(shell_app_module.CFG)
-        assert len(self._logger().handlers) == 1
+        assert len(self._logger().handlers) == 2
 
     def test_reconfigure_does_not_duplicate_handlers(self):
         configure_logging(shell_app_module.CFG)
         configure_logging(shell_app_module.CFG)
-        assert len(self._logger().handlers) == 1
+        assert len(self._logger().handlers) == 2
 
     def test_werkzeug_logger_silenced_to_error(self):
         configure_logging({})
@@ -628,7 +625,7 @@ class TestConfigStartupLogging:
             local_config=json.dumps(values), configure_twice=True,
         )
         assert result.returncode == 0
-        assert result.stderr.count("CONFIG_LOADED") == 1
+        assert result.stdout.count("CONFIG_LOADED") == 1
         assert "private-" not in result.stderr + result.stdout
         expected = {
             "access_profile": profile, "oidc_configured": provider, "oidc_provisioning": provisioning,
@@ -636,12 +633,12 @@ class TestConfigStartupLogging:
             "browser_session_idle_minutes": 45, "browser_session_absolute_hours": 24,
         }
         if log_format == "gelf":
-            loaded = next(item for item in _gelf_records(result.stderr) if item["short_message"] == "CONFIG_LOADED")
+            loaded = next(item for item in _gelf_records(result.stdout) if item["short_message"] == "CONFIG_LOADED")
             assert loaded["level"] == 6
             for key, value in expected.items():
                 assert loaded[f"_{key}"] == value
         else:
-            loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
+            loaded = next(line for line in result.stdout.splitlines() if "CONFIG_LOADED" in line)
             assert "[INFO ]" in loaded
             for key, value in expected.items():
                 assert f"{key}={value}" in loaded
@@ -686,6 +683,7 @@ class TestConfigStartupLogging:
         )
         assert result.returncode != 0
         assert result.stderr.count("CONFIG_LOAD_FAILED") == 1
+        assert result.stdout == ""
         assert "private-" not in result.stderr + result.stdout
         phase = "access_profile_validation" if key == "browser_session_idle_minutes" else "oidc_validation"
         source = str(tmp_path / "local" / "config.local.yaml") if key in values else "built-in defaults"
@@ -714,21 +712,23 @@ class TestConfigStartupLogging:
         )
 
         assert result.returncode == 0, result.stderr
-        assert result.stderr.count("CONFIG_SOURCE_SELECTED") == 1
+        assert result.stdout.count("CONFIG_SOURCE_SELECTED") == 1
         assert result.stderr.count("CONFIG_VALUE_DEFAULTED") == 1
-        assert result.stderr.count("CONFIG_VALIDATED") == 1
-        assert result.stderr.count("CONFIG_LOADED") == 1
+        assert "CONFIG_VALUE_DEFAULTED" not in result.stdout
+        assert "CONFIG_SOURCE_SELECTED" not in result.stderr
+        assert "CONFIG_LOADED" not in result.stderr
+        assert result.stdout.count("CONFIG_VALIDATED") == 1
+        assert result.stdout.count("CONFIG_LOADED") == 1
         if log_format == "gelf":
-            records = _gelf_records(result.stderr)
-            warning = next(item for item in records if item["short_message"] == "CONFIG_VALUE_DEFAULTED")
-            loaded = next(item for item in records if item["short_message"] == "CONFIG_LOADED")
+            warning = next(item for item in _gelf_records(result.stderr) if item["short_message"] == "CONFIG_VALUE_DEFAULTED")
+            loaded = next(item for item in _gelf_records(result.stdout) if item["short_message"] == "CONFIG_LOADED")
             assert warning["_key"] == "raw_packet_scanning_enabled"
             assert warning["_reason"] == "invalid_bool"
             assert warning["_fallback"] is False
             assert loaded["_warning_count"] == 1
         else:
             warning = next(line for line in result.stderr.splitlines() if "CONFIG_VALUE_DEFAULTED" in line)
-            loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
+            loaded = next(line for line in result.stdout.splitlines() if "CONFIG_LOADED" in line)
             assert "key=raw_packet_scanning_enabled" in warning
             assert "reason=invalid_bool" in warning
             assert "fallback=False" in warning
@@ -743,7 +743,7 @@ class TestConfigStartupLogging:
         )
 
         assert result.returncode == 0
-        assert result.stderr == ""
+        assert result.stderr == result.stdout == ""
 
     def test_unknown_local_key_keeps_source_but_not_value(self, tmp_path):
         secret_value = "release-secret-must-not-appear"
@@ -756,7 +756,7 @@ class TestConfigStartupLogging:
         assert result.returncode == 0, result.stderr
         assert result.stderr.count("CONFIG_UNKNOWN_KEY_IGNORED") == 1
         warning = next(line for line in result.stderr.splitlines() if "CONFIG_UNKNOWN_KEY_IGNORED" in line)
-        loaded = next(line for line in result.stderr.splitlines() if "CONFIG_LOADED" in line)
+        loaded = next(line for line in result.stdout.splitlines() if "CONFIG_LOADED" in line)
         assert "key=unknown_password" in warning
         assert str(tmp_path / "local" / "config.local.yaml") in warning
         assert "warning_count=1" in loaded
@@ -774,6 +774,7 @@ class TestConfigStartupLogging:
 
         assert result.returncode != 0
         assert result.stderr.count("CONFIG_LOAD_FAILED") == 1
+        assert result.stdout == ""
         assert secret_value not in result.stderr
         if log_format == "gelf":
             records = _gelf_records(result.stderr)
