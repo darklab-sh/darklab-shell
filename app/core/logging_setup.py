@@ -5,7 +5,7 @@
 Centralized logging configuration for darklab_shell.
 
 Two output formats, controlled by CFG['log_format']:
-  text  — human-readable key=value lines (default, good for Docker stdout)
+  text  — human-readable key=value lines (default, good for container logs)
   gelf  — newline-delimited GELF 1.1 JSON for Graylog / GELF-capable back-ends
 
 Log level is controlled by CFG['log_level'] (default: INFO).
@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from config import APP_VERSION
+from core.log_streams import console_handlers
 from core.startup_logging import drain_config_log_records, gelf_additional_field
 
 # ---------------------------------------------------------------------------
@@ -167,12 +168,9 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
         GELFFormatter(app_name, APP_VERSION) if fmt_name == "gelf" else _TextFormatter()
     )
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    handler.setLevel(logging.DEBUG)  # handler accepts all; the logger level gates first
-
     logger.handlers.clear()
-    logger.addHandler(handler)
+    for handler in console_handlers(formatter):
+        logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False  # do not forward to root — this is the complete pipeline
 

@@ -11,7 +11,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Feature Enhancements](#feature-enhancements)
 - [Technical Debt](#technical-debt)
-  - [Route container logs by severity](#route-container-logs-by-severity)
 - [Research](#research)
 - [Ideas](#ideas)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
@@ -166,15 +165,7 @@ These are possible future improvements, split by whether they look worth carryin
 
 ## Technical Debt
 
-### Route container logs by severity
-
-The application's `logging.StreamHandler()` defaults to stderr for every level, and Gunicorn also sends its process logs there. Container log viewers therefore show normal INFO activity on stderr; the Nuclei bootstrap markers are currently the only stdout entries. The records retain their correct severity, but the stream routing makes troubleshooting less clear.
-
-- [ ] Send DEBUG and INFO records to stdout, and WARNING, ERROR, and CRITICAL records to stderr. Apply the same policy to the shared application logger, background workers, and Gunicorn's own process logs, including master-process startup messages.
-- [ ] Use mutually exclusive handler filters so each record is emitted once. Preserve configured level filtering, text/GELF formatting, structured fields, redaction, traceback handling, and buffered configuration-log replay.
-- [ ] Keep fatal configuration fallback and entrypoint failures on stderr. Preserve the Nuclei bootstrap's stdout progress/success markers and stderr failure markers.
-- [ ] Add focused coverage for stream selection at each severity, duplicate prevention after repeated configuration, buffered startup records, and exception output. Verify Gunicorn and worker routing with stdout and stderr captured separately in a container smoke check.
-- [ ] Document the implemented stream policy in [the logging reference](docs/logging.md) and update relevant operator guidance and the changelog when this work is completed.
+No technical debt items are currently tracked.
 
 ## Research
 

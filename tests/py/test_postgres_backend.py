@@ -4643,13 +4643,14 @@ try:
         "/history",
         headers={"X-Darklab-Anonymous-ID": anonymous_id},
     )
-    print(json.dumps({
+    payload = {
         "status": status.status_code,
         "db": status.get_json().get("db"),
         "history_status": history_resp.status_code,
-    }))
+    }
 finally:
     close_postgres_pool()
+print(json.dumps(payload))
 """
     env = os.environ.copy()
     env.update({

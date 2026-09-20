@@ -1510,7 +1510,7 @@ docker compose -f compose.dev.yaml up --build
 Application log format is independent of container log transport. Development
 can set `log_format: gelf` in `app/conf/config.local.yaml`, while production
 uses installed `conf/config.local.yaml`. A host-local collector can forward the
-resulting standard output without changing the application stack.
+resulting stdout and stderr streams without changing the application stack.
 
 ### Docker Labels
 
@@ -1819,8 +1819,10 @@ log_format: gelf
 log_level: INFO
 ```
 
-The application writes GELF-shaped JSON to standard output. Use a host-local
-collector when those container logs should be sent to a remote log service.
+The application writes GELF-shaped JSON to stdout for DEBUG/INFO and stderr for
+WARNING, ERROR, and CRITICAL. Collect both streams when forwarding container logs
+to a remote service. Gunicorn process messages retain their native format; see
+the [logging reference](docs/logging.md#runtime-and-redaction-boundaries).
 HTTP response codes are indexed under numeric `_http_status`; provider,
 workflow, schedule/watcher, AI, Project, team, and export states use their
 documented feature-specific fields. Existing Graylog/OpenSearch dashboards

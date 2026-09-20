@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import time
 import sys
 import urllib.parse
@@ -1804,6 +1805,79 @@ def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_
 
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_gunicorn_log_streams(container_smoke_test):
+    # A rejected request exercises Gunicorn's worker logger without entering Flask.
+    _run(container_smoke_test.compose + ["exec", "-T", "--user", "appuser", "shell", "python", "-c", textwrap.dedent("""
+        import socket
+        with socket.create_connection(('127.0.0.1', 8888), timeout=30) as connection:
+            connection.sendall(b'SMOKE_BAD_REQUEST\\r\\n\\r\\n')
+            assert b'400 Bad Request' in connection.recv(4096)
+    """)], timeout=60)
+    container_id = _run(container_smoke_test.compose + ["ps", "-q", "shell"], timeout=30).stdout.strip()
+    # Unlike compose logs, docker logs keeps the container's stream identities.
+    captured = _run(["docker", "logs", container_id], timeout=30)
+    for event in ("Starting gunicorn", "Booting worker with pid:", "GUNICORN_WORKER_BOOTED"):
+        assert event in captured.stdout, captured.stdout + captured.stderr
+        assert event not in captured.stderr
+    assert "Invalid request from ip=" in captured.stderr
+    assert "SMOKE_BAD_REQUEST" in captured.stderr
+    assert "Invalid request from ip=" not in captured.stdout
+    assert (
+        any(f"NUCLEI_TEMPLATE_BOOTSTRAP_{state}" in captured.stdout for state in ("SKIPPED", "SUCCEEDED"))
+        or "NUCLEI_TEMPLATE_BOOTSTRAP_FAILED" in captured.stderr
+    )
+    for state in ("STARTED", "SKIPPED", "SUCCEEDED"):
+        assert f"NUCLEI_TEMPLATE_BOOTSTRAP_{state}" not in captured.stderr
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_FAILED" not in captured.stdout
+
+
+@pytest.mark.parametrize("log_format", ["text", "gelf"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_container_smoke_test_notification_worker_log_streams(container_smoke_test, log_format, fail):
+    # Use the real worker bootstrap and loop in the disposable smoke stack.
+    # Fault injection stops at dispatch, so it can't deliver notifications.
+    program = textwrap.dedent("""
+        import json
+        import os
+        import sys
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as config_dir:
+            Path(config_dir, 'config.local.yaml').write_text(json.dumps({'log_format': sys.argv[1]}))
+            os.environ['APP_LOCAL_CONF_DIR'] = config_dir
+            from services.notifications import worker
+            def fail_dispatch(**kwargs):
+                raise RuntimeError('controlled worker failure')
+            worker.run_once = fail_dispatch
+            worker._STOP = sys.argv[2] == 'False'
+            try:
+                worker.main()
+            except RuntimeError:
+                if sys.argv[2] != 'True':
+                    raise
+    """)
+    captured = _run(container_smoke_test.compose + [
+        "exec", "-T", "--user", "appuser", "shell", "python", "-c", program, log_format, str(fail),
+    ], timeout=120)
+    assert captured.stdout.count("NOTIFICATION_WORKER_STARTED") == 1
+    assert "NOTIFICATION_WORKER_STARTED" not in captured.stderr
+    assert "NOTIFICATION_WORKER_CRASHED" not in captured.stdout
+    assert "Traceback" not in captured.stdout
+    if fail:
+        assert captured.stderr.count("NOTIFICATION_WORKER_CRASHED") == 1
+        assert captured.stderr.count("RuntimeError: controlled worker failure") == 1
+        assert "NOTIFICATION_WORKER_STOPPED" not in captured.stdout + captured.stderr
+        if log_format == "gelf":
+            failure = next(json.loads(line) for line in captured.stderr.splitlines()
+                           if "NOTIFICATION_WORKER_CRASHED" in line)
+            assert failure["level"] == 3 and failure["_phase"] == "run_once"
+            assert "Traceback" in failure["full_message"]
+    else:
+        assert captured.stdout.count("NOTIFICATION_WORKER_STOPPED") == 1
+        assert "NOTIFICATION_WORKER_STOPPED" not in captured.stderr
+        assert "NOTIFICATION_WORKER_CRASHED" not in captured.stderr
 
 
 def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):

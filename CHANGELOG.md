@@ -31,6 +31,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Startup and container checks cover both streams, including fatal configuration failures and worker exceptions.
+
 - **Masscan's deterministic smoke check reaches its test container directly.** The fixture supplies the target's Docker MAC address, avoiding Masscan's default gateway path and its dependence on the runner's forwarding policy. Packet traces and the required SYN-ACK preserve evidence of a real successful scan.
 
 - **Browser CI reduces contention across concurrent test projects.** The parallel suite caps CI execution at three workers in total, including the dedicated sign-in projects. Comparison, assessment-batch, output-menu, and logout checks use independent journeys; settings and sign-in checks wait for the relevant response or navigation, and the assessment polling check verifies focus after the monitor is replaced. Test deadlines and failure-on-flaky safeguards remain unchanged.
