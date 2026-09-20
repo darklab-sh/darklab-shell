@@ -285,7 +285,7 @@ The current event inventory is:
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
 | INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
-| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected | fixed reason only |
+| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected or throttled | fixed `credential_rejected`, `rate_limited`, or `source_unavailable` reason only |
 | WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
 | ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | operator authentication storage unavailable | exception class as reason, numeric http_status; no exception details |
 | WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |

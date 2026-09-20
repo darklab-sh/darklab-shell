@@ -34,6 +34,11 @@ def reauthenticate():
     context = g.operator_context
     next_path = operator_access.return_path(request.values.get("next"))
     error = "Verification couldn't be completed. Please try again." if request.args.get("error") else ""
+    if request.args.get("error") == "provider_freshness":
+        error = (
+            "Your identity provider didn't confirm a fresh sign-in. Operator access requires a signed auth_time "
+            "from a new authentication. Ask your operator to check the provider configuration before trying again."
+        )
     status = 200
     limited = None
     provider = context.credential_type == "oidc"
@@ -77,17 +82,27 @@ def reauthenticate():
                 limited = _redemption_limit(secret, failed=True)
                 if result.failed and limited.allowed:
                     lifecycle.record_authentication_failure(result, request_fields=request_audit_fields(request))
-            log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={"reason": "credential_rejected"})
+            log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={
+                "reason": "credential_rejected" if limited.allowed else "rate_limited",
+            })
             error = "Verification failed. Use an active credential for this account."
             status = 400
             if not limited.allowed:
                 error, status = "Too many attempts. Wait a moment and try again.", 429
+    return render_reauthentication_form(error=error, status=status, limited=limited)
+
+
+def render_reauthentication_form(*, error="", status=200, limited=None, csrf_rejected=False):
+    """Render verification errors without replaying a rejected form submission."""
+    provider = g.operator_context.credential_type == "oidc"
+    next_path = operator_access.return_path(request.values.get("next"))
     theme = get_theme_entry(current_theme_name(), fallback=str(active_config().get("default_theme")))
     response = current_app.make_response(render_template(
         "restricted_sign_in.html", app_name=active_config()["app_name"], current_theme=theme,
         current_theme_css=theme["vars"], next_path=next_path, error=error,
         reauthentication=True, credential_sign_in_enabled=not provider, oidc_sign_in_enabled=provider,
         csrf_token=request.cookies.get(BROWSER_CSRF_COOKIE, ""),
+        csrf_rejected=csrf_rejected,
     ))
     response.status_code = status
     if status == 429 and limited is not None:

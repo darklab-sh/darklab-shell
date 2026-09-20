@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import core.process as process_state
 from app_factory import create_app as _create_flask_app
-from blueprints.admin import admin_bp
+from blueprints.admin import admin_bp, render_reauthentication_form
 from blueprints.api_v1 import api_v1_bp
 from blueprints.assets import assets_bp
 from blueprints.atlas import atlas_bp
@@ -436,7 +436,13 @@ def _enforce_access_profile():
 
 
 def _enforce_csrf():
-    return enforce_browser_csrf(get_authentication_result())
+    rejection = enforce_browser_csrf(get_authentication_result())
+    if rejection is not None and request.endpoint == "admin.reauthenticate":
+        return render_reauthentication_form(
+            error="This form has expired. Try again with this form, or sign in again if the problem continues.",
+            status=403, csrf_rejected=True,
+        )
+    return rejection
 
 
 def _server_error_handler(e):

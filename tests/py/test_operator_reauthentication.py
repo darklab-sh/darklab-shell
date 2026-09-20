@@ -76,7 +76,11 @@ def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(opera
     page = client.get("/admin/reauth?next=/admin/", base_url=ORIGIN)
     assert page.status_code == 200 and b"Verify operator access" in page.data
     assert page.headers["Cache-Control"] == "private, no-store"
-    assert client.post("/admin/reauth", base_url=ORIGIN, data={"credential": bundle.credential.secret}).status_code == 403
+    expired_form = client.post("/admin/reauth", base_url=ORIGIN, data={"credential": bundle.credential.secret})
+    assert expired_form.status_code == 403 and expired_form.mimetype == "text/html"
+    assert b"This form has expired" in expired_form.data and b"Sign in again" in expired_form.data
+    assert original.csrf_token.encode() in expired_form.data
+    assert bundle.credential.secret.encode() not in expired_form.data
     wrong = client.post("/admin/reauth", base_url=ORIGIN, data={
         "credential": peer.credential.secret, "csrf_token": original.csrf_token, "next": "/admin/",
     })
@@ -91,6 +95,47 @@ def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(opera
     assert replacement.id != original.id
     assert replacement.absolute_expires_at == original.absolute_expires_at
     assert browser_sessions.resolve_browser_session(original.cookie_value, idle_seconds=1800).state == "revoked"
+
+
+@pytest.mark.parametrize("csrf", ["missing_cookie", "mismatched", "invalid_cookie"])
+def test_reauthentication_csrf_errors_render_without_verifying(operator_db, monkeypatch, csrf):
+    import blueprints.admin as admin
+
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+    token = original.csrf_token
+    if csrf == "missing_cookie":
+        client.delete_cookie(browser_sessions.BROWSER_CSRF_COOKIE, domain="shell.example")
+    elif csrf == "invalid_cookie":
+        token = "unrecognized-token"
+        client.set_cookie(browser_sessions.BROWSER_CSRF_COOKIE, token, domain="shell.example")
+    else:
+        token = "old-form-token"
+    monkeypatch.setattr(admin, "redeem_portable_credential", lambda _secret: pytest.fail("CSRF failure verified a credential"))
+    response = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": bundle.credential.secret, "csrf_token": token, "next": "/audit?event_type=run.start",
+    })
+    assert response.status_code == 403 and response.mimetype == "text/html"
+    assert b"This form has expired" in response.data and b"/audit?event_type=run.start" in response.data
+    assert bundle.credential.secret.encode() not in response.data
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE) == original.cookie_value
+
+
+def test_limited_reauthentication_reports_throttling_without_verifying(operator_db, monkeypatch):
+    import blueprints.admin as admin
+    from services.auth.rate_limit import CredentialRateLimitResult
+
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+    records = []
+    monkeypatch.setattr(admin, "log", SimpleNamespace(warning=lambda event, *, extra: records.append((event, extra))))
+    monkeypatch.setattr(admin, "_redemption_limit", lambda _secret: CredentialRateLimitResult(False, retry_after=20))
+    monkeypatch.setattr(admin, "redeem_portable_credential", lambda _secret: pytest.fail("Limited request verified a credential"))
+    response = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": bundle.credential.secret, "csrf_token": original.csrf_token,
+    })
+    assert response.status_code == 429 and response.headers["Retry-After"] == "20"
+    assert b"Too many attempts" in response.data
+    assert records == [("INSTANCE_OPERATOR_REAUTH_FAILED", {"reason": "rate_limited"})]
 
 
 @pytest.mark.parametrize("change", ["grant", "principal", "session", "credential", "absolute", "idle"])
@@ -238,6 +283,13 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
         provider.available = False
     result = _callback(client, state)
     assert result.status_code in (302, 404)
+    if failure in {"missing", "old", "future"}:
+        query = parse_qs(urlsplit(result.headers["Location"]).query)
+        assert query["error"] == ["provider_freshness"]
+        assert query["next"] == ["/admin/?view=host"]
+        page = client.get(result.headers["Location"], base_url=ORIGIN)
+        assert b"requires a signed auth_time" in page.data
+        assert b"check the provider configuration" in page.data
     assert not any(value.startswith(browser_sessions.BROWSER_SESSION_COOKIE + "=")
                    for value in result.headers.getlist("Set-Cookie"))
     with get_db_connect()() as conn:
