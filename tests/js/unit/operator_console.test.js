@@ -171,6 +171,9 @@ describe('operator console', () => {
   });
   it('restores combined URL filters after asynchronous inventory loading and a verification return', async () => {
     const root = fixture('/admin/?search=beta&group=Browser&source=default&warnings=yes');
+    // Shared page setup can enhance selects before the feature restores URL state.
+    const { enhanceAppSelects } = await import('../../../app/static/js/ui/ui_helpers.js');
+    enhanceAppSelects(root);
     const data = payload(), pending = deferred(), navigate = vi.fn();
     data.settings = [row('alpha'), row('beta', { group: 'Browser', source: { layer: 'default' }, warnings: [{ event: 'clamped' }] })];
     const fetcher = vi.fn().mockReturnValueOnce(pending.promise)
@@ -180,6 +183,8 @@ describe('operator console', () => {
     expect(root.querySelector('#admin-count').textContent).toBe('1 of 2 settings');
     expect(root.querySelector('#admin-group').value).toBe('Browser');
     expect(root.querySelector('#admin-group').nextElementSibling.textContent).toContain('Browser');
+    expect(root.querySelector('#admin-source').nextElementSibling.querySelector('.app-select-value').textContent).toBe('Default');
+    expect(root.querySelector('#admin-warnings').nextElementSibling.querySelector('.app-select-value').textContent).toBe('Warnings');
     const address = window.location.pathname + window.location.search;
     await controller.refresh();
     expect(new URL(navigate.mock.calls[0][0], window.location.origin).searchParams.get('next')).toBe(address);

@@ -40,6 +40,7 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
   };
   enhanceAppSelects(root);
+  for (const control of [source, warnings]) syncAppSelect(control);
   const option = (label, value) => { const node = element('option', label); node.value = value; return node; };
   const syncGroups = () => {
     const selected = initialGroup || group.value;

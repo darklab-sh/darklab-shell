@@ -348,8 +348,8 @@
     },
     "admin": {
       "type": "esm",
-      "path": "/static/build/admin.d91b7f22b066.js",
-      "hash": "d91b7f22b066ae2200fe89b31a754b1fc9f6e956e58d426ea179006984a958a1",
+      "path": "/static/build/admin.30588f1e1c00.js",
+      "hash": "30588f1e1c006398930dcd928e3e6a349e1f65af43f3f0e36f131e20674705d6",
       "sources": [
         "/static/js/admin.entry.js",
         "/static/js/core/dom.js",
@@ -378,7 +378,7 @@
         "/static/js/core/dom.js": "f1680f5e57c4e91a01cc904c6508c4144fcb25c3f801fdf7597b87947c63f210",
         "/static/js/core/state.js": "07016305ab506b6fd4737a6b95a9c71a757beada67c6e1c82a63ab5a2ff8510c",
         "/static/js/features/admin/operator_access.js": "4dc894bf89be4268cb681f3cc2d5de761816894aa5b8039070c9b35f25e2676c",
-        "/static/js/features/admin/operator_console.js": "031b3818cfcceb63748ec2f4a5c4891f567240751add7b7736b412ac21283072",
+        "/static/js/features/admin/operator_console.js": "1ae633aa8f2f7889def1dd86ccee77fc85d277c796c31340b28f2637c30c16ec",
         "/static/js/features/admin/operator_settings_view.js": "5d1382d44d973a449934197add273bd25eade9ec2c389978d3b458638efb8bb3",
         "/static/js/features/history/history_panel_bridge.js": "f305ed2892bb453e299b6550d9c15aa84ac67a706a86b935a5f4f318c94bed9a",
         "/static/js/features/history/history_recall_bridge.js": "f3c38fcd523eba11a3ee390cf0373317030c3c966272ff704c065081f1f86905",

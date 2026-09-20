@@ -73,6 +73,8 @@ async function browseOperatorPages(page, appName, width, testInfo) {
 }
 
 async function browseInventory(page, inventory, width, testInfo) {
+  // This fixture replaces the inventory; discard filters for the earlier real rows.
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   const base = inventory.settings.find(row => row.key === 'ai_allow_full_output');
   const data = { ...inventory, warnings: [], host_settings: inventory.host_settings.slice(0, 1), settings: [
     { ...base, key: 'alpha', label: 'Alpha value', group: 'Alpha group', description: 'Permitted long value',
