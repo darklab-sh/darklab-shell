@@ -5,6 +5,9 @@
 
 import json
 import os
+from pathlib import Path
+import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -153,6 +156,121 @@ def commands(log):
 
 def mutations(log):
     return [call for call in commands(log) if "/app/tools/manage_principal_access.py" in call]
+
+
+@pytest.fixture
+def private_transport(deployment, tmp_path):
+    install, _state, _log, _run = deployment
+    body = (install / "darklab-deploy").read_text().split("access_file() {", 1)[1].split("\n}", 1)[0]
+    arguments = shlex.split(body)
+    program = arguments[arguments.index("-c") + 1]
+    # Execute the shipped program, changing only its two /data references.
+    data = tmp_path / "container-data"
+    data.mkdir()
+    assert program.count("/data") == 2
+    program = program.replace('dir="/data"', "dir=" + repr(str(data)))
+    program = program.replace('r"/data/', 'r"' + re.escape(str(data)) + '/')
+
+    def run(action, *args, payload=""):
+        return subprocess.run(
+            [sys.executable, "-c", program, action, *map(str, args)],
+            input=payload, capture_output=True, text=True, timeout=5, check=False,
+        )
+
+    prepared = run("prepare")
+    assert prepared.returncode == 0 and not prepared.stderr
+    path = Path(prepared.stdout.strip())
+    assert path.parent.parent == data and path.name == "credential"
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    return run, path, data
+
+
+def test_private_transport_executes_safe_read_and_finalization(private_transport, tmp_path):
+    run, path, _data = private_transport
+    path.write_text(SECRET + "\n")
+    path.chmod(0o600)
+    read = run("read", path)
+    assert read.returncode == 0 and read.stdout == SECRET + "\n" and not read.stderr
+    output = tmp_path / "host-credential"
+    metadata = {"principal_id": "prn_example", "secret_file": str(path)}
+    finished = run("finish", path, output, payload=json.dumps(metadata))
+    assert finished.returncode == 0 and not finished.stderr
+    assert json.loads(finished.stdout) == {**metadata, "secret_file": str(output), "secret_file_location": "host"}
+    assert SECRET not in finished.stdout and not path.parent.exists()
+
+
+@pytest.mark.parametrize("state", ["unused", "empty", "issued"])
+def test_private_transport_discard_preserves_inflight_files(private_transport, state):
+    run, path, _data = private_transport
+    if state != "unused":
+        path.write_text(SECRET if state == "issued" else "")
+        path.chmod(0o600)
+    result = run("discard-unused", path)
+    assert result.returncode == 0 and not result.stderr
+    assert result.stdout.strip() == ("empty" if state == "unused" else "retained")
+    assert path.parent.exists() == (state != "unused")
+    if state != "unused":
+        assert path.read_text() == (SECRET if state == "issued" else "")
+
+
+@pytest.mark.parametrize("unsafe", [
+    "outside", "wrong_name", "directory_mode", "directory_symlink", "file_mode", "file_symlink",
+    "hardlink", "empty", "oversized", "directory", "missing",
+])
+def test_private_transport_rejects_unsafe_paths_without_disclosure(private_transport, tmp_path, unsafe):
+    run, path, data = private_transport
+    path.write_text(SECRET)
+    path.chmod(0o600)
+    requested = path
+    if unsafe == "outside":
+        requested = tmp_path / "outside" / "credential"
+        requested.parent.mkdir(mode=0o700)
+        requested.write_text(SECRET)
+        requested.chmod(0o600)
+    elif unsafe == "wrong_name":
+        requested = path.with_name("other")
+        path.rename(requested)
+    elif unsafe == "directory_mode":
+        path.parent.chmod(0o755)
+    elif unsafe == "directory_symlink":
+        moved = data / "real-directory"
+        path.parent.rename(moved)
+        path.parent.symlink_to(moved, target_is_directory=True)
+    elif unsafe == "file_mode":
+        path.chmod(0o644)
+    elif unsafe in {"file_symlink", "hardlink"}:
+        target = tmp_path / "retained-credential"
+        path.rename(target)
+        if unsafe == "file_symlink":
+            path.symlink_to(target)
+        else:
+            os.link(target, path)
+    elif unsafe == "empty":
+        path.write_text("")
+    elif unsafe == "oversized":
+        path.write_text(SECRET + "x" * 4096)
+    elif unsafe == "directory":
+        path.unlink()
+        path.mkdir(mode=0o700)
+    else:
+        path.unlink()
+    result = run("read", requested)
+    assert result.returncode == 1 and not result.stdout
+    assert result.stderr.strip() == "darklab-deploy: private credential file transfer failed"
+    assert SECRET not in result.stderr
+    if unsafe in {"file_symlink", "hardlink"}:
+        assert target.read_text() == SECRET
+
+
+@pytest.mark.parametrize("payload", ["not-json", "[]"])
+def test_private_transport_failed_finalization_keeps_retrievable_secret(private_transport, tmp_path, payload):
+    run, path, _data = private_transport
+    path.write_text(SECRET)
+    path.chmod(0o600)
+    result = run("finish", path, tmp_path / "host-credential", payload=payload)
+    assert result.returncode == 1 and not result.stdout
+    assert SECRET not in result.stderr and path.read_text() == SECRET
+    assert run("read", path).stdout == SECRET
 
 
 @pytest.mark.parametrize(
