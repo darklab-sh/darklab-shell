@@ -2548,6 +2548,8 @@ These surfaces share the same runtime health model, but they target different co
 
 ### Operator Diagnostics
 
+Unavailable live authorization checks emit one safe ERROR with request and operator context. Routes return a generic 503 before streaming; an in-flight export stops with `check_unavailable`, an incomplete CSV warning or unterminated JSON, and no completion event. Actual revocation remains a separate denial.
+
 The shared `services.auth.operator_access` policy guards `/admin/`, `/diag`, `/audit`, and their child routes before data reads or probes. It requires a restricted profile, eligible browser-cookie session, active principal, current operator grant, and recent credential or signed-provider verification. IP addresses never grant operator authority. Open profiles remain closed. `/metrics` independently requires `metrics_enabled` and a match in `metrics_allowed_cidrs`, using the trusted-proxy client-IP resolver; it needs no browser identity.
 
 Denied operator requests consume the baseline HTTP request budget. In restricted profiles, invalid credentials also consume the shared failed-authentication budget before the private denial or sign-in response; disabled operator pages still reject before identity lookup.

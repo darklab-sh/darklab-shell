@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from flask import Response, stream_with_context
-from services.auth.operator_access import OperatorAccessLost, recheck_access
+from services.auth.operator_access import OperatorAccessLost, OperatorAccessUnavailable, recheck_access
 
 log = logging.getLogger("shell")
 
@@ -37,15 +37,17 @@ def _observe_export(chunks, context):
     try:
         yield from chunks
         completed = True
-    except OperatorAccessLost:
-        reason = "access_lost"
+    except (OperatorAccessLost, OperatorAccessUnavailable) as exc:
+        unavailable = isinstance(exc, OperatorAccessUnavailable)
+        reason = "check_unavailable" if unavailable else "access_lost"
         if context["format"] == "csv":
             yield _audit_csv_row({
-                "id": "__access_lost__",
+                "id": "__access_unavailable__" if unavailable else "__access_lost__",
                 "event_type": "export.interrupted",
                 "details": (
-                    "Export incomplete: operator access was lost. "
-                    "Discard this file and verify access before exporting again."
+                    "Export incomplete: operator access could not be checked. Discard this file and retry later."
+                    if unavailable else
+                    "Export incomplete: operator access was lost. Discard this file and verify access before exporting again."
                 ),
             })
         raise

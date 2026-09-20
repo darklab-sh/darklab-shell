@@ -111,19 +111,43 @@ def test_storage_failure_hides_operator_data(operator_db, monkeypatch):
     assert b"PRIVATE" not in response.data
 
 
+@pytest.mark.parametrize("path", ["/diag?format=json", "/diag/ai-test", "/audit/export"])
+def test_live_check_failure_returns_unavailable_and_one_safe_error(operator_db, monkeypatch, caplog, path):
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
+    def unavailable(*args, **kwargs):
+        raise OSError("PRIVATE_STORAGE_DETAILS")
+    monkeypatch.setattr(operator_access, "resolve_authentication", unavailable)
+    response = request(client, path, headers={"X-Darklab-CSRF": issued.csrf_token})
+    assert response.status_code == 503
+    assert response.get_json() == {"error": "operator_access_unavailable"}
+    assert response.headers["Cache-Control"] == "private, no-store"
+    [error] = [record for record in caplog.records if record.message == "INSTANCE_OPERATOR_ACCESS_UNAVAILABLE"]
+    assert error.levelname == "ERROR" and error.reason == "OSError" and error.stage == "live_check"
+    assert error.principal_id == bundle.principal.id and error.request_id and error.endpoint
+    assert error.exc_info is None
+    assert "PRIVATE_STORAGE_DETAILS" not in caplog.text + response.get_data(as_text=True)
+
+
 @pytest.mark.parametrize("format", ["csv", "json"])
-def test_export_stops_after_grant_revocation_and_never_logs_completion(operator_db, monkeypatch, caplog, format):
+@pytest.mark.parametrize("failure", ["revoked", "storage"])
+def test_export_stops_after_access_failure_and_never_logs_completion(operator_db, monkeypatch, caplog, format, failure):
     import blueprints.assets as assets
     caplog.set_level("INFO", logger="shell")
     _app, client, bundle, _issued = credential_setup(operator_db, monkeypatch)
     def pages(*args, **kwargs):
         yield {"events": [{"id": "first-safe-row"}], "truncated": False}
-        operator_grants.set_grant(bundle.principal.id, granted=False)
+        if failure == "revoked":
+            operator_grants.set_grant(bundle.principal.id, granted=False)
+        else:
+            def unavailable(*args, **kwargs):
+                raise OSError("PRIVATE_STORAGE_DETAILS")
+            monkeypatch.setattr(operator_access, "has_grant", unavailable)
         yield {"events": [{"id": "must-not-escape"}], "truncated": False}
     monkeypatch.setattr(assets, "iter_event_pages", pages)
     response = request(client, "/audit/export?format=" + format, buffered=False)
     emitted = []
-    with pytest.raises(operator_access.OperatorAccessLost):
+    unavailable = failure == "storage"
+    with pytest.raises(operator_access.OperatorAccessUnavailable if unavailable else operator_access.OperatorAccessLost):
         for chunk in response.response:
             emitted.append(chunk)
     assert b"first-safe-row" in b"".join(emitted)
@@ -132,13 +156,20 @@ def test_export_stops_after_grant_revocation_and_never_logs_completion(operator_
         import csv
         import io
         rows = list(csv.DictReader(io.StringIO(b"".join(emitted).decode())))
-        assert [row["id"] for row in rows] == ["first-safe-row", "__access_lost__"]
+        assert [row["id"] for row in rows] == ["first-safe-row", "__access_unavailable__" if unavailable else "__access_lost__"]
         assert rows[-1]["event_type"] == "export.interrupted"
         assert "Discard this file" in rows[-1]["details"]
     assert not any(record.message == "DIAG_AUDIT_EXPORTED" for record in caplog.records)
     interrupted = [record for record in caplog.records if record.message == "DIAG_AUDIT_EXPORT_INTERRUPTED"]
     assert len(interrupted) == 1 and interrupted[0].principal_id == bundle.principal.id
-    assert interrupted[0].format == format and interrupted[0].reason == "access_lost"
+    assert interrupted[0].format == format
+    assert interrupted[0].reason == ("check_unavailable" if unavailable else "access_lost")
+    errors = [record for record in caplog.records if record.message == "INSTANCE_OPERATOR_ACCESS_UNAVAILABLE"]
+    assert len(errors) == int(unavailable)
+    if unavailable:
+        assert errors[0].reason == "OSError" and errors[0].stage == "live_check"
+        assert errors[0].principal_id == bundle.principal.id and errors[0].exc_info is None
+    assert "PRIVATE_STORAGE_DETAILS" not in caplog.text + b"".join(emitted).decode()
 
 
 def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch):

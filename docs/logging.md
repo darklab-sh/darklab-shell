@@ -287,7 +287,7 @@ The current event inventory is:
 | INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
 | WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected or throttled | fixed `credential_rejected`, `rate_limited`, or `source_unavailable` reason only |
 | WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status; no inventory or search text |
-| ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | operator authentication storage unavailable | exception class as reason, numeric http_status; no exception details |
+| ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | initial or live operator authority check unavailable | bounded exception class as reason, fixed initial_check/live_check stage, numeric http_status, request_id, endpoint, permitted principal_id/credential_id and ip; no exception details or traceback |
 | WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |
 | INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; repeated unchanged operations are quiet | principal_id, source, granted |
 | INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
@@ -447,7 +447,7 @@ The current event inventory is:
 | INFO / DEBUG | `DIAG_VIEWED` | diagnostics view / automatic refresh | principal_id, credential_id, request_id, resolved ip; background XHR reads use DEBUG |
 | INFO / DEBUG | `DIAG_AUDIT_VIEWED` | operator audit view / background read | operator context, event_count, limit, offset, has_more, audit_log_enabled, filter_count, filter_keys; no filter values |
 | INFO | `DIAG_AUDIT_EXPORTED` | fully consumed operator audit stream | operator context, format, limit, event_count, truncated, filter_count, filter_keys |
-| WARNING | `DIAG_AUDIT_EXPORT_INTERRUPTED` | cancelled, failed, or access-revoked export | operator context, format, limit, filter_count, filter_keys, fixed reason; no completed event |
+| WARNING | `DIAG_AUDIT_EXPORT_INTERRUPTED` | cancelled, failed, or access-revoked export | operator context, format, limit, filter_count, filter_keys, fixed interrupted/access_lost/check_unavailable reason; unavailable live checks also emit one safe operator ERROR; no completed event |
 | INFO | `AI_DIAG_TEST_COMPLETED` | explicit operator AI test completes | principal_id, credential_id, request_id, resolved ip |
 | WARNING | `AI_DIAG_TEST_REJECTED` | shared operator or global AI test limit | operator context, fixed reason, numeric http_status |
 | WARNING | `METRICS_DENIED` | client outside metrics allowlist | resolved ip only; no configured CIDRs |
