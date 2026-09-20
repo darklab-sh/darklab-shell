@@ -18905,7 +18905,7 @@ class TestEntrypointWorkspaceRepair:
 
         assert bootstrap_state["db_exists"] is True
         assert bootstrap_state["metrics_dir_exists"] is True
-        assert bootstrap_state["shell_handler_count"] == 1
+        assert bootstrap_state["shell_handler_count"] == 2
         assert {call["method"] for call in bootstrap_state["redis_calls"]} >= {"from_url", "ping"}
         assert bootstrap_state["redis_client_initialized"] is True
         assert bootstrap_state["process_initialized"] is True
