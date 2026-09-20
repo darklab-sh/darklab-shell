@@ -16,11 +16,15 @@ class _SeverityFilter(logging.Filter):
         return (record.levelno >= logging.WARNING) == self.warnings
 
 
-def console_handlers(formatter: logging.Formatter) -> list[logging.StreamHandler]:
+def console_handlers(
+    formatter: logging.Formatter,
+    *,
+    handler_type: type[logging.StreamHandler] = logging.StreamHandler,
+) -> list[logging.StreamHandler]:
     """Return disjoint stdout/stderr handlers; the logger controls verbosity."""
     handlers = []
     for stream, warnings in ((sys.stdout, False), (sys.stderr, True)):
-        handler = logging.StreamHandler(stream)
+        handler = handler_type(stream)
         handler.setFormatter(formatter)
         handler.addFilter(_SeverityFilter(warnings=warnings))
         handlers.append(handler)

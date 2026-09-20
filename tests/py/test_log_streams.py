@@ -7,6 +7,7 @@ import json
 import logging
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,32 @@ def test_gunicorn_logger_import_does_not_bootstrap_application():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == result.stderr == ""
+
+
+def test_gunicorn_preserves_explicit_logging_configuration():
+    # dictConfig touches root and other loggers; keep that state in its own process.
+    program = textwrap.dedent("""
+        from gunicorn.config import Config
+        from gunicorn_conf import ConsoleSeverityLogger
+        cfg = Config()
+        cfg.set('logconfig_dict', {
+            'version': 1,
+            'disable_existing_loggers': False,
+            'root': {'handlers': [], 'level': 'WARNING'},
+            'formatters': {'custom': {'format': 'CUSTOM %(levelname)s %(message)s'}},
+            'handlers': {'custom': {'class': 'logging.StreamHandler', 'stream': 'ext://sys.stdout',
+                                    'formatter': 'custom'}},
+            'loggers': {'gunicorn.error': {'handlers': ['custom'], 'level': 'DEBUG', 'propagate': False}},
+        })
+        logger = ConsoleSeverityLogger(cfg)
+        logger.setup(cfg)
+        logger.info('CUSTOM_INFO')
+        logger.warning('CUSTOM_WARNING')
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", program], cwd=Path(__file__).resolve().parents[2] / "app",
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["CUSTOM INFO CUSTOM_INFO", "CUSTOM WARNING CUSTOM_WARNING"]
+    assert result.stderr == ""
