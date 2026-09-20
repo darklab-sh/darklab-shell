@@ -781,7 +781,7 @@
         {% endif %}
         <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
         {% if operator_console_enabled %}
-        <a class="rail-nav-item nav-item rail-more-item" data-action="audit" href="/diag/audit" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator audit log"><span class="rail-nav-glyph" aria-hidden="true">≡</span><span class="rail-nav-label">audit log</span></a>
+        <a class="rail-nav-item nav-item rail-more-item" data-action="audit" href="/audit" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator audit log"><span class="rail-nav-glyph" aria-hidden="true">≡</span><span class="rail-nav-label">audit log</span></a>
         {% endif %}
       </div>
       <a class="rail-nav-version" href="{{ project_source or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>

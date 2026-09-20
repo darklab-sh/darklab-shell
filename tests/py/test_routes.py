@@ -516,19 +516,24 @@ class TestIndexRoute:
         assert extra["local_path"].endswith("static/js/does-not-exist.js")
         assert extra["fallback_version"] == shell_app_module.APP_VERSION
 
-    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
-        client = get_client()
-        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["203.0.113.0/24"]}):
-            body = client.get("/").get_data(as_text=True)
-        assert 'id="rail-diag-btn"' in body
-        assert 'href="/diag"' in body
-        assert 'target="_blank"' in body
-        assert 'rel="noopener noreferrer"' in body
-        assert 'data-menu-action="diag"' in body
-        rail_match = re.search(r'<a class="([^"]*)" data-action="diag" id="rail-diag-btn"', body)
+    @pytest.mark.parametrize("granted_operator", [False, True])
+    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self, granted_operator):
+        app = _test_app()
+        client = operator_browser_client(app) if granted_operator else app.test_client()
+        app.config["DARKLAB_CONFIG"] = build_test_config({
+            "access_profile": "token_required" if granted_operator else "open",
+            "metrics_allowed_cidrs": [] if granted_operator else ["203.0.113.0/24"],
+        })
+        client.environ_base["REMOTE_ADDR"] = "203.0.113.19"
+        body = client.get("/").get_data(as_text=True)
+        rail_match = re.search(r'<a class="([^"]*)" data-action="diag" id="rail-diag-btn"([^>]*)>', body)
         mobile_match = re.search(r'<button type="button" class="([^"]*)" data-menu-action="diag"', body)
-        assert rail_match and "u-hidden" not in rail_match.group(1)
-        assert mobile_match and "u-hidden" not in mobile_match.group(1)
+        assert rail_match and mobile_match
+        assert 'href="/diag"' in rail_match.group(2)
+        assert 'target="_blank"' in rail_match.group(2)
+        assert 'rel="noopener noreferrer"' in rail_match.group(2)
+        assert ("u-hidden" not in rail_match.group(1)) is granted_operator
+        assert ("u-hidden" not in mobile_match.group(1)) is granted_operator
 
     def test_quick_lookup_navigation_sits_beside_atlas(self):
         body = get_client().get("/").get_data(as_text=True)
@@ -15856,7 +15861,7 @@ class TestDiagRoute:
     def test_audit_route_requires_diag_access(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
-            resp = client.get("/diag/audit")
+            resp = client.get("/audit")
         assert resp.status_code == 404
 
     def test_audit_html_lists_events_and_disabled_banner(self):
@@ -15870,7 +15875,7 @@ class TestDiagRoute:
                 "audit_log_enabled": False,
             },
         ):
-            resp = client.get(f"/diag/audit?target_id={target_id}")
+            resp = client.get(f"/audit?target_id={target_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         _assert_html_document_contract(
@@ -15891,7 +15896,7 @@ class TestDiagRoute:
         assert target_id in body
         assert f'href="/projects/{target_id}"' not in body
         assert "Diag Operator" in body
-        assert '<form class="diag-audit-filter-form" method="get" action="/diag/audit">' in body
+        assert '<form class="diag-audit-filter-form" method="get" action="/audit">' in body
         assert '<div class="diag-audit-table-wrap">' in body
         assert '<table class="diag-table diag-audit-table">' in body
         assert '<col class="diag-audit-col-target">' in body
@@ -15946,7 +15951,7 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets.log, "info") as log_info:
                 resp = client.get(
-                    "/diag/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
+                    "/audit?format=json&event_type=project.link&session_id=diag-audit-owner"
                     f"&team_id={quote(team_id)}&target_type=project"
                     f"&date_from={audit_date_text}&date_to={audit_date_text}"
                     "&actor=" + quote(actor_display_fragment)
@@ -15990,7 +15995,7 @@ class TestDiagRoute:
 
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
             member_resp = client.get(
-                "/diag/audit?format=json&event_type=project.link"
+                "/audit?format=json&event_type=project.link"
                 f"&team_id={quote(team_id)}&target_type=project"
                 f"&date_from={audit_date_text}&date_to={audit_date_text}"
                 "&actor=" + quote(actor_member_id[-12:])
@@ -16008,7 +16013,7 @@ class TestDiagRoute:
             target_id=run_id,
         )
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
-            resp = client.get(f"/diag/audit?format=json&target_id={run_id}")
+            resp = client.get(f"/audit?format=json&target_id={run_id}")
         payload = resp.get_json()
         assert resp.status_code == 200
         assert [event["target_id"] for event in payload["events"]] == [run_id]
@@ -16036,7 +16041,7 @@ class TestDiagRoute:
                 "audit_export_max_rows": 1,
             },
         ):
-            resp = client.get(f"/diag/audit/export?correlation_id={correlation_id}")
+            resp = client.get(f"/audit/export?correlation_id={correlation_id}")
         body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert "text/csv" in resp.content_type
@@ -16091,7 +16096,7 @@ class TestDiagRoute:
                 "info",
             ) as log_info,
         ):
-            resp = client.get("/diag/audit/export?event_type=project.link")
+            resp = client.get("/audit/export?event_type=project.link")
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert len(page_calls) == 1
@@ -16132,7 +16137,7 @@ class TestDiagRoute:
                 "audit_export_max_rows": 1,
             },
         ):
-            resp = client.get(f"/diag/audit/export?format=json&correlation_id={correlation_id}")
+            resp = client.get(f"/audit/export?format=json&correlation_id={correlation_id}")
         payload = resp.get_json()
         assert resp.status_code == 200
         assert "application/json" in resp.content_type
@@ -16158,24 +16163,34 @@ class TestDiagRoute:
         assert "operator diagnostics" in body
         assert 'class="btn btn-secondary btn-compact diag-back-btn"' in body
         assert 'href="/"' in body
-        assert 'href="/diag/audit"' in body
+        assert 'href="/audit"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
 
-    def test_top_command_cells_are_keyboard_expandable(self):
-        """Top Commands cells render as accessible toggle buttons (tabindex=0,
-        role=button, aria-expanded=false) with a delegated tap handler so
-        an operator on mobile can read the full command without `title=`
-        hover affordances."""
+    @pytest.mark.parametrize("asset_mode", ["source", "bundle"])
+    def test_top_command_cells_are_keyboard_expandable(self, asset_mode):
+        """Command cells expose button semantics and load the operator page module."""
         client = self._allowed_client()
-        with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["127.0.0.1/32"]}):
-            body = client.get("/diag").get_data(as_text=True)
-        if '<td class="diag-cmd-cell"' not in body:
-            pytest.skip("no top-command rows in the dev DB to assert against")
+        stats = assets_diagnostics.diag_usage_stats(0)
+        assert stats["ok"]
+        stats["top_by_freq"] = [{"command": "echo keyboard-fixture", "count": 1}]
+        with (
+            mock.patch.dict("config.CFG", {"asset_bundle_mode": asset_mode}),
+            mock.patch("blueprints.assets_diag.diag_usage_stats", return_value=stats),
+        ):
+            response = client.get("/diag")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert '>echo keyboard-fixture</td>' in body
         assert 'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"' in body, (
             "top-command cells must carry the expand-button accessibility attrs"
         )
-        assert "toggleCmdCell" in body, "tap-to-expand handler missing from page script"
+        if asset_mode == "source":
+            source = "/static/js/operator_pages.entry.js"
+        else:
+            manifest = json.loads((Path(__file__).resolve().parents[2] / "app/static/build/manifest.json").read_text())
+            source = manifest["bundles"]["operator-pages"]["path"]
+        assert f'<script type="module" src="{source}"></script>' in body
 
     def test_top_command_cells_render_full_untruncated_command(self):
         """The 48-char server-side `truncate` is gone — full text reaches

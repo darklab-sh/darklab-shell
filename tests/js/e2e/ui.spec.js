@@ -1105,7 +1105,7 @@ test.describe('project workspace modal', () => {
     const projectId = await createActiveProject(page, `Playwright Audit ${Date.now()}`)
     await linkExternalRunToOpenProject(page, testInfo)
 
-    const response = await page.goto(`/diag/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
+    const response = await page.goto(`/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
     expect(response.status()).toBe(404)
     await expect(page.locator('body.diag-page')).toHaveCount(0)
     await expect(page.locator('.diag-audit-table')).toHaveCount(0)

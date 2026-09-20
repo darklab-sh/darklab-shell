@@ -55,8 +55,8 @@
     },
     "shell-bootstrap": {
       "type": "esm",
-      "path": "/static/build/shell-bootstrap.c1eb7a1ce866.js",
-      "hash": "d590f838bf729159dd7f37aac768a49c6fe99aeb00e6f0356fec6cc81ecb5720",
+      "path": "/static/build/shell-bootstrap.4f207d485c9f.js",
+      "hash": "9cf4ee1b74bec102bd94d56dccfd080eea3b5daf408defb394b1797f421c1023",
       "entries": [
         "/static/js/shell_bootstrap.entry.js"
       ],
@@ -213,7 +213,7 @@
         "/static/js/features/history/history_rows.js": "de4cb4f30b1f08a77a0bab9982aacab7936df142945191291852a8075a4289c2",
         "/static/js/features/history/history_run_modal_state_bridge.js": "e1caf887ace97ebca74619e1ee21b145a31370250518d767885e37b4144dd063",
         "/static/js/features/history/history_search.js": "62ab11c6383da3848cef26152c69ac0c0ebdbeb4699427148b84fa400f7572de",
-        "/static/js/features/mobile/mobile_menu_actions.js": "e148567a151a3897c28050c5dd7b1a99f9294fab6df68e76f2d028ca8dce6bf5",
+        "/static/js/features/mobile/mobile_menu_actions.js": "ee7d48b6bfafb5fc6ba1269b8222fcdffdc18fbbe5dcdd94782fd01e9bc87d61",
         "/static/js/features/mobile/mobile_shell_layout.js": "94e84b4c86f45a2a69ad5313f63df900d94d786e9b62690cd02ebe2288d40fc4",
         "/static/js/features/mobile/mobile_shell_layout_bridge.js": "2dc56cc7210e3e5b13deb8d4c4cdeef495fab7a9602bb82d8c9a5e46ee3fc08e",
         "/static/js/features/preferences/browser_logout.js": "af0003d725f4a0953ff54e5829ed0661aec0970e7676f01e2cd2aa20c54d04bb",
@@ -402,8 +402,8 @@
     },
     "operator-pages": {
       "type": "esm",
-      "path": "/static/build/operator-pages.20e9a2fc5db5.js",
-      "hash": "20e9a2fc5db5235b97dfb8dc66fc90f957b849d80175a1020113defcfb147ae5",
+      "path": "/static/build/operator-pages.8786f9f22818.js",
+      "hash": "8786f9f228182e2cf0f5682b5f5fe48fdaa4f6610e0ef4a646a1f0f69881cafd",
       "sources": [
         "/static/js/features/admin/operator_access.js",
         "/static/js/features/diagnostics/ai_test.js",
@@ -417,7 +417,7 @@
       "source_hashes": {
         "/static/js/features/admin/operator_access.js": "fcf996b15f47a119f031a0277a7507f7329ed79b1693776c911bc09a3493ba01",
         "/static/js/features/diagnostics/ai_test.js": "b444885dc473fcd33b423f22acdfcaf4deafbe171336e35a41b299a018830cad",
-        "/static/js/features/diagnostics/audit_exports.js": "6c9612cc27f6b70162b126a89c7cbcc5f78cafd41bf6bf123f0b6a212ab7f90d",
+        "/static/js/features/diagnostics/audit_exports.js": "05cbdc4a41ac7f998139a83298bbab1062faa7286ec72ba9e88b41127f5c5c8b",
         "/static/js/features/diagnostics/classifier.js": "c0383fdfa9270efa0b443f506ce07c1e23ea9c27d185d7d878eeebe0b5c945bd",
         "/static/js/features/diagnostics/command_cells.js": "7253a15b1571fb5a7c45a79e18a8eafd4511d1f39686df67d1b3991191839760",
         "/static/js/features/diagnostics/drift.js": "bd851aee49ca8d77d0608a68651773484e4faf62157e9cf8b6f447c4cddb9e82",

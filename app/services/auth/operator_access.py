@@ -19,6 +19,7 @@ log = logging.getLogger("shell")
 def is_operator_request():
     return (request.path == "/admin" or request.path.startswith("/admin/")
             or request.path == "/diag" or request.path.startswith("/diag/")
+            or request.path == "/audit" or request.path.startswith("/audit/")
             or (request.path == "/auth/oidc/callback" and request.args.get("state", "").startswith("admin_")))
 
 
@@ -85,12 +86,15 @@ def return_path(value):
         query = urlencode([(key, item[:256]) for key, item in parse_qsl(parsed.query[:4096])
                            if key in {"view", "search", "group", "source", "warnings"}][:20])
         return "/admin/" + ("?" + query if query else "")
-    path = "/diag/audit" if parsed.path.startswith("/diag/audit") else "/diag"
-    if parsed.path != "/diag" and not parsed.path.startswith("/diag/"):
+    if parsed.path == "/audit" or parsed.path.startswith("/audit/"):
+        path = "/audit"
+    elif parsed.path == "/diag" or parsed.path.startswith("/diag/"):
+        path = "/diag"
+    else:
         return "/admin/"
     keys = {"event_type", "actor", "actor_member_id", "actor_session_hash", "owner_session_hash",
             "session_id", "team_id", "project_id", "target_type", "target_id", "correlation_id",
-            "date_from", "date_to", "limit", "offset"} if path == "/diag/audit" else {"tz_offset"}
+            "date_from", "date_to", "limit", "offset"} if path == "/audit" else {"tz_offset"}
     query = urlencode([(key, item[:256]) for key, item in parse_qsl(parsed.query[:4096]) if key in keys][:20])
     return path + ("?" + query if query else "")
 

@@ -1695,7 +1695,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 **Behavior:**
 
-- Choose **audit log** from the desktop More menu or mobile menu, or open `/diag/audit`, as a signed-in, recently verified operator to review audit rows across the instance. It shares the same principal grant as Diagnostics and Operator settings.
+- Choose **audit log** from the desktop More menu or mobile menu, or open `/audit`, as a signed-in, recently verified operator to review audit rows across the instance. It shares the same principal grant as Diagnostics and Operator settings.
 - The viewer lists recent rows with created time, event type, actor, target, scope, and a native details drawer. Details are a safe JSON envelope with allowlisted fields such as actor context, scope, target, job/correlation ids, and bounded action metadata.
 - Filters cover event type, actor, team, project, target type, target id, correlation/job chain, date range, and page size. Event choices include short hints so rows such as `history.delete` read as run-deletion events instead of opaque codes.
 - CSV and JSON export buttons download the currently filtered result set. Exports honor `audit_export_max_rows`; when more rows match, CSV adds a truncation marker and JSON returns `truncated: true` with a short hint to narrow the filters.
@@ -1705,7 +1705,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - The Projects modal also exposes a scoped Activity tab. It shows safe project activity for personal project owners and team members who can view that team project, with filters and pagination but without operator-only request/session metadata. Project metadata edit sheets include a compact Recent activity panel for the current item and can jump into the filtered Activity tab.
 - Options → Teams exposes an Activity subtab for team owners and admins. It focuses on team governance and shared-configuration rows, keeps invite/recovery codes, raw tokens, session hashes, IPs, and user agents out of the browser response, and stays unavailable to operators/viewers. The selected team overview shows owners/admins a small Recent activity preview before the full subtab.
 
-**Limits:** `/diag/audit` is an operator-wide view of personal and team activity, actor labels, target ids, request metadata, and reviewed audit details. Grant operator access only to people trusted to inspect the instance. Exports recheck access while streaming and stop if access is lost. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
+**Limits:** `/audit` is an operator-wide view of personal and team activity, actor labels, target ids, request metadata, and reviewed audit details. Grant operator access only to people trusted to inspect the instance. Exports recheck access while streaming and stop if access is lost. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
 
 **Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, and `admin_console_reauth_minutes`; see [operator setup](CONFIGURATION.md#operator-settings-console).
 
@@ -1730,7 +1730,7 @@ Access requires a restricted sign-in profile, an explicit principal grant, and r
 **Behavior:**
 
 - `/diag` provides a live operator view of the running instance and is disabled by default.
-- `/diag/audit` provides the audit-log workflow described in [Audit Log](#audit-log), using the same operator grant and recent verification.
+- `/audit` provides the audit-log workflow described in [Audit Log](#audit-log), using the same operator grant and recent verification.
 - The diagnostics page includes a classifier inspector near the top of the page. Paste one output line, optionally add the command context, and it shows the line's `kind`, `role`, signals, entities, command root, and target using the same backend classifier used for saved runs without rerunning the heavier diagnostics probes. An Advanced disclosure keeps the legacy line-class override available when you need to debug old transcript classes.
 - The classifier drift report samples recent saved output on demand and calls out spots where stored metadata no longer matches today's classifier, where help output produced findings/entities, or where useful-looking output stayed as plain body text. Samples can be sent straight into the one-line inspector for a closer look.
 - `/metrics` returns Prometheus text for scrape-based monitoring and uses its own `metrics_allowed_cidrs` permission.

@@ -160,7 +160,7 @@ def test_console_authorization_and_navigation(operator_db, monkeypatch, cause):
             else:
                 conn.execute("UPDATE browser_sessions SET last_seen_at = ? WHERE id = ?", (old, issued.id))
             conn.commit()
-    for path in ("/admin/settings", "/diag?format=json", "/diag/audit?format=json", "/diag/classifier-inspector"):
+    for path in ("/admin/settings", "/diag?format=json", "/audit?format=json", "/diag/classifier-inspector"):
         response = client.get(path, headers=headers, base_url=ORIGIN)
         assert response.status_code == (
             404 if cause in {"missing_grant", "revoked_grant", "revoked_session", "team_owner",

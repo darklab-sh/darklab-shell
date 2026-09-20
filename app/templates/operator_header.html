@@ -9,7 +9,7 @@
       <span class="diag-header-meta">{{ subtitle }}</span>
     </div>
     <nav class="diag-header-actions" aria-label="Operator pages">
-      {% for page, href, label in [('diag', '/diag', 'diagnostics'), ('audit', '/diag/audit', 'audit log'), ('admin', '/admin/', 'operator settings')] %}
+      {% for page, href, label in [('diag', '/diag', 'diagnostics'), ('audit', '/audit', 'audit log'), ('admin', '/admin/', 'operator settings')] %}
       {% if page != current_page %}
       <a href="{{ href }}" class="btn btn-secondary btn-compact diag-nav-btn">{{ label }}</a>
       {% endif %}

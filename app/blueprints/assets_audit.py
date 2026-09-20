@@ -202,7 +202,7 @@ def _audit_export_json(filters: AuditEventFilters, *, limit: int, client_ip: str
                        iter_pages=assets_routes.iter_event_pages)
 
 
-@assets_bp.route("/diag/audit")
+@assets_bp.route("/audit")
 def diag_audit():
     diag_routes._require_diag_access()
     filters = _audit_filters_from_args(request.args)
@@ -251,7 +251,7 @@ def diag_audit():
     )
 
 
-@assets_bp.route("/diag/audit/export")
+@assets_bp.route("/audit/export")
 def diag_audit_export():
     client_ip = diag_routes._require_diag_access()
     filters = _audit_filters_from_args(request.args)

@@ -4,7 +4,7 @@
 export function initialize(access) {
   let loading = false;
   document.addEventListener('click', async event => {
-    const link = event.target.closest?.('a[href^="/diag/audit/export"]');
+    const link = event.target.closest?.('a[href^="/audit/export"]');
     if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     if (loading || !access.active) return;

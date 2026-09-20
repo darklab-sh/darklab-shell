@@ -101,7 +101,7 @@ async function openFullMobileHistoryPanel(page) {
 test('open-profile diagnostics remain unavailable on mobile', async ({ page }) => {
   await page.setViewportSize(MOBILE)
   expect((await page.request.get('/diag?tz_offset=0')).status()).toBe(404)
-  expect((await page.request.get('/diag/audit')).status()).toBe(404)
+  expect((await page.request.get('/audit')).status()).toBe(404)
 })
 
 test.describe('mobile menu', () => {

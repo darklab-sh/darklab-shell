@@ -40,7 +40,7 @@ async function browseOperatorPages(page, appName, width, testInfo) {
   const pages = [
     { path: '/admin/', subtitle: 'operator settings · read only', next: 'diagnostics' },
     { path: '/diag', subtitle: 'operator diagnostics', next: 'audit log' },
-    { path: '/diag/audit', subtitle: 'audit log', next: 'operator settings' },
+    { path: '/audit', subtitle: 'audit log', next: 'operator settings' },
   ];
   for (const current of pages) {
     await page.waitForURL(url => url.pathname === current.path, { waitUntil: 'domcontentloaded' });
@@ -192,7 +192,7 @@ async function withOperator(shellPage, testInfo, width, run, { fromMenu = false 
     expect((await page.request.get('/admin/')).status()).toBe(404);
     expect((await page.request.get('/admin/settings')).status()).toBe(404);
     expect((await page.request.get('/diag')).status()).toBe(404);
-    expect((await page.request.get('/diag/audit')).status()).toBe(404);
+    expect((await page.request.get('/audit')).status()).toBe(404);
     return;
   }
   const credential = provider ? '' : readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
@@ -277,7 +277,7 @@ for (const width of [1280, 375]) {
           await audit.tap();
           expect(page.context().pages()).toHaveLength(1);
         } else {
-          await expect(audit).toHaveAttribute('href', '/diag/audit');
+          await expect(audit).toHaveAttribute('href', '/audit');
           await expect(audit).toHaveAttribute('target', '_blank');
           await expect(audit).toHaveAttribute('rel', 'noopener noreferrer');
           const opened = page.waitForEvent('popup');
@@ -289,7 +289,7 @@ for (const width of [1280, 375]) {
           expect(new URL(page.url()).pathname).toBe('/');
           await ensurePromptReady(page);
         }
-        await expect(auditPage).toHaveURL(/\/diag\/audit$/);
+        await expect(auditPage).toHaveURL(/\/audit$/);
         await expect(auditPage.locator('.diag-header-meta')).toHaveText('audit log');
       });
     });
@@ -381,7 +381,7 @@ for (const width of [1280, 375]) {
           if (!linked.ok) throw new Error(`Project link failed: ${linked.status}`);
           return project.id;
         }, runId);
-        const response = await page.goto(`/diag/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
+        const response = await page.goto(`/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
         expect(response.status()).toBe(200);
         await expect(page.locator('body.diag-page')).toBeVisible();
         const auditRow = page.locator('.diag-audit-table tbody tr', { hasText: projectId }).first();
@@ -391,13 +391,13 @@ for (const width of [1280, 375]) {
         const details = auditRow.locator('.diag-audit-details pre');
         await expect(details).toContainText('"event_type": "project.link"');
         await expect(details).toContainText('"source": "manual"');
-        const audit = await browserRead(page, `/diag/audit?format=json&event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
+        const audit = await browserRead(page, `/audit?format=json&event_type=project.link&project_id=${encodeURIComponent(projectId)}`);
         expect(audit.status).toBe(200);
         expect(audit.body.events.some(event => event.actor_principal_id === principal && event.project_id === projectId)).toBe(true);
         for (const format of ['CSV', 'JSON']) {
           const href = await page.getByRole('link', { name: format, exact: true }).getAttribute('href');
           const url = new URL(href, page.url());
-          expect(url.pathname).toBe('/diag/audit/export');
+          expect(url.pathname).toBe('/audit/export');
           expect(Object.fromEntries(url.searchParams)).toEqual({ event_type: 'project.link', project_id: projectId,
             ...(format === 'JSON' ? { format: 'json' } : {}) });
         }
@@ -406,12 +406,12 @@ for (const width of [1280, 375]) {
 
     test(`audit verification preserves filters and protects downloads at ${width}px`, async ({ page: shellPage }, testInfo) => {
       await withOperator(shellPage, testInfo, width, async ({ page, slot, principal, provider, credential }) => {
-        await page.goto('/diag/audit?event_type=instance_operator.view');
+        await page.goto('/audit?event_type=instance_operator.view');
         await expect(page.locator('.diag-audit-table tbody tr').first()).toBeVisible();
         control('stale', slot, principal);
         await page.getByRole('link', { name: 'JSON', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
-        await verify(page, provider, credential, '/diag/audit');
+        await verify(page, provider, credential, '/audit');
         expect(new URL(page.url()).searchParams.get('event_type')).toBe('instance_operator.view');
         const completed = page.waitForEvent('download');
         await page.getByRole('link', { name: 'JSON', exact: true }).click();

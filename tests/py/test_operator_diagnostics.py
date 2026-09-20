@@ -13,14 +13,25 @@ from services.auth.contracts import IdentityStorageError, timestamp
 from test_operator_reauthentication import ORIGIN, credential_setup
 
 operator_db = _operator_db
-PATHS = ("/diag", "/diag?format=json", "/diag/audit", "/diag/audit?format=json",
-         "/diag/audit/export", "/diag/audit/export?format=json", "/diag/classifier-inspector",
+PATHS = ("/diag", "/diag?format=json", "/audit", "/audit?format=json",
+         "/audit/export", "/audit/export?format=json", "/diag/classifier-inspector",
          "/diag/classifier-drift", "/diag/ai-test", "/admin/", "/admin/settings", "/admin/access")
 
 
 def request(client, path, **kwargs):
     call = client.post if path == "/diag/ai-test" else client.get
     return call(path, base_url=ORIGIN, **kwargs)
+
+
+def test_audit_routes_use_top_level_urls(operator_db, monkeypatch):
+    from flask import url_for
+
+    app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch)
+    with app.test_request_context():
+        assert url_for("assets.diag_audit") == "/audit"
+        assert url_for("assets.diag_audit_export") == "/audit/export"
+    for old_path in ("/diag/audit", "/diag/audit/export"):
+        assert request(client, old_path).status_code == 404
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -54,7 +65,8 @@ def test_verified_operator_needs_no_metrics_allowlist(operator_db, monkeypatch, 
 
 
 @pytest.mark.parametrize("path", [
-    "/diag?format=json", "/diag/classifier-drift", "/diag/audit?format=json&event_type=project.link",
+    "/diag?format=json", "/diag/classifier-drift", "/audit?format=json&event_type=project.link",
+    "/audit/export?format=json&event_type=project.link",
 ])
 def test_expired_verification_returns_json_with_safe_document_destination(operator_db, monkeypatch, path):
     _app, client, _bundle, issued = credential_setup(operator_db, monkeypatch)
@@ -69,7 +81,7 @@ def test_expired_verification_returns_json_with_safe_document_destination(operat
     destination = urlsplit(payload["destination"])
     assert destination.path == "/admin/reauth"
     next_path = parse_qs(destination.query)["next"][0]
-    assert next_path == ("/diag/audit?event_type=project.link" if "/audit" in path else "/diag")
+    assert next_path == ("/audit?event_type=project.link" if "/audit" in path else "/diag")
 
 
 def test_storage_failure_hides_operator_data(operator_db, monkeypatch):
@@ -93,7 +105,7 @@ def test_export_stops_after_grant_revocation_and_never_logs_completion(operator_
         operator_grants.set_grant(bundle.principal.id, granted=False)
         yield {"events": [{"id": "must-not-escape"}], "truncated": False}
     monkeypatch.setattr(assets, "iter_event_pages", pages)
-    response = request(client, "/diag/audit/export?format=" + format, buffered=False)
+    response = request(client, "/audit/export?format=" + format, buffered=False)
     emitted = []
     with pytest.raises(operator_access.OperatorAccessLost):
         for chunk in response.response:
@@ -155,11 +167,14 @@ def test_metrics_scrapes_are_independent_of_operator_identity(operator_db, monke
 
 
 @pytest.mark.parametrize("value,expected", [
-    ("https://elsewhere.test/diag/audit", "/admin/"),
+    ("https://elsewhere.test/audit", "/admin/"),
     ("//elsewhere.test/diag", "/admin/"),
+    ("/auditor?actor=Example", "/admin/"),
+    ("/audit?format=json&event_type=project.link&project_id=example&next=https://elsewhere.test",
+     "/audit?event_type=project.link&project_id=example"),
     ("/diag/ai-test?prompt=PRIVATE", "/diag"),
     ("/diag/classifier-inspector?classifier_line=PRIVATE", "/diag"),
-    ("/diag/audit/export?format=json&actor=Example&offset=50&next=https://elsewhere.test", "/diag/audit?actor=Example&offset=50"),
+    ("/audit/export?format=json&actor=Example&offset=50&next=https://elsewhere.test", "/audit?actor=Example&offset=50"),
 ])
 def test_operator_return_paths_never_replay_probes_or_leave_site(value, expected):
     assert operator_access.return_path(value) == expected

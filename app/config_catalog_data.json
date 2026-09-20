@@ -478,7 +478,7 @@
   "audit_export_max_rows": {
     "label": "Audit export max rows",
     "group": "Shell and execution",
-    "description": "Server-side only. Maximum number of audit rows /diag/audit CSV/JSON exports return in one request. Values above 200000 are capped, and truncated exports include a marker row or flag",
+    "description": "Server-side only. Maximum number of audit rows /audit CSV/JSON exports return in one request. Values above 200000 are capped, and truncated exports include a marker row or flag",
     "disclosure": "full",
     "summary": null,
     "reviewed": true,
