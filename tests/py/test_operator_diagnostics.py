@@ -112,6 +112,13 @@ def test_export_stops_after_grant_revocation_and_never_logs_completion(operator_
             emitted.append(chunk)
     assert b"first-safe-row" in b"".join(emitted)
     assert b"must-not-escape" not in b"".join(emitted)
+    if format == "csv":
+        import csv
+        import io
+        rows = list(csv.DictReader(io.StringIO(b"".join(emitted).decode())))
+        assert [row["id"] for row in rows] == ["first-safe-row", "__access_lost__"]
+        assert rows[-1]["event_type"] == "export.interrupted"
+        assert "Discard this file" in rows[-1]["details"]
     assert not any(record.message == "DIAG_AUDIT_EXPORTED" for record in caplog.records)
     interrupted = [record for record in caplog.records if record.message == "DIAG_AUDIT_EXPORT_INTERRUPTED"]
     assert len(interrupted) == 1 and interrupted[0].principal_id == bundle.principal.id

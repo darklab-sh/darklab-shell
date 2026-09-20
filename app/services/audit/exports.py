@@ -39,6 +39,15 @@ def _observe_export(chunks, context):
         completed = True
     except OperatorAccessLost:
         reason = "access_lost"
+        if context["format"] == "csv":
+            yield _audit_csv_row({
+                "id": "__access_lost__",
+                "event_type": "export.interrupted",
+                "details": (
+                    "Export incomplete: operator access was lost. "
+                    "Discard this file and verify access before exporting again."
+                ),
+            })
         raise
     finally:
         chunks.close()
@@ -88,7 +97,7 @@ def _audit_export_truncation_hint(limit: int) -> str:
     return f"Export capped at {int(limit)} rows. Narrow the filters to include older matching rows."
 
 
-def export_csv(filters, *, limit, client_ip, log_context, iter_pages) -> Response:
+def export_csv(filters, *, limit, log_context, iter_pages) -> Response:
 
     def generate():
         recheck_access()
@@ -110,7 +119,6 @@ def export_csv(filters, *, limit, client_ip, log_context, iter_pages) -> Respons
         log.info(
             "DIAG_AUDIT_EXPORTED",
             extra={
-                "ip": client_ip,
                 "format": "csv",
                 "limit": int(limit),
                 "event_count": event_count,
@@ -126,7 +134,7 @@ def export_csv(filters, *, limit, client_ip, log_context, iter_pages) -> Respons
     )
 
 
-def export_json(filters, *, limit, client_ip, audit_enabled, filter_values, log_context, iter_pages) -> Response:
+def export_json(filters, *, limit, audit_enabled, filter_values, log_context, iter_pages) -> Response:
 
     def generate():
         recheck_access()
@@ -152,7 +160,6 @@ def export_json(filters, *, limit, client_ip, audit_enabled, filter_values, log_
         log.info(
             "DIAG_AUDIT_EXPORTED",
             extra={
-                "ip": client_ip,
                 "format": "json",
                 "limit": int(limit),
                 "event_count": event_count,
@@ -166,4 +173,3 @@ def export_json(filters, *, limit, client_ip, audit_enabled, filter_values, log_
         mimetype="application/json",
         headers={"Content-Disposition": "attachment; filename=audit-events.json"},
     )
-

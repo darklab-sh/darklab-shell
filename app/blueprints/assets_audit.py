@@ -189,14 +189,14 @@ def _decorate_audit_events(events: list[dict]) -> list[dict]:
     return decorated
 
 
-def _audit_export_csv(filters: AuditEventFilters, *, limit: int, client_ip: str):
-    return export_csv(filters, limit=limit, client_ip=client_ip,
+def _audit_export_csv(filters: AuditEventFilters, *, limit: int):
+    return export_csv(filters, limit=limit,
                       log_context={**operator_access.log_context(), **_audit_log_filter_context(filters)},
                       iter_pages=assets_routes.iter_event_pages)
 
 
-def _audit_export_json(filters: AuditEventFilters, *, limit: int, client_ip: str, audit_enabled: bool):
-    return export_json(filters, limit=limit, client_ip=client_ip, audit_enabled=audit_enabled,
+def _audit_export_json(filters: AuditEventFilters, *, limit: int, audit_enabled: bool):
+    return export_json(filters, limit=limit, audit_enabled=audit_enabled,
                        filter_values=_audit_filter_values(filters),
                        log_context={**operator_access.log_context(), **_audit_log_filter_context(filters)},
                        iter_pages=assets_routes.iter_event_pages)
@@ -253,14 +253,13 @@ def diag_audit():
 
 @assets_bp.route("/audit/export")
 def diag_audit_export():
-    client_ip = diag_routes._require_diag_access()
+    diag_routes._require_diag_access()
     filters = _audit_filters_from_args(request.args)
     max_rows = audit_export_max_rows()
     if request.args.get("format") == "json":
         return _audit_export_json(
             filters,
             limit=max_rows,
-            client_ip=client_ip,
             audit_enabled=audit_log_enabled(),
         )
-    return _audit_export_csv(filters, limit=max_rows, client_ip=client_ip)
+    return _audit_export_csv(filters, limit=max_rows)
