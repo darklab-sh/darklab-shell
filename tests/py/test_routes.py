@@ -12940,7 +12940,7 @@ class TestProjectRoutes:
                 except OSError:
                     pass
 
-    def test_project_report_large_non_run_selector_filters_match_api_pages(self, tmp_path):
+    def test_project_report_large_non_run_selector_filters_match_api_pages(self, tmp_path, monkeypatch):
         client = get_client()
         session_id = self._session_id("project-report-large-non-run")
         project = self._create_project(client, session_id, name="Large Non-Run Selection")
@@ -13041,7 +13041,9 @@ class TestProjectRoutes:
                 )
             )
             artifact_expected_text[artifact_id] = artifact_text.strip()
-            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            with monkeypatch.context() as workspace_patch:
+                for key, value in workspace_cfg.items():
+                    workspace_patch.setitem(shell_app_module.CFG, key, value)
                 resolve_workspace_path(session_id, artifact_path, shell_app_module.CFG, ensure_parent=True).write_text(
                     artifact_text,
                     encoding="utf-8",
@@ -13161,7 +13163,9 @@ class TestProjectRoutes:
             draft["selection_filters"][case["selection_key"]] = case["filters"]
             draft["selection_exclude_ids"][case["selection_key"]] = [excluded_id]
 
-            with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+            with monkeypatch.context() as workspace_patch:
+                for key, value in workspace_cfg.items():
+                    workspace_patch.setitem(shell_app_module.CFG, key, value)
                 context = compose_report_context(
                     draft,
                     project=project,
@@ -13186,7 +13190,9 @@ class TestProjectRoutes:
             assert excluded_label not in preview_text
 
             with tempfile.TemporaryDirectory() as tmp:
-                with mock.patch.dict(shell_app_module.CFG, workspace_cfg, clear=False):
+                with monkeypatch.context() as workspace_patch:
+                    for key, value in workspace_cfg.items():
+                        workspace_patch.setitem(shell_app_module.CFG, key, value)
                     archive_result = build_report_export_archive(
                         draft,
                         project=project,

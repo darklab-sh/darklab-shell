@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Postgres and report checks avoid repeated setup work.** Compose reuses runtime-qualified Python dependencies and leaves migration ownership to isolated fixtures. Ordinary Postgres connections match the production JIT default, while the large report fixture restores only its changed settings; realistic query, preview, and archive assertions remain intact.
+
 - **Browser preparation checks freshness without rebuilding every bundle.** Source, configuration, lockfile, toolchain, generated outputs, and decoded compression sidecars remain checked before bundle tests; CI retains full build reproducibility checks. Browser jobs reuse versioned package/headless-browser downloads while keeping locked installs and OS dependency setup.
 
 - **Template asset lookups reuse a validated manifest per app.** File edits and atomic replacement invalidate cached data; missing or malformed manifests retain their existing errors.

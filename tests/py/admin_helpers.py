@@ -39,6 +39,8 @@ def operator_db(request, tmp_path, monkeypatch):
             @contextmanager
             def connect():
                 with psycopg.Connection[dict[str, Any]].connect(target.dsn, row_factory=dict_row) as raw:
+                    raw.execute("SET jit = off")
+                    raw.commit()
                     yield PostgresSqliteCompatConnection(raw)
 
             cfg = cfg.with_overrides({"database_backend": "postgres", "database_url": target.dsn})

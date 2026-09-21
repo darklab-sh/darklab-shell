@@ -90,6 +90,10 @@ def postgres_current(postgres_test_databases):
 
     with postgres_test_databases.current_database() as target:
         with psycopg.connect(target.dsn, row_factory=dict_row) as conn:
+            # Ordinary query fixtures use the production default. Dedicated pool
+            # and startup tests continue through the real configuration path.
+            conn.execute("SET jit = off")
+            conn.commit()
             yield replace(target, conn=conn)
 
 
@@ -7319,6 +7323,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     from services.storage import body_store
 
     conn = postgres_current.conn
+    assert conn.execute("SHOW jit").fetchone()["jit"] == "off"
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     entity_id = "ent-" + uuid.uuid4().hex
