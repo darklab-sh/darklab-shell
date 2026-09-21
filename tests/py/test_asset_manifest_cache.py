@@ -21,12 +21,15 @@ def test_manifest_cache_reuses_valid_reads_and_invalidates_edits_and_replacement
     path = tmp_path / "manifest.json"
     _write(path, "old")
     monkeypatch.setattr(shell, "_ASSET_MANIFEST_PATH", path)
+    previous = path.stat()
+    stat = type(path).stat
+    # Exercise a filesystem whose metadata cannot distinguish same-sized edits.
+    monkeypatch.setattr(type(path), "stat", lambda target, **kwargs: previous if target == path else stat(target, **kwargs))
     app = Flask(__name__)
-    with app.app_context(), mock.patch.object(shell.json, "load", wraps=json.load) as load:
+    with app.app_context(), mock.patch.object(shell.json, "loads", wraps=json.loads) as load:
         assert "old" in shell._load_asset_manifest()["bundles"]
         assert "old" in shell._load_asset_manifest()["bundles"]
         assert load.call_count == 1
-        previous = path.stat()
         _write(path, "new")
         os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
         assert "new" in shell._load_asset_manifest()["bundles"]

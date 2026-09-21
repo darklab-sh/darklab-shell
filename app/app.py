@@ -282,20 +282,14 @@ def _log_asset_manifest_resolution_failed(
 
 
 def _load_asset_manifest() -> dict:
-    # Each app owns its cache; helpers outside an app context still read afresh.
-    # Include inode and ctime so atomic replacements and restored mtimes expire it.
-    def signature(stat):
-        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-
+    # Each app owns parsed data. Read and compare content because timestamp and
+    # size signatures can collide on rapid edits or coarse container filesystems.
     cache = current_app.extensions.get("darklab.asset_manifest") if has_app_context() else None
     try:
-        key = (str(_ASSET_MANIFEST_PATH.resolve()), signature(_ASSET_MANIFEST_PATH.stat()))
+        key = (str(_ASSET_MANIFEST_PATH.resolve()), _ASSET_MANIFEST_PATH.read_text(encoding="utf-8"))
         if cache is not None and cache[0] == key:
             return cache[1]
-        with _ASSET_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
-            before = signature(os.fstat(fh.fileno()))
-            manifest = json.load(fh)
-            after = signature(os.fstat(fh.fileno()))
+        manifest = json.loads(key[1])
     except OSError as exc:
         raise _asset_manifest_error(f"Asset manifest is missing at {_ASSET_MANIFEST_PATH}") from exc
     except json.JSONDecodeError as exc:
@@ -305,7 +299,7 @@ def _load_asset_manifest() -> dict:
     bundles = manifest.get("bundles")
     if not isinstance(bundles, dict):
         raise _asset_manifest_error("Asset manifest is incomplete: missing bundles")
-    if has_app_context() and before == after == key[1]:
+    if has_app_context():
         current_app.extensions["darklab.asset_manifest"] = (key, manifest)
     return manifest
 
