@@ -8,8 +8,14 @@ if (recovery) {
   const saved = recovery.querySelector('[data-use-saved-credential]');
   const anonymous = recovery.querySelector('[data-continue-anonymous]');
   const message = recovery.querySelector('[role="status"]');
+  const discard = recovery.querySelector('[data-remove-saved-credential]');
+  const hasSaved = Boolean(localStorage.getItem('access_credential'));
+  if (discard) {
+    discard.closest('label').classList.toggle('u-hidden', !hasSaved);
+    discard.addEventListener('change', () => { anonymous.disabled = hasSaved && !discard.checked; });
+  }
   if (saved) {
-    saved.classList.toggle('u-hidden', !localStorage.getItem('access_credential'));
+    saved.classList.toggle('u-hidden', !hasSaved);
     saved.disabled = false;
     saved.addEventListener('click', async () => {
       saved.disabled = true;
@@ -24,6 +30,7 @@ if (recovery) {
     });
   }
   anonymous?.addEventListener('click', async () => {
+    if (localStorage.getItem('access_credential') && !discard?.checked) return;
     anonymous.disabled = true;
     try {
       const csrf = browserCookie('darklab_csrf');
@@ -40,5 +47,5 @@ if (recovery) {
       anonymous.disabled = false;
     }
   });
-  if (anonymous) anonymous.disabled = false;
+  if (anonymous) anonymous.disabled = hasSaved && !discard?.checked;
 }

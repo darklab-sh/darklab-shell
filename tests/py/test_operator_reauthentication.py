@@ -60,7 +60,13 @@ def source_context(bundle, issued):
 
 
 def credential_setup(operator_db, monkeypatch, profile="token_required"):
-    cfg = operator_db.cfg.with_overrides({"access_profile": profile, "metrics_allowed_cidrs": ["127.0.0.0/8"]})
+    overrides = {"access_profile": profile, "metrics_allowed_cidrs": ["127.0.0.0/8"]}
+    if profile == "mixed":
+        provider = _config("mixed", provisioning="disabled")
+        overrides.update({key: provider[key] for key in (
+            "oidc_issuer", "oidc_client_id", "oidc_client_secret", "oidc_redirect_uri",
+        )})
+    cfg = operator_db.cfg.with_overrides(overrides)
     app = app_for(monkeypatch, cfg)
     bundle = create_identity()
     operator_grants.set_grant(bundle.principal.id, granted=True)
@@ -254,8 +260,11 @@ def provider_setup(operator_db, monkeypatch, profile="oidc_required"):
     return app, client, provider, state, principal
 
 
-def test_provider_step_up_binds_state_and_preserves_original_deadline_without_strict_cookie(operator_db, monkeypatch):
-    _app, client, _provider, state, principal = provider_setup(operator_db, monkeypatch)
+@pytest.mark.parametrize("profile", ["open", "mixed", "oidc_required"])
+def test_provider_step_up_binds_state_and_preserves_original_deadline_without_strict_cookie(
+    operator_db, monkeypatch, profile,
+):
+    _app, client, _provider, state, principal = provider_setup(operator_db, monkeypatch, profile)
     old_cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
     old = browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800, touch=False).session
     assert old is not None
@@ -268,6 +277,55 @@ def test_provider_step_up_binds_state_and_preserves_original_deadline_without_st
     assert new.principal_id == principal and new.absolute_expires_at == old.absolute_expires_at
     assert new.id != old.id
     assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
+
+
+@pytest.mark.parametrize("provider_session", [False, True])
+def test_profile_changes_preserve_browser_ownership_and_enforce_permitted_methods(
+    operator_db, monkeypatch, provider_session,
+):
+    if provider_session:
+        app, client, _provider, state, _principal = provider_setup(operator_db, monkeypatch, "open")
+        assert _callback(client, state).status_code == 302
+    else:
+        app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch, "mixed")
+    original = client.get("/auth/principal", base_url=ORIGIN).json["principal"]
+    cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    csrf = _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)
+    for profile in ["mixed", "token_required", "oidc_required", "open"]:
+        app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({
+            "access_profile": profile, "oidc_provisioning": "disabled",
+        })
+        allowed = profile != ("token_required" if provider_session else "oidc_required")
+        identity = client.get("/auth/principal", base_url=ORIGIN)
+        assert identity.status_code == (200 if allowed else 401)
+        if allowed:
+            assert identity.json["principal"] == original
+            assert client.get("/admin/access", base_url=ORIGIN).status_code == 204
+            assert client.post("/session/preferences", base_url=ORIGIN, json={}).status_code == 403
+            written = client.post("/session/preferences", base_url=ORIGIN,
+                                  headers={"X-Darklab-CSRF": csrf},
+                                  json={"preferences": {"pref_prompt_username": "same-owner"}})
+            assert written.status_code == 200
+        else:
+            assert client.get("/admin/access", base_url=ORIGIN).status_code == 404
+            assert client.get("/", base_url=ORIGIN).status_code == 302
+        assert _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE) == cookie
+    saved = client.get("/session/preferences", base_url=ORIGIN).json
+    assert saved["preferences"]["pref_prompt_username"] == "same-owner"
+
+
+def test_inflight_provider_sign_in_cannot_override_new_token_required_policy(operator_db, monkeypatch):
+    app, client, provider, _state, principal = provider_setup(operator_db, monkeypatch, "open")
+    state = _start(client, provider)
+    original = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
+    app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({
+        "access_profile": "token_required", "oidc_provisioning": "disabled",
+    })
+    response = _callback(client, state)
+    assert response.status_code == 302 and "oidc_error" in response.headers["Location"]
+    assert _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE) == original
+    assert client.get("/auth/principal", base_url=ORIGIN).status_code == 401
+    assert operator_grants.has_grant(principal)
 
 
 @pytest.mark.parametrize("failure", [

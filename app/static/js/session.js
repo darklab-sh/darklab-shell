@@ -337,6 +337,13 @@ async function apiFetch(url, options = {}) {
     _browserIdentity = _browserSessionIdentity();
     SESSION_ID = _browserIdentity.publicId;
     _sessionCsrfToken = _cookieValue('darklab_csrf');
+    // Server-rendered navigation and all cached state must belong to this
+    // session before any normal request continues under its authority.
+    if (!_identityNavigationPending) {
+      _identityNavigationPending = true;
+      SESSION_GLOBAL.location?.reload?.();
+    }
+    throw new Error('Browser sign-in completed. Reloading.');
   }
   const requestOptions = _sessionCore().withIdentityHeaders(options, _browserIdentity, CLIENT_ID);
   const teamId = typeof importedGetActiveTeamId === 'function'

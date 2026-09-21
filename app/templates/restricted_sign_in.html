@@ -16,7 +16,7 @@
     <section class="restricted-sign-in-card">
       <div class="restricted-sign-in-kicker">{{ "BROWSER SIGN-IN" if anonymous_access_enabled else "RESTRICTED ACCESS" }}</div>
       <h1 id="restricted-sign-in-title">{% if reauthentication %}Verify operator access{% else %}Sign in to {{ app_name }}{% endif %}</h1>
-      {% if reauthentication %}<p>Verify your identity to inspect instance settings. This does not extend your browser session’s absolute expiry.</p>{% elif force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
+      {% if reauthentication %}<p>Verify your identity to inspect instance settings. This does not extend your browser session’s absolute expiry.</p>{% elif force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter your access credential. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
       {% if error %}<div class="restricted-sign-in-error" role="alert">{{ error }}</div>{% endif %}
       {% if csrf_rejected %}<a class="btn btn-secondary" href="{{ url_for('auth.sign_in', next=next_path) }}">Sign in again</a>{% endif %}
       {% if oidc_sign_in_enabled %}
@@ -49,13 +49,16 @@
         >
         <button type="submit" class="btn btn-primary">{{ "Verify access" if reauthentication else "Sign in" }}</button>
       </form>
-      <p class="restricted-sign-in-help">If you don't have a credential, contact the shell operator.</p>
+      <p class="restricted-sign-in-help">{% if anonymous_access_enabled %}You can also continue anonymously and keep a workspace later from Options → Access.{% else %}If you don't have a credential, contact the shell operator.{% endif %}</p>
       {% endif %}
       {% if reauthentication %}<a class="btn btn-secondary" href="/">Cancel</a>{% endif %}
       {% if not reauthentication %}
       <div data-browser-sign-in data-next="{{ next_path }}">
         {% if credential_sign_in_enabled %}<button class="btn btn-secondary u-hidden" type="button" data-use-saved-credential disabled>Use saved credential</button>{% endif %}
-        {% if anonymous_access_enabled %}<button class="btn btn-secondary" type="button" data-continue-anonymous disabled>Continue anonymously</button>{% endif %}
+        {% if anonymous_access_enabled %}
+        <label class="restricted-sign-in-help u-hidden"><input type="checkbox" data-remove-saved-credential> I saved my credential elsewhere and want to remove it from this browser.</label>
+        <button class="btn btn-secondary" type="button" data-continue-anonymous disabled>Continue anonymously</button>
+        {% endif %}
         <p class="restricted-sign-in-help" role="status" aria-live="polite"></p>
       </div>
       {% endif %}

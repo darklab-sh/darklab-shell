@@ -13,7 +13,7 @@ function fixtureInfo(project) {
   if (project.includes('restricted')) return { slot: pg ? 'pg-restricted' : 'restricted-qualification', provider: false };
   if (project.includes('oidc-required')) return { slot: pg ? 'pg-oidc-required' : 'oidc-required', provider: true };
   if (project.includes('oidc')) return { slot: pg ? 'pg-mixed' : 'oidc-qualification', provider: true };
-  return { slot: '', provider: false };
+  return { slot: pg ? 'pg-open' : 'w1', provider: false, open: true };
 }
 async function browserRead(page, path) {
   return page.evaluate(async url => {
@@ -189,15 +189,17 @@ async function browseInventory(page, inventory, width, testInfo) {
 // journeys so one case does not spend its timeout on unrelated checks.
 async function withOperator(shellPage, testInfo, width, run, { fromMenu = false } = {}) {
   let page = shellPage;
-  const { slot, provider } = fixtureInfo(testInfo.project.name);
-  if (!slot) {
-    expect((await page.request.get('/admin/')).status()).toBe(404);
-    expect((await page.request.get('/admin/settings')).status()).toBe(404);
-    expect((await page.request.get('/diag')).status()).toBe(404);
-    expect((await page.request.get('/audit')).status()).toBe(404);
-    return;
+  const { slot, provider, open } = fixtureInfo(testInfo.project.name);
+  let credential = '';
+  if (open) {
+    await page.goto('/');
+    await ensurePromptReady(page);
+    await expect(page.locator('[data-action="admin"], [data-menu-action="admin"], [data-action="audit"], [data-menu-action="audit"]')).toHaveCount(0);
+    // Setup uses the disposable fixture boundary, leaving public signup limits intact.
+    credential = JSON.parse(control('create-principal', slot, '')).secret;
+  } else if (!provider) {
+    credential = readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
   }
-  const credential = provider ? '' : readFileSync(resolve(process.env.PW_E2E_SECRET_DIR, `${slot}.credential`), 'utf8').trim();
   await page.goto('/admin/');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   if (provider) await page.getByRole('link', { name: /identity provider/i }).click();
@@ -256,12 +258,6 @@ for (const width of [1280, 375]) {
     });
 
     test(`operator audit menu navigation at ${width}px`, async ({ page: shellPage }, testInfo) => {
-      if (!fixtureInfo(testInfo.project.name).slot) {
-        await shellPage.goto('/');
-        await ensurePromptReady(shellPage);
-        await expect(shellPage.locator('[data-action="audit"], [data-menu-action="audit"]')).toHaveCount(0);
-        return;
-      }
       await withOperator(shellPage, testInfo, width, async ({ page }) => {
         await page.goto('/');
         await ensurePromptReady(page);

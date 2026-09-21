@@ -131,10 +131,13 @@ def test_live_check_failure_returns_unavailable_and_one_safe_error(operator_db, 
 
 @pytest.mark.parametrize("format", ["csv", "json"])
 @pytest.mark.parametrize("failure", ["revoked", "session", "verification", "storage"])
-def test_export_stops_after_access_failure_and_never_logs_completion(operator_db, monkeypatch, caplog, format, failure):
+@pytest.mark.parametrize("profile", ["open", "token_required", "mixed"])
+def test_export_stops_after_access_failure_and_never_logs_completion(
+    operator_db, monkeypatch, caplog, format, failure, profile,
+):
     import blueprints.assets as assets
     caplog.set_level("INFO", logger="shell")
-    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch, profile)
     def pages(*args, **kwargs):
         yield {"events": [{"id": "first-safe-row"}], "truncated": False}
         if failure == "revoked":
@@ -182,9 +185,10 @@ def test_export_stops_after_access_failure_and_never_logs_completion(operator_db
     assert "PRIVATE_STORAGE_DETAILS" not in caplog.text + b"".join(emitted).decode()
 
 
-def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch):
+@pytest.mark.parametrize("profile", ["open", "token_required", "mixed"])
+def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch, profile):
     from blueprints import assets
-    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch, profile)
     calls = []
     monkeypatch.setattr(assets, "ai_run_test_prompt", lambda: calls.append(1))
     assert request(client, "/diag/ai-test").status_code == 403

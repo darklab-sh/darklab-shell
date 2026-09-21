@@ -401,23 +401,19 @@ describe('session.js', () => {
 describe('saved browser credential exchange', () => {
   const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
 
-  it('exchanges once before concurrent workspace reads and retains only public metadata', async () => {
-    const fetchImpl = vi.fn(async url => {
-      if (url === '/auth/credentials/redeem') {
-        session.browserDocument.cookie = 'darklab_csrf=csrf-proof'
-        return new Response(JSON.stringify({ authentication: { credential_id: `crd_${'a'.repeat(32)}` } }))
-      }
-      return new Response('{}')
+  it('exchanges once and reloads before concurrent workspace reads can change owners', async () => {
+    const location = { reload: vi.fn() }
+    const fetchImpl = vi.fn(async () => {
+      session.browserDocument.cookie = 'darklab_csrf=csrf-proof'
+      return new Response(JSON.stringify({ authentication: { credential_id: `crd_${'a'.repeat(32)}` } }))
     })
-    const session = loadSession({ storageData: { access_credential: secret }, fetchImpl })
-    await Promise.all([session.apiFetch('/history'), session.apiFetch('/projects')])
-    expect(fetchImpl.mock.calls.filter(([url]) => url === '/auth/credentials/redeem')).toHaveLength(1)
+    const session = loadSession({ storageData: { access_credential: secret }, fetchImpl, location })
+    const results = await Promise.allSettled([session.apiFetch('/history'), session.apiFetch('/projects')])
+    expect(results.every(result => result.status === 'rejected')).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toBe('/auth/credentials/redeem')
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ secret })
-    for (const [, options] of fetchImpl.mock.calls.slice(1)) {
-      expect(options.headers['X-Darklab-Credential']).toBeUndefined()
-      expect(options.headers['X-Darklab-Anonymous-ID']).toBeUndefined()
-      expect(JSON.stringify(options)).not.toContain(secret)
-    }
+    expect(location.reload).toHaveBeenCalledOnce()
     expect(session.storage.getItem('access_credential')).toBeNull()
     expect(session.getBrowserIdentitySnapshot().kind).toBe('browser_session')
   })

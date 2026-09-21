@@ -98,6 +98,10 @@ test.describe('workspace Access', () => {
       localStorage.setItem('anonymous_id', retiredId)
     }, { retiredId: anonymousId, secret: issued.secret })
     await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(id => {
+      const boot = JSON.parse(document.getElementById('app-config-json')?.textContent || '{}')
+      return boot.browser_identity?.credential_id === id
+    }, issued.id)
     await ensurePromptReady(page)
     await openAccess(page)
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
@@ -106,6 +110,22 @@ test.describe('workspace Access', () => {
     expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
     expect((await context.cookies()).find(cookie => cookie.name === 'darklab_browser_session').httpOnly).toBe(true)
     await expect(page.locator('body')).not.toContainText(issued.secret)
+  })
+
+  test('requires explicit removal of a saved credential before anonymous recovery', async ({ page }) => {
+    const anonymous = await page.evaluate(() => localStorage.getItem('anonymous_id'))
+    await page.evaluate(() => localStorage.setItem('access_credential', 'unusable-saved-credential'))
+    await page.goto('/auth/sign-in')
+    const resume = page.getByRole('button', { name: 'Continue anonymously' })
+    const consent = page.getByRole('checkbox', { name: 'I saved my credential elsewhere' })
+    await expect(consent).toBeVisible()
+    await expect(resume).toBeDisabled()
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBe('unusable-saved-credential')
+    await consent.check()
+    await resume.click()
+    await ensurePromptReady(page)
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('anonymous_id'))).toBe(anonymous)
   })
 
   for (const width of [1280, 375]) test.describe(`API tokens at ${width}px`, () => {
