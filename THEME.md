@@ -111,7 +111,7 @@ The shell, restricted sign-in, permalink, diagnostics, and audit routes pass the
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the registry into `window.ThemeRegistry`. The HTML payload keeps theme metadata and the runtime `vars` map but omits the unused duplicate `theme_vars` map. Server-side definitions and the `/themes` response retain their full shape. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 

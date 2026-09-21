@@ -14484,6 +14484,28 @@ class TestConfigRoute:
 
 
 class TestThemesRoute:
+    @pytest.mark.parametrize("theme_name", ["darklab_obsidian", "apricot_sand"])
+    def test_html_omits_raw_theme_map_without_changing_runtime_vars_or_api(self, theme_name):
+        client = get_client(use_forwarded_for=False)
+        client.set_cookie("pref_theme_name", theme_name)
+        original = deepcopy(config.THEME_REGISTRY)
+        api = client.get("/themes").get_json()
+        for path in ("/", "/share/missing"):
+            body = client.get(path).get_data(as_text=True)
+            match = re.search(r"window.ThemeRegistry = (.+?);\s*window.ThemeCssVars", body, re.S)
+            assert match, path
+            payload = json.loads(match.group(1))
+            assert payload["current"]["name"] == theme_name
+            assert payload["current"] == {key: value for key, value in api["current"].items() if key != "theme_vars"}
+            assert payload["themes"] == [
+                {key: value for key, value in entry.items() if key != "theme_vars"}
+                for entry in api["themes"]
+            ]
+            assert '"theme_vars"' not in match.group(1)
+        assert "theme_vars" in api["current"]
+        assert all("theme_vars" in entry for entry in api["themes"])
+        assert config.THEME_REGISTRY == original
+
     def test_returns_200(self):
         client = get_client()
         resp = client.get("/themes")
