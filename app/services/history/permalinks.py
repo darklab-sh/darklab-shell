@@ -20,6 +20,7 @@ from config import (
     theme_runtime_css_vars,
 )
 from core.helpers import WEB_FONT_FILES, current_theme_name
+from services.theme_payload import browser_theme_registry
 from services.runs.output_model import LineRole, line_event_from_legacy, to_legacy_entry
 
 _FONT_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
@@ -315,7 +316,7 @@ def _permalink_context(
         "page_title": f"{app_name} — {title}",
         "current_theme": theme_entry,
         "current_theme_css": theme_entry["vars"],
-        "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
+        "theme_registry": browser_theme_registry(theme_entry, THEME_REGISTRY),
         "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
         "page_model": page_model,
         "page_model_json": json.dumps(page_model),
@@ -346,7 +347,7 @@ def _permalink_error_page(noun: str) -> Response:
         app_name=app_name,
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
-        theme_registry={"current": current_theme, "themes": THEME_REGISTRY},
+        theme_registry=browser_theme_registry(current_theme, THEME_REGISTRY),
         fallback_theme_css=theme_runtime_css_vars(DARK_THEME),
         noun=noun,
         detail=detail,

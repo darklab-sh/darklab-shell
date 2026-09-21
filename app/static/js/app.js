@@ -593,10 +593,11 @@ function closeOptions() {
 function openThemeSelector() {
   _closeMajorOverlays();
   if (typeof _appBlurVisibleComposerMobileAdapter === 'function') _appBlurVisibleComposerMobileAdapter();
-  _appRenderThemeSelectionOptionsAdapter();
+  const ready = _appRenderThemeSelectionOptionsAdapter({ load: true });
   _appSyncThemeSelectionControlsAdapter();
   _appShowThemeOverlayAdapter();
-  setTimeout(() => {
+  const focusSelection = () => setTimeout(() => {
+    if (!_appIsThemeOverlayOpenAdapter()) return;
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
     if (!_appFocusElementAdapter(target, { preventScroll: true })) {
@@ -606,6 +607,8 @@ function openThemeSelector() {
       _appMarkInteractionSurfaceReadyAdapter('theme', themeOverlay, document.getElementById('theme-modal'));
     }
   }, 0);
+  if (ready && typeof ready.then === 'function') ready.then(focusSelection);
+  else focusSelection();
 }
 
 function closeThemeSelector() {

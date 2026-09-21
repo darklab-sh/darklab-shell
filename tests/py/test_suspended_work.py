@@ -8,6 +8,7 @@ from contextlib import nullcontext
 
 import pytest
 
+from conftest import create_pristine_sqlite_connection
 from core.database_backend import DatabaseBackend
 from core.migrations import MIGRATIONS
 from core.migrations.runner import run_migrations
@@ -23,22 +24,36 @@ from services.workspace.models import WorkspaceSettings
 NOW = "2026-09-13T12:00:00+00:00"
 
 
-@pytest.fixture
-def suspended_db(tmp_path, monkeypatch):
+def _suspended_database(tmp_path, monkeypatch, *, migrate=False):
     monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
     reset_master_key_cache_for_tests()
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    if migrate:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    else:
+        conn = create_pristine_sqlite_connection()
     monkeypatch.setattr("services.auth.background_runtime.stop_principal_active_work", lambda _principal: ())
     monkeypatch.setattr(channels_store.database, "db_connect", lambda: nullcontext(conn))
     monkeypatch.setattr(channels_store.database, "DB_BACKEND", DatabaseBackend.SQLITE)
     settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
     bundles = [storage.create_principal_with_credential(settings=settings, conn=conn) for _ in range(2)]
-    yield conn, bundles
-    conn.close()
-    reset_master_key_cache_for_tests()
+    try:
+        yield conn, bundles
+    finally:
+        conn.close()
+        reset_master_key_cache_for_tests()
+
+
+@pytest.fixture
+def suspended_db(tmp_path, monkeypatch):
+    yield from _suspended_database(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def suspended_upgrade_db(tmp_path, monkeypatch):
+    yield from _suspended_database(tmp_path, monkeypatch, migrate=True)
 
 
 def _insert(conn, table, **fields):
@@ -152,8 +167,8 @@ def test_channel_and_digest_keep_reason_until_explicit_resume(suspended_db):
     ]
 
 
-def test_upgrade_recovers_pause_reasons_only_for_disabled_principals(suspended_db):
-    conn, (bundle, other) = suspended_db
+def test_upgrade_recovers_pause_reasons_only_for_disabled_principals(suspended_upgrade_db):
+    conn, (bundle, other) = suspended_upgrade_db
     _seed_work(conn, bundle, "disabled", manually_paused=True, jobs=False)
     _seed_work(conn, other, "active", manually_paused=True, jobs=False)
     conn.execute("UPDATE principals SET status = 'disabled', disabled_at = ? WHERE id = ?", (NOW, bundle.principal.id))

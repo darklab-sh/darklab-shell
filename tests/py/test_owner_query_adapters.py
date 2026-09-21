@@ -181,12 +181,16 @@ def test_owner_query_adapters_require_explicit_table_shape():
         composite_owner_predicate(owner, key_values=(("personal_workspace_id", "other"),))
 
 
-def test_checked_in_owner_query_inventory_matches_source():
+def test_checked_in_owner_query_inventory_matches_source(capsys):
+    import owner_query_inventory
+
+    assert owner_query_inventory.main(["--check"]) == 0, capsys.readouterr()
+
+
+def test_owner_query_inventory_cli_accepts_help_outside_checkout(tmp_path):
     result = subprocess.run(
-        [sys.executable, "scripts/development/owner_query_inventory.py", "--check"],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
+        [sys.executable, str(REPO_ROOT / "scripts/development/owner_query_inventory.py"), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
-    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.returncode == 0, result.stderr
+    assert "--inventory" in result.stdout and "--check" in result.stdout

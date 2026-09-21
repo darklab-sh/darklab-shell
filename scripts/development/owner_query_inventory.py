@@ -17,6 +17,8 @@ import re
 import sys
 from typing import Iterable, cast
 
+from python_source import parse_python_source
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INVENTORY = REPO_ROOT / ".tooling" / "owner-query-inventory.jsonl"
@@ -699,44 +701,19 @@ def _iter_python_paths() -> Iterable[Path]:
             yield path
 
 
-def _production_helper_calls() -> dict[str, int]:
-    counts = Counter({name: 0 for name in QUERY_HELPERS})
-    helper_modules = {
-        "app/services/teams/ownership_queries.py",
-        "app/services/teams/scope.py",
-    }
-    for path in sorted((REPO_ROOT / "app").rglob("*.py")):
-        relative = path.relative_to(REPO_ROOT).as_posix()
-        if relative in helper_modules or "__pycache__" in path.parts:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if isinstance(node.func, ast.Name):
-                name = node.func.id
-            elif isinstance(node.func, ast.Attribute):
-                name = node.func.attr
-            else:
-                continue
-            if name in QUERY_HELPERS:
-                counts[name] += 1
-    return dict(sorted(counts.items()))
-
-
-def generate_sites() -> list[InventorySite]:
+def generate_sites(helper_counts: Counter | None = None) -> list[InventorySite]:
     table_shapes = _table_shapes()
     sites: list[InventorySite] = []
     for path in _iter_python_paths():
         relative = path.relative_to(REPO_ROOT).as_posix()
-        source = path.read_text(encoding="utf-8")
         try:
-            tree = ast.parse(source, filename=relative)
+            tree = parse_python_source(path, filename=relative)
         except SyntaxError as exc:
             raise RuntimeError(f"Unable to parse {relative}: {exc}") from exc
-        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        nodes = list(ast.walk(tree))
+        parents = {child: parent for parent in nodes for child in ast.iter_child_nodes(parent)}
         scope_tables: dict[str, set[str]] = {}
-        for candidate in ast.walk(tree):
+        for candidate in nodes:
             value = _stringish(candidate)
             if value is None or _is_stringish_parent(parents.get(candidate)):
                 continue
@@ -745,7 +722,16 @@ def generate_sites() -> list[InventorySite]:
                 continue
             scope_tables.setdefault(_scope_for(candidate, parents), set()).update(tables)
         seen: Counter[tuple[str, str]] = Counter()
-        for node in ast.walk(tree):
+        count_helpers = relative.startswith("app/") and relative not in {
+            "app/services/teams/ownership_queries.py", "app/services/teams/scope.py",
+        }
+        for node in nodes:
+            if helper_counts is not None and count_helpers and isinstance(node, ast.Call):
+                name = node.func.id if isinstance(node.func, ast.Name) else (
+                    node.func.attr if isinstance(node.func, ast.Attribute) else ""
+                )
+                if name in QUERY_HELPERS:
+                    helper_counts[name] += 1
             value = _stringish(node)
             if value is None or _is_stringish_parent(parents.get(node)):
                 continue
@@ -809,7 +795,8 @@ def _reviewed_sites(path: Path) -> dict[str, dict[str, object]]:
 
 
 def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) -> dict[str, object]:
-    sites = [asdict(site) for site in generate_sites()]
+    helper_counts = Counter({name: 0 for name in QUERY_HELPERS})
+    sites = [asdict(site) for site in generate_sites(helper_counts)]
     reviewed_sites = reviewed_sites or {}
     for site in sites:
         reviewed = reviewed_sites.get(str(site["site_id"]))
@@ -849,7 +836,7 @@ def build_inventory(reviewed_sites: dict[str, dict[str, object]] | None = None) 
             "by_adapter_shape": dict(sorted(Counter(str(site["adapter_shape"]) for site in sites).items())),
             "by_branch": dict(sorted(Counter(str(site["planned_branch"]) for site in sites).items())),
             "by_classification": dict(sorted(Counter(str(site["conversion_classification"]) for site in sites).items())),
-            "production_helper_calls": _production_helper_calls(),
+            "production_helper_calls": dict(sorted(helper_counts.items())),
         },
         "sites": sites,
     }
@@ -863,14 +850,14 @@ def _render(inventory: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--write", action="store_true", help="replace the checked-in inventory")
     action.add_argument("--check", action="store_true", help="fail when the inventory has drifted")
     action.add_argument("--summary", action="store_true", help="print the current scan summary")
     parser.add_argument("--inventory", type=Path, default=DEFAULT_INVENTORY)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     inventory_path = args.inventory.resolve()
     reviewed_sites = _reviewed_sites(inventory_path)

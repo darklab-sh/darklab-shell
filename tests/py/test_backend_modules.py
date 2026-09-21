@@ -65,7 +65,7 @@ import services.reports.storage as report_storage
 import services.reports.templates as report_templates
 import runtime_bootstrap
 import app as shell_app_module
-from conftest import build_test_config, copy_pristine_sqlite_database
+from conftest import build_test_config, copy_pristine_sqlite_database, create_pristine_sqlite_connection
 from conftest import make_test_app as _test_app
 from conftest import reset_reusable_test_apps, reusable_test_app
 import config as app_config
@@ -18689,6 +18689,8 @@ class TestEntrypointWorkspaceRepair:
                         f"data_dir: {data_dir}",
                         f"prometheus_multiproc_dir: {metrics_dir}",
                         "workspace_enabled: false",
+                        "cve_risk:",
+                        "  bootstrap_enabled: false",
                         "rate_limit_enabled: false",
                         "run_broker_require_redis: true",
                     ]
@@ -18699,6 +18701,7 @@ class TestEntrypointWorkspaceRepair:
             env.update(
                 {
                     "APP_CONF_DIR": str(conf_dir),
+                    "APP_LOCAL_CONF_DIR": str(conf_dir),
                     "APP_DATA_DIR": str(data_dir),
                     "PROMETHEUS_MULTIPROC_DIR": str(metrics_dir),
                     "REDIS_URL": "redis://redis.example.invalid:6379/0",
@@ -28486,6 +28489,51 @@ class TestPermalinkErrorPage:
 
 
 class TestPristineSQLiteTestDatabase:
+    def test_memory_clones_preserve_schema_transactions_and_isolation(self):
+        from core.migrations import MIGRATIONS
+
+        first = create_pristine_sqlite_connection()
+        second = create_pristine_sqlite_connection()
+        try:
+            assert not first.in_transaction
+            assert first.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+            assert first.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert first.execute("PRAGMA foreign_key_check").fetchone() is None
+            assert {
+                row["version"] for row in first.execute("SELECT version FROM schema_migrations")
+            } == {migration.version for migration in MIGRATIONS}
+            first.execute(
+                "INSERT INTO runs (id, personal_workspace_id, command, started, output_search_text) "
+                "VALUES ('clone-run', ?, 'clonecheck', '2026-09-21', 'clonecheck')",
+                (anonymous_session_id("pristine-memory"),),
+            )
+            assert first.in_transaction
+            first.commit()
+            assert first.execute(
+                "SELECT rowid FROM runs_fts WHERE runs_fts MATCH 'clonecheck'"
+            ).fetchall()
+            assert second.execute("SELECT 1 FROM runs WHERE id = 'clone-run'").fetchone() is None
+            first.execute("DELETE FROM runs WHERE id = 'clone-run'")
+            first.rollback()
+            assert first.execute("SELECT id FROM runs WHERE id = 'clone-run'").fetchone()["id"] == "clone-run"
+            with pytest.raises(sqlite3.IntegrityError):
+                first.execute(
+                    "INSERT INTO personal_workspaces (id, principal_id, storage_key, created_at) "
+                    "VALUES (?, ?, ?, '2026-09-21')",
+                    ("wsp_" + "a" * 32, "prn_" + "b" * 32, "ws_" + "c" * 32),
+                )
+                first.commit()
+            first.rollback()
+        finally:
+            first.close()
+            second.close()
+        fresh = create_pristine_sqlite_connection(foreign_keys=False)
+        try:
+            assert fresh.execute("PRAGMA foreign_keys").fetchone()[0] == 0
+            assert fresh.execute("SELECT 1 FROM runs WHERE id = 'clone-run'").fetchone() is None
+        finally:
+            fresh.close()
+
     def test_copy_is_current_clean_and_self_contained(self, tmp_path):
         from core.migrations import MIGRATIONS
         from services.auth.schema_guard import post_cutover_schema_violations

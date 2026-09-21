@@ -257,7 +257,11 @@ async function handleThemeCommand(cmd, tabId = null, execution) {
 
   const applyThemeSelection = (typeof importedApplyThemeSelection !== 'undefined' && importedApplyThemeSelection)
     || _cliGlobalFunction('applyThemeSelection');
-  if (typeof applyThemeSelection === 'function') applyThemeSelection(entry.name);
+  if (typeof applyThemeSelection === 'function' && await applyThemeSelection(entry.name) === false) {
+    _cliAppendLine('theme: unable to load this theme; try again', 'exit-fail', tabId, null, execution);
+    _cliSetStatus('fail', execution);
+    return true;
+  }
   _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId, null, execution);
   _cliRecordSuccess(cmd, execution);
   _cliSetStatus('ok', execution);

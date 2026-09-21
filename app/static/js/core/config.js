@@ -75,6 +75,18 @@ _configLogClientEvent('app config loaded', null, {
   ) ? 'window.APP_CONFIG' : 'app-config-json'),
 });
 
+// Distinguish the complete server payload from partial fallback/harness state.
+function isUsableAppConfig(config) {
+  return !!config && typeof config.app_name === 'string' && !!config.app_name
+    && typeof config.version === 'string' && !!config.version
+    && typeof config.workspace_enabled === 'boolean'
+    && typeof config.share_redaction_enabled === 'boolean'
+    && Array.isArray(config.share_redaction_rules)
+    && Number.isInteger(config.recent_commands_limit) && config.recent_commands_limit > 0
+    && Number.isInteger(config.max_tabs) && config.max_tabs > 0
+    && ['open', 'token_required', 'oidc_required', 'mixed'].includes(config.access_profile);
+}
+
 function getAppConfig() {
   return APP_CONFIG;
 }
@@ -94,4 +106,4 @@ if (typeof window !== 'undefined') {
   });
 }
 
-export { APP_CONFIG, getAppConfig, readBootstrappedAppConfig, setAppConfig };
+export { isUsableAppConfig, APP_CONFIG, getAppConfig, readBootstrappedAppConfig, setAppConfig };

@@ -67,6 +67,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 
 **Behavior:**
 
+- You can start typing while saved command recall finishes loading. A delayed response keeps your draft and the current workspace intact.
 - Submitted commands are echoed inline above their output so the transcript reads like a real terminal session.
 - Pressing **Enter** on a blank prompt adds a fresh prompt line without starting a run.
 - **Ctrl+C** is context-aware: while a command is running it opens a kill confirmation dialog; while the tab is idle it drops a new prompt line.

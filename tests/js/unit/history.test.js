@@ -329,6 +329,19 @@ describe('command history hydration', () => {
     expect(cmdInput.value).toBe('curl -I https://darklab.sh')
   })
 
+  it('merges late startup recall without losing new commands, drafts, or navigation', () => {
+    const { hydrateCmdHistory, addToHistory, navigateCmdHistory, getCmdHistory } = loadHistoryHelpers()
+    const input = document.getElementById('cmd')
+    addToHistory('whoami')
+    input.value = 'unfinished draft'
+    expect(navigateCmdHistory(1)).toBe(true)
+    hydrateCmdHistory([{ command: 'whoami' }, { command: 'status' }], { mergeExisting: true })
+    expect(getCmdHistory()).toEqual(['whoami', 'status'])
+    expect(input.value).toBe('whoami')
+    expect(navigateCmdHistory(-1)).toBe(true)
+    expect(input.value).toBe('unfinished draft')
+  })
+
   it('adds commands to both global recents and active tab recall', () => {
     const { addToHistory, navigateCmdHistory, getCmdHistory, getTabCommandHistory } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')

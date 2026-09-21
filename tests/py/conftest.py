@@ -35,6 +35,7 @@ APP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__)
 ROOT_DIR = Path(APP_DIR).parent
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
+sys.path.insert(0, str(ROOT_DIR / "scripts" / "development"))
 
 import config as shell_config  # noqa: E402
 from identity_helpers import (  # noqa: E402
@@ -179,6 +180,24 @@ def copy_pristine_sqlite_database(db_path: str | Path) -> Path:
     return target
 
 
+def create_pristine_sqlite_connection(*, foreign_keys: bool = True) -> sqlite3.Connection:
+    """Return an isolated current-schema memory database; the caller closes it."""
+    template = _ensure_pristine_sqlite_template()
+    conn = sqlite3.connect(":memory:")
+    try:
+        source = sqlite3.connect(f"{template.as_uri()}?mode=ro", uri=True)
+        try:
+            source.backup(conn)
+        finally:
+            source.close()
+        conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA foreign_keys = {int(foreign_keys)}")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
 def make_test_app(*, init_db: bool = True):
     import app as shell_app_module  # noqa: PLC0415
 
@@ -200,7 +219,7 @@ def reusable_test_app(scope: str, *, init_db: bool = True):
     """Return an opt-in shared app for stable route tests.
 
     Callers still create a function-scoped client and must not mutate extension
-    registration, request hooks, logging, imports, or construction-time config.
+    registration, request hooks, logging setup, imports, or construction-time config.
     Those contracts continue to use ``make_test_app()`` directly.
     """
     key = (scope, init_db)
@@ -267,6 +286,15 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
+    timing_output = os.environ.get("PYTEST_TIMING_JSON")
+    if timing_output and not config.option.collectonly:
+        from timing_helpers import PytestTimings  # noqa: PLC0415
+
+        output = Path(timing_output)
+        config.pluginmanager.register(PytestTimings(
+            output if output.is_absolute() else ROOT_DIR / output,
+            app_data_dir_supplied=_OWNED_TEST_DATA_DIR is None,
+        ))
     config.addinivalue_line(
         "markers",
         "release_integration: slower release-boundary coverage for release workflows",
@@ -274,6 +302,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "postgres: opt-in tests that require DARKLAB_TEST_POSTGRES_DSN or --postgres-dsn",
+    )
+    config.addinivalue_line(
+        "markers",
+        "sqlite_backend: SQLite variants already covered by the required fast lane",
     )
     xmlpath = getattr(config.option, "xmlpath", None)
     if xmlpath and not Path(xmlpath).is_absolute():
@@ -305,3 +337,14 @@ def postgres_dsn(request) -> str:
     if not dsn:
         pytest.skip(f"set {POSTGRES_DSN_ENV} or --postgres-dsn to run Postgres integration tests")
     return dsn
+
+
+@pytest.fixture(scope="session")
+def postgres_test_databases(postgres_dsn):
+    from postgres_helpers import PostgresTestDatabases  # noqa: PLC0415
+
+    databases = PostgresTestDatabases(postgres_dsn)
+    try:
+        yield databases
+    finally:
+        databases.close()

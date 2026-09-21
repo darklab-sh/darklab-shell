@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 import config
-from conftest import build_test_config, copy_pristine_sqlite_database, make_test_app
+from conftest import build_test_config, copy_pristine_sqlite_database, reusable_test_app
 from core import database
 from core.database_access import get_db_connect
 from core.logging_setup import GELFFormatter, _TextFormatter, _extra_fields
@@ -24,7 +24,7 @@ from services.workspace.models import WorkspaceSettings
 @pytest.fixture
 def milestones(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", str(copy_pristine_sqlite_database(tmp_path / "milestones.db")))
-    app = make_test_app()
+    app = reusable_test_app(__name__, init_db=False)
     app.config["DARKLAB_CONFIG"] = build_test_config({"audit_log_enabled": False})
     settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
     settings.root.mkdir()

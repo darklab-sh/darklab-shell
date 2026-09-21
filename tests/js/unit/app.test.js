@@ -4220,6 +4220,18 @@ describe('app helpers', () => {
     expect(fetchCatalog).toHaveBeenCalledTimes(['network', 'server'].includes(kind) ? 2 : 1)
   })
 
+  it('uses a complete bootstrap config without requesting it again', async () => {
+    const config = {
+      app_name: 'Bootstrapped shell', version: '3.1.0', access_profile: 'open',
+      workspace_enabled: true, share_redaction_enabled: true, share_redaction_rules: [],
+      recent_commands_limit: 25, max_tabs: 5,
+    }
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }))
+    await loadAppFns({ apiFetch, appConfig: config })
+    await vi.waitFor(() => expect(document.title).toBe('Bootstrapped shell'))
+    expect(apiFetch.mock.calls.map(([url]) => url)).not.toContain('/config')
+  })
+
   it('bootstraps cleanly when config and allowed-commands fetches fail', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config' || url === '/allowed-commands' || url === '/autocomplete') {
@@ -4289,10 +4301,10 @@ describe('app helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/commands/catalog')
     expect(apiFetch).toHaveBeenCalledWith('/autocomplete')
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
-    expect(logClientError).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(logClientError).toHaveBeenCalledWith(
       'failed to load /allowed-commands',
       expect.any(Error),
-    )
+    ))
     expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
     expect(storage.getItem('theme')).toBe('only_theme')
   })

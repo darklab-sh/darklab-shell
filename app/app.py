@@ -282,9 +282,14 @@ def _log_asset_manifest_resolution_failed(
 
 
 def _load_asset_manifest() -> dict:
+    # Each app owns parsed data. Read and compare content because timestamp and
+    # size signatures can collide on rapid edits or coarse container filesystems.
+    cache = current_app.extensions.get("darklab.asset_manifest") if has_app_context() else None
     try:
-        with _ASSET_MANIFEST_PATH.open("r", encoding="utf-8") as fh:
-            manifest = json.load(fh)
+        key = (str(_ASSET_MANIFEST_PATH.resolve()), _ASSET_MANIFEST_PATH.read_text(encoding="utf-8"))
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        manifest = json.loads(key[1])
     except OSError as exc:
         raise _asset_manifest_error(f"Asset manifest is missing at {_ASSET_MANIFEST_PATH}") from exc
     except json.JSONDecodeError as exc:
@@ -294,6 +299,8 @@ def _load_asset_manifest() -> dict:
     bundles = manifest.get("bundles")
     if not isinstance(bundles, dict):
         raise _asset_manifest_error("Asset manifest is incomplete: missing bundles")
+    if has_app_context():
+        current_app.extensions["darklab.asset_manifest"] = (key, manifest)
     return manifest
 
 

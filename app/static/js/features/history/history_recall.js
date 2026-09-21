@@ -228,28 +228,19 @@ function addToRecentPreview(cmd) {
   _historyRecallRenderHistory();
 }
 
-function hydrateCmdHistory(runs) {
+function hydrateCmdHistory(runs, { mergeExisting = false } = {}) {
   const items = Array.isArray(runs) ? runs : [];
-  const seen = new Set();
-  const config = _historyRecallAppConfig();
-  _historyRecallSetCmdHistory(items
-    .map(run => run && typeof run.command === 'string' ? run.command : '')
-    .filter(cmd => {
-      if (!cmd || seen.has(cmd)) return false;
-      seen.add(cmd);
-      return true;
-    })
-    .slice(0, config.recent_commands_limit));
-  const previewSeen = new Set();
-  _historyRecallSetRecentPreviewHistory(items
-    .map(run => run && typeof run.command === 'string' ? run.command : '')
-    .filter(cmd => {
-      if (!cmd || previewSeen.has(cmd)) return false;
-      previewSeen.add(cmd);
-      return true;
-    })
-    .slice(0, config.recent_commands_limit));
-  resetCmdHistoryNav();
+  const commands = items.map(run => run && typeof run.command === 'string' ? run.command : '').filter(Boolean);
+  const limit = _historyRecallAppConfig().recent_commands_limit;
+  const unique = values => [...new Set(values)].slice(0, limit);
+  _historyRecallSetCmdHistory(unique([
+    ...(mergeExisting ? _historyRecallCmdHistory() : []), ...commands,
+  ]));
+  _historyRecallSetRecentPreviewHistory(unique([
+    ...(mergeExisting ? _historyRecallRecentPreviewHistory() : []), ...commands,
+  ]));
+  // Startup recall must not clear a draft or disturb navigation begun meanwhile.
+  if (!mergeExisting) resetCmdHistoryNav();
   _historyRecallRenderHistory();
 }
 

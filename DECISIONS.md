@@ -49,6 +49,8 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Assessment History, Evidence, and Finding Identity](#assessment-history-evidence-and-finding-identity)
   - [Assessment Execution, Secrets, and Packaging](#assessment-execution-secrets-and-packaging)
 - [Backend Architecture Decisions](#backend-architecture-decisions)
+  - [Pytest Feedback Uses Exact Serial Partitions](#pytest-feedback-uses-exact-serial-partitions)
+  - [Request Performance Preserves Authentication and Maintenance](#request-performance-preserves-authentication-and-maintenance)
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
   - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
 - [Frontend Decisions](#frontend-decisions)
@@ -383,13 +385,36 @@ The primary image follows the measured full-image decision recorded below instea
 
 `npm run test:pytest` remains the canonical pre-merge and release command. CI selects ordinary backend coverage with `not release_integration` and slower installer, publication, signing, and backup/restore boundaries with `release_integration`. A collection guard compares node IDs from both selections with the complete suite, so a misplaced marker can't silently drop or duplicate coverage. Each lane publishes its own JUnit report, slowest-case output, and file-level timing summary.
 
-Stable route modules can opt into one reusable Flask app, but every test still gets a new client and mutable Flask config is restored around each case. Factory behavior, construction-time configuration, extension isolation, logging, imports, and tests that need independent applications continue to call the fresh app helper. This keeps the common HTTP path cheap without changing the factory contract the suite is meant to protect.
+Stable route modules can opt into one reusable Flask app, but every test still gets a new client and mutable Flask config is restored around each case. Factory behavior, construction-time configuration, extension isolation, construction logging, imports, and tests that need independent applications continue to call the fresh app helper. This keeps the common HTTP path cheap without changing the factory contract the suite is meant to protect. Request-event logging, stream revocation, and credential lifecycle/PAT tests can reuse stable wiring while keeping fresh clients and their existing data-isolation fixtures. Operator helpers that construct apps from per-case backend and provider configuration retain fresh factories.
 
-Ordinary SQLite tests that only need an empty current schema copy a pristine database instead of rebuilding it. Each pytest process creates that source once through the production `db_init()` path, packages it through SQLite's backup API into one closed, sidecar-free file, validates integrity, migration head, FTS, and the principal-only schema, then copies it to a unique path for each test. The copy helper refuses existing database or sidecar state, and focused coverage proves that rows written to one copy never appear in another. Migration, reconciliation, startup, failure, and rollback tests deliberately keep their purpose-built databases and the real initialization path.
+Ordinary SQLite tests that only need an empty current schema copy a pristine database instead of rebuilding it. Each pytest process creates that source once through the production `db_init()` path, packages it through SQLite's backup API into one closed, sidecar-free file, validates integrity, migration head, FTS, and the principal-only schema, then copies it to a unique path or backs it up into a new in-memory connection for each test. In-memory clones preserve caller-owned transactions and use row mappings with explicit foreign-key enforcement. The copy helper refuses existing database or sidecar state, and focused coverage proves that rows written to one copy never appear in another. Migration, reconciliation, startup, failure, and rollback tests deliberately keep their purpose-built databases and the real initialization path.
+
+Ordinary Postgres cases use a session-owned migrated template and a distinct database for each test. This avoids repeated table and index creation while preserving commits through independent connections. The template is closed and refuses new connections before cloning. Ordinary query and operator fixtures disable JIT, matching the production default; real-pool configuration and cold-start coverage keep their own connection paths. Roles without `CREATEDB`, or host databases whose encoding or locale differs from the cluster template, use isolated schemas instead. Migration, startup, schema-rejection, and initialization-failure tests retain real schema construction. Cleanup is limited to uniquely named resources created by the current invocation.
 
 A new production schema baseline was not adopted as a test-speed shortcut. Rotating the baseline changes fresh-install and upgrade qualification, while the measured cost came from replaying production initialization in ordinary tests that weren't testing initialization. Keeping that decision separate preserves every historical migration and the existing SQLite/Postgres upgrade contract without making the normal feedback loop pay for it repeatedly.
 
 `pytest-xdist` isn't used for the backend suite. The current tests intentionally exercise process-wide config, logging, SQLite paths, Redis stand-ins, generated files, and local servers. Isolating all of those per worker would add more machinery than the measured runner capacity justifies, while the exact two-lane split provides earlier feedback without introducing worker-only failures. Parallel workers can be reconsidered if those shared boundaries become independently namespaced and repeated measurements show a worthwhile gain.
+
+The September 2026 local qualification retained realistic data and assertions while measuring these focused changes:
+
+| Focused workload | Before | After | Measurement boundary |
+| --- | --- | --- | --- |
+| Five ordinary SQLite fixture files | 38.83 s | 10.20 s | Same machine; four added isolation checks |
+| Logging, architecture, docs, and owner inventory | 38.84 s | 28.21 s | Same machine; three added cache/CLI checks |
+| Large Atlas Postgres case | 7.06 s | 2.16 s | Test call, same data; direct-connection JIT on versus production default off |
+| Large report selection case | 14.30 s | 5.32 s | Both calls under cProfile; only configuration restoration changed |
+| Compose dependency preparation plus two template checks | 19.51 s | 4.28 s | Cold then warm cache in one disposable Compose project |
+| Bundle prerequisite | About 16–17 s | 0.25–0.32 s | Rebuilding three times versus validating fingerprints; full CI check retained |
+
+These are focused observations, not a promised whole-suite reduction. The Atlas profile attributed about 4.8 seconds to two JIT-compiled query shapes; production already disabled JIT, so the correction belongs in ordinary fixtures. Report profiling attributed most removable work to restoring every validated config field after changing only two. Report composition still performs real ownership checks, preview rendering, and archive generation. Container durability settings, real-pool cold startup, and feed-loading tests weren't weakened to improve these numbers. CI comparisons also account for changed selections, added regressions, cache state, and runner contention.
+
+### Request Performance Preserves Authentication and Maintenance
+
+Static endpoints use the shared per-request authentication result. A public asset doesn't make supplied identity disposable: retirement checks, credential and principal revocation, browser-session validation, PAT route restrictions, and credential-guess accounting still apply. Cross-request authentication caching or a blanket static-path exemption would change those contracts. Reducing source-module requests through the existing bundle mode preserves them.
+
+The September 2026 local SQLite review measured warm static requests at about 0.5 ms with no identity and 2.1–2.6 ms with an anonymous header, portable credential, PAT, or restricted browser cookie. No-identity requests already performed zero SQL statements. Those test-client measurements describe server work, not browser navigation latency or production contention. Manifest parsing was independent repeat work. After freshness metadata expanded the manifest, parsing each read measured about 0.461 ms; a content-checked, app-owned cache measured 0.057 ms. The cache compares file content rather than timestamps because rapid same-size writes can share metadata on container filesystems. Missing, malformed, edited, and atomically replaced files retain their invalidation and error behavior.
+
+Request-driven maintenance retained its existing bounded cadence and ownership rules. Checking 100 test-owned workspace directories took about 1 ms, and an uncontended SQLite checkpoint about 1.7 ms. These measurements didn't justify introducing another worker or moving cleanup into a new lifecycle; they don't establish a latency bound for large or locked databases.
 
 ### Blueprint Parent Modules and Size Ratchets
 

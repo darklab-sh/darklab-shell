@@ -18,6 +18,7 @@ import {
   refocusComposerAfterAction as importedRefocusComposerAfterAction,
   setComposerValue as importedSetComposerValue,
 } from '../../ui/ui_helpers.js';
+import { loadShellCatalogs } from './shell_catalogs.js';
 import { activateFaqCommandChip as importedActivateFaqCommandChip } from './faq_helpers.js';
 import { bindPressable as importedBindPressable } from '../../ui/ui_pressable.js';
 import { closeMajorOverlays as importedCloseMajorOverlays } from '../../ui/overlay_actions_bridge.js';
@@ -427,6 +428,7 @@ function renderCommandRegistry() {
 }
 
 function openCommandRegistry() {
+  void loadShellCatalogs();
   const overlay = _commandRegistryOverlay();
   const body = _commandRegistryBody();
   if (!overlay || !body) return;

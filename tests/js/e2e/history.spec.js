@@ -411,18 +411,23 @@ test.describe('history drawer', () => {
       await json({ error: 'not found' }, 404)
     })
 
-    const aiEnabledConfig = await page.evaluate(() => ({
-      ...window.APP_CONFIG,
-      ai_enabled: true,
-      ai_feature_summary: true,
-      ai_feature_next_commands: true,
-      ai_feature_run_suggestions: true,
-    }))
-    await page.route(/https?:\/\/[^/]+\/config(?:\?|$)/, async (route) => {
+    await page.route(/https?:\/\/[^/]+\/(?:\?.*)?$/, async (route) => {
+      const response = await route.fetch()
+      const html = await response.text()
+      const configScript = /(<script id="app-config-json" type="application\/json">)([\s\S]*?)(<\/script>)/
+      expect(html).toMatch(configScript)
+      const body = html.replace(configScript, (_match, open, json, close) => (
+        open + JSON.stringify({
+          ...JSON.parse(json),
+          ai_enabled: true,
+          ai_feature_summary: true,
+          ai_feature_next_commands: true,
+          ai_feature_run_suggestions: true,
+        }).replace(/</g, '\\u003c') + close
+      ))
       await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(aiEnabledConfig),
+        response,
+        body,
       })
     })
     await page.reload()

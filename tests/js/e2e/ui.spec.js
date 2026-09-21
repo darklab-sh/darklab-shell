@@ -678,6 +678,7 @@ test.describe('theme selector', () => {
 
   test('selecting a theme applies it from the selector', async ({ page }) => {
     await openRailAction(page, 'theme')
+    await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
     const optionLabels = await page
       .locator('#theme-select .theme-card-label')
       .evaluateAll((labels) => labels.map((label) => label.textContent))

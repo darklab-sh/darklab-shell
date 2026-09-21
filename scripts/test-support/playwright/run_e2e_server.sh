@@ -108,9 +108,8 @@ if [[ -n "${PW_E2E_POSTGRES_DSN:-}" ]]; then
     exit 2
   fi
   export DATABASE_BACKEND=postgres
-  export DATABASE_URL="$PW_E2E_POSTGRES_DSN"
-  PG_SCHEMA="$("$PYTHON_BIN" "$SCRIPT_DIR/prepare_postgres_schema.py" "$SLOT")"
-  export PGOPTIONS="${PGOPTIONS:+$PGOPTIONS }-c search_path=$PG_SCHEMA"
+  DATABASE_URL="$("$PYTHON_BIN" "$SCRIPT_DIR/prepare_postgres_schema.py" "$SLOT")"
+  export DATABASE_URL
 fi
 
 if [[ "$ACCESS_PROFILE_VALUE" == "mixed" || "$ACCESS_PROFILE_VALUE" == "oidc_required" ]]; then
