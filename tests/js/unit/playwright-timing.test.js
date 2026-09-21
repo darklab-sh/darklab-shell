@@ -12,7 +12,7 @@ describe('browser timing evidence', () => {
     expect(summarizeSamples([])).toEqual({ count: 0, p50_ms: null, p95_ms: null })
   })
 
-  it('counts failed attempts separately and never stores titles or attachments', () => {
+  it('counts failed attempts separately without retaining private context', () => {
     const reporter = new TimingReporter()
     const test = { parent: { project: () => ({ name: 'chromium-w1' }) }, location: { file: '/private/tests/theme.spec.js' }, title: 'private credential' }
     reporter.onTestEnd(test, { status: 'failed', duration: 100, retry: 0, attachments: ['private credential'] })
@@ -27,4 +27,25 @@ describe('browser timing evidence', () => {
     expect(reporter.navigation).toEqual([90])
     expect(JSON.stringify([...reporter.rows.values()])).not.toContain('private')
   })
+})
+
+it('retains only bounded startup measurements from successful attempts', () => {
+  const reporter = new TimingReporter()
+  const test = { parent: { project: () => ({ name: 'chromium-w1' }) }, location: { file: 'boot-resilience.spec.js' } }
+  const sample = { cache: 'fresh-context', viewport: 'desktop', prompt_ms: 800, navigation_ms: 400,
+    first_paint_ms: 150, requests: { config: 0, static: 3, other: -1, private: 'credential' }, secret: 'credential' }
+  const attachments = [
+    { name: 'startup-timing', body: Buffer.from(JSON.stringify(sample)) },
+    { name: 'trace', body: Buffer.from('credential') },
+    { name: 'startup-timing', body: Buffer.from('{malformed credential') },
+    { name: 'startup-timing', body: Buffer.from(JSON.stringify({ ...sample, prompt_ms: -1 })) },
+  ]
+  reporter.onTestEnd(test, { status: 'failed', duration: 100, retry: 0, attachments })
+  expect(reporter.startup).toEqual([])
+  reporter.onTestEnd(test, { status: 'passed', duration: 100, retry: 1, attachments })
+  expect(reporter.startup).toEqual([{
+    project: 'chromium-w1', cache: 'fresh-context', viewport: 'desktop', prompt_ms: 800,
+    navigation_ms: 400, first_paint_ms: 150, requests: { config: 0, static: 3 },
+  }])
+  expect(JSON.stringify(reporter.startup)).not.toContain('credential')
 })

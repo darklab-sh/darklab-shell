@@ -395,6 +395,19 @@ A new production schema baseline was not adopted as a test-speed shortcut. Rotat
 
 `pytest-xdist` isn't used for the backend suite. The current tests intentionally exercise process-wide config, logging, SQLite paths, Redis stand-ins, generated files, and local servers. Isolating all of those per worker would add more machinery than the measured runner capacity justifies, while the exact two-lane split provides earlier feedback without introducing worker-only failures. Parallel workers can be reconsidered if those shared boundaries become independently namespaced and repeated measurements show a worthwhile gain.
 
+The September 2026 local qualification retained realistic data and assertions while measuring these focused changes:
+
+| Focused workload | Before | After | Measurement boundary |
+| --- | --- | --- | --- |
+| Five ordinary SQLite fixture files | 38.83 s | 10.20 s | Same machine; four added isolation checks |
+| Logging, architecture, docs, and owner inventory | 38.84 s | 28.21 s | Same machine; three added cache/CLI checks |
+| Large Atlas Postgres case | 7.06 s | 2.16 s | Test call, same data; direct-connection JIT on versus production default off |
+| Large report selection case | 14.30 s | 5.32 s | Both calls under cProfile; only configuration restoration changed |
+| Compose dependency preparation plus two template checks | 19.51 s | 4.28 s | Cold then warm cache in one disposable Compose project |
+| Bundle prerequisite | About 16–17 s | 0.25–0.32 s | Rebuilding three times versus validating fingerprints; full CI check retained |
+
+These are focused observations, not a promised whole-suite reduction. The Atlas profile attributed about 4.8 seconds to two JIT-compiled query shapes; production already disabled JIT, so the correction belongs in ordinary fixtures. Report profiling attributed most removable work to restoring every validated config field after changing only two. Report composition still performs real ownership checks, preview rendering, and archive generation. Container durability settings, real-pool cold startup, and feed-loading tests weren't weakened to improve these numbers. CI comparisons also account for changed selections, added regressions, cache state, and runner contention.
+
 ### Request Performance Preserves Authentication and Maintenance
 
 Static endpoints use the shared per-request authentication result. A public asset doesn't make supplied identity disposable: retirement checks, credential and principal revocation, browser-session validation, PAT route restrictions, and credential-guess accounting still apply. Cross-request authentication caching or a blanket static-path exemption would change those contracts. Reducing source-module requests through the existing bundle mode preserves them.

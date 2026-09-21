@@ -226,7 +226,8 @@ if [ "$mode" = "container" ]; then
       "${pytest_args[@]}"
     exit $?
   fi
-  bash scripts/run_pytest.sh "${pytest_args[@]}"
+  "${PYTHON_BIN:-python}" scripts/development/postgres_test_metrics.py "$started_container" \
+    bash scripts/run_pytest.sh "${pytest_args[@]}"
   exit $?
 fi
 

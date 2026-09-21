@@ -8,7 +8,17 @@ import os
 from pathlib import Path
 import platform
 import resource
+import subprocess
 import time
+
+
+def revision_metadata():
+    try:
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "diff", "--quiet", "HEAD"], capture_output=True, check=False).returncode != 0
+    except (OSError, subprocess.SubprocessError):
+        return {"revision": "unknown", "working_tree_dirty": None}
+    return {"revision": revision, "working_tree_dirty": dirty}
 
 
 class PytestTimings:
@@ -47,11 +57,12 @@ class PytestTimings:
         children = resource.getrusage(resource.RUSAGE_CHILDREN)
         payload = {
             "schema_version": 1,
-            "revision": os.environ.get("CI_COMMIT_SHA", "local"),
+            **revision_metadata(),
             "python": platform.python_version(),
             "platform": platform.system(),
             "machine": platform.machine(),
             "logical_cpus": os.cpu_count(),
+            "ci_runner_id": int(os.environ["CI_RUNNER_ID"]) if os.environ.get("CI_RUNNER_ID", "").isdigit() else None,
             "environment_present": self.environment,
             "postgres_option_present": bool(session.config.getoption("--postgres-dsn")),
             "session_seconds": time.monotonic() - self.started,

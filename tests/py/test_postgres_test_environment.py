@@ -117,3 +117,36 @@ print(module.prepare_environment(pathlib.Path(sys.argv[2]), pathlib.Path(sys.arg
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+
+def test_postgres_container_metrics_only_accepts_safe_numeric_fields():
+    metrics_spec = importlib.util.spec_from_file_location("pg_metrics", SCRIPT.with_name("postgres_test_metrics.py"))
+    assert metrics_spec and metrics_spec.loader
+    metrics = importlib.util.module_from_spec(metrics_spec)
+    metrics_spec.loader.exec_module(metrics)
+    assert metrics.parse_container_metrics(
+        "usage_usec 250000\nuser_usec 200000\nsystem_usec 50000\nMEMORY_PEAK 12345\n"
+        "postgres (PostgreSQL) 18.0\nPASSWORD private\nusage_usec bad-secret\n"
+    ) == {"usage_usec": 250000, "user_usec": 200000, "system_usec": 50000,
+          "MEMORY_PEAK": 12345, "postgres": "18.0"}
+    assert metrics.parse_container_metrics("Docker unavailable: private configuration") == {}
+
+
+def test_postgres_metrics_preserves_failure_status_when_counters_are_unavailable(tmp_path, monkeypatch, capsys):
+    import json
+    from types import SimpleNamespace
+
+    metrics_spec = importlib.util.spec_from_file_location("pg_metrics", SCRIPT.with_name("postgres_test_metrics.py"))
+    assert metrics_spec and metrics_spec.loader
+    metrics = importlib.util.module_from_spec(metrics_spec)
+    metrics_spec.loader.exec_module(metrics)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(metrics, "read_container_metrics", lambda _: {})
+    monkeypatch.setattr(metrics.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=7))
+    assert metrics.run_measured("private-container", ["private-command"]) == 7
+    output = capsys.readouterr().out
+    assert "private" not in output
+    data = json.loads((tmp_path / "test-results/timings/postgres-container.json").read_text())
+    assert data["database_cpu_seconds"] is None
+    assert data["exitstatus"] == 7
+    assert data["wall_seconds"] >= 0

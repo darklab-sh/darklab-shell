@@ -27,7 +27,8 @@ const specWeights = {
   'access.spec.js': 67,
   'assessment.spec.js': 96,
   'autocomplete.spec.js': 26,
-  'boot-resilience.spec.js': 9,
+  // Recovery cases measured ~24 s in job 16622742806; include the new startup probes.
+  'boot-resilience.spec.js': 30,
   'commands.spec.js': 23,
   'compare.spec.js': 33,
   'demo.mobile.spec.js': 1,

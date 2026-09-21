@@ -131,6 +131,22 @@ asset mode, revision, configured server count, selected projects and worker coun
 Retries remain separate attempts; navigation duration is not prompt-readiness or
 paint time. Full browser artifacts retain the existing failure-only policy.
 
+The startup measurement cases record a fresh browser context and a reload
+separately, without canceling welcome. They verify that the visible composer
+accepts input and retain prompt latency, first paint, DOM readiness, completed
+startup request counts by fixed category, and static cache hits. The server is
+already ready in both samples; these aren't cold-server measurements or timing
+pass/fail budgets. Unknown attachment fields and request URLs aren't retained.
+
+Disposable Postgres pytest runs also write
+`test-results/timings/postgres-container.json` and print
+`DARKLAB_POSTGRES_TIMINGS`. Client CPU and cgroup v2 database-container CPU are
+separate; the record includes PostgreSQL version, test-command wall time, and
+container-lifetime peak memory. Unsupported container counters are `null`.
+Preparation and image pulls precede that measurement. Host, Compose, and CI
+service targets don't expose those container counters through this helper;
+low client CPU alone doesn't identify a database wait.
+
 Use `npm run test:pytest`, not just the fast command,
 for the final local backend check.
 

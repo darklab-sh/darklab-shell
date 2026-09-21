@@ -36,29 +36,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Postgres and report checks avoid repeated setup work.** Compose reuses runtime-qualified Python dependencies and leaves migration ownership to isolated fixtures. Ordinary Postgres connections match the production JIT default, while the large report fixture restores only its changed settings; realistic query, preview, and archive assertions remain intact.
-
-- **Browser preparation checks freshness without rebuilding every bundle.** Source, configuration, lockfile, toolchain, generated outputs, and decoded compression sidecars remain checked before bundle tests; CI retains full build reproducibility checks. Browser jobs reuse versioned package/headless-browser downloads while keeping locked installs and OS dependency setup.
-
-- **Template asset lookups reuse a validated manifest per app.** File edits and atomic replacement invalidate cached data; missing or malformed manifests retain their existing errors.
-
-- **The shell becomes usable without waiting for command recall.** It reuses page configuration, defers secondary catalogs, and preserves privacy defaults, restored runs, typed drafts, and scope isolation when startup responses arrive late.
-
-- **Theme previews load when needed.** The active palette and offline export colors stay available immediately, while other palettes load when opening the chooser or selecting another theme. Failed loads can be retried, and delayed responses preserve the latest choice.
-
-- **Backend feedback avoids repeated app construction and syntax parsing.** Request-event logging and stable credential/stream tests reuse app wiring with fresh clients and isolated data. Repository guards share a bounded syntax cache with source-content invalidation and independent visitor trees; import, factory, construction-log, and startup contracts still run independently.
-
-- **Ordinary Postgres tests and browser servers clone a migrated template into independent databases.** This avoids rebuilding every table and index for operator and current-schema cases while preserving transactions, constraints, and committed-state isolation. Roles without database-creation permission and custom host locales retain isolated schemas; migration and startup tests keep their real initialization paths. Cleanup is limited to resources created by the test invocation. Browser targets remain isolated by profile, with an explicit fresh-schema startup mode.
-
-- **Focused browser tests start only their selected app servers.** The helper uses Playwright collection to preserve project/profile isolation and normal selection behavior while avoiding unrelated startup and teardown. Browser projects use refreshed CI timing weights, account for fixed qualification work, and warn about unweighted specs.
-
-- **The Postgres test lane avoids repeating fast-lane coverage.** Its default selection keeps live Postgres integration and operator cases, while SQLite variants and offline database checks remain in the required fast lane. Timing and report flags retain the default selection; explicit focused arguments still run exactly the requested cases.
-
-- **Shell and shared pages send smaller theme payloads.** Their inline registry omits the unused duplicate theme map while keeping the same palettes, selector previews, and export variables. Server-side theme definitions and `/themes` remain unchanged.
-
-- **CI preserves timing evidence from successful test runs.** Pytest reports collection and per-case setup, call, teardown, and process CPU costs; Playwright traces retain per-spec/project attempt timings, navigation percentiles, asset mode, and effective worker/server counts. Reports omit credentials, environment values, and captured application output.
-
-- **Ordinary in-memory pytest fixtures reuse the validated SQLite schema.** CVE risk, OAST, Nmap evidence, principal ownership, and suspension cases clone a pristine database instead of replaying every migration. Each connection keeps independent rows and transactions; schema-upgrade cases still run real migrations. Regression coverage checks the migration ledger, FTS, foreign keys, rollback, and clone isolation.
+- **Shell startup and test feedback do less repeated work while preserving access checks and coverage.**
+  - **Page load:** The shell reuses its embedded configuration and becomes usable without waiting for command recall or secondary catalogs. Late responses preserve privacy defaults, restored runs, typed drafts, and workspace scope. Theme previews load on demand with retry and latest-choice protection; active and exported palettes remain available immediately. Asset-manifest reads use an app-owned cache with file invalidation and existing error behavior.
+  - **Backend tests:** Ordinary SQLite fixtures clone a validated pristine database. Postgres tests and browser profiles clone independent databases from a migrated template, with schema isolation for restricted roles and custom locales. Migration, startup, rollback, and real-pool tests keep their production initialization paths. Request tests reuse stable app wiring with fresh clients and data; repository guards share bounded syntax analysis. Postgres query fixtures match production's JIT default, and report fixtures restore only changed settings.
+  - **Test preparation:** The Postgres lane avoids duplicating required SQLite coverage, Compose reuses runtime-qualified Python dependencies, and focused browser runs start only selected servers. Refreshed project weights account for qualification work. Bundle runs verify generated fingerprints without rebuilding; required CI still checks complete reproducibility. Browser jobs reuse versioned package and headless-browser downloads.
+  - **Evidence and safeguards:** Successful runs retain safe pytest phase/CPU and browser timing summaries, including fresh-context/reload prompt readiness and first paint. Disposable Postgres runs separately record database-container CPU. Isolation, failure recovery, theme loading, late startup responses, cache invalidation, and selected-project behavior have regression coverage. Serial pytest policy, immutable migration history, authentication, and flaky-test guards remain intact.
 
 - **Metrics network permissions are independent of operator access.**
   - **Before:** Metrics and diagnostics shared the `diagnostics_allowed_cidrs` network gate.

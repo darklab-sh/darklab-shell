@@ -3,6 +3,17 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, basename } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { availableParallelism, totalmem } from 'node:os'
+
+function revisionMetadata() {
+  try {
+    return {
+      revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(),
+      working_tree_dirty: spawnSync('git', ['diff', '--quiet', 'HEAD'], { stdio: 'ignore' }).status !== 0,
+    }
+  } catch { return { revision: 'unknown', working_tree_dirty: null } }
+}
 
 export function summarizeSamples(samples) {
   const sorted = [...samples].sort((a, b) => a - b)
@@ -10,11 +21,31 @@ export function summarizeSamples(samples) {
   return { count: sorted.length, p50_ms: percentile(0.5), p95_ms: percentile(0.95) }
 }
 
+export function readStartupSample(attachment) {
+  if (attachment?.name !== 'startup-timing' || !attachment.body || attachment.body.length > 8192) return null
+  try {
+    const value = JSON.parse(attachment.body.toString())
+    const bounded = (number, max = 600000) => Number.isFinite(number) && number >= 0 && number <= max
+    if (!['fresh-context', 'reload'].includes(value.cache) || !['desktop', 'mobile'].includes(value.viewport)
+        || !bounded(value.prompt_ms) || !bounded(value.navigation_ms)) return null
+    const requests = {}
+    for (const key of ['config', 'preferences', 'active', 'recall', 'catalogs', 'other', 'static', 'cached_static']) {
+      if (Number.isInteger(value.requests?.[key]) && bounded(value.requests[key], 10000)) requests[key] = value.requests[key]
+    }
+    return {
+      cache: value.cache, viewport: value.viewport, prompt_ms: value.prompt_ms, navigation_ms: value.navigation_ms,
+      first_paint_ms: bounded(value.first_paint_ms) ? value.first_paint_ms : null,
+      requests,
+    }
+  } catch { return null }
+}
+
 export default class TimingReporter {
   constructor() {
     this.started = performance.now()
     this.rows = new Map()
     this.navigation = []
+    this.startup = []
     this.busyWorkers = new Set()
     this.peakBusyWorkers = 0
   }
@@ -47,6 +78,12 @@ export default class TimingReporter {
     row.seconds += result.duration / 1000
     row.outcomes[result.status] = (row.outcomes[result.status] || 0) + 1
     this.rows.set(key, row)
+    if (result.status === 'passed') {
+      for (const attachment of result.attachments || []) {
+        const sample = readStartupSample(attachment)
+        if (sample) this.startup.push({ project, ...sample })
+      }
+    }
   }
 
   onEnd(result) {
@@ -54,10 +91,13 @@ export default class TimingReporter {
     const mode = process.env.ASSET_BUNDLE_MODE === 'source' ? 'source' : 'bundle'
     const summary = {
       schema_version: 1,
-      revision: process.env.CI_COMMIT_SHA || 'local',
+      ...revisionMetadata(),
       node: process.version,
       platform: process.platform,
       architecture: process.arch,
+      available_cpus: availableParallelism(),
+      host_memory_bytes: totalmem(),
+      ci_runner_id: /^\d+$/.test(process.env.CI_RUNNER_ID || '') ? Number(process.env.CI_RUNNER_ID) : null,
       mode,
       status: result.status,
       workers: this.config?.workers,
@@ -67,6 +107,7 @@ export default class TimingReporter {
       preparation_ms: this.preparationMs,
       duration_ms: result.duration,
       navigation: summarizeSamples(this.navigation),
+      startup: this.startup,
       specs: [...this.rows.values()].sort((a, b) => `${a.project}/${a.file}`.localeCompare(`${b.project}/${b.file}`)),
     }
     const directory = resolve('test-results/timings')

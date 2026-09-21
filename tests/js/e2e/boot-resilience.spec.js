@@ -128,3 +128,53 @@ for (const width of [1280, 390]) {
     })
   })
 }
+
+for (const width of [1280, 390]) {
+  test.describe(`startup measurements at width ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, isMobile: width < 600, hasTouch: width < 600 })
+    test('records fresh-context and reload readiness without skipping welcome', async ({ page }, testInfo) => {
+      for (const cache of ['fresh-context', 'reload']) {
+        if (cache === 'fresh-context') await page.goto('/', { waitUntil: 'domcontentloaded' })
+        else await page.reload({ waitUntil: 'domcontentloaded' })
+        const ready = await page.waitForFunction(() => {
+          const mobile = document.body.classList.contains('mobile-terminal-mode')
+          const input = document.getElementById(mobile ? 'mobile-cmd' : 'cmd')
+          if (!(input instanceof HTMLInputElement) || input.disabled || !input.getClientRects().length) return false
+          if (getComputedStyle(input).visibility !== 'visible') return false
+          if (!window.APP_STATE_API?.getActiveTab?.()
+              || !window.DarklabRunner?.hasRunnerHandler?.('submitVisibleComposerCommand')) return false
+          return performance.now()
+        })
+        const promptMs = await ready.jsonValue()
+        const sample = await page.evaluate(({ promptMs, cache, width }) => {
+          const requests = { config: 0, preferences: 0, active: 0, recall: 0, catalogs: 0, other: 0, static: 0, cached_static: 0 }
+          const labels = { '/config': 'config', '/session/preferences': 'preferences', '/history/active': 'active', '/history/commands': 'recall' }
+          const catalogs = ['/commands/catalog', '/allowed-commands', '/faq', '/shortcuts', '/workflows', '/autocomplete']
+          for (const entry of performance.getEntriesByType('resource')) {
+            const path = new URL(entry.name).pathname
+            if (path.startsWith('/static/')) {
+              requests.static += 1
+              if (entry.transferSize === 0 && entry.decodedBodySize > 0) requests.cached_static += 1
+            } else if (entry.initiatorType === 'fetch' || entry.initiatorType === 'xmlhttprequest') {
+              requests[labels[path] || (catalogs.includes(path) ? 'catalogs' : 'other')] += 1
+            }
+          }
+          return {
+            cache, viewport: width < 600 ? 'mobile' : 'desktop', prompt_ms: promptMs,
+            navigation_ms: performance.getEntriesByType('navigation')[0].domContentLoadedEventEnd,
+            first_paint_ms: performance.getEntriesByName('first-paint')[0]?.startTime ?? null,
+            requests,
+          }
+        }, { promptMs, cache, width })
+        // Prove the measured composer accepts input; do not settle/cancel welcome
+        // or execute a command merely to record a performance sample.
+        const input = page.locator(width < 600 ? '#mobile-cmd' : '#cmd')
+        await input.fill('startup timing draft')
+        await expect(input).toHaveValue('startup timing draft')
+        await input.fill('')
+        expect(sample.requests.config).toBe(0)
+        await testInfo.attach('startup-timing', { body: JSON.stringify(sample), contentType: 'application/json' })
+      }
+    })
+  })
+}
