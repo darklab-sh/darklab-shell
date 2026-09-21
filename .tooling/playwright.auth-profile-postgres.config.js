@@ -3,6 +3,7 @@
 
 import { defineConfig, devices } from '@playwright/test'
 import { buildIsolatedWebServer, testDir } from './playwright.shared.js'
+import { selectedWebServers } from './playwright.project-selection.js'
 
 if (!process.env.PW_E2E_POSTGRES_DSN) {
   throw new Error('PW_E2E_POSTGRES_DSN is required; use scripts/run_postgres_tests.sh --browser')
@@ -16,9 +17,13 @@ const profiles = [
   ['chromium-oidc-required', 'pg-oidc-required', 'oidc_required', true],
 ]
 
+const webServer = selectedWebServers(profiles.map(([name, slot, profile, tls], index) => [
+  name, buildIsolatedWebServer(basePort + index, slot, profile, tls),
+]))
+
 export default defineConfig({
   testDir,
-  metadata: { configuredServerCount: profiles.length },
+  metadata: { configuredServerCount: webServer.length },
   fullyParallel: false,
   workers: profiles.length,
   retries: process.env.CI ? 1 : 0,
@@ -36,6 +41,5 @@ export default defineConfig({
       trace: 'retain-on-failure',
     },
   })),
-  webServer: profiles.map(([, slot, profile, tls], index) =>
-    buildIsolatedWebServer(basePort + index, slot, profile, tls)),
+  webServer,
 })

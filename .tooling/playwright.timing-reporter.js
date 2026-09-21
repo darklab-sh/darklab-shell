@@ -15,6 +15,8 @@ export default class TimingReporter {
     this.started = performance.now()
     this.rows = new Map()
     this.navigation = []
+    this.busyWorkers = new Set()
+    this.peakBusyWorkers = 0
   }
 
   onBegin(config, suite) {
@@ -29,7 +31,13 @@ export default class TimingReporter {
     }
   }
 
+  onTestBegin(test, result) {
+    this.busyWorkers.add(result.workerIndex)
+    this.peakBusyWorkers = Math.max(this.peakBusyWorkers, this.busyWorkers.size)
+  }
+
   onTestEnd(test, result) {
+    this.busyWorkers.delete(result.workerIndex)
     const project = test.parent.project().name
     const file = basename(test.location.file)
     const key = `${project}/${file}`
@@ -53,6 +61,7 @@ export default class TimingReporter {
       mode,
       status: result.status,
       workers: this.config?.workers,
+      peak_busy_workers: this.peakBusyWorkers,
       configured_servers: this.config?.metadata?.configuredServerCount || 0,
       selected_projects: this.projects || [],
       preparation_ms: this.preparationMs,

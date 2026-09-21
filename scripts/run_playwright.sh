@@ -186,6 +186,25 @@ else
   runner=(npx playwright)
 fi
 
+# Ask Playwright itself which projects match the files, grep and shard options.
+# Keep the same projects/ports; only omit servers no selected test can use.
+unset PW_SELECTED_PROJECTS
+select_servers=1
+for argument in "${playwright_args[@]}"; do
+  case "$argument" in --ui*|--debug|--list|--help|-h) select_servers=0 ;; esac
+done
+if ((select_servers)); then
+  selection_file="$(mktemp /tmp/darklab-playwright-selection.XXXXXX)"
+  if "${runner[@]}" test "${playwright_args[@]}" --list --reporter=json > "$selection_file" &&
+     PW_SELECTED_PROJECTS="$(node .tooling/playwright.project-selection.js "$selection_file")"; then
+    export PW_SELECTED_PROJECTS
+  else
+    unset PW_SELECTED_PROJECTS
+    echo "[e2e] Project preselection unavailable; using the complete configured server set." >&2
+  fi
+  rm -f -- "$selection_file"
+fi
+
 set +e
 "${runner[@]}" test "${playwright_args[@]}"
 status=$?
