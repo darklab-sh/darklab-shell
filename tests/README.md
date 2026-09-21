@@ -116,7 +116,21 @@ settings, fixed credential bindings, read-only runtime, health checks, and the
 entrypoint's allowlisted process-role dispatch. CI runs both required serial
 lanes at the same time, retains separate JUnit, slow-test, and file-timing
 reports, and verifies that their node IDs are disjoint and add up to the
-unchanged complete suite. Use `npm run test:pytest`, not just the fast command,
+unchanged complete suite. `test-results/pytest-timings.json` also records collection,
+setup/call/teardown, selected IDs and test-process/child CPU time. Set
+`PYTEST_TIMING_JSON` to a report path to collect the same evidence locally.
+Environment overrides are recorded as presence flags, with no DSNs, argument
+values or captured output. Session timing begins after conftest imports; it
+doesn't include dependency installation or database-server CPU.
+
+Playwright writes per-spec/project attempt timings and successful navigation
+percentiles under `test-results/timings/`, and prints a
+`DARKLAB_PLAYWRIGHT_TIMINGS` JSON summary in every CI job trace. It includes
+asset mode, revision, configured server count, selected projects and worker count.
+Retries remain separate attempts; navigation duration is not prompt-readiness or
+paint time. Full browser artifacts retain the existing failure-only policy.
+
+Use `npm run test:pytest`, not just the fast command,
 for the final local backend check.
 
 `test_deployment_operations.py` qualifies the generated helper's access commands, exact argument forwarding, private host output, retained-file recovery, interruption cleanup, managed-file and image checks, and configuration evaluation through the real Python checker. Current-input cases honor custom local roots and replacement mounts while ignoring unused host YAML; explicit candidates still replace the selected overlay. Host identity checks cover GNU and BSD `stat`, missing or invalid metadata, matching inode numbers on different devices, and destination replacement with a regular file or symlink. Required filesystem cases extract and execute the generated helper's actual private-file transport program, changing only its `/data` root. They cover safe reads and finalization, invalid paths, directory and file permissions, symlinks and hardlinks, size bounds, empty in-flight retention, and retrievable output after rejected finalization. Its Docker stub records arguments separately and never logs credential bytes. With `DARKLAB_DEPLOY_TEST_IMAGE` set to a locally built release image, its opt-in container cases exercise SQLite and Postgres installations, stopped and unhealthy services, bootstrap and operator grants, confirmation and lockout rejection, credential retrieval, and configuration checks that preserve deployment data. Each container case removes its test project and volumes.

@@ -18,12 +18,13 @@ const profiles = [
 
 export default defineConfig({
   testDir,
+  metadata: { configuredServerCount: profiles.length },
   fullyParallel: false,
   workers: profiles.length,
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never' }], ['./playwright.timing-reporter.js']],
   projects: profiles.map(([name, , , tls], index) => ({
     name,
     workers: 1,

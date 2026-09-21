@@ -152,13 +152,14 @@ const projects = [
 
 export default defineConfig({
   testDir,
+  metadata: { configuredServerCount: projects.length },
   fullyParallel: false,
   // Auth-profile projects share this total budget with the open-profile shards.
   workers: Math.min(process.env.CI ? 3 : 7, projects.length),
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never' }], ['./playwright.timing-reporter.js']],
   projects,
   webServer: [
     ...openProjects.map((project, index) =>

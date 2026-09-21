@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **CI preserves timing evidence from successful test runs.** Pytest reports collection and per-case setup, call, teardown, and process CPU costs; Playwright traces retain per-spec/project attempt timings, navigation percentiles, asset mode, and effective worker/server counts. Reports omit credentials, environment values, and captured application output.
+
 - **Ordinary in-memory pytest fixtures reuse the validated SQLite schema.** CVE risk, OAST, Nmap evidence, principal ownership, and suspension cases clone a pristine database instead of replaying every migration. Each connection keeps independent rows and transactions; schema-upgrade cases still run real migrations. Regression coverage checks the migration ledger, FTS, foreign keys, rollback, and clone isolation.
 
 - **Metrics network permissions are independent of operator access.**

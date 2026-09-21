@@ -285,6 +285,15 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
+    timing_output = os.environ.get("PYTEST_TIMING_JSON")
+    if timing_output and not config.option.collectonly:
+        from timing_helpers import PytestTimings  # noqa: PLC0415
+
+        output = Path(timing_output)
+        config.pluginmanager.register(PytestTimings(
+            output if output.is_absolute() else ROOT_DIR / output,
+            app_data_dir_supplied=_OWNED_TEST_DATA_DIR is None,
+        ))
     config.addinivalue_line(
         "markers",
         "release_integration: slower release-boundary coverage for release workflows",
