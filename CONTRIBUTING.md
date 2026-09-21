@@ -292,15 +292,34 @@ OIDC changes use the deterministic local provider in `tests/py/test_oidc_sign_in
 
 For cross-profile changes, run `tests/js/e2e/auth-profile-qualification.spec.js` through the Playwright helper in both source and bundle modes. It exercises `open`, `token_required`, `oidc_required`, and `mixed` at desktop and mobile widths. Repeat the browser matrix on disposable Postgres with `bash scripts/run_postgres_tests.sh --browser -- --asset-bundle-mode source` and then `--asset-bundle-mode bundle`. The Postgres request-policy lane also checks PAT access on isolated schemas. The full matrix and deeper feature evidence are in [tests/README.md](tests/README.md#access-profile-qualification).
 
+Request-event logging, stream authorization, and credential lifecycle/PAT cases
+reuse stable Flask wiring with fresh clients. Credential and stream fixtures
+still own separate databases. Construction logging and per-case factory
+configuration retain fresh applications.
+
 Ordinary isolated SQLite tests that only need an empty current schema should use
-`copy_pristine_sqlite_database()` from `tests/py/conftest.py`. Tests for
+`copy_pristine_sqlite_database()` for files or `create_pristine_sqlite_connection()`
+for an in-memory database, both from `tests/py/conftest.py`. The memory helper
+returns a new connection with `sqlite3.Row` rows and foreign keys enabled; callers
+own transactions and must close it. Pass `foreign_keys=False` only when preserving
+an existing fixture that deliberately leaves enforcement disabled. Tests for
 migrations, schema reconciliation, startup, failure, or rollback must
 keep using a genuinely empty or purpose-built database and the real `db_init()`
 path.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
-integration tests against isolated test schemas. The helper uses
+integration tests against isolated test databases or schemas. Ordinary cases
+clone a session-owned current-schema template when the test role has `CREATEDB`
+and the host database uses the cluster template's encoding and locale. Otherwise
+they keep schema isolation. Migration, upgrade, startup, and initialization-failure
+cases retain their purpose-built schemas. Postgres browser runs also use a
+separate target per server; `--postgres-fresh` on the browser helper selects empty
+schemas for startup qualification. Its default selection excludes
+SQLite operator variants and offline dialect/migration checks, which remain in
+the required fast lane. Reporting-only flags such as `--durations=0` and
+`--junitxml=report.xml` extend that selection; explicit pytest selections replace
+it and retain SQLite variants when requested. The helper uses
 `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable
 Docker Postgres container and removes it and its anonymous volumes after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
@@ -329,8 +348,8 @@ prove every confirmed item is preserved instead of silently truncating a plan.
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and balances the open-profile browser suite across 5 isolated Chromium projects alongside dedicated restricted-profile projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
-- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode Assessment, boot, share, shell-output entity action, and lazy-surface browser slice that is also part of `npm test`; GitLab requires this source slice in its own job alongside the full bundled suite. Pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
+- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and balances the open-profile browser suite across 5 isolated Chromium projects alongside dedicated restricted-profile projects. Focused commands use Playwright's own collection to start only the matching project servers, preserving their normal ports and profiles; interactive runs retain the complete configured server set. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:fresh` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode Assessment, boot, share, shell-output entity action, and lazy-surface browser slice that is also part of `npm test`; GitLab requires this source slice in its own job alongside the full bundled suite. Pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - The parallel CLI suite uses at most three workers in CI across all open and restricted-profile projects, compared with seven locally. `PLAYWRIGHT_PROJECT_COUNT` only controls open-profile sharding; `--ci` also applies the CI worker cap locally. Browser runs retain a trace for every failed attempt, including the first attempt when a retry passes. CI retries once and still rejects flaky results and focused `test.only` cases.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
@@ -402,7 +421,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 **Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. The vendor build wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and Compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
-**Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles and their precompressed siblings still match the current sources. The app serves content-hashed bundles by default, minifies generated ESM output with linked external source maps, negotiates Brotli or gzip for generated text assets when the browser supports it, and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change. Source mode keeps JS module URLs unversioned so lazy imports and relative ESM imports don't refetch the same file under two browser module identities.
+**Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles and their precompressed siblings still match the current sources. The app serves content-hashed bundles by default, minifies generated ESM output with linked external source maps, negotiates Brotli or gzip for generated text assets when the browser supports it, and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change. Source mode keeps JS module URLs unversioned so lazy imports and relative ESM imports don't refetch the same file under two browser module identities. The fast `npm run assets:fresh` prerequisite compares source/configuration/build-script/lockfile hashes, the installed esbuild version and compatible Node major, manifest contents, generated-file membership, and decompressed sidecar bytes. It doesn't rebuild assets. Required CI lint retains the complete build, compression, and working-directory checks through `npm run assets:check`.
 
 ---
 

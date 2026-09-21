@@ -53,8 +53,9 @@ test('audit mobile surfaces across every installed theme', async ({ page }) => {
   const results = []
   for (const themeName of themes) {
     await page.evaluate((name) => {
-      if (typeof applyThemeSelection === 'function') applyThemeSelection(name, false)
+      if (typeof applyThemeSelection === 'function') return applyThemeSelection(name, false)
     }, themeName)
+    await expect(page.locator('body')).toHaveAttribute('data-theme', themeName)
 
     const metrics = await page.evaluate(() => {
       // Resolve rgba/hex strings into linear [r,g,b,a] arrays via a throwaway
@@ -215,8 +216,9 @@ test('semantic color contract: four semantic tokens stay perceptually distinct w
   const results = []
   for (const themeName of themes) {
     await page.evaluate((name) => {
-      if (typeof applyThemeSelection === 'function') applyThemeSelection(name, false)
+      if (typeof applyThemeSelection === 'function') return applyThemeSelection(name, false)
     }, themeName)
+    await expect(page.locator('body')).toHaveAttribute('data-theme', themeName)
 
     const deltas = await page.evaluate(() => {
       const probe = document.createElement('div')

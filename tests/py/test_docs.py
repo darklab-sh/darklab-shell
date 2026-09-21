@@ -15,6 +15,8 @@ from urllib.parse import unquote
 
 import pytest
 
+from python_source import parse_python_source
+
 _HERE = Path(__file__).parent          # tests/py/
 _TESTS_README = _HERE.parent / "README.md"
 _REPO_ROOT = _HERE.parent.parent
@@ -404,7 +406,7 @@ def _assessment_log_event_literals() -> set[str]:
                 if event.startswith(_ASSESSMENT_LOG_EVENT_PREFIXES):
                     events.add(event)
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = parse_python_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -605,7 +607,7 @@ class TestProjectStructureCoverage:
     def test_pytest_files_do_not_import_legacy_flask_singleton(self):
         offenders: list[str] = []
         for path in sorted(_HERE.glob("test_*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = parse_python_source(path)
             app_aliases: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):

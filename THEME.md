@@ -111,7 +111,7 @@ The shell, restricted sign-in, permalink, diagnostics, and audit routes pass the
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the registry into `window.ThemeRegistry`. The HTML payload keeps the active palette and selector metadata. Other palettes load from `/themes` when the selector or a saved/terminal selection needs them; the unused duplicate `theme_vars` map is omitted from browser state. The shared loader preserves the current palette during slow or failed requests, supports retries, and keeps the latest selection when responses arrive late. Server-side definitions and the `/themes` response retain their full shape. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 
@@ -141,7 +141,7 @@ The shell, restricted sign-in, permalink, diagnostics, and audit routes pass the
 
 ## Runtime Theme Selector
 
-The theme preview grid is driven by the theme registry. Clicking a preview card immediately applies that theme and saves the choice to `localStorage`. Each preview card renders a compact sketch of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so contrast is judged against the same relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
+The theme preview grid is driven by the theme registry. Opening the selector loads any missing preview palettes and offers a retry if the request fails. Clicking a loaded preview card immediately applies that theme and saves the preference. Each preview card renders a compact sketch of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so contrast is judged against the same relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 

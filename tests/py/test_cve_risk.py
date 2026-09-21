@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from conftest import create_pristine_sqlite_connection
 from identity_helpers import anonymous_session_id
 from config import CveRiskConfig
 from core import process
@@ -94,9 +95,7 @@ _OTHER_VERSION_OWNER = anonymous_session_id("other-version-owner")
 
 @pytest.fixture
 def risk_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    conn = create_pristine_sqlite_connection(foreign_keys=False)
     try:
         yield conn
     finally:

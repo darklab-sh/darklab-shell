@@ -2,14 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 import json
-import sqlite3
 
 import pytest
 
+from conftest import create_pristine_sqlite_connection
 from identity_helpers import anonymous_session_id
-from core.database_backend import DatabaseBackend
-from core.migrations import MIGRATIONS
-from core.migrations.runner import run_migrations
 from services.assessments.nmap_service_evidence_persistence import (
     persist_nmap_xml_service_observations,
 )
@@ -27,10 +24,7 @@ _TEAM_MEMBER_C = anonymous_session_id("team-member-c")
 
 @pytest.fixture
 def evidence_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    conn = create_pristine_sqlite_connection()
     try:
         yield conn
     finally:

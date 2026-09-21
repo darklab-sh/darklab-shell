@@ -31,6 +31,7 @@ import {
   gzipSync,
 } from 'zlib';
 import { build as esbuild } from 'esbuild';
+import { createFreshnessMetadata } from './asset_freshness.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -810,6 +811,7 @@ const manifest = {
   bundles: buildEntries,
   static_assets: staticAssetEntries,
 };
+manifest.freshness = createFreshnessMetadata(ROOT, outDir, manifest);
 writeFileSync(resolve(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 if (checkOnly) {

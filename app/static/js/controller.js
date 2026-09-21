@@ -8,6 +8,9 @@ import {
   getCmdSelection,
   replaceCmdRange,
 } from './features/terminal/composer_editing.js';
+import { isUsableAppConfig } from './core/config.js';
+import { loadShellCatalogs, renderShortcuts } from './features/command-registry/shell_catalogs.js';
+import { startShellSession } from './core/shell_startup.js';
 import { setControllerActionHandlers as importedSetControllerActionHandlers } from './controller_action_bridge.js';
 import {
   emitUiEvent,
@@ -163,18 +166,12 @@ import {
 import {
   applyFaqHashTarget,
   clearFaqHash,
-  renderAllowedCommandsFaq,
-  renderFaqItems,
   renderFaqLimits,
-  setAllowedCommandsFaqData,
 } from './features/command-registry/faq_helpers.js';
 import {
   closeCommandCatalogModal as importedCloseCommandCatalogModal,
   closeCommandRegistry,
   isCommandCatalogOverlayOpen as importedIsCommandCatalogOverlayOpen,
-  isCommandRegistryOverlayOpen,
-  renderCommandRegistry,
-  setCommandRegistryData as importedSetCommandRegistryData,
 } from './features/command-registry/command_registry_bridge.js';
 import {
   apiFetch,
@@ -371,14 +368,6 @@ function _controllerSetAutocompleteState(next) {
   return _controllerFn('setAutocompleteState', importedSetAutocompleteState)?.(next);
 }
 
-let _controllerCommandRegistryData = null;
-
-function _controllerSetCommandRegistryData(data) {
-  _controllerCommandRegistryData = data || null;
-  if (typeof importedSetCommandRegistryData === 'function') importedSetCommandRegistryData(data);
-  return _controllerCommandRegistryData;
-}
-
 renderThemeSelectionOptions();
 const initialThemeName = _savedThemeName();
 const initialTheme = initialThemeName ? _findThemeEntry(initialThemeName) : null;
@@ -527,6 +516,7 @@ document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(b
 });
 
 function openFaq() {
+  void loadShellCatalogs();
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showFaqOverlay();
@@ -547,6 +537,7 @@ function closeCommandRegistryPanel() {
 }
 
 function openShortcuts() {
+  void loadShellCatalogs();
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   if (typeof showShortcutsOverlay === 'function') showShortcutsOverlay();
@@ -575,36 +566,6 @@ function toggleHistoryPanelSurface(force = null) {
 }
 
 
-function renderShortcuts(data) {
-  const listEl = document.getElementById('shortcuts-list');
-  if (!listEl) return;
-  listEl.textContent = '';
-  const sections = Array.isArray(data && data.sections) ? data.sections : [];
-  for (const section of sections) {
-    const items = Array.isArray(section && section.items) ? section.items : [];
-    if (!items.length) continue;
-    const sectionEl = document.createElement('div');
-    sectionEl.className = 'shortcuts-section';
-    const headingEl = document.createElement('div');
-    headingEl.className = 'shortcut-section-title';
-    headingEl.textContent = section.title || '';
-    sectionEl.appendChild(headingEl);
-    const pairsEl = document.createElement('div');
-    pairsEl.className = 'shortcuts-pairs';
-    for (const item of items) {
-      const keyEl = document.createElement('div');
-      keyEl.className = 'shortcut-key';
-      keyEl.textContent = item.key || '';
-      const descEl = document.createElement('div');
-      descEl.className = 'shortcut-desc';
-      descEl.textContent = item.description || '';
-      pairsEl.appendChild(keyEl);
-      pairsEl.appendChild(descEl);
-    }
-    sectionEl.appendChild(pairsEl);
-    listEl.appendChild(sectionEl);
-  }
-}
 
 function setupMobileSheetDragClose() {
   // All sheet drag/tap/keyboard close behavior lives in mobile_sheet.js so the
@@ -814,8 +775,17 @@ function setupMobileComposer() {
   }
 }
 
-// ── Load config from server ──
-apiFetch('/config').then(r => r.json()).then(cfg => {
+function readShellResponse(response) {
+  if (response.ok === false) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+// The HTML and /config use the same server serializer. Only incomplete
+// bootstraps need the fallback request.
+const shellConfigLoad = isUsableAppConfig(APP_CONFIG)
+  ? Promise.resolve(APP_CONFIG)
+  : apiFetch('/config').then(readShellResponse);
+shellConfigLoad.then(cfg => {
   if (
     typeof window !== 'undefined'
     && window.DarklabConfig
@@ -950,46 +920,6 @@ optionsPromptUsernameInput?.addEventListener('change', e => {
   }
 });
 
-apiFetch('/allowed-commands').then(r => r.json()).then(data => {
-  if (typeof setAllowedCommandsFaqData === 'function') setAllowedCommandsFaqData(data);
-  if (typeof renderAllowedCommandsFaq === 'function') renderAllowedCommandsFaq(data);
-}).catch(err => {
-  logClientError('failed to load /allowed-commands', err);
-});
-
-apiFetch('/commands/catalog').then(r => r.json()).then(data => {
-  _controllerSetCommandRegistryData(data);
-  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
-    if (typeof renderCommandRegistry === 'function') renderCommandRegistry();
-  }
-}).catch(err => {
-  logClientError('failed to load /commands/catalog', err);
-  _controllerSetCommandRegistryData({ restricted: false, commands: [], groups: [] });
-});
-
-apiFetch('/faq').then(r => r.json()).then(data => {
-  if (typeof renderFaqItems === 'function') renderFaqItems(data.items || []);
-}).catch(err => {
-  logClientError('failed to load /faq', err);
-});
-
-apiFetch('/shortcuts').then(r => r.json()).then(data => {
-  renderShortcuts(data || {});
-}).catch(err => {
-  logClientError('failed to load /shortcuts', err);
-});
-
-const workflowsLoad = typeof ensureWorkflowCatalogLoaded === 'function'
-  ? ensureWorkflowCatalogLoaded()
-  : apiFetch('/workflows').then(r => r.json()).then(data => {
-    const items = data.items || [];
-    if (typeof renderWorkflowItems === 'function') renderWorkflowItems(items);
-    return items;
-  });
-workflowsLoad.catch(err => {
-  logClientError('failed to load /workflows', err);
-});
-
 loadStarredFromServer().catch(err => {
   logClientError('failed to load /session/starred', err);
 });
@@ -1011,36 +941,30 @@ applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false
 applyHudClockPreference(getHudClockPreference(), false);
 applyPromptUsernamePreference(getPromptUsernamePreference(), false);
 syncOptionsControls();
-const sessionPreferencesLoad = typeof loadSessionPreferences === 'function'
-  ? loadSessionPreferences().catch(err => {
-    logClientError('failed to apply session preferences', err);
-  })
-  : Promise.resolve();
-
-const commandHistoryLimit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
-Promise.all([
-  sessionPreferencesLoad,
-  apiFetch(`/history/commands?limit=${commandHistoryLimit}`).then(r => r.json()).catch(err => {
-    logClientError('failed to load /history/commands', err);
-    return { runs: [] };
-  }),
-  apiFetch('/history/active').then(r => r.json()).catch(err => {
-    logClientError('failed to load /history/active', err);
-    return { runs: [] };
-  }),
-]).then(([, historyData, activeData]) => {
-  hydrateCmdHistory(historyData.runs || []);
-  const restoredTabs = typeof restoreTabSessionState === 'function'
-    && restoreTabSessionState();
-  const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
-    && restoreActiveRunsAfterReload(activeData.runs || []);
-  if (!restoredTabs && !restoredActiveRuns && (!_controllerTabs().length)) {
-    createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
-    _runWelcomeIntro();
-    return;
-  }
-  _setWelcomeBootPending(false);
+// Preferences and active runs protect restoration and action defaults. Command
+// recall can arrive later, provided it still belongs to the same scope.
+const shellStartup = startShellSession({
+  loadPreferences: () => typeof loadSessionPreferences === 'function'
+    ? loadSessionPreferences() : Promise.resolve(),
+  loadActive: () => apiFetch('/history/active').then(readShellResponse),
+  loadHistory: () => {
+    const limit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
+    return apiFetch(`/history/commands?limit=${limit}`).then(readShellResponse);
+  },
+  hydrate: runs => hydrateCmdHistory(runs, { mergeExisting: true }),
+  restore: runs => {
+    const restoredTabs = typeof restoreTabSessionState === 'function' && restoreTabSessionState();
+    const restoredRuns = typeof restoreActiveRunsAfterReload === 'function' && restoreActiveRunsAfterReload(runs);
+    if (!restoredTabs && !restoredRuns && !_controllerTabs().length) {
+      createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
+      _runWelcomeIntro();
+    } else _setWelcomeBootPending(false);
+    void loadShellCatalogs();
+  },
+  onError: logClientError,
 });
+window.addEventListener('app:identity-changed', shellStartup.scopeChanged);
+document.addEventListener('app:scope-changed', shellStartup.scopeChanged);
 
 setTimeout(() => {
   if (!cmdInput) return;

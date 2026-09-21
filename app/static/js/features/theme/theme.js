@@ -6,7 +6,8 @@ import { APP_CONFIG as importedAppConfig } from '../../core/config.js';
 import { themeSelect as importedThemeSelect } from '../../core/dom.js';
 import { emitUiEvent as importedEmitUiEvent } from '../../core/state.js';
 import { buildPromptLabel as importedBuildPromptLabel } from '../../output.js';
-import { logClientError as importedLogClientError } from '../../session.js';
+import { apiFetch as importedThemeApiFetch, logClientError as importedLogClientError } from '../../session.js';
+import { bindPressable as importedThemeBindPressable } from '../../ui/ui_pressable.js';
 import {
   _persistCurrentSessionPreferences as importedPersistCurrentSessionPreferences,
   getPreference as importedGetPreference,
@@ -44,6 +45,34 @@ function _getThemeRegistry() {
 function _getThemeThemes() {
   const registry = _getThemeRegistry();
   return Array.isArray(registry.themes) ? registry.themes : [];
+}
+
+let _themeCatalogRequest = null;
+let _themeSelectionRevision = 0;
+let _themePendingSelection = null;
+let _themeOptionsRequest = null;
+
+function loadThemeRegistry() {
+  const registry = _getThemeRegistry();
+  if (registry.details_loaded !== false) return Promise.resolve(registry);
+  if (_themeCatalogRequest?.registry === registry) return _themeCatalogRequest.promise;
+  const request = importedThemeApiFetch;
+  const pending = { registry, promise: null };
+  pending.promise = Promise.resolve().then(() => request('/themes')).then(async response => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data?.themes) || !data.themes.length || data.themes.some(entry => (
+      !entry || typeof entry.name !== 'string' || !entry.vars || typeof entry.vars !== 'object' || Array.isArray(entry.vars)
+    ))) throw new Error('Invalid theme catalog');
+    // Preserve the live palette: the server's current theme can be older than
+    // a selection made while this request was in flight.
+    if (_getThemeRegistry() !== registry) return _getThemeRegistry();
+    registry.themes = data.themes.map(({ theme_vars: _unused, ...entry }) => entry);
+    registry.details_loaded = true;
+    return registry;
+  }).finally(() => { if (_themeCatalogRequest === pending) _themeCatalogRequest = null; });
+  _themeCatalogRequest = pending;
+  return pending.promise;
 }
 
 function _normalizeThemeName(name) {
@@ -241,9 +270,38 @@ function _buildThemePreviewCard(theme) {
   return card;
 }
 
-function renderThemeSelectionOptions() {
+function renderThemeSelectionOptions({ load = false } = {}) {
   const themeSelect = _themeSelectEl();
   if (!themeSelect || themeSelect.dataset.wired === '1') return;
+  if (_getThemeRegistry().details_loaded === false) {
+    if (!load) return;
+    if (_themeOptionsRequest) return _themeOptionsRequest;
+    const restoreFocus = themeSelect.contains(document.activeElement);
+    themeSelect.replaceChildren();
+    const status = document.createElement('div');
+    status.className = 'theme-picker-empty';
+    status.setAttribute('role', 'status');
+    status.textContent = 'Loading themes…';
+    themeSelect.appendChild(status);
+    _themeOptionsRequest = loadThemeRegistry().then(() => {
+      renderThemeSelectionOptions();
+      syncThemeSelectionControls();
+      if (restoreFocus && document.getElementById('theme-overlay')?.classList.contains('open')) {
+        themeSelect.querySelector('.theme-card-active')?.focus({ preventScroll: true });
+      }
+    }).catch(err => {
+      _themeLogClientError('failed to load theme previews', err);
+      status.textContent = 'Themes couldn’t load. Your current theme is still available.';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-secondary';
+      retry.textContent = 'Retry loading themes';
+      const bind = importedThemeBindPressable;
+      bind(retry, { onActivate: () => renderThemeSelectionOptions({ load: true }), refocusComposer: false });
+      themeSelect.appendChild(retry);
+    }).finally(() => { _themeOptionsRequest = null; });
+    return _themeOptionsRequest;
+  }
   const themes = [..._getThemeThemes()].sort(_compareThemeEntries);
   themeSelect.innerHTML = '';
   if (!themes.length) {
@@ -305,8 +363,24 @@ function syncThemeSelectionControls() {
 function applyThemeSelection(themeName, persist = true) {
   // Theme preview uses the same resolved-entry path as persisted selection, so
   // the drawer/modal never shows a palette the runtime cannot actually apply.
+  // A delayed preference response must not supersede an explicit selection
+  // whose palette is still loading.
+  if (!persist && _themePendingSelection !== null) return false;
   const entry = _resolveThemeEntry(themeName);
-  if (!entry) return;
+  const revision = ++_themeSelectionRevision;
+  _themePendingSelection = null;
+  if (!entry) return false;
+  if (!entry.vars && _getThemeRegistry().details_loaded === false) {
+    if (persist) _themePendingSelection = revision;
+    return loadThemeRegistry().then(() => {
+      if (revision !== _themeSelectionRevision) return false;
+      const loaded = _findThemeEntry(themeName);
+      return loaded?.vars ? applyThemeSelection(loaded.name, persist) : false;
+    }).catch(err => {
+      _themeLogClientError('failed to load selected theme', err);
+      return false;
+    }).finally(() => { if (_themePendingSelection === revision) _themePendingSelection = null; });
+  }
   if (document.body) document.body.dataset.theme = entry.name;
   _applyThemeVars(entry);
   if (typeof window !== 'undefined') {
@@ -322,6 +396,7 @@ function applyThemeSelection(themeName, persist = true) {
   if (typeof importedEmitUiEvent === 'function') {
     importedEmitUiEvent('app:theme-changed', { theme: entry.name });
   }
+  return true;
 }
 
 const THEME_GLOBAL = typeof window !== 'undefined' ? window : globalThis;
@@ -340,6 +415,7 @@ export {
   _resolveThemeEntry,
   _savedThemeName,
   applyThemeSelection,
+  loadThemeRegistry,
   renderThemeSelectionOptions,
   syncThemeSelectionControls,
 };

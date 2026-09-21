@@ -6,7 +6,6 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
-import uuid
 
 import pytest
 
@@ -16,7 +15,10 @@ from core.database_backend import DatabaseBackend, PostgresSqliteCompatConnectio
 from services.secrets.vault import reset_master_key_cache_for_tests
 
 
-@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+@pytest.fixture(params=[
+    pytest.param("sqlite", marks=pytest.mark.sqlite_backend),
+    pytest.param("postgres", marks=pytest.mark.postgres),
+])
 def operator_db(request, tmp_path, monkeypatch):
     data = tmp_path / "data"
     data.mkdir()
@@ -30,32 +32,19 @@ def operator_db(request, tmp_path, monkeypatch):
         yield SimpleNamespace(backend="sqlite", cfg=cfg, path=path)
     else:
         import psycopg
-        from psycopg import sql
         from psycopg.rows import dict_row
-        from psycopg.conninfo import make_conninfo
-        from core.migrations import MIGRATIONS
-        from core.migrations.runner import run_migrations_with_advisory_lock
 
-        dsn = request.getfixturevalue("postgres_dsn")
-        schema = "operator_test_" + uuid.uuid4().hex
-        with psycopg.connect(dsn) as setup:
-            setup.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-            setup.commit()
-            isolated_dsn = make_conninfo(dsn, options="-csearch_path=" + schema)
-            try:
-                with psycopg.Connection[dict[str, Any]].connect(isolated_dsn, row_factory=dict_row) as raw:
-                    run_migrations_with_advisory_lock(raw, MIGRATIONS)
+        databases = request.getfixturevalue("postgres_test_databases")
+        with databases.current_database() as target:
+            @contextmanager
+            def connect():
+                with psycopg.Connection[dict[str, Any]].connect(target.dsn, row_factory=dict_row) as raw:
+                    raw.execute("SET jit = off")
+                    raw.commit()
+                    yield PostgresSqliteCompatConnection(raw)
 
-                @contextmanager
-                def connect():
-                    with psycopg.Connection[dict[str, Any]].connect(isolated_dsn, row_factory=dict_row) as raw:
-                        yield PostgresSqliteCompatConnection(raw)
-
-                cfg = cfg.with_overrides({"database_backend": "postgres", "database_url": isolated_dsn})
-                monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-                monkeypatch.setattr(database, "db_connect", connect)
-                yield SimpleNamespace(backend="postgres", cfg=cfg, path=None)
-            finally:
-                setup.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
-                setup.commit()
+            cfg = cfg.with_overrides({"database_backend": "postgres", "database_url": target.dsn})
+            monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+            monkeypatch.setattr(database, "db_connect", connect)
+            yield SimpleNamespace(backend="postgres", cfg=cfg, path=None)
     reset_master_key_cache_for_tests()

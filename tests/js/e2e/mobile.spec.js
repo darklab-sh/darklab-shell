@@ -705,6 +705,7 @@ test.beforeEach(async ({ page }) => {
     expect(modalBox.width).toBeGreaterThanOrEqual(viewport.width * 0.95)
     expect(modalBox.height).toBeGreaterThanOrEqual(viewport.height * 0.95)
 
+    await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
     const mobileColumns = await page
       .locator('#theme-select')
       .evaluate((el) => el.style.getPropertyValue('--theme-picker-columns-mobile'))

@@ -5,14 +5,11 @@
 
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-import sqlite3
 
 import pytest
 
+from conftest import create_pristine_sqlite_connection
 from identity_helpers import anonymous_session_id
-from core.database_backend import DatabaseBackend
-from core.migrations import MIGRATIONS
-from core.migrations.runner import run_migrations
 from services.connectors.oast_config import OastConnectorSettings
 from services.connectors.oast_correlation_lifecycle import (
     activate_oast_correlation,
@@ -40,10 +37,7 @@ DIFFERENT_ACTOR = anonymous_session_id("oast-different-actor")
 
 @pytest.fixture
 def correlation_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    conn = create_pristine_sqlite_connection()
     timestamp = NOW.isoformat()
     conn.execute(
         "INSERT INTO projects (id, personal_workspace_id, name, slug, created, updated) "

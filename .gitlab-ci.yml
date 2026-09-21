@@ -61,6 +61,21 @@ before_script:
   image: $CI_PYTHON_E2E_IMAGE
   variables:
     PLAYWRIGHT_PROJECT_COUNT: "3"
+    PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.cache/ms-playwright"
+  cache:
+    - key: "$CI_COMMIT_REF_SLUG"
+      paths:
+        - .cache/pip/
+    # The lockfile pins Playwright; the CI file pins the OS image/dependency setup.
+    # Runner identity separates native platforms without slashes in cache keys.
+    - key:
+        prefix: "browser-downloads-$CI_RUNNER_ID"
+        files:
+          - package-lock.json
+          - .gitlab-ci.yml
+      paths:
+        - .cache/ms-playwright/
+        - .cache/npm/_cacache/
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -73,8 +88,9 @@ before_script:
   before_script:
     - curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && apt-get install -y -q nodejs iputils-ping
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
-    - npm ci
-    - npx playwright install --with-deps chromium
+    - npm ci --cache .cache/npm --prefer-offline
+    - export PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH/$(node -p 'process.platform + "-" + process.arch')"
+    - npx playwright install --with-deps --only-shell chromium
   artifacts:
     when: on_failure
     paths:
@@ -112,6 +128,8 @@ test-js-e2e-postgres-auth-profiles:
 
 .pytest-lane:
   stage: test
+  variables:
+    PYTEST_TIMING_JSON: "test-results/pytest-timings.json"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -142,6 +160,7 @@ test-py-pytest-fast:
       - test-results/pytest-fast.xml
       - test-results/pytest-fast-durations.txt
       - test-results/pytest-fast-files.txt
+      - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-fast.xml
     expire_in: 1 week
@@ -164,6 +183,7 @@ test-py-pytest-release:
       - test-results/pytest-release.xml
       - test-results/pytest-release-durations.txt
       - test-results/pytest-release-files.txt
+      - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-release.xml
     expire_in: 1 week
@@ -197,6 +217,7 @@ test-py-postgres:
     POSTGRES_USER: darklab
     POSTGRES_PASSWORD: darklab_dev_password
     DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+    PYTEST_TIMING_JSON: "test-results/pytest-timings.json"
     PYTEST_JUNIT_XML: "test-results/pytest-postgres.xml"
     PYTEST_DURATIONS: "50"
   rules:
@@ -220,6 +241,7 @@ test-py-postgres:
       - test-results/pytest-postgres.xml
       - test-results/pytest-postgres-durations.txt
       - test-results/pytest-postgres-files.txt
+      - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-postgres.xml
     expire_in: 1 week

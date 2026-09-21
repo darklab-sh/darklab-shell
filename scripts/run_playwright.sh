@@ -33,6 +33,10 @@ while (($#)); do
       serial_mode=1
       shift
       ;;
+    --postgres-fresh)
+      export PW_E2E_POSTGRES_FRESH=1
+      shift
+      ;;
     --server-timeout)
       shift
       if (($# == 0)); then
@@ -133,7 +137,7 @@ if [[ "$ASSET_BUNDLE_MODE" != "source" && "$ASSET_BUNDLE_MODE" != "bundle" ]]; t
   exit 2
 fi
 if [[ "$ASSET_BUNDLE_MODE" == "bundle" ]]; then
-  if ! npm run assets:check; then
+  if ! npm run assets:fresh; then
     echo "run_playwright.sh: asset_bundle_mode=bundle requires current committed build output; run assets:sync" >&2
     exit 1
   fi
@@ -186,8 +190,36 @@ else
   runner=(npx playwright)
 fi
 
+# Ask Playwright itself which projects match the files, grep and shard options.
+# Keep the same projects/ports; only omit servers no selected test can use.
+unset PW_SELECTED_PROJECTS
+select_servers=1
+run_tests=1
+for argument in "${playwright_args[@]}"; do
+  case "$argument" in --ui*|--debug|--list|--help|-h) select_servers=0 ;; esac
+  case "$argument" in --list|--help|-h) run_tests=0 ;; esac
+done
+if ((select_servers)); then
+  selection_file="$(mktemp /tmp/darklab-playwright-selection.XXXXXX)"
+  if "${runner[@]}" test "${playwright_args[@]}" --list --reporter=json > "$selection_file" &&
+     PW_SELECTED_PROJECTS="$(node .tooling/playwright.project-selection.js "$selection_file")"; then
+    export PW_SELECTED_PROJECTS
+  else
+    unset PW_SELECTED_PROJECTS
+    echo "[e2e] Project preselection unavailable; using the complete configured server set." >&2
+  fi
+  rm -f -- "$selection_file"
+fi
+
 set +e
-"${runner[@]}" test "${playwright_args[@]}"
+if [[ -n "${PW_E2E_POSTGRES_DSN:-}" ]] && ((run_tests)); then
+  postgres_python="$PWD/.venv/bin/python"
+  [[ -x "$postgres_python" ]] || postgres_python=python3
+  "$postgres_python" scripts/test-support/playwright/prepare_postgres_schema.py \
+    --run "${runner[@]}" test "${playwright_args[@]}"
+else
+  "${runner[@]}" test "${playwright_args[@]}"
+fi
 status=$?
 set -e
 

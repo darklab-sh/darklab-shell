@@ -128,11 +128,40 @@ async function qualifyPersonalAndTeamScope(page) {
   })
 }
 
+// Every profile/backend/viewport proves that command recall is off the prompt
+// readiness path and that a late response preserves a draft already being typed.
+async function prepareStartupProbe(page) {
+  let release, requested = false
+  const pending = new Promise(resolve => { release = resolve })
+  const handler = async route => {
+    requested = true
+    await pending
+    await route.fulfill({ json: { runs: [{ command: 'late startup recall' }] } })
+  }
+  await page.route('**/history/commands?*', handler)
+  return async () => {
+    try {
+      await ensurePromptReady(page)
+      await expect.poll(() => requested).toBe(true)
+      const input = page.locator(await page.locator('#hamburger-btn').isVisible() ? '#mobile-cmd' : '#cmd')
+      await input.fill('draft while recall is loading')
+      release()
+      await page.waitForFunction(() => window.APP_STATE_API.getState().cmdHistory.includes('late startup recall'))
+      await expect(input).toHaveValue('draft while recall is loading')
+      await input.fill('')
+    } finally {
+      release()
+      await page.unroute('**/history/commands?*', handler)
+    }
+  }
+}
+
 async function qualifyBrowser(page, context, projectName) {
   const profile = profileFor(projectName)
+  const startupProbe = await prepareStartupProbe(page)
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   if (profile === 'open') {
-    await ensurePromptReady(page)
+    await startupProbe()
     await expect(page.locator('#hud-session')).toHaveText('ANON')
     await expect(page.locator('[data-action="logout"]')).toHaveClass(/\bu-hidden\b/)
     await expect(page.locator('[data-menu-action="logout"]')).toHaveClass(/\bu-hidden\b/)
@@ -176,7 +205,7 @@ async function qualifyBrowser(page, context, projectName) {
   // Predicate URL assertions also wait for full load on the assertion timeout.
   // Give navigation its own budget, then check that the shell is usable.
   await page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded', timeout: 30_000 })
-  await ensurePromptReady(page)
+  await startupProbe()
 
   if (profile === 'oidc_required') {
     const mobile = await page.locator('#hamburger-btn').isVisible()

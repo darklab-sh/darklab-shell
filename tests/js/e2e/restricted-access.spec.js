@@ -218,7 +218,10 @@ test.describe('restricted access profile', () => {
     }, { times: 1 })
     // A background protected request may observe revocation before Projects.
     const denied = page.waitForResponse(response => new URL(response.url()).origin === origin && response.status() === 401)
-    await page.evaluate(() => { void apiFetch('/projects').catch(() => {}) })
+    await Promise.all([
+      page.waitForURL(/\/auth\/sign-in\?next=/, { waitUntil: 'domcontentloaded' }),
+      page.evaluate(() => { void apiFetch('/projects').catch(() => {}) }),
+    ])
     await expect.poll(() => revocationStatus).toBe(200)
     expect((await denied).status()).toBe(401)
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)

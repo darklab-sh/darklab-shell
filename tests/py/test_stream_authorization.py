@@ -14,7 +14,7 @@ from unittest import mock
 
 import pytest
 
-from conftest import copy_pristine_sqlite_database, make_test_app
+from conftest import copy_pristine_sqlite_database, reusable_test_app
 from core import database
 from core.database_access import get_db_connect
 from services.auth import browser_sessions, storage, stream_authorization
@@ -27,7 +27,7 @@ from services.workspace.models import WorkspaceSettings
 def stream_identity(tmp_path, monkeypatch):
     path = copy_pristine_sqlite_database(tmp_path / "stream.db")
     monkeypatch.setattr(database, "DB_PATH", str(path))
-    app = make_test_app()
+    app = reusable_test_app(__name__, init_db=False)
     app.config["RATELIMIT_ENABLED"] = False
     settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
     settings.root.mkdir()

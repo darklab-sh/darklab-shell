@@ -16,16 +16,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import copy_pristine_sqlite_database
+from conftest import copy_pristine_sqlite_database, create_pristine_sqlite_connection
 from core.database_backend import DatabaseBackend
 from core.database_access import get_db_connect
 from core.migrations import (
-    MIGRATIONS,
     v0078_principal_credential_persistence,
     v0079_credential_scopes,
     v0083_browser_sessions,
 )
-from core.migrations.runner import run_migrations
 from services.auth import lifecycle, storage, verifier_keys
 from services.auth.background_authorization import (
     BackgroundAuthorizationState,
@@ -93,10 +91,7 @@ def ownership_cutover_db(tmp_path, monkeypatch):
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    run_migrations(conn, MIGRATIONS, backend=DatabaseBackend.SQLITE)
+    conn = create_pristine_sqlite_connection()
     yield conn
     conn.close()
     reset_master_key_cache_for_tests()

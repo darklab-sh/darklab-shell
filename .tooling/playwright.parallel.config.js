@@ -5,6 +5,7 @@ import { defineConfig, devices } from '@playwright/test'
 import { readdirSync } from 'fs'
 import { resolve } from 'path'
 import { __dirname, buildIsolatedWebServer, testDir } from './playwright.shared.js'
+import { selectedWebServers } from './playwright.project-selection.js'
 
 const projectCount = Math.max(
   1,
@@ -20,36 +21,44 @@ const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js', 'operator-console.spec.js'].includes(name))
   .sort()
 
-// Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
-// not by file count. Split welcome flows are weighted separately so the old
-// 70s+ long pole can be distributed across multiple workers.
+// Rounded per-spec seconds from successful CI job 16620146718 (2026-09-21).
+// Refresh from DARKLAB_PLAYWRIGHT_TIMINGS; skipped demo specs keep a small weight.
 const specWeights = {
-  'assessment.spec.js': 10,
-  'mobile.spec.js': 21,
-  'ui.spec.js': 21,
-  'shortcuts.spec.js': 19,
-  'history.spec.js': 9,
-  'interaction-contract.spec.js': 8,
-  'tabs.spec.js': 7,
-  'output.spec.js': 7,
-  'share.spec.js': 6,
-  'kill.spec.js': 4,
-  'search.spec.js': 4,
-  'welcome-interactions.spec.js': 3,
-  'welcome.spec.js': 3,
-  'autocomplete.spec.js': 2,
-  'commands.spec.js': 2,
-  'failure-paths.spec.js': 2,
-  'timestamps.spec.js': 2,
-  'welcome-context.spec.js': 2,
-  'boot-resilience.spec.js': 1,
-  'rate-limit.spec.js': 1,
-  'runner-stall.spec.js': 1,
-  'theme-audit.spec.js': 1,
-  // Demo recording specs skip immediately unless RUN_DEMO=1 is set.
-  'demo.spec.js': 1,
+  'access.spec.js': 67,
+  'assessment.spec.js': 96,
+  'autocomplete.spec.js': 26,
+  // Recovery cases measured ~24 s in job 16622742806; include the new startup probes.
+  'boot-resilience.spec.js': 30,
+  'commands.spec.js': 23,
+  'compare.spec.js': 33,
   'demo.mobile.spec.js': 1,
+  'demo.spec.js': 1,
+  'failure-paths.spec.js': 24,
+  'history.spec.js': 91,
+  'interaction-contract.spec.js': 59,
+  'kill.spec.js': 26,
+  'mobile.spec.js': 180,
+  'output.spec.js': 59,
+  'probes.spec.js': 21,
+  'project-list-layout.spec.js': 15,
+  'project-overview.spec.js': 14,
+  'rate-limit.spec.js': 3,
+  'runner-stall.spec.js': 6,
+  'search.spec.js': 20,
+  'share.spec.js': 47,
+  'shortcuts.spec.js': 99,
+  'source-lazy-smoke.spec.js': 25,
+  'tabs.spec.js': 71,
+  'team-mode.spec.js': 29,
+  'theme-audit.spec.js': 8,
+  'timestamps.spec.js': 17,
+  'ui.spec.js': 344,
+  'welcome-context.spec.js': 24,
+  'welcome-interactions.spec.js': 33,
+  'welcome.spec.js': 36,
 }
+const missingWeights = allSpecFiles.filter((name) => !(name in specWeights))
+if (missingWeights.length) console.warn(`[e2e] fallback spec weight (5 seconds): ${missingWeights.join(', ')}`)
 
 const weightedSpecs = [...allSpecFiles]
   .map((name) => ({ name, weight: specWeights[name] || 5 }))
@@ -60,7 +69,8 @@ const weightedSpecs = [...allSpecFiles]
 
 const buckets = Array.from({ length: projectCount }, (_, index) => ({
   index,
-  totalWeight: 0,
+  // The first open project also owns access-profile and operator qualification.
+  totalWeight: index === 0 ? 27 : 0,
   specs: [],
 }))
 
@@ -77,7 +87,7 @@ const specGroups = buckets.sort((a, b) => a.index - b.index).map((bucket) => buc
 
 const openProjects = specGroups
   .map((specs, index) => {
-    if (!specs.length) return null
+    if (!specs.length && index !== 0) return null
     return {
       name: `chromium-w${index + 1}`,
       testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js', 'operator-console.spec.js'] : specs,
@@ -150,24 +160,27 @@ const projects = [
   restrictedQualificationProject, oidcQualificationProject,
 ].map((project) => ({ ...project, workers: 1 }))
 
+const webServer = selectedWebServers([
+  ...openProjects.map((project, index) => [
+    project.name, buildIsolatedWebServer(basePort + index, `w${index + 1}`),
+  ]),
+  [restrictedProject.name, buildIsolatedWebServer(restrictedPort, 'restricted', 'token_required')],
+  [oidcProject.name, buildIsolatedWebServer(oidcPort, 'oidc', 'mixed', true)],
+  [oidcRequiredProject.name, buildIsolatedWebServer(oidcRequiredPort, 'oidc-required', 'oidc_required', true)],
+  [restrictedQualificationProject.name, buildIsolatedWebServer(restrictedQualificationPort, 'restricted-qualification', 'token_required')],
+  [oidcQualificationProject.name, buildIsolatedWebServer(oidcQualificationPort, 'oidc-qualification', 'mixed', true)],
+])
+
 export default defineConfig({
   testDir,
+  metadata: { configuredServerCount: webServer.length },
   fullyParallel: false,
   // Auth-profile projects share this total budget with the open-profile shards.
   workers: Math.min(process.env.CI ? 3 : 7, projects.length),
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never' }], ['./playwright.timing-reporter.js']],
   projects,
-  webServer: [
-    ...openProjects.map((project, index) =>
-      buildIsolatedWebServer(basePort + index, `w${index + 1}`),
-    ),
-    buildIsolatedWebServer(restrictedPort, 'restricted', 'token_required'),
-    buildIsolatedWebServer(oidcPort, 'oidc', 'mixed', true),
-    buildIsolatedWebServer(oidcRequiredPort, 'oidc-required', 'oidc_required', true),
-    buildIsolatedWebServer(restrictedQualificationPort, 'restricted-qualification', 'token_required'),
-    buildIsolatedWebServer(oidcQualificationPort, 'oidc-qualification', 'mixed', true),
-  ],
+  webServer,
 })
