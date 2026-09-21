@@ -4,6 +4,7 @@
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './extract.js'
 import { bindFocusTrap } from '../../../../app/static/js/ui/ui_focus_trap.js'
+import { bindPressable } from '../../../../app/static/js/ui/ui_pressable.js'
 
 const BASE_MATCH_MEDIA = window.matchMedia
 const BASE_VISUAL_VIEWPORT = window.visualViewport
@@ -744,6 +745,8 @@ export async function loadAppFns({
       localStorage: storage,
       sessionStorage: sessionStore,
       apiFetch,
+      importedThemeApiFetch: apiFetch,
+      importedThemeBindPressable: bindPressable,
       APP_CONFIG: appConfig,
       AnsiUp: FakeAnsiUp,
       showConfirm: showConfirmOverride || vi.fn(() => Promise.resolve(null)),

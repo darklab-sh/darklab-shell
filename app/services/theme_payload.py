@@ -5,8 +5,10 @@
 
 
 def browser_theme_registry(current: dict, themes: list[dict]) -> dict:
-    """Keep runtime variables and metadata without duplicating the raw theme map."""
-    def entry_payload(entry: dict) -> dict:
-        return {key: value for key, value in entry.items() if key != "theme_vars"}
+    """Keep the current palette ready while other previews load on demand."""
+    def entry_payload(entry: dict, *, metadata: bool = False) -> dict:
+        omitted = {"theme_vars", "vars"} if metadata else {"theme_vars"}
+        return {key: value for key, value in entry.items() if key not in omitted}
 
-    return {"current": entry_payload(current), "themes": [entry_payload(entry) for entry in themes]}
+    return {"current": entry_payload(current), "themes": [entry_payload(entry, metadata=True) for entry in themes],
+            "details_loaded": False}

@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Theme previews load when needed.** The active palette and offline export colors stay available immediately, while other palettes load when opening the chooser or selecting another theme. Failed loads can be retried, and delayed responses preserve the latest choice.
+
 - **Backend feedback avoids repeated app construction and syntax parsing.** Request-event logging and stable credential/stream tests reuse app wiring with fresh clients and isolated data. Repository guards share a bounded syntax cache with source-content invalidation and independent visitor trees; import, factory, construction-log, and startup contracts still run independently.
 
 - **Ordinary Postgres tests and browser servers clone a migrated template into independent databases.** This avoids rebuilding every table and index for operator and current-schema cases while preserving transactions, constraints, and committed-state isolation. Roles without database-creation permission and custom host locales retain isolated schemas; migration and startup tests keep their real initialization paths. Cleanup is limited to resources created by the test invocation. Browser targets remain isolated by profile, with an explicit fresh-schema startup mode.

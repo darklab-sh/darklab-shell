@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
-import { openRailAction } from './helpers.js'
+import { ensurePromptReady, openRailAction } from './helpers.js'
 
 test.describe('boot resilience', () => {
   test.beforeEach(async ({ page }) => {
@@ -46,3 +46,37 @@ test.describe('boot resilience', () => {
     expect(externalFonts).toEqual([])
   })
 })
+
+for (const width of [1280, 390]) {
+  test.describe(`theme previews at width ${width}`, () => {
+    test.use({ viewport: { width, height: 900 }, isMobile: width < 600, hasTouch: width < 600 })
+    test(`theme previews load on demand and recover from failure at width ${width}`, async ({ page }) => {
+      let attempts = 0
+      let release
+      const pending = new Promise(resolve => { release = resolve })
+      await page.route('**/themes', async route => {
+        attempts += 1
+        if (attempts === 1) {
+          await pending
+          await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+        } else await route.continue()
+      })
+      await page.goto('/')
+      await ensurePromptReady(page)
+      const initial = await page.locator('body').getAttribute('data-theme')
+      expect(attempts).toBe(0)
+      if (width < 600) {
+        await page.locator('#hamburger-btn').click()
+        await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
+      } else await openRailAction(page, 'theme')
+      await expect(page.getByRole('status').filter({ hasText: 'Loading themes' })).toBeVisible()
+      await expect(page.locator('body')).toHaveAttribute('data-theme', initial)
+      release()
+      await page.getByRole('button', { name: 'Retry loading themes' }).click()
+      await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
+      await page.locator('#theme-select .theme-card:not(.theme-card-active)').first().click()
+      await expect(page.locator('body')).not.toHaveAttribute('data-theme', initial)
+      expect(attempts).toBe(2)
+    })
+  })
+}

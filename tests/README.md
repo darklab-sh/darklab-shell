@@ -699,6 +699,8 @@ Practical note:
 
 ---
 
+Theme loading checks cover a usable current palette without a catalog request, shared requests, rapid selection, late preferences, invalid responses, retries, and private offline export colors. Desktop/mobile browser cases hold and fail the catalog response before retrying; theme audits await each palette before measuring its rendered colors.
+
 ## Testing Conventions
 
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
