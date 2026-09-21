@@ -78,6 +78,8 @@ def test_dependency_cache_rejects_shared_directory_and_symlink(environment_cache
     parent, root, _ = environment_cache
     cache = parent / "darklab-postgres-test-venvs"
     cache.mkdir(parents=True, mode=0o755)
+    # Set the rejected permissions explicitly; mkdir() applies the caller's umask.
+    cache.chmod(0o755)
     with pytest.raises(RuntimeError, match="private directory"):
         environment.prepare_environment(parent, root)
     cache.rmdir()
