@@ -33,6 +33,10 @@ while (($#)); do
       serial_mode=1
       shift
       ;;
+    --postgres-fresh)
+      export PW_E2E_POSTGRES_FRESH=1
+      shift
+      ;;
     --server-timeout)
       shift
       if (($# == 0)); then
@@ -190,8 +194,10 @@ fi
 # Keep the same projects/ports; only omit servers no selected test can use.
 unset PW_SELECTED_PROJECTS
 select_servers=1
+run_tests=1
 for argument in "${playwright_args[@]}"; do
   case "$argument" in --ui*|--debug|--list|--help|-h) select_servers=0 ;; esac
+  case "$argument" in --list|--help|-h) run_tests=0 ;; esac
 done
 if ((select_servers)); then
   selection_file="$(mktemp /tmp/darklab-playwright-selection.XXXXXX)"
@@ -206,7 +212,14 @@ if ((select_servers)); then
 fi
 
 set +e
-"${runner[@]}" test "${playwright_args[@]}"
+if [[ -n "${PW_E2E_POSTGRES_DSN:-}" ]] && ((run_tests)); then
+  postgres_python="$PWD/.venv/bin/python"
+  [[ -x "$postgres_python" ]] || postgres_python=python3
+  "$postgres_python" scripts/test-support/playwright/prepare_postgres_schema.py \
+    --run "${runner[@]}" test "${playwright_args[@]}"
+else
+  "${runner[@]}" test "${playwright_args[@]}"
+fi
 status=$?
 set -e
 

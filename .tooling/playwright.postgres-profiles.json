@@ -1,0 +1,6 @@
+[
+  ["chromium-w1", "pg-open", "open", false],
+  ["chromium-restricted", "pg-restricted", "token_required", false],
+  ["chromium-oidc", "pg-mixed", "mixed", true],
+  ["chromium-oidc-required", "pg-oidc-required", "oidc_required", true]
+]

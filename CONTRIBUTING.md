@@ -308,7 +308,9 @@ integration tests against isolated test databases or schemas. Ordinary cases
 clone a session-owned current-schema template when the test role has `CREATEDB`
 and the host database uses the cluster template's encoding and locale. Otherwise
 they keep schema isolation. Migration, upgrade, startup, and initialization-failure
-cases retain their purpose-built schemas. Its default selection excludes
+cases retain their purpose-built schemas. Postgres browser runs also use a
+separate target per server; `--postgres-fresh` on the browser helper selects empty
+schemas for startup qualification. Its default selection excludes
 SQLite operator variants and offline dialect/migration checks, which remain in
 the required fast lane. Reporting-only flags such as `--durations=0` and
 `--junitxml=report.xml` extend that selection; explicit pytest selections replace

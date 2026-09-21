@@ -83,7 +83,7 @@ Notes:
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
-- CI runs the Postgres backend lane automatically. Locally, use `npm run test:postgres` to run the Postgres smoke, route, and migration integration tests against isolated schemas. The route smoke exercises browser and API Assessment reads, configured CVE feed status, protected HTTP-profile references, managed Nuclei preflight and aggregate template-failure diagnosis, and compatible completed-run reconciliation through the configured app. The configured-app startup smoke also performs a complete cold start, including migrations and the bundled EPSS/KEV baseline import, so it allows extra time for a contended shared runner without treating elapsed startup time as a performance assertion. The helper uses `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable Docker Postgres container and removes it and its anonymous volumes after the run. You can also pass `--postgres-dsn` to pytest directly, or use `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the bundled Compose Postgres service without publishing the database port.
+- CI runs the Postgres backend lane automatically. Locally, use `npm run test:postgres` to run the Postgres smoke, route, and migration integration tests against isolated databases or schemas. The route smoke exercises browser and API Assessment reads, configured CVE feed status, protected HTTP-profile references, managed Nuclei preflight and aggregate template-failure diagnosis, and compatible completed-run reconciliation through the configured app. The configured-app startup smoke also performs a complete cold start, including migrations and the bundled EPSS/KEV baseline import, so it allows extra time for a contended shared runner without treating elapsed startup time as a performance assertion. The helper uses `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable Docker Postgres container and removes it and its anonymous volumes after the run. You can also pass `--postgres-dsn` to pytest directly, or use `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the bundled Compose Postgres service without publishing the database port.
 - the container smoke test is slower and is meant for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
 ---
@@ -177,6 +177,14 @@ connections before cleanup; only names created and recorded by this invocation
 can be force-dropped after an interrupted test. Template regressions qualify the
 ledger, indexes, sequences, functions, triggers, foreign keys, committed-row
 isolation, schema fallback, failed initialization, and cleanup.
+The Postgres browser helper builds the same production-migrated template once
+for the invocation and gives each selected server a separate target. Private
+connection metadata stays in the helper's secret directory and is removed after
+Playwright stops its servers, including failed or interrupted runs. Existing
+connection options are preserved, with an explicit target search path. Pass
+`--postgres-fresh` through `bash scripts/run_postgres_tests.sh --browser -- ...`
+to start each server from an empty isolated schema and exercise real startup.
+The dedicated pytest cold-start smoke also retains production initialization.
 SQLite operator cases, SQLite FTS search, and offline backend/dialect/migration
 checks run in the required fast lane. Reporting-only options keep the helper
 selection; explicit pytest arguments retain their normal selection behavior.

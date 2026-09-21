@@ -123,3 +123,40 @@ def test_role_without_createdb_uses_its_own_schema(postgres_dsn):
         finally:
             admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
             admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_browser_targets_keep_profile_state_private_and_clean_up_after_interruption(postgres_dsn, tmp_path, capsys, fresh):
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts/test-support/playwright/prepare_postgres_schema.py"
+    spec = importlib.util.spec_from_file_location("browser_postgres_targets", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.selected_slots('["chromium-oidc", "chromium-w1"]') == ["pg-open", "pg-mixed"]
+    with pytest.raises(ValueError, match="Unknown"):
+        module.selected_slots('["unrecognized"]')
+    with pytest.raises(KeyboardInterrupt):
+        with module.browser_targets(postgres_dsn, tmp_path, ["pg-open", "pg-mixed"], fresh=fresh) as metadata:
+            assert metadata.stat().st_mode & 0o777 == 0o600
+            targets = json.loads(metadata.read_text())
+            assert targets["pg-open"]["dsn"] != targets["pg-mixed"]["dsn"]
+            resources = []
+            for target in targets.values():
+                with psycopg.connect(target["dsn"]) as conn:
+                    resources.append((conn.info.dbname, conn.execute("SELECT current_schema()").fetchone()[0]))
+                    assert (conn.execute("SELECT to_regclass('schema_migrations')").fetchone()[0] is None) is fresh
+            raise KeyboardInterrupt
+    assert not metadata.exists()
+    output = capsys.readouterr().out
+    assert "DARKLAB_POSTGRES_BROWSER_PREPARATION" in output
+    assert postgres_dsn not in output
+    assert all(target["dsn"] not in output for target in targets.values())
+    with psycopg.connect(postgres_dsn) as conn:
+        for database, schema in resources:
+            if schema == "public":
+                assert conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (database,)).fetchone() is None
+            else:
+                assert conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", (schema,)).fetchone() is None

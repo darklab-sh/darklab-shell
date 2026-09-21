@@ -108,15 +108,20 @@ class PostgresTestDatabases:
             finally:
                 self._drop_database(name)
         else:
-            schema = self.prefix + "_" + uuid4().hex[:12]
-            with psycopg.connect(self.dsn, autocommit=True) as admin:
-                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-                try:
-                    dsn = self._connection_dsn(schema=schema)
-                    self._migrate(dsn)
-                    yield PostgresTestTarget(dsn, schema, "schema")
-                finally:
-                    admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+            with self.fresh_schema() as target:
+                self._migrate(target.dsn)
+                yield target
+
+    @contextmanager
+    def fresh_schema(self):
+        """Leave production initialization to the caller when startup is under test."""
+        schema = self.prefix + "_" + uuid4().hex[:12]
+        with psycopg.connect(self.dsn, autocommit=True) as admin:
+            admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            try:
+                yield PostgresTestTarget(self._connection_dsn(schema=schema), schema, "schema")
+            finally:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
     def close(self) -> None:
         # Connections to clones must be closed by their fixtures first. FORCE is

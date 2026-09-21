@@ -36,7 +36,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Ordinary Postgres tests clone a migrated template into independent databases.** This avoids rebuilding every table and index for operator and current-schema cases while preserving transactions, constraints, and committed-state isolation. Roles without database-creation permission and custom host locales retain isolated schemas; migration and startup tests keep their real initialization paths. Cleanup is limited to resources created by the test invocation.
+- **Ordinary Postgres tests and browser servers clone a migrated template into independent databases.** This avoids rebuilding every table and index for operator and current-schema cases while preserving transactions, constraints, and committed-state isolation. Roles without database-creation permission and custom host locales retain isolated schemas; migration and startup tests keep their real initialization paths. Cleanup is limited to resources created by the test invocation. Browser targets remain isolated by profile, with an explicit fresh-schema startup mode.
 
 - **Focused browser tests start only their selected app servers.** The helper uses Playwright collection to preserve project/profile isolation and normal selection behavior while avoiding unrelated startup and teardown. Browser projects use refreshed CI timing weights, account for fixed qualification work, and warn about unweighted specs.
 

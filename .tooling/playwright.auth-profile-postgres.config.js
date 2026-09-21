@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { defineConfig, devices } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { buildIsolatedWebServer, testDir } from './playwright.shared.js'
 import { selectedWebServers } from './playwright.project-selection.js'
 
@@ -10,12 +11,7 @@ if (!process.env.PW_E2E_POSTGRES_DSN) {
 }
 
 const basePort = Number.parseInt(process.env.PLAYWRIGHT_BASE_PORT || '5201', 10)
-const profiles = [
-  ['chromium-w1', 'pg-open', 'open', false],
-  ['chromium-restricted', 'pg-restricted', 'token_required', false],
-  ['chromium-oidc', 'pg-mixed', 'mixed', true],
-  ['chromium-oidc-required', 'pg-oidc-required', 'oidc_required', true],
-]
+const profiles = JSON.parse(readFileSync(new URL('./playwright.postgres-profiles.json', import.meta.url), 'utf8'))
 
 const webServer = selectedWebServers(profiles.map(([name, slot, profile, tls], index) => [
   name, buildIsolatedWebServer(basePort + index, slot, profile, tls),
