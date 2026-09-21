@@ -20,6 +20,7 @@ or connect to Redis by itself.
 import json
 import logging
 import socket
+import sys
 from collections.abc import Mapping
 from typing import Any
 
@@ -149,12 +150,12 @@ class _TextFormatter(logging.Formatter):
 # Public API
 # ---------------------------------------------------------------------------
 
-def configure_logging(cfg: Mapping[str, Any]) -> None:
+def configure_logging(cfg: Mapping[str, Any], *, stderr_only: bool = False) -> None:
     """
     Apply level and format from cfg to the 'shell' logger.
 
     Runtime bootstrap calls this before process, database, or app startup work
-    emits operational logs.
+    emits operational logs. Local JSON commands use stderr_only to reserve stdout.
     """
     logger = logging.getLogger("shell")
     buffered_records = drain_config_log_records(logger)
@@ -169,7 +170,9 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
     )
 
     logger.handlers.clear()
-    for handler in console_handlers(formatter):
+    handlers = [logging.StreamHandler(sys.stderr)] if stderr_only else console_handlers(formatter)
+    for handler in handlers:
+        handler.setFormatter(formatter)
         logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False  # do not forward to root — this is the complete pipeline

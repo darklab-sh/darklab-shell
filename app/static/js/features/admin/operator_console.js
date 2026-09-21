@@ -5,6 +5,7 @@ import { bindPressable } from '../../ui/ui_pressable.js';
 
 import { enhanceAppSelects, syncAppSelect } from '../../ui/ui_helpers.js';
 import { element, disclosure, settingCard } from './operator_settings_view.js';
+import { operatorDestination } from './operator_access.js';
 export { displayValue } from './operator_settings_view.js';
 
 export function filterSettings(rows, { search = '', group = '', source = '', warnings = '' } = {}) {
@@ -23,10 +24,27 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
   const diagnostics = query('#admin-load-warnings');
   const categoryState = new Map(), filteredState = new Map(), settingState = new Map();
   let rows = [], requestId = 0, filtering = false, categoryHandles = [];
+  const parameters = new URLSearchParams(window.location.search);
+  search.value = (parameters.get('search') || '').slice(0, 256);
+  let initialGroup = (parameters.get('group') || '').slice(0, 256);
+  source.value = parameters.get('source') || (parameters.get('view') === 'host' ? 'host' : '');
+  warnings.value = parameters.get('warnings') === 'yes' ? 'yes' : '';
+  if (!source.value) source.value = '';
+  const updateAddress = filters => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('view');
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) url.searchParams.set(key, value.slice(0, 256));
+      else url.searchParams.delete(key);
+    }
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+  };
   enhanceAppSelects(root);
+  for (const control of [source, warnings]) syncAppSelect(control);
   const option = (label, value) => { const node = element('option', label); node.value = value; return node; };
   const syncGroups = () => {
-    const selected = group.value;
+    const selected = initialGroup || group.value;
+    initialGroup = '';
     const menu = group.nextElementSibling;
     const active = document.activeElement;
     const focusedOption = menu?.contains(active) && active.getAttribute('role') === 'option' ? active.dataset.value : null;
@@ -52,6 +70,7 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
   };
   const render = ({ filtersChanged = false } = {}) => {
     const filters = { search: search.value, group: group.value, source: source.value, warnings: warnings.value };
+    updateAddress(filters);
     filtering = Object.values(filters).some(value => value.trim());
     if (filtersChanged) filteredState.clear();
     const visible = filterSettings(rows, filters);
@@ -108,10 +127,10 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
         status.textContent = 'Sign-in or verification is required.';
         const data = await response.json();
         if (current !== requestId) return;
-        const destination = new URL(data.destination, window.location.origin);
-        if (destination.origin === window.location.origin && ['/auth/sign-in', '/admin/reauth'].includes(destination.pathname)) {
+        const destination = operatorDestination(data.destination);
+        if (destination) {
           navigating = true;
-          navigate(destination.pathname + destination.search);
+          navigate(destination);
         }
         return;
       }
@@ -125,7 +144,7 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
       if (data.schema_version !== 1 || !Array.isArray(data.settings) || !Array.isArray(data.host_settings)) throw new Error('Invalid inventory');
       rows = [...data.settings, ...data.host_settings.map(item => ({
         ...item, label: item.key, group: 'Host deployment · not observed',
-        effective: { mode: 'full', value: 'Not observed by this worker' }, default: { mode: 'withheld' },
+        effective: { mode: 'full', value: 'Not observed by this worker' }, default: { mode: 'unobserved' },
         source: { layer: 'host', name: item.status }, environment: [item.key], processes: ['Deployment'], warnings: [],
       }))].sort((a, b) => a.group.localeCompare(b.group) || a.key.localeCompare(b.key));
       syncGroups();
@@ -134,7 +153,10 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
       const loadedAt = Number.isNaN(date.getTime()) ? 'Unavailable' : new Intl.DateTimeFormat(undefined, {
         dateStyle: 'medium', timeStyle: 'long', timeZone: 'UTC',
       }).format(date);
-      observation.replaceChildren(...[`Worker ${sample.process_id}`, `Configuration loaded: ${loadedAt}`, `Application ${sample.app_version}`]
+      const loader = sample.load_pid && sample.load_pid !== sample.process_id
+        ? `Configuration inherited from process ${sample.load_pid}` : 'Configuration loaded in this worker';
+      observation.replaceChildren(...[sample.kind || "Serving web worker's loaded configuration", `Worker ${sample.process_id}`,
+        loader, `Configuration loaded: ${loadedAt}`, `Application ${sample.app_version}`]
         .map(text => element('span', text)));
       diagnostics.replaceChildren(...data.warnings.map(item => element('p', `${item.key}: ${item.event} · ${item.reason}`, 'admin-warning')));
       if (data.warnings_truncated) diagnostics.append(element('p', 'Additional load warnings were omitted.', 'admin-warning'));
@@ -153,11 +175,15 @@ export function initializeConsole(root, { fetcher = fetch, navigate = path => wi
     }
   }
   search.addEventListener('input', () => render({ filtersChanged: true }));
-  for (const control of [group, source, warnings]) control.addEventListener('change', () => render({ filtersChanged: true }));
+  for (const control of [group, source, warnings]) control.addEventListener('change', () => {
+    if (control === group) initialGroup = '';
+    render({ filtersChanged: true });
+  });
   root.querySelector('form').addEventListener('submit', event => event.preventDefault());
   bindPressable(refresh, { onActivate: load, refocusComposer: false });
   bindPressable(query('#admin-clear'), { onActivate: () => {
     search.value = '';
+    initialGroup = '';
     for (const control of [group, source, warnings]) { control.value = ''; syncAppSelect(control); }
     render({ filtersChanged: true });
     search.focus({ preventScroll: true });

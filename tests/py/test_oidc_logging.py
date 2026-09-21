@@ -210,7 +210,7 @@ def test_signed_token_rejections_keep_the_validation_reason_without_claim_values
     provider.claim_overrides = claim
     flow = oidc.OIDCFlow("private-canary-state", provider.nonce, provider.verifier, "sign_in", "", "", "/")
     with pytest.raises(oidc.OIDCError) as caught:
-        oidc.exchange_code(_config(), flow, "local-code")
+        oidc.exchange_code_proof(_config(), flow, "local-code")
     assert not isinstance(caught.value, oidc.OIDCUnavailable)
     oidc_diagnostics.log_oidc_failure(caught.value)
     _assert_event(records, stage="token_validation", reason=reason, level=logging.WARNING, private=(provider.subject,))

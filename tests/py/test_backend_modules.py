@@ -27564,7 +27564,7 @@ class TestAutocompleteContextLoading:
             ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
             ("CDNCHECK_VERSION", "v1.2.50", "cdncheck -h"),
             ("GAU_VERSION", "v2.2.4", "gau --version"),
-            ("TRUFFLEHOG_VERSION", "v3.97.0", "trufflehog --help"),
+            ("TRUFFLEHOG_VERSION", "v3.97.5", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):

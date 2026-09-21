@@ -11,6 +11,7 @@ export function element(tag, text, className) {
 }
 
 export function displayValue(value) {
+  if (value?.mode === 'unobserved') return 'Not observed by this worker';
   if (value?.mode === 'summary') {
     if (value.summary === 'count') return `${value.value} entries configured`;
     if (value.summary === 'presence') return value.value ? 'Configured' : 'Not configured';
@@ -57,7 +58,6 @@ export function acceptedValues(rules = {}) {
   if (rules.minimum !== undefined && rules.maximum !== undefined) parts.push(`From ${rules.minimum} to ${rules.maximum}, inclusive`);
   else if (rules.minimum !== undefined) parts.push(`Minimum: ${rules.minimum}`);
   else if (rules.maximum !== undefined) parts.push(`Maximum: ${rules.maximum}`);
-  if (rules.unit) parts.push(`Unit: ${rules.unit}`);
   if (rules.input) parts.push(rules.input.charAt(0).toUpperCase() + rules.input.slice(1));
   if (rules.fallback !== undefined) parts.push(`Invalid input uses ${rules.fallback}`);
   if (rules.pattern) parts.push(`Must match pattern: ${rules.pattern}`);

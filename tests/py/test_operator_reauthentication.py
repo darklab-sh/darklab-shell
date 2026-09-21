@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from datetime import datetime, timedelta, timezone
+import logging
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -10,7 +11,9 @@ from admin_helpers import operator_db as _operator_db
 from core.database_access import get_db_connect
 from services.auth import (
     browser_sessions,
+    observability,
     oidc,
+    oidc_diagnostics,
     operator_access,
     operator_grants,
     operator_reauth,
@@ -76,7 +79,11 @@ def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(opera
     page = client.get("/admin/reauth?next=/admin/", base_url=ORIGIN)
     assert page.status_code == 200 and b"Verify operator access" in page.data
     assert page.headers["Cache-Control"] == "private, no-store"
-    assert client.post("/admin/reauth", base_url=ORIGIN, data={"credential": bundle.credential.secret}).status_code == 403
+    expired_form = client.post("/admin/reauth", base_url=ORIGIN, data={"credential": bundle.credential.secret})
+    assert expired_form.status_code == 403 and expired_form.mimetype == "text/html"
+    assert b"This form has expired" in expired_form.data and b"Sign in again" in expired_form.data
+    assert original.csrf_token.encode() in expired_form.data
+    assert bundle.credential.secret.encode() not in expired_form.data
     wrong = client.post("/admin/reauth", base_url=ORIGIN, data={
         "credential": peer.credential.secret, "csrf_token": original.csrf_token, "next": "/admin/",
     })
@@ -91,6 +98,53 @@ def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(opera
     assert replacement.id != original.id
     assert replacement.absolute_expires_at == original.absolute_expires_at
     assert browser_sessions.resolve_browser_session(original.cookie_value, idle_seconds=1800).state == "revoked"
+
+
+@pytest.mark.parametrize("csrf", ["missing_cookie", "mismatched", "invalid_cookie"])
+def test_reauthentication_csrf_errors_render_without_verifying(operator_db, monkeypatch, csrf):
+    import blueprints.admin as admin
+
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+    token = original.csrf_token
+    if csrf == "missing_cookie":
+        client.delete_cookie(browser_sessions.BROWSER_CSRF_COOKIE, domain="shell.example")
+    elif csrf == "invalid_cookie":
+        token = "unrecognized-token"
+        client.set_cookie(browser_sessions.BROWSER_CSRF_COOKIE, token, domain="shell.example")
+    else:
+        token = "old-form-token"
+    monkeypatch.setattr(admin, "redeem_portable_credential", lambda _secret: pytest.fail("CSRF failure verified a credential"))
+    response = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": bundle.credential.secret, "csrf_token": token, "next": "/audit?event_type=run.start",
+    })
+    assert response.status_code == 403 and response.mimetype == "text/html"
+    assert b"This form has expired" in response.data and b"/audit?event_type=run.start" in response.data
+    assert bundle.credential.secret.encode() not in response.data
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE) == original.cookie_value
+
+
+def test_limited_reauthentication_reports_throttling_without_verifying(operator_db, monkeypatch):
+    import blueprints.admin as admin
+    from services.auth.rate_limit import CredentialRateLimitResult
+
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+    records = []
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
+    monkeypatch.setattr(observability, "log", SimpleNamespace(
+        warning=lambda event, *, extra: records.append((event, extra)), isEnabledFor=lambda _level: False,
+    ))
+    monkeypatch.setattr(admin, "_redemption_limit", lambda _secret: CredentialRateLimitResult(False, retry_after=20))
+    monkeypatch.setattr(admin, "redeem_portable_credential", lambda _secret: pytest.fail("Limited request verified a credential"))
+    response = client.post("/admin/reauth", base_url=ORIGIN, data={
+        "credential": bundle.credential.secret, "csrf_token": original.csrf_token,
+    })
+    assert response.status_code == 429 and response.headers["Retry-After"] == "20"
+    assert b"Too many attempts" in response.data
+    assert len(records) == 1 and records[0][0] == "INSTANCE_OPERATOR_REAUTH_FAILED"
+    assert records[0][1]["reason"] == "rate_limited" and records[0][1]["http_status"] == 429
+    assert records[0][1]["endpoint"] == "admin.reauthenticate"
+    assert records[0][1]["request_id"] != "unknown"
 
 
 @pytest.mark.parametrize("change", ["grant", "principal", "session", "credential", "absolute", "idle"])
@@ -215,9 +269,20 @@ def test_provider_step_up_binds_state_and_preserves_original_deadline_without_st
     assert browser_sessions.resolve_browser_session(old_cookie, idle_seconds=1800).state == "revoked"
 
 
-@pytest.mark.parametrize("failure", ["missing", "old", "future", "subject", "state", "revoked", "profile", "provider"])
+@pytest.mark.parametrize("failure", [
+    "missing", "old", "future", "subject", "state", "revoked", "session", "session_without_cookie",
+    "profile", "provider", "storage",
+])
 def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, monkeypatch, failure):
     app, client, provider, state, principal = provider_setup(operator_db, monkeypatch)
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger = logging.Logger("operator-step-up-test", logging.WARNING)
+    logger.addHandler(handler)
+    monkeypatch.setattr(oidc_diagnostics, "log", logger)
+    monkeypatch.setattr(observability, "log", logger)
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
     if failure == "missing":
         provider.claim_omissions.add("auth_time")
     elif failure == "old":
@@ -230,14 +295,42 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
         client.delete_cookie(oidc.OIDC_STATE_COOKIE, domain="shell.example", path="/auth/oidc/callback")
     elif failure == "revoked":
         operator_grants.set_grant(principal, granted=False)
+    elif failure in {"session", "session_without_cookie"}:
+        browser_sessions.revoke_principal_browser_sessions(principal, reason="test")
+        if failure == "session_without_cookie":
+            client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE, domain="shell.example")
     elif failure == "profile":
         app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides(
             {"access_profile": "open", "oidc_provisioning": "disabled"}
         )
     elif failure == "provider":
         provider.available = False
+    elif failure == "storage":
+        def unavailable(*_args, **_kwargs):
+            raise IdentityStorageError("private-storage-sentinel")
+        monkeypatch.setattr(operator_grants, "lock_principal", unavailable)
     result = _callback(client, state)
     assert result.status_code in (302, 404)
+    terminals = [record for record in records if record.msg in {"OIDC_AUTH_FAILED", "OIDC_PROVIDER_FAILED"}]
+    if failure != "profile":
+        assert len(terminals) == 1
+        record = terminals[0]
+        assert record.purpose == ("unknown" if failure == "state" else "admin_reauth")
+        assert record.levelno == (logging.ERROR if failure in {"provider", "storage"} else logging.WARNING)
+        if failure in {"subject", "revoked", "session", "session_without_cookie"}:
+            assert record.stage == "identity_binding" and record.reason == "operator_source_unavailable"
+        elif failure == "storage":
+            assert record.reason == "storage_failed"
+        assert record.exc_info is None and record.stack_info is None
+        assert "private-storage-sentinel" not in str(record.__dict__)
+        assert provider.subject not in str(record.__dict__)
+    if failure in {"missing", "old", "future"}:
+        query = parse_qs(urlsplit(result.headers["Location"]).query)
+        assert query["error"] == ["provider_freshness"]
+        assert query["next"] == ["/admin/?view=host"]
+        page = client.get(result.headers["Location"], base_url=ORIGIN)
+        assert b"requires a signed auth_time" in page.data
+        assert b"check the provider configuration" in page.data
     assert not any(value.startswith(browser_sessions.BROWSER_SESSION_COOKIE + "=")
                    for value in result.headers.getlist("Set-Cookie"))
     with get_db_connect()() as conn:
@@ -420,3 +513,49 @@ def test_provider_flow_upgrade_preserves_pending_sign_in_and_link(operator_db):
         apply_migration(conn, upgrade, backend=backend)
         after = [dict(row) for row in conn.execute("SELECT * FROM oidc_auth_flows ORDER BY purpose").fetchall()]
         assert before == after
+
+
+@pytest.mark.parametrize("reason,status", [
+    ("profile", 404), ("ineligible", 404), ("source_unavailable", 302),
+    ("credential_rejected", 400), ("rate_limited", 429),
+])
+def test_operator_warning_repeats_use_fixed_keys_and_safe_context(monkeypatch, reason, status):
+    from flask import Flask
+
+    app = Flask(__name__)
+    records = []
+    clock = [100.0]
+    monkeypatch.setattr(observability, "_WARNING_STATE", {})
+    monkeypatch.setattr(observability, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(observability, "log", SimpleNamespace(
+        warning=lambda event, *, extra: records.append((event, extra)), isEnabledFor=lambda _level: False,
+    ))
+
+    @app.get("/admin/settings")
+    def protected():
+        if status == 404:
+            return operator_access.hidden_response(reason)
+        observability.log_operator_reauthentication_failed(reason)
+        return "", status
+
+    client = app.test_client()
+    for index in range(100):
+        response = client.get(
+            f"/admin/settings?search=private-query-{index}",
+            environ_overrides={"darklab_request_id": f"request-{index}", "REMOTE_ADDR": "192.0.2.1"},
+        )
+        assert response.status_code == status
+    assert len(records) == 1
+    event, fields = records[0]
+    assert event == ("INSTANCE_OPERATOR_ACCESS_DENIED" if status == 404 else "INSTANCE_OPERATOR_REAUTH_FAILED")
+    assert fields == {"reason": reason, "http_status": status, "request_id": "request-0",
+                      "endpoint": "protected", "suppressed_repeat_count": 0}
+    clock[0] += 60
+    assert client.get("/admin/settings").status_code == status
+    assert len(records) == 2 and records[1][1]["suppressed_repeat_count"] == 99
+    for index in range(100):
+        observability.log_operator_access_denied(f"private-reason-{index}")
+        observability.log_operator_reauthentication_failed(f"private-reason-{index}")
+    assert len(observability._WARNING_STATE) <= 3
+    assert "private-" not in repr(records) + repr(observability._WARNING_STATE)
+    assert "192.0.2.1" not in repr(records) + repr(observability._WARNING_STATE)

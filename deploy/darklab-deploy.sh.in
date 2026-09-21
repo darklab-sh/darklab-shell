@@ -1044,6 +1044,7 @@ Commands (principal and credential ids are non-secret identifiers):
   bootstrap --output-file HOST_PATH [--label LABEL]
   status PRINCIPAL
   operator-grant PRINCIPAL | operator-status PRINCIPAL | operator-revoke PRINCIPAL
+  operator-list [--limit 1..1000] [--after PRINCIPAL]
   issue PRINCIPAL --output-file HOST_PATH [--type portable|pat] [--scope SCOPE ...]
   recover PRINCIPAL --confirm-principal PRINCIPAL --output-file HOST_PATH
   rotate PRINCIPAL CREDENTIAL --output-file HOST_PATH
@@ -1276,7 +1277,7 @@ access_command() {
     access_operation=$1
     shift
     case "$access_operation" in
-        bootstrap|status|operator-grant|operator-status|operator-revoke|issue|recover|expiry|rotate|revoke|disable|enable|revoke-all-sessions|rotate-session-signing-key|retrieve) ;;
+        bootstrap|status|operator-grant|operator-status|operator-revoke|operator-list|issue|recover|expiry|rotate|revoke|disable|enable|revoke-all-sessions|rotate-session-signing-key|retrieve) ;;
         *) access_usage >&2; fail "unknown access command: $access_operation" ;;
     esac
     access_output=""
@@ -1352,7 +1353,7 @@ config_check_run() {
     trap 'exit 143' TERM
     deployment_compose "$script_dir/.env" "$script_dir/compose.yaml" \
         run --rm --no-deps -T --pull never --name "$config_container" --entrypoint python3 shell -c '
-import os, subprocess, sys
+import subprocess, sys
 from pathlib import Path
 args = sys.argv[2:]
 checker = "/app/tools/check_instance_config.py"
@@ -1363,10 +1364,8 @@ try:
     if sys.argv[1] == "input":
         # The checker reads the pipe directly: no candidate file is writable.
         args += ["--local-yaml", "/dev/stdin"]
-    else:
-        local = Path(os.environ.get("APP_LOCAL_CONF_DIR") or "/config") / "config.local.yaml"
-        if local.exists():
-            args += ["--local-yaml", str(local)]
+    # Without a candidate, the checker resolves the overlay from the container
+    # Compose-selected environment and mounts, exactly as configuration loading does.
     raise SystemExit(subprocess.run([sys.executable, checker, *args], check=False).returncode)
 except OSError:
     print("darklab-deploy: configuration evaluation could not run", file=sys.stderr)
@@ -1404,11 +1403,6 @@ config_command() {
             *) set -- "$@" "$config_arg" ;;
         esac
     done
-    if [ -z "$config_candidate" ]; then
-        if [ -e "$script_dir/conf/config.local.yaml" ] || [ -L "$script_dir/conf/config.local.yaml" ]; then
-            config_candidate="$script_dir/conf/config.local.yaml"
-        fi
-    fi
     if [ -n "$config_candidate" ] && { [ ! -f "$config_candidate" ] || [ ! -r "$config_candidate" ]; }; then
         printf '%s\n' 'darklab-deploy: local YAML input is missing or unreadable' >&2
         exit 2

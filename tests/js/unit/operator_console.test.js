@@ -10,9 +10,10 @@ const row = (key, extra = {}) => ({ key, label: key, description: 'Description',
   source: { layer: 'local', name: 'Local YAML' }, effective: { mode: 'full', value: '<script>literal</script>' },
   default: { mode: 'full', value: 'default' }, environment: [], processes: [], warnings: [], apply: 'Recreate container', ...extra });
 const payload = (name = 'setting') => ({ schema_version: 1, settings: [row(name)], host_settings: [], warnings: [],
-  observation: { process_id: 12, loaded_at: '2026-09-19', app_version: 'test' } });
+  observation: { process_id: 12, load_pid: 12, loaded_at: '2026-09-19', app_version: 'test' } });
 const response = (body = payload(), status = 200) => ({ ok: status === 200, status, json: async () => body });
-function fixture() {
+function fixture(url = '/admin/') {
+  window.history.replaceState(null, '', url);
   document.body.innerHTML = `<main><form><input id="admin-search"><select class="form-select" id="admin-group"><option value="">All</option></select>
   <select class="form-select" id="admin-source"><option value="">All</option><option value="local">Local</option><option value="host">Host</option><option value="default">Default</option></select><select class="form-select" id="admin-warnings"><option value="">All</option><option value="yes">Warnings</option></select></form>
   <div id="admin-results"></div><p id="admin-count"></p><p id="admin-status"></p><p id="admin-observation"></p>
@@ -159,7 +160,7 @@ describe('operator console', () => {
   it('explains declared input rules without inventing coercion for strict booleans or default file sources', () => {
     expect(acceptedValues({ type: 'boolean' }).join(' ')).toBe('Boolean: true or false');
     expect(acceptedValues({ type: 'boolean', input: 'boolean or 1/0, true/false, yes/no, on/off; invalid values default' }).join(' ')).toContain('yes/no, on/off');
-    expect(acceptedValues({ type: 'integer', minimum: 1, maximum: 10, unit: 'minutes', fallback: 2 }).join(' ')).toContain('From 1 to 10, inclusive Unit: minutes Invalid input uses 2');
+    expect(acceptedValues({ type: 'integer', minimum: 1, maximum: 10, fallback: 2 }).join(' ')).toContain('From 1 to 10, inclusive Invalid input uses 2');
     expect(loadedSource(row('default', { source: { layer: 'default' } }))).toBe('Built-in default');
     expect(loadedSource(row('local', { source: { layer: 'local' } }))).toBe('Local config.local.yaml');
   });
@@ -167,5 +168,52 @@ describe('operator console', () => {
     const navigate = vi.fn();
     await initializeConsole(fixture(), { navigate, fetcher: async () => response({ destination: '//outside.test/admin/reauth' }, 401) }).ready;
     expect(navigate).not.toHaveBeenCalled();
+  });
+  it('restores combined URL filters after asynchronous inventory loading and a verification return', async () => {
+    const root = fixture('/admin/?search=beta&group=Browser&source=default&warnings=yes');
+    // Shared page setup can enhance selects before the feature restores URL state.
+    const { enhanceAppSelects } = await import('../../../app/static/js/ui/ui_helpers.js');
+    enhanceAppSelects(root);
+    const data = payload(), pending = deferred(), navigate = vi.fn();
+    data.settings = [row('alpha'), row('beta', { group: 'Browser', source: { layer: 'default' }, warnings: [{ event: 'clamped' }] })];
+    const fetcher = vi.fn().mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(response({ destination: '/admin/reauth?next=%2Fadmin%2F' }, 401));
+    const controller = initializeConsole(root, { fetcher, navigate });
+    pending.resolve(response(data)); await controller.ready;
+    expect(root.querySelector('#admin-count').textContent).toBe('1 of 2 settings');
+    expect(root.querySelector('#admin-group').value).toBe('Browser');
+    expect(root.querySelector('#admin-group').nextElementSibling.textContent).toContain('Browser');
+    expect(root.querySelector('#admin-source').nextElementSibling.querySelector('.app-select-value').textContent).toBe('Default');
+    expect(root.querySelector('#admin-warnings').nextElementSibling.querySelector('.app-select-value').textContent).toBe('Warnings');
+    const address = window.location.pathname + window.location.search;
+    await controller.refresh();
+    expect(new URL(navigate.mock.calls[0][0], window.location.origin).searchParams.get('next')).toBe(address);
+    const restored = fixture(address);
+    await initializeConsole(restored, { fetcher: async () => response(data) }).ready;
+    expect(restored.querySelector('#admin-count').textContent).toBe('1 of 2 settings');
+    restored.querySelector('#admin-clear').click();
+    expect(window.location.search).toBe('');
+  });
+  it('writes changed filters to the URL and normalizes obsolete or unsupported selections', async () => {
+    const root = fixture('/admin/?view=host&group=missing&warnings=bad');
+    const data = payload();
+    data.host_settings = [{ key: 'APP_PORT', status: 'Not observed', description: 'Port' }];
+    await initializeConsole(root, { fetcher: async () => response(data) }).ready;
+    expect(window.location.search).toBe('?source=host');
+    expect(root.querySelector('#admin-count').textContent).toBe('1 of 2 settings');
+    const search = root.querySelector('#admin-search');
+    search.value = '<literal>&port'; search.dispatchEvent(new Event('input'));
+    expect(new URLSearchParams(window.location.search).get('search')).toBe('<literal>&port');
+    expect(root.querySelector('literal')).toBeNull();
+  });
+  it('identifies inherited configuration and unobserved host defaults separately from withheld values', async () => {
+    const root = fixture(), data = payload();
+    data.observation.load_pid = 7;
+    data.observation.kind = "Serving web worker's loaded configuration";
+    data.host_settings = [{ key: 'APP_PORT', status: 'Not observed', description: 'Port' }];
+    await initializeConsole(root, { fetcher: async () => response(data) }).ready;
+    expect(root.querySelector('#admin-observation').textContent).toContain('Configuration inherited from process 7');
+    expect(root.querySelector('[data-key="APP_PORT"]').textContent).not.toContain('Value withheld');
+    expect(root.querySelector('[data-key="APP_PORT"]').textContent).toContain('Not observed by this worker');
   });
 });

@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import core.process as process_state
 from app_factory import create_app as _create_flask_app
-from blueprints.admin import admin_bp
+from blueprints.admin import admin_bp, render_reauthentication_form
 from blueprints.api_v1 import api_v1_bp
 from blueprints.assets import assets_bp
 from blueprints.atlas import atlas_bp
@@ -46,6 +46,7 @@ from core.helpers import (
     get_client_ip,
     get_log_session_id,
     get_session_id,
+    record_failed_authentication,
 )
 from core.http_rate_limit import check_dynamic_route_rate_limit
 from core.process import redis_storage_uri
@@ -53,7 +54,6 @@ from extensions import limiter
 from flask import current_app, has_app_context, jsonify, request
 from runtime_bootstrap import bootstrap_runtime
 from services.api_v1.serialization import json_error
-from services.audit.context import request_audit_fields
 from services.auth.access_profile import (
     enforce_browser_csrf,
     enforce_pat_route_access,
@@ -62,15 +62,11 @@ from services.auth.access_profile import (
     is_restricted,
     rotate_browser_session_after_privilege_change,
 )
-from services.auth.lifecycle import record_authentication_failure
 from services.auth.observability import (
     log_authentication_rejected,
-    log_credential_rate_limited,
 )
 from services.auth.operator_access import enforce_operator_access
 from services.auth.operator_access import private_response as operator_private_response
-from services.auth.rate_limit import check_failed_redemption
-from services.auth.resolver import public_lookup_id_from_headers
 from services.metrics_lazy import app_metrics
 from services.workspace.files import cleanup_inactive_workspaces
 
@@ -427,20 +423,7 @@ def _enforce_authentication_resolution():
         raise AuthenticationRejected(result.error_code, result.message)
     if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
         return None
-    limited = check_failed_redemption(
-        get_client_ip(),
-        public_lookup_id_from_headers(request.headers),
-        redis_client=process_state.redis_client,
-        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", CFG.get("rate_limit_enabled", True))),
-    )
-    if limited.allowed:
-        record_authentication_failure(result, request_fields=request_audit_fields(request))
-    if not limited.allowed:
-        log_credential_rate_limited(limited)
-        return jsonify({
-            "error": "credential_authentication_rate_limited",
-            "retry_after": limited.retry_after,
-        }), 429
+    record_failed_authentication(result)
     raise AuthenticationRejected(result.error_code, result.message)
 
 
@@ -453,7 +436,13 @@ def _enforce_access_profile():
 
 
 def _enforce_csrf():
-    return enforce_browser_csrf(get_authentication_result())
+    rejection = enforce_browser_csrf(get_authentication_result())
+    if rejection is not None and request.endpoint == "admin.reauthenticate":
+        return render_reauthentication_form(
+            error="This form has expired. Try again with this form, or sign in again if the problem continues.",
+            status=403, csrf_rejected=True,
+        )
+    return rejection
 
 
 def _server_error_handler(e):
@@ -621,8 +610,8 @@ def create_app(config=None):
         },
         before_request_handlers=(
             _log_request,
-            enforce_operator_access,
             _enforce_dynamic_route_rate_limit,
+            enforce_operator_access,
             _enforce_authentication_resolution,
             _enforce_access_profile,
             _enforce_csrf,
