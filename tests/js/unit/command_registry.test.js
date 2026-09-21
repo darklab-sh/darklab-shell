@@ -43,6 +43,7 @@ function registryGlobals(extra = {}) {
     commandRegistryCategories: null,
     apiFetch: () => {},
     logClientError: () => {},
+    loadShellCatalogs: vi.fn(() => Promise.resolve()),
     setComposerValue: () => {},
     ...extra,
   }

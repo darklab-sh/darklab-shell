@@ -4,6 +4,8 @@
 import { vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './extract.js'
 import { bindFocusTrap } from '../../../../app/static/js/ui/ui_focus_trap.js'
+import { isUsableAppConfig } from '../../../../app/static/js/core/config.js'
+import { startShellSession } from '../../../../app/static/js/core/shell_startup.js'
 import { bindPressable } from '../../../../app/static/js/ui/ui_pressable.js'
 
 const BASE_MATCH_MEDIA = window.matchMedia
@@ -717,10 +719,10 @@ export async function loadAppFns({
       'app/static/js/app.js',
       'app/static/js/features/mobile/mobile_shell_layout.js',
       'app/static/js/features/tabs/tab_session_state.js',
+      'app/static/js/features/command-registry/command_registry_bridge.js',
       'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/teams_panel.js',
       'app/static/js/ui/ui_helpers.js',
-      'app/static/js/features/command-registry/command_registry_bridge.js',
       'app/static/js/features/command-registry/faq_helpers.js',
       'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/terminal/composer_editing.js',
@@ -737,6 +739,7 @@ export async function loadAppFns({
       'app/static/js/features/mobile/mobile_menu_actions.js',
       'app/static/js/features/shortcuts/global_shortcuts.js',
       'app/static/js/features/shortcuts/shortcuts_key_handler.js',
+      'app/static/js/features/command-registry/shell_catalogs.js',
       'app/static/js/controller.js',
       'app/static/js/features/terminal/composer_controller.js',
     ],
@@ -746,6 +749,8 @@ export async function loadAppFns({
       sessionStorage: sessionStore,
       apiFetch,
       importedThemeApiFetch: apiFetch,
+      isUsableAppConfig,
+      startShellSession,
       importedThemeBindPressable: bindPressable,
       APP_CONFIG: appConfig,
       AnsiUp: FakeAnsiUp,
