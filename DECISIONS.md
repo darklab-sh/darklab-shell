@@ -49,6 +49,8 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Assessment History, Evidence, and Finding Identity](#assessment-history-evidence-and-finding-identity)
   - [Assessment Execution, Secrets, and Packaging](#assessment-execution-secrets-and-packaging)
 - [Backend Architecture Decisions](#backend-architecture-decisions)
+  - [Pytest Feedback Uses Exact Serial Partitions](#pytest-feedback-uses-exact-serial-partitions)
+  - [Request Performance Preserves Authentication and Maintenance](#request-performance-preserves-authentication-and-maintenance)
   - [Blueprint Parent Modules and Size Ratchets](#blueprint-parent-modules-and-size-ratchets)
   - [Mutable Runtime State Uses Source-Owner Accessors](#mutable-runtime-state-uses-source-owner-accessors)
 - [Frontend Decisions](#frontend-decisions)
@@ -392,6 +394,14 @@ Ordinary Postgres cases use a session-owned migrated template and a distinct dat
 A new production schema baseline was not adopted as a test-speed shortcut. Rotating the baseline changes fresh-install and upgrade qualification, while the measured cost came from replaying production initialization in ordinary tests that weren't testing initialization. Keeping that decision separate preserves every historical migration and the existing SQLite/Postgres upgrade contract without making the normal feedback loop pay for it repeatedly.
 
 `pytest-xdist` isn't used for the backend suite. The current tests intentionally exercise process-wide config, logging, SQLite paths, Redis stand-ins, generated files, and local servers. Isolating all of those per worker would add more machinery than the measured runner capacity justifies, while the exact two-lane split provides earlier feedback without introducing worker-only failures. Parallel workers can be reconsidered if those shared boundaries become independently namespaced and repeated measurements show a worthwhile gain.
+
+### Request Performance Preserves Authentication and Maintenance
+
+Static endpoints use the shared per-request authentication result. A public asset doesn't make supplied identity disposable: retirement checks, credential and principal revocation, browser-session validation, PAT route restrictions, and credential-guess accounting still apply. Cross-request authentication caching or a blanket static-path exemption would change those contracts. Reducing source-module requests through the existing bundle mode preserves them.
+
+The September 2026 local SQLite review measured warm static requests at about 0.5 ms with no identity and 2.1–2.6 ms with an anonymous header, portable credential, PAT, or restricted browser cookie. No-identity requests already performed zero SQL statements. Those test-client measurements describe server work, not browser navigation latency or production contention. Manifest parsing was independent repeat work: an app-owned cache reduced a warm read from about 0.139 ms to 0.015 ms while preserving file invalidation and errors.
+
+Request-driven maintenance retained its existing bounded cadence and ownership rules. Checking 100 test-owned workspace directories took about 1 ms, and an uncontended SQLite checkpoint about 1.7 ms. These measurements didn't justify introducing another worker or moving cleanup into a new lifecycle; they don't establish a latency bound for large or locked databases.
 
 ### Blueprint Parent Modules and Size Ratchets
 

@@ -456,6 +456,8 @@ Access coverage keeps one-time credentials masked until requested and removes th
 
 Provider-link UI coverage checks the safe linked/unlinked states, credential reauthentication handoff, CSRF-protected start and unlink actions, and the absence of provider tokens in normal browser state.
 
+Manifest-cache tests verify app/path isolation, in-place edits with restored timestamps, atomic replacements, missing/malformed files, and recovery after correction. Cached state never masks an invalid deployment manifest.
+
 Shell startup tests hold preferences and command recall independently: privacy defaults precede the first tab, while delayed or failed recall doesn't block the prompt or replace typed input. Unit cases cover out-of-order identity/Team changes and preserved recall navigation. The desktop/mobile profile qualification checks late recall on both databases and asset modes; FAQ direct opens work before startup preferences finish. Dedicated welcome-animation coverage remains independent of the shared prompt-readiness helper.
 
 Autocomplete readiness coverage checks that a pending startup catalog becomes ready without a competing fetch and that browser checks read the shared app state. The autocomplete browser suite allows 30 seconds for startup readiness and one minute for each complete test; interaction assertions keep their normal deadlines. Startup recovery cases verify one retry after a network or server failure, one final error after persistent failure, and no retry for authorization or JSON errors. The browser case aborts the first real catalog request, then checks recovered positional hints and flags in source and bundled modes.

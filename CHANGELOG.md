@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Template asset lookups reuse a validated manifest per app.** File edits and atomic replacement invalidate cached data; missing or malformed manifests retain their existing errors.
+
 - **The shell becomes usable without waiting for command recall.** It reuses page configuration, defers secondary catalogs, and preserves privacy defaults, restored runs, typed drafts, and scope isolation when startup responses arrive late.
 
 - **Theme previews load when needed.** The active palette and offline export colors stay available immediately, while other palettes load when opening the chooser or selecting another theme. Failed loads can be retried, and delayed responses preserve the latest choice.
