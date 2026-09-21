@@ -423,7 +423,6 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 **Frontend bundles:** CSS and JavaScript bundle output works the same way. `assets.config.json` defines bundle membership and order, `npm run assets:sync` regenerates committed files in `app/static/build/`, and `npm run assets:check` verifies that the checked-in bundles and their precompressed siblings still match the current sources. The app serves content-hashed bundles by default, minifies generated ESM output with linked external source maps, negotiates Brotli or gzip for generated text assets when the browser supports it, and fails with a clear `Run assets:sync` message if the manifest is missing or incomplete. Set `asset_bundle_mode: source` in `app/conf/config.local.yaml` for local edit-and-refresh work without rebuilding after every source change. Source mode keeps JS module URLs unversioned so lazy imports and relative ESM imports don't refetch the same file under two browser module identities. The fast `npm run assets:fresh` prerequisite compares source/configuration/build-script/lockfile hashes, the installed esbuild version and compatible Node major, manifest contents, generated-file membership, and decompressed sidecar bytes. It doesn't rebuild assets. Required CI lint retains the complete build, compression, and working-directory checks through `npm run assets:check`.
 
-
 ---
 
 ## GitLab Runner Setup
