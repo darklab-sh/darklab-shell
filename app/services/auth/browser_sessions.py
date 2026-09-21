@@ -75,6 +75,7 @@ class ResolvedBrowserSession:
     credential_expires_at: str | None
     absolute_expires_at: str
     authenticated_at: str
+    provider_authenticated_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,7 @@ def create_browser_session(
     absolute_seconds: int,
     replace_session_id: str = "",
     authenticated_at: str | None = None,
+    provider_authenticated_at: str | None = None,
     absolute_expires_at: str | None = None,
     now: datetime | None = None,
     conn: Any | None = None,
@@ -275,8 +277,8 @@ def create_browser_session(
         active_conn.execute(
             "INSERT INTO browser_sessions "
             "(id, principal_id, credential_id, oidc_identity_id, signing_key_version, csrf_digest, created_at, "
-            "authenticated_at, last_seen_at, absolute_expires_at, revoked_at, revocation_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')",
+            "authenticated_at, provider_authenticated_at, last_seen_at, absolute_expires_at, revoked_at, revocation_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '')",
             (
                 session_id,
                 principal_id,
@@ -286,6 +288,7 @@ def create_browser_session(
                 _csrf_digest(csrf_token),
                 created,
                 timestamp(_as_utc(authenticated_at)) if authenticated_at else created,
+                timestamp(_as_utc(provider_authenticated_at)) if provider_authenticated_at else None,
                 created,
                 timestamp(expires_at),
             ),
@@ -331,6 +334,41 @@ def _session_row(conn: Any, session_id: str) -> Any:
         "WHERE s.id = ?",
         (session_id,),
     ).fetchone()
+
+
+def lock_rotation_source(
+    conn: Any, *, session_id: str, principal_id: str, idle_seconds: int, now: datetime | None = None,
+) -> dict[str, Any]:
+    """Lock and validate an existing session before a caller-owned rotation.
+
+    The caller locks the principal first. Lock the identity before the session,
+    matching credential revocation/provider unlink, then recheck the source.
+    Evaluate expiry after lock acquisition, through the rotation commit.
+    """
+    backend = DatabaseBackend(getattr(conn, "database_backend", None) or get_db_backend())
+    if backend == DatabaseBackend.SQLITE and not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    row = conn.execute("SELECT * FROM browser_sessions WHERE id = ?", (session_id,)).fetchone()
+    if row is None or row["principal_id"] != principal_id:
+        raise BrowserSessionError("the source session is unavailable")
+    if row["credential_id"]:
+        query = ("SELECT id FROM credentials WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+                 else "SELECT id FROM credentials WHERE id = ?")
+        conn.execute(query, (row["credential_id"],)).fetchone()
+    else:
+        query = ("SELECT id FROM oidc_identities WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+                 else "SELECT id FROM oidc_identities WHERE id = ?")
+        conn.execute(query, (row["oidc_identity_id"],)).fetchone()
+    query = ("SELECT * FROM browser_sessions WHERE id = ? FOR UPDATE" if backend == DatabaseBackend.POSTGRES
+             else "SELECT * FROM browser_sessions WHERE id = ?")
+    locked = conn.execute(query, (session_id,)).fetchone()
+    if (locked is None or locked["credential_id"] != row["credential_id"]
+            or locked["oidc_identity_id"] != row["oidc_identity_id"]):
+        raise BrowserSessionError("the source session is unavailable")
+    data = _row_dict(_session_row(conn, session_id))
+    if not data or _session_state_failure(data, _active_now(now), idle_seconds) is not None:
+        raise BrowserSessionError("the source session is unavailable")
+    return data
 
 
 def _session_state_failure(data: dict[str, Any], active_now: datetime, idle_seconds: int) -> BrowserSessionResolution | None:
@@ -441,6 +479,8 @@ def resolve_browser_session(
                 ),
                 absolute_expires_at=timestamp(_as_utc(data["absolute_expires_at"])),
                 authenticated_at=timestamp(_as_utc(data["authenticated_at"])),
+                provider_authenticated_at=(timestamp(_as_utc(data["provider_authenticated_at"]))
+                                           if data.get("provider_authenticated_at") else None),
             ),
         )
 

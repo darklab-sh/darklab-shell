@@ -61,7 +61,7 @@ def _write_config(conf_dir: Path, body: str) -> None:
 
 def _write_sqlite_database(path: Path) -> None:
     from core.database_backend import DatabaseBackend
-    from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes
+    from core.migrations import v0078_principal_credential_persistence, v0079_credential_scopes, v0086_instance_operator_grants
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
@@ -73,6 +73,8 @@ def _write_sqlite_database(path: Path) -> None:
             conn.execute(statement)
         for statement in v0079_credential_scopes.MIGRATION.statements_for(DatabaseBackend.SQLITE):
             conn.execute(statement)
+        for statement in v0086_instance_operator_grants.MIGRATION.statements_for(DatabaseBackend.SQLITE):
+            conn.execute(statement)
         created = "2026-09-06T12:00:00+00:00"
         principal_id = "prn_" + "1" * 32
         credential_id = "crd_" + "3" * 32
@@ -80,6 +82,7 @@ def _write_sqlite_database(path: Path) -> None:
             "INSERT INTO principals VALUES (?, 'active', '', ?, ?, NULL)",
             (principal_id, created, created),
         )
+        conn.execute("INSERT INTO instance_operator_grants VALUES (?, ?, NULL)", (principal_id, created))
         conn.execute(
             "INSERT INTO personal_workspaces VALUES (?, ?, ?, ?)",
             ("wsp_" + "2" * 32, principal_id, "ws_" + "4" * 32, created),
@@ -145,6 +148,9 @@ def test_sqlite_backup_uses_snapshot_and_excludes_live_database_from_data_dir(
     assert manifest["data_dir"]["logical_dir"] == "/data"
     assert manifest["data_dir"]["source"] == str(data_dir)
     with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute("SELECT command FROM runs").fetchone()[0] == "ping -c 4 darklab.sh"
         credential = conn.execute(
             "SELECT principal_id, public_prefix, length(verifier_digest) FROM credentials"
@@ -193,7 +199,11 @@ def test_extra_and_env_files_are_included_without_logging_secret_values(tmp_path
     assert any(path.name == "docker-compose.local.yml" for path in (backup_dir / "extra").rglob("docker-compose.local.yml"))
 
 
-def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypatch):
+@pytest.mark.parametrize("include_operator_compose", [False, True])
+@pytest.mark.parametrize("target_has_operator_compose", [False, True])
+def test_repository_free_backup_uses_operator_restore_layout(
+    tmp_path, monkeypatch, capsys, include_operator_compose, target_has_operator_compose,
+):
     _clean_env(monkeypatch)
     data_dir = tmp_path / "data"
     _write_sqlite_database(data_dir / "history.db")
@@ -210,6 +220,13 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     )
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
+    operator_compose = tmp_path / "compose.operator.yaml"
+    operator_secret = "private-operator-setting"
+    operator_compose.write_text(
+        f"services:\n  shell:\n    environment:\n      PRIVATE_SETTING: {operator_secret}\n",
+        encoding="utf-8",
+    )
+    operator_compose.chmod(0o644)
     release_manifest = tmp_path / "release-manifest.json"
     release_manifest.write_text('{"version":"2.6.0"}\n', encoding="utf-8")
     managed_checksums = tmp_path / "managed-files.sha256"
@@ -226,6 +243,7 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         str(env_file),
         "--compose-file",
         str(compose_file),
+        *(["--operator-compose-file", str(operator_compose)] if include_operator_compose else []),
         "--data-source",
         f"bind:{data_dir}",
         "--extra-file",
@@ -241,6 +259,17 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     assert rc == 0
     backup_dir = _backup_dirs(output_dir)[0]
     assert (backup_dir / "operator" / ".env").read_bytes() == env_file.read_bytes()
+    assert stat.S_IMODE((backup_dir / "operator" / ".env").stat().st_mode) == 0o600
+    saved_operator_compose = backup_dir / "operator" / "compose.operator.yaml"
+    assert saved_operator_compose.exists() is include_operator_compose
+    assert not (backup_dir / "release" / "compose.operator.yaml").exists()
+    if include_operator_compose:
+        assert saved_operator_compose.read_bytes() == operator_compose.read_bytes()
+        assert stat.S_IMODE(saved_operator_compose.stat().st_mode) == 0o600
+        checksum = hashlib.sha256(operator_compose.read_bytes()).hexdigest()
+        assert f"{checksum}  operator/compose.operator.yaml\n" in (
+            backup_dir / "checksums.sha256"
+        ).read_text(encoding="utf-8")
     assert (backup_dir / "operator" / "conf" / "config.local.yaml").read_bytes() == (
         local_conf_dir / "config.local.yaml"
     ).read_bytes()
@@ -249,6 +278,9 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
     assert (backup_dir / "release" / "managed-files.sha256").is_file()
     assert (backup_dir / "data" / ".secrets_master_key").is_file()
     with sqlite3.connect(backup_dir / "database" / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute(
             "SELECT version, length(wrapped_root), length(wrap_nonce) "
             "FROM credential_verifier_roots"
@@ -256,6 +288,18 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         assert conn.execute("SELECT COUNT(*) FROM credentials").fetchone()[0] == 1
     manifest = _manifest(backup_dir)
     assert manifest["repository_free"] is True
+    assert [entry for entry in manifest["included"] if entry["kind"] == "operator_compose"] == (
+        [{
+            "kind": "operator_compose",
+            "source": str(operator_compose),
+            "archive_path": "operator/compose.operator.yaml",
+        }] if include_operator_compose else []
+    )
+    captured = capsys.readouterr()
+    assert operator_secret not in captured.out + captured.err + json.dumps(manifest)
+    assert "Managed restore keeps the destination's Compose override unchanged" in (
+        backup_dir / "RESTORE.md"
+    ).read_text(encoding="utf-8")
 
     archive_path = tmp_path / "principal-backup.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
@@ -268,8 +312,12 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         directory.mkdir(parents=True)
     restore_env = restore_root / ".env"
     restore_env.write_bytes(env_file.read_bytes())
+    target_operator_compose = restore_root / "compose.operator.yaml"
+    target_operator_content = "services:\n  shell:\n    labels:\n      target: preserved\n"
+    if target_has_operator_compose:
+        target_operator_compose.write_text(target_operator_content, encoding="utf-8")
 
-    restore_system.restore(SimpleNamespace(
+    restore_args = SimpleNamespace(
         archive=str(archive_path),
         data_dir=str(restore_data),
         local_conf_dir=str(restore_conf),
@@ -278,12 +326,20 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         database_url="",
         output_uid="",
         output_gid="",
-    ))
+    )
+    restore_system.restore(restore_args)
+
+    assert target_operator_compose.exists() is target_has_operator_compose
+    if target_has_operator_compose:
+        assert target_operator_compose.read_text(encoding="utf-8") == target_operator_content
 
     assert (restore_data / ".secrets_master_key").read_bytes() == (
         data_dir / ".secrets_master_key"
     ).read_bytes()
     with sqlite3.connect(restore_data / "history.db") as conn:
+        assert conn.execute("SELECT principal_id, revoked_at FROM instance_operator_grants").fetchall() == [
+            ("prn_" + "1" * 32, None),
+        ]
         assert conn.execute("SELECT storage_key FROM personal_workspaces").fetchone()[0] == (
             "ws_" + "4" * 32
         )
@@ -293,6 +349,60 @@ def test_repository_free_backup_uses_operator_restore_layout(tmp_path, monkeypat
         assert conn.execute(
             "SELECT length(wrapped_root), length(wrap_nonce) FROM credential_verifier_roots"
         ).fetchone() == (48, 12)
+
+    if include_operator_compose:
+        saved_operator_compose.write_text("services: {}\n", encoding="utf-8")
+        with tarfile.open(archive_path, "w:gz") as archive:
+            archive.add(backup_dir, arcname=backup_dir.name)
+        with pytest.raises(restore_system.RestoreError, match="checksum mismatch: operator/compose.operator.yaml"):
+            restore_system.restore(restore_args)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("source_kind", ["missing", "directory", "broken_symlink", "unreadable", "unmanaged"])
+def test_operator_compose_input_is_validated_before_writing(
+    tmp_path, monkeypatch, capsys, dry_run, source_kind,
+):
+    _clean_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    operator_compose = tmp_path / "compose.operator.yaml"
+    if source_kind == "directory":
+        operator_compose.mkdir()
+    elif source_kind == "broken_symlink":
+        operator_compose.symlink_to(tmp_path / "missing-target")
+    elif source_kind in {"unreadable", "unmanaged"}:
+        operator_compose.write_text("services: {}\n", encoding="utf-8")
+    if source_kind == "unreadable":
+        original_open = Path.open
+
+        def unreadable_open(path, *args, **kwargs):
+            if path == operator_compose:
+                raise PermissionError(errno.EACCES, "Permission denied", str(path))
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", unreadable_open)
+    output_dir = tmp_path / "backups"
+    rc = backup_system.main([
+        *(["--repository-free"] if source_kind != "unmanaged" else []),
+        "--env-file", str(env_file),
+        "--local-conf-dir", str(tmp_path),
+        "--operator-compose-file", str(operator_compose),
+        "--output-dir", str(output_dir),
+        *(["--dry-run"] if dry_run else []),
+    ])
+
+    assert rc == 2
+    assert not output_dir.exists()
+    error = capsys.readouterr().err
+    if source_kind == "unmanaged":
+        assert "--operator-compose-file requires --repository-free" in error
+    elif source_kind == "directory":
+        assert "operator Compose path is not a file" in error
+    elif source_kind == "unreadable":
+        assert "operator Compose file source is not readable" in error
+    else:
+        assert "operator Compose file does not exist" in error
 
 
 def test_missing_extra_file_fails_unless_operator_allows_it(tmp_path, monkeypatch):
@@ -918,6 +1028,71 @@ def test_workspace_volume_source_with_container_exports_with_docker_cp(tmp_path,
 
     assert calls == [["docker", "cp", "darklab_shell:/workspaces/.", str(tmp_path / "stage" / "workspaces")]]
     assert (tmp_path / "stage" / "workspaces" / "team_abc" / "notes.txt").read_text(encoding="utf-8") == "shared\n"
+
+
+def _copy_named_volume_source(ctx, source_kind, stage):
+    if source_kind == "workspaces":
+        source = backup_system._parse_workspace_source("volume:backup-source", "/workspaces")
+        backup_system.copy_workspace(ctx, source, stage)
+    else:
+        source = backup_system._parse_data_source("volume:backup-source", "/data")
+        backup_system.copy_data_dir(ctx, source, stage, exclude=set())
+
+
+@pytest.mark.parametrize("source_kind", ["data", "workspaces"])
+@pytest.mark.parametrize("inspection_error", ["No such volume: backup-source", "Docker access denied"])
+def test_named_volume_export_stops_when_source_inspection_fails(tmp_path, monkeypatch, source_kind, inspection_error):
+    ctx = backup_system.BackupContext(
+        args=backup_system.parse_args(["--output-dir", str(tmp_path)]),
+        output_dir=tmp_path,
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        assert command[:3] == ["docker", "volume", "inspect"]
+        return subprocess.CompletedProcess(command, 1, "", inspection_error)
+
+    monkeypatch.setattr(backup_system.subprocess, "run", fake_run)
+    stage = tmp_path / "stage"
+    with pytest.raises(backup_system.BackupError, match="backup source volume inspection failed"):
+        _copy_named_volume_source(ctx, source_kind, stage)
+
+    assert len(calls) == 1
+    assert calls[0][-1] == "backup-source"
+    assert not stage.exists()
+    assert not ctx.included
+
+
+@pytest.mark.parametrize("source_kind", ["data", "workspaces"])
+def test_named_volume_export_copies_an_existing_source(tmp_path, monkeypatch, source_kind):
+    ctx = backup_system.BackupContext(
+        args=backup_system.parse_args(["--output-dir", str(tmp_path)]),
+        output_dir=tmp_path,
+    )
+    calls = []
+    stage = tmp_path / "stage"
+    destination = stage / source_kind
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        if command[:3] == ["docker", "volume", "inspect"]:
+            assert not destination.exists()
+            return subprocess.CompletedProcess(command, 0, "backup-source\n", "")
+        assert command[:3] == ["docker", "run", "--rm"]
+        assert len(calls) == 2 and calls[0][-1] == "backup-source"
+        assert "backup-source:/source:ro" in command
+        assert f"{destination}:/backup" in command
+        (destination / "marker.txt").write_text("preserved\n", encoding="utf-8")
+        return subprocess_completed(command)
+
+    monkeypatch.setattr(backup_system.subprocess, "run", fake_run)
+    _copy_named_volume_source(ctx, source_kind, stage)
+
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "preserved\n"
+    assert ctx.included[-1]["source"] == "backup-source"
+    assert ctx.included[-1]["file_count"] == 1
+    assert len(calls) == 2
 
 
 def subprocess_completed(command):

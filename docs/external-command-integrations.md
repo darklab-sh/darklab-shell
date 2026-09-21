@@ -235,6 +235,8 @@ Security note: ProjectDiscovery provider/config files can contain API keys or ot
 
 ## TruffleHog
 
+The image builds TruffleHog v3.97.5, whose upstream dependency manifest includes `github.com/rabbitmq/amqp091-go` v1.13.0 with the AMQP parser and TLS fixes. It needs no local dependency override. The `TRUFFLEHOG_AMQP_VERSION` build argument records the expected dependency version: the build checks the executable's Go metadata for that exact dependency and rejects replacements. Its BSD-2-Clause notice is included in the container license inventory.
+
 TruffleHog is exposed for four managed scan shapes:
 
 - `trufflehog filesystem --directory <folder> --json` scans a folder from Files.

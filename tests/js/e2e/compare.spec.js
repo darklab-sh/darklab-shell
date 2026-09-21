@@ -8,11 +8,40 @@ import { join } from 'path'
 import {
   browserSessionId,
   closeHistory,
+  ensurePromptReady,
   clickHistoryRunMenuAction,
   openHistoryWithEntries,
 } from './helpers.js'
 
 const COMPARE_PANE_SCROLL_TEST_HEIGHT = '48px'
+
+async function expectFindingAnchorJump(page, anchor, side, text) {
+  // Capture the pulse when navigation emits its event; the 900 ms highlight
+  // can expire before Playwright's next assertion on a busy runner.
+  const observation = await page.evaluateHandle(() => {
+    const state = { result: null }
+    const listener = ({ detail }) => {
+      const pane = document.querySelector(`#history-compare-overlay .history-compare-pane[data-side="${detail.side}"]`)
+      const row = pane?.querySelector(`.history-compare-row[data-compare-line-index="${detail.compare_line_index}"]`)
+      state.result = {
+        side: detail.side,
+        text: row?.textContent || '',
+        pulsed: !!row?.classList.contains('history-compare-line-pulse'),
+      }
+    }
+    document.addEventListener('app:compare-anchor-scroll', listener)
+    return { state, dispose: () => document.removeEventListener('app:compare-anchor-scroll', listener) }
+  })
+  try {
+    await anchor.click()
+    await expect.poll(() => observation.evaluate(({ state }) => state.result)).toEqual({
+      side, text: expect.stringContaining(text), pulsed: true,
+    })
+  } finally {
+    await observation.evaluate(observer => observer.dispose())
+    await observation.dispose()
+  }
+}
 
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
@@ -319,16 +348,14 @@ async function expectComparisonRendered(page, fixture) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
-  await page.reload()
-  await page.locator('#cmd').waitFor({ state: 'attached' })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await ensurePromptReady(page)
 })
 
 test.describe('run comparison launch paths', () => {
   test.describe.configure({ timeout: 90_000 })
 
-  test('opens chronological comparison from History, Project, HUD, and Findings', async ({ page }, testInfo) => {
+  test('opens History comparison with output, findings, and playbook navigation', async ({ page }, testInfo) => {
     const sessionId = await browserSessionId(page)
     const fixture = seedCompareFixture(testInfo, { sessionId })
 
@@ -365,14 +392,8 @@ test.describe('run comparison launch paths', () => {
     await expect(findingAnchors).toHaveCount(2)
     await expect(findingAnchors.first()).toHaveText('Baseline: low')
     await expect(findingAnchors.last()).toHaveText('Current: high')
-    await findingAnchors.first().click()
-    await expect(page.locator(
-      '#history-compare-overlay .history-compare-pane[data-side="a"] .history-compare-line-pulse',
-    )).toContainText(fixture.sharedFindingText)
-    await findingAnchors.last().click()
-    await expect(page.locator(
-      '#history-compare-overlay .history-compare-pane[data-side="b"] .history-compare-line-pulse',
-    )).toContainText(fixture.sharedFindingText)
+    await expectFindingAnchorJump(page, findingAnchors.first(), 'a', fixture.sharedFindingText)
+    await expectFindingAnchorJump(page, findingAnchors.last(), 'b', fixture.sharedFindingText)
     const playbookButtons = page.locator('#history-compare-overlay').getByRole('button', { name: 'View playbook' })
     await expect(playbookButtons).toHaveCount(2)
     await playbookButtons.last().click()
@@ -392,6 +413,11 @@ test.describe('run comparison launch paths', () => {
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
     await page.locator('#workflows-overlay .workflows-close').click()
     await closeHistory(page)
+  })
+
+  test('opens chronological comparison from a Project', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
 
     const project = await createProjectWithLinkedRuns(
       page,
@@ -412,6 +438,11 @@ test.describe('run comparison launch paths', () => {
     await expectComparisonRendered(page, fixture)
     await closeComparison(page)
     await page.locator('#project-workspace-overlay .project-workspace-close').click()
+  })
+
+  test('opens comparison for the restored run from the HUD', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
 
     await openHistoryWithEntries(page)
     await page
@@ -430,6 +461,21 @@ test.describe('run comparison launch paths', () => {
     await expectComparisonRendered(page, fixture)
     await closeComparison(page)
     await expect(hudCompare).toBeFocused()
+  })
+
+  test('opens findings-only comparison for the restored run', async ({ page }, testInfo) => {
+    const sessionId = await browserSessionId(page)
+    const fixture = seedCompareFixture(testInfo, { sessionId })
+
+    await openHistoryWithEntries(page)
+    await page
+      .locator('.history-entry')
+      .filter({ hasText: fixture.command })
+      .first()
+      .locator('[data-action="restore"]')
+      .click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText(fixture.currentChangedText)
+    await closeHistory(page)
 
     const findingsCompare = page.locator('[data-search-compare-findings="1"]')
     await expect(findingsCompare).toBeVisible()

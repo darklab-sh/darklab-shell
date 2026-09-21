@@ -110,6 +110,27 @@ def check_ai_route_rate_limit(
     return AIRateLimitResult(allowed=True)
 
 
+def check_operator_test_rate_limit(principal_id: str, *, cfg=None, redis_client=None) -> AIRateLimitResult:
+    """Share one test per operator per minute across workers, plus the global AI bucket."""
+    store = _redis_store(redis_client)
+    current = time.time()
+    try:
+        # Reserve global capacity first; a busy instance must not consume the operator's slot.
+        result = check_ai_route_rate_limit(principal_id, cfg=cfg, redis_client=store,
+                                          now=current, bypass_session_limit=True)
+        if not result.allowed:
+            return result
+        allowed = store.set(f"{_KEY_PREFIX}:rate:operator-test:{_key_part(principal_id)}", "1", nx=True, ex=60)
+        if not allowed:
+            # Refund this exact window without deleting a counter another worker may use.
+            store.decr(f"{_KEY_PREFIX}:rate:global:{int(current // 60)}")
+    except Exception:
+        raise AICoordinationUnavailable("AI coordination is unavailable.") from None
+    if not allowed:
+        return AIRateLimitResult(False, "ai_rate_limited", "AI tests are limited to once per minute per operator.", 60)
+    return result
+
+
 @contextmanager
 def enqueue_lock(
     session_id: str,

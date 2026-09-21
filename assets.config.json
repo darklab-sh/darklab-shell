@@ -39,6 +39,24 @@
       "entries": [
         "/static/js/permalink.entry.js"
       ]
+    },
+    "admin-console": {
+      "type": "css",
+      "sources": [
+        "/static/css/admin-console.css"
+      ]
+    },
+    "admin": {
+      "type": "esm",
+      "entries": [
+        "/static/js/admin.entry.js"
+      ]
+    },
+    "operator-pages": {
+      "type": "esm",
+      "entries": [
+        "/static/js/operator_pages.entry.js"
+      ]
     }
   },
   "order_checks": {

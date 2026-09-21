@@ -27,7 +27,8 @@ ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
 ARG FFUF_VERSION=v2.2.1
-ARG TRUFFLEHOG_VERSION=v3.97.0
+ARG TRUFFLEHOG_VERSION=v3.97.5
+ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.4
@@ -63,7 +64,7 @@ ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
 ARG SETUPTOOLS_VERSION=81.0.0
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
-ARG APP_VERSION=3.0.0
+ARG APP_VERSION=3.0.1
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
@@ -192,12 +193,20 @@ RUN git clone --depth 1 --branch "${GOSU_VERSION}" \
         /out/usr/share/doc/darklab-shell/licenses/gosu.txt && \
     /out/usr/sbin/gosu --version && \
     rm -rf /tmp/gosu
+ARG TRUFFLEHOG_AMQP_VERSION
+COPY scripts/container/verify_go_dependency.sh /usr/local/bin/verify-go-dependency
+# Verify the patched AMQP dependency shipped by the pinned upstream release.
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" \
         https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog && \
     go -C /tmp/trufflehog install && \
+    sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog \
+        github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}" && \
     install -m 0644 /tmp/trufflehog/LICENSE \
         /out/usr/share/doc/darklab-shell/licenses/TruffleHog.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/rabbitmq/amqp091-go@${TRUFFLEHOG_AMQP_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/amqp091-go.txt && \
     rm -rf /tmp/trufflehog
 RUN amass_license=$(find "$(go env GOMODCACHE)/github.com/owasp-amass" \
         -iname 'LICENSE*' -type f -print -quit) && \
@@ -565,7 +574,7 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 # Development Compose mounts the checkout separately and stages a private,
 # read-only runtime snapshot over /app before the app drops privileges.
 COPY app/ /app/
-COPY scripts/operations/backup_system.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
+COPY scripts/operations/backup_system.py scripts/operations/check_instance_config.py scripts/operations/manage_principal_access.py scripts/operations/migrate_sqlite_to_postgres.py scripts/operations/restore_system.py /app/tools/
 
 # Keep the reviewed redistribution inventory and notices with the image.
 COPY LICENSE /usr/share/doc/darklab-shell/LICENSE

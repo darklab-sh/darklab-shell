@@ -17,7 +17,7 @@ const basePort = Math.max(
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
   .filter((name) => name.endsWith('.spec.js'))
-  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js'].includes(name))
+  .filter((name) => !['restricted-access.spec.js', 'oidc-access.spec.js', 'auth-profile-qualification.spec.js', 'operator-console.spec.js'].includes(name))
   .sort()
 
 // Wall-clock weights from recent CI runs so projects are balanced by elapsed time,
@@ -80,11 +80,11 @@ const openProjects = specGroups
     if (!specs.length) return null
     return {
       name: `chromium-w${index + 1}`,
-      testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js'] : specs,
+      testMatch: index === 0 ? [...specs, 'auth-profile-qualification.spec.js', 'operator-console.spec.js'] : specs,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: `http://127.0.0.1:${basePort + index}`,
-        trace: 'on-first-retry',
+        trace: 'retain-on-failure',
       },
     }
   })
@@ -97,7 +97,7 @@ const restrictedProject = {
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${restrictedPort}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcPort = restrictedPort + 1
@@ -108,50 +108,53 @@ const oidcProject = {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcRequiredPort = oidcPort + 1
 const oidcRequiredProject = {
   name: 'chromium-oidc-required',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcRequiredPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const restrictedQualificationPort = oidcRequiredPort + 1
 const restrictedQualificationProject = {
   name: 'chromium-restricted-qualification',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://127.0.0.1:${restrictedQualificationPort}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
 const oidcQualificationPort = restrictedQualificationPort + 1
 const oidcQualificationProject = {
   name: 'chromium-oidc-qualification',
-  testMatch: ['auth-profile-qualification.spec.js'],
+  testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `https://127.0.0.1:${oidcQualificationPort}`,
     ignoreHTTPSErrors: true,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
 }
+// Tests in one project share an app process and database. Keep parallelism
+// between isolated servers instead of letting one project use every worker.
 const projects = [
   ...openProjects, restrictedProject, oidcProject, oidcRequiredProject,
   restrictedQualificationProject, oidcQualificationProject,
-]
+].map((project) => ({ ...project, workers: 1 }))
 
 export default defineConfig({
   testDir,
   fullyParallel: false,
-  workers: Math.min(7, projects.length),
+  // Auth-profile projects share this total budget with the open-profile shards.
+  workers: Math.min(process.env.CI ? 3 : 7, projects.length),
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),

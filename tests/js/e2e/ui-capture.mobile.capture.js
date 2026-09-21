@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { test, expect } from '@playwright/test'
+import { withOperatorCapture } from './operator_helpers.js'
 
 import {
   browserSessionId,
@@ -882,10 +883,33 @@ const scenes = [
     slug: 'diag-page',
     title: 'Diag page',
     route: '/diag',
+    operator: true,
     run: async (page) => {
-      await page.context().clearCookies()
-      await page.goto('/diag', { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.diag-page')).toBeVisible()
+    },
+  },
+  {
+    slug: 'operator-settings-page',
+    title: 'Operator settings - loaded values and host guidance',
+    route: '/admin/',
+    operator: true,
+    run: async (page) => {
+      await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.')
+      await page.getByRole('searchbox', { name: 'Search settings' }).fill('admin_console_reauth_minutes')
+      const card = page.locator('[data-key="admin_console_reauth_minutes"]')
+      await expect(card).toBeVisible()
+      await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+      await card.getByRole('button', { name: 'Defaults and host configuration' }).click()
+    },
+  },
+  {
+    slug: 'operator-audit-page',
+    title: 'Operator audit log',
+    route: '/audit',
+    operator: true,
+    run: async (page) => {
+      await expect(page.locator('.diag-audit-table')).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Operator pages' })).toBeVisible()
     },
   },
 ]
@@ -902,15 +926,19 @@ test('mobile screenshot capture pack', async ({ page }, testInfo) => {
   for (const themeName of themes) {
     for (const [index, scene] of scenes.entries()) {
       await test.step(`${themeLabel(themeName)} :: ${scene.title}`, async () => {
-        await scene.run(page, themeName, testInfo)
-        await saveCapture(page, manifest, {
-          ui: 'mobile',
-          themeName,
-          order: index + 1,
-          slug: scene.slug,
-          title: scene.title,
-          route: scene.route,
-        })
+        const capture = async () => {
+          await scene.run(page, themeName, testInfo)
+          await saveCapture(page, manifest, {
+            ui: 'mobile',
+            themeName,
+            order: index + 1,
+            slug: scene.slug,
+            title: scene.title,
+            route: scene.route,
+          })
+        }
+        if (scene.operator) await withOperatorCapture(page, testInfo, capture, { route: scene.route, themeName })
+        else await capture()
       })
     }
   }

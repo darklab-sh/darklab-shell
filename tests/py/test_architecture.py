@@ -1460,7 +1460,8 @@ _MODULE_SIZE_RATCHET_REQUIRED_PATTERNS = (
 
 _DECOMPOSED_ROUTE_BLUEPRINTS = frozenset({"api_v1", "run", "projects", "atlas", "assets"})
 _DECOMPOSED_ROUTE_CONTRACT_COUNT = 299
-_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "56dbbadc1fb6047b814b6fab21a61bbb8a706bd78beb39ea58d56e0e92de7dd2"
+# Audit viewer and export use /audit and /audit/export; methods and endpoints are unchanged.
+_DECOMPOSED_ROUTE_CONTRACT_SHA256 = "c62ba831189aba6604ffe22c9e7b0517632308820f08ae5b8cc4f2cb5c037951"
 
 _PUBLIC_IMPORT_COMPATIBILITY_CONTRACT = (
     ("blueprints.api_v1", "api_health", "callable"),

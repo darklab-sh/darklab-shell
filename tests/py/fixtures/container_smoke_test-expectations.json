@@ -1267,6 +1267,7 @@
         { "expected_text": ["107.178.106.164"] },
         { "expected_text": ["172.18.0"] },
         { "expected_text": ["192.168.10"] },
+        { "expected_text": ["192.168.20"] },
         { "expected_text": ["10.20.0."] }
       ]
     },

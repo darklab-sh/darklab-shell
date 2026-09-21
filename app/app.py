@@ -9,57 +9,51 @@ Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
 import gzip
-import logging
-import os
-from pathlib import Path
-import time
 import hashlib
 import json
+import logging
+import os
+import time
+from pathlib import Path
 from uuid import uuid4
 
-from flask import current_app, has_app_context, jsonify, request
+import core.process as process_state
 from app_factory import create_app as _create_flask_app
-
+from blueprints.admin import admin_bp, render_reauthentication_form
+from blueprints.api_v1 import api_v1_bp
+from blueprints.assets import assets_bp
+from blueprints.atlas import atlas_bp
+from blueprints.auth import auth_bp
+from blueprints.content import content_bp
+from blueprints.history import history_bp
+from blueprints.history_clear import history_clear_bp
+from blueprints.notifications import notifications_bp
+from blueprints.projects import projects_bp
+from blueprints.run import run_bp
+from blueprints.schedules import schedules_bp
+from blueprints.secrets import secrets_bp
+from blueprints.session import session_bp
+from blueprints.teams import teams_bp
+from blueprints.watchers import watchers_bp
+from blueprints.workflows import workflows_bp
+from blueprints.workspace import workspace_bp
 from config import APP_VERSION, CFG
-from runtime_bootstrap import bootstrap_runtime
-from extensions import limiter
+from core.database_access import get_db_backend, get_db_connect
+from core.database_backend import DatabaseBackend
 from core.helpers import (
     AuthenticationRejected,
     get_authentication_result,
     get_client_ip,
     get_log_session_id,
     get_session_id,
+    record_failed_authentication,
 )
-import core.process as process_state
-from blueprints.assets import assets_bp
-from blueprints.auth import auth_bp
-from blueprints.api_v1 import api_v1_bp
-from blueprints.atlas import atlas_bp
-from blueprints.content import content_bp
-from blueprints.run import run_bp
-from blueprints.history import history_bp
-from blueprints.history_clear import history_clear_bp
-from blueprints.notifications import notifications_bp
-from blueprints.schedules import schedules_bp
-from blueprints.session import session_bp
-from blueprints.secrets import secrets_bp
-from blueprints.teams import teams_bp
-from blueprints.watchers import watchers_bp
-from blueprints.workspace import workspace_bp
-from blueprints.workflows import workflows_bp
-from blueprints.projects import projects_bp
 from core.http_rate_limit import check_dynamic_route_rate_limit
-from core.database_access import get_db_backend, get_db_connect
-from core.database_backend import DatabaseBackend
 from core.process import redis_storage_uri
-from services.workspace.files import cleanup_inactive_workspaces
-from services.metrics_lazy import app_metrics
+from extensions import limiter
+from flask import current_app, has_app_context, jsonify, request
+from runtime_bootstrap import bootstrap_runtime
 from services.api_v1.serialization import json_error
-from services.audit.context import request_audit_fields
-from services.auth.lifecycle import record_authentication_failure
-from services.auth.observability import log_authentication_rejected, log_credential_rate_limited
-from services.auth.rate_limit import check_failed_redemption
-from services.auth.resolver import public_lookup_id_from_headers
 from services.auth.access_profile import (
     enforce_browser_csrf,
     enforce_pat_route_access,
@@ -68,6 +62,13 @@ from services.auth.access_profile import (
     is_restricted,
     rotate_browser_session_after_privilege_change,
 )
+from services.auth.observability import (
+    log_authentication_rejected,
+)
+from services.auth.operator_access import enforce_operator_access
+from services.auth.operator_access import private_response as operator_private_response
+from services.metrics_lazy import app_metrics
+from services.workspace.files import cleanup_inactive_workspaces
 
 log = logging.getLogger("shell")
 
@@ -422,20 +423,7 @@ def _enforce_authentication_resolution():
         raise AuthenticationRejected(result.error_code, result.message)
     if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
         return None
-    limited = check_failed_redemption(
-        get_client_ip(),
-        public_lookup_id_from_headers(request.headers),
-        redis_client=process_state.redis_client,
-        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", CFG.get("rate_limit_enabled", True))),
-    )
-    if limited.allowed:
-        record_authentication_failure(result, request_fields=request_audit_fields(request))
-    if not limited.allowed:
-        log_credential_rate_limited(limited)
-        return jsonify({
-            "error": "credential_authentication_rate_limited",
-            "retry_after": limited.retry_after,
-        }), 429
+    record_failed_authentication(result)
     raise AuthenticationRejected(result.error_code, result.message)
 
 
@@ -448,7 +436,13 @@ def _enforce_access_profile():
 
 
 def _enforce_csrf():
-    return enforce_browser_csrf(get_authentication_result())
+    rejection = enforce_browser_csrf(get_authentication_result())
+    if rejection is not None and request.endpoint == "admin.reauthenticate":
+        return render_reauthentication_form(
+            error="This form has expired. Try again with this form, or sign in again if the problem continues.",
+            status=403, csrf_rejected=True,
+        )
+    return rejection
 
 
 def _server_error_handler(e):
@@ -555,7 +549,7 @@ def _log_response(response):
             "REQUEST_COMPLETED",
             extra={
                 "ip": get_client_ip(),
-                "session": get_log_session_id(),
+                "session": "" if request.environ.get("darklab_operator_denied") else get_log_session_id(),
                 "request_id": _current_request_id(),
                 "method": request.method,
                 "path": request.path,
@@ -592,6 +586,7 @@ def create_app(config=None):
         blueprints=(
             assets_bp,
             auth_bp,
+            admin_bp,
             api_v1_bp,
             atlas_bp,
             content_bp,
@@ -616,12 +611,14 @@ def create_app(config=None):
         before_request_handlers=(
             _log_request,
             _enforce_dynamic_route_rate_limit,
+            enforce_operator_access,
             _enforce_authentication_resolution,
             _enforce_access_profile,
             _enforce_csrf,
             _run_periodic_workspace_cleanup,
         ),
         after_request_handlers=(
+            operator_private_response,
             rotate_browser_session_after_privilege_change,
             _log_response,
         ),
@@ -649,7 +646,7 @@ def _log_app_initialized(config=None, *, flask_app=None, duration_ms: int | None
         "blueprint_count": blueprint_count,
         "before_request_handlers": before_count,
         "after_request_handlers": after_count,
-        "limiter_storage": "redis" if storage_uri.startswith("redis://") or storage_uri.startswith("rediss://") else "memory",
+        "limiter_storage": "redis" if storage_uri.startswith(("redis://", "rediss://")) else "memory",
         "duration_ms": int(duration_ms or 0),
     })
 

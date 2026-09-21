@@ -18,6 +18,10 @@
 # uppercase environment variables in .env so Compose, container startup,
 # lifecycle tools, and the app all receive the same values. See CONFIGURATION.md.
 
+# Verified authentication age for settings, diagnostics, and audit; 5–60 minutes.
+# Activity never refreshes this deadline; browser idle/absolute limits still apply.
+# admin_console_reauth_minutes: 30
+
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages.
@@ -558,34 +562,23 @@
 
 # ── Operator Diagnostics ─────────────────────────────────────────────────────
 #
-# GET /diag returns a JSON summary of app version, operational config, database
-# health and row counts, Redis connectivity, vendor-asset source (built-in vs
-# fallback), and per-tool availability derived from the allowlist.
+# Operator settings (/admin/), diagnostics (/diag), and audit pages require
+# a signed-in browser, a principal operator grant, and recent verification.
+# They are available in restricted access profiles from any client network.
+# They are unavailable in open mode. Grant access with manage_principal_access.py.
 #
-# The endpoint returns 404 to all callers unless the resolved client IP falls
-# within one of the CIDRs listed here. Client IP resolution uses the same
-# trusted-proxy rules as the rest of the app: X-Forwarded-For is only honored
-# when the direct peer IP is inside trusted_proxy_cidrs. Leave the list empty
-# (the default) to keep the endpoint fully hidden.
+# /metrics uses a separate IP allowlist and needs no browser credentials.
+# Forwarded client IPs are honored only through trusted_proxy_cidrs.
+# An empty allowlist hides /metrics without restricting operator pages.
 #
-# Typical values:
-#   172.16.0.0/12  — Docker bridge / overlay networks (recommended for host access)
-#   10.0.0.0/8     — private LAN / VPN range
+# Server default if unset: []
+# metrics_allowed_cidrs:
+#   - 127.0.0.1/32
 #
-# If you are behind a reverse proxy, also make sure trusted_proxy_cidrs covers
-# that proxy address/range; otherwise forwarded client IPs are ignored and the
-# proxy peer IP is used instead.
-#
-# Server default if unset: [] (disabled)
-# diagnostics_allowed_cidrs:
-#   - 172.16.0.0/12
-#
-# GET /metrics exposes Prometheus-format metrics for dashboards and alerts.
-# It uses the same IP allowlist as /diag and returns 404 when the caller is not
-# allowed. Keep diagnostics_allowed_cidrs empty to hide both endpoints.
-# AI assist writes from this allowlist also bypass the per-session AI quota for
-# operator testing. The deployment-wide AI quota and worker concurrency still
-# apply, so trusted clients cannot overload a local model.
+# diagnostics_allowed_cidrs is accepted as a metrics-only alias in 3.0.1.
+# Rename it before 3.1.0. The canonical key wins within one YAML layer,
+# including an explicit empty list; normal precedence applies across layers.
+# Neither key grants operator access or an AI quota exemption.
 #
 # Server default if unset: true
 # metrics_enabled: true
@@ -641,8 +634,7 @@
 # ai_next_commands_max_output_tokens: 180
 # ai_max_concurrent: 1
 # ai_max_queue_depth: 20
-# diagnostics_allowed_cidrs clients bypass this per-session AI write limit only.
-# The global AI write limit below still applies to every client.
+# These limits apply to every workspace, including operator workspaces.
 # ai_rate_limit_per_session_hour: 5
 # ai_rate_limit_global_per_minute: 2
 # ai_allow_full_output: false

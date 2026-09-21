@@ -4812,9 +4812,9 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
     monkeypatch.setitem(config.CFG, "ai_model", "llama3.1:8b")
     monkeypatch.setitem(config.CFG, "ai_max_input_chars", 8000)
     monkeypatch.setitem(config.CFG, "ai_max_queue_depth", 1000)
-    monkeypatch.setitem(config.CFG, "ai_rate_limit_per_session_hour", 1)
+    monkeypatch.setitem(config.CFG, "ai_rate_limit_per_session_hour", 20)
     monkeypatch.setitem(config.CFG, "ai_rate_limit_global_per_minute", 20)
-    monkeypatch.setitem(config.CFG, "diagnostics_allowed_cidrs", ["127.0.0.1/32"])
+    monkeypatch.setitem(config.CFG, "metrics_allowed_cidrs", ["127.0.0.1/32"])
     monkeypatch.setitem(config.CFG, "share_redaction_enabled", False)
     monkeypatch.setattr(process, "redis_client", process._FakeRedisClient())
 
@@ -4833,7 +4833,7 @@ def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
         "ai_max_queue_depth": 1000,
         "ai_rate_limit_per_session_hour": 20,
         "ai_rate_limit_global_per_minute": 20,
-        "diagnostics_allowed_cidrs": [],
+        "metrics_allowed_cidrs": ["127.0.0.1/32"],
         "share_redaction_enabled": False,
     }
     guard_cases = []

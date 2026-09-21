@@ -30,7 +30,8 @@ from services.commands.registry import (
     load_welcome_hints,
 )
 from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
-from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
+from core.helpers import get_client_ip, get_log_session_id, get_session_id, resolve_theme
+from services.auth.operator_access import navigation_eligible
 from services.intel.registry import app_native_secret_consumers, provider_status_catalog
 from services.assessments.batch.settings import assessment_batch_settings
 from services.cve_risk.store import get_configured_feed_status
@@ -184,16 +185,14 @@ def _frontend_config_payload():
         "tour_version":           int(tour_version),
         "tour_chapters":          tour_chapters,
         "tour_chapter_count":      len(tour_chapters),
-        "diag_enabled": ip_is_in_cidrs(
-            get_client_ip(),
-            cfg.get("diagnostics_allowed_cidrs") or [],
-        ),
+        "diag_enabled": navigation_eligible(),
     }
 
 
 @content_bp.route("/")
 def index():
     current_theme = _current_theme_entry()
+    frontend_config = _frontend_config_payload()
     log.info(
         "PAGE_LOAD",
         extra={
@@ -204,6 +203,7 @@ def index():
     )
     return render_template(
         "index.html",
+        operator_console_enabled=frontend_config["diag_enabled"],
         app_name=_config.CFG["app_name"],
         project_name=_config.PROJECT_NAME,
         version=_config.APP_VERSION,
@@ -214,7 +214,7 @@ def index():
         current_theme_css=current_theme["vars"],
         theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
         fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
-        frontend_config=_frontend_config_payload(),
+        frontend_config=frontend_config,
         workspace_enabled=bool(_config.CFG.get("workspace_enabled", False)),
     )
 

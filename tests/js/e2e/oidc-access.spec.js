@@ -23,8 +23,26 @@ async function openAccess(page) {
 }
 
 
+async function resetOperatorProviderLink(request) {
+  // A timed-out attempt can leave the shared operator linked. Reset it through
+  // a separate cookie jar before the browser starts its sign-in journey.
+  const redeemed = await request.post('/auth/credentials/redeem', { data: { secret: operatorCredential() } })
+  expect(redeemed.status()).toBe(200)
+  const csrf = (await request.storageState()).cookies.find(cookie => cookie.name === 'darklab_csrf')
+  expect(csrf).toBeTruthy()
+  const headers = { 'X-Darklab-CSRF': csrf.value }
+  const unlinked = await request.post('/auth/oidc/unlink', { headers })
+  expect(unlinked.status()).toBe(200)
+  if (!(await unlinked.json()).unlinked) {
+    expect((await request.post('/auth/logout', { headers })).status()).toBe(204)
+  }
+}
+
+
 test.describe('managed sign-in with a local HTTPS provider', () => {
   test('keeps provider load failures visible and recovers with Refresh', async ({ page }) => {
+    // Four failure/recovery cycles each refresh the full Access panel.
+    test.setTimeout(60_000)
     await page.goto('/')
     await page.getByLabel('Access credential').fill(operatorCredential())
     await Promise.all([
@@ -84,7 +102,10 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
     expect(diagnostics).toHaveLength(4)
   })
 
-  test('links after both proofs, unlinks with revocation, then signs in through the provider', async ({ page, context }) => {
+  test('links after both proofs, unlinks with revocation, then signs in through the provider', async ({ page, context, request }) => {
+    // Credential sign-in, reauthentication, linking, and provider sign-in each load the app.
+    test.setTimeout(90_000)
+    await resetOperatorProviderLink(request)
     await page.goto('/')
     await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
     const providerGap = await page.locator('.restricted-sign-in-card').evaluate(card => {
@@ -116,16 +137,22 @@ test.describe('managed sign-in with a local HTTPS provider', () => {
     await expect(page.getByRole('link', { name: 'Continue with identity provider' })).toHaveCount(0)
     await page.unroute('**/auth/principal')
     await page.getByLabel('Access credential').fill(operatorCredential())
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await Promise.all([
+      page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded' }),
+      page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+    ])
+    await ensurePromptReady(page)
     await expect(page.locator('#options-panel-access')).toBeVisible()
     await expect(page.locator('#options-tab-access')).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(url => url.pathname === '/' && !url.searchParams.has('options'))
     await expect(page.locator('#options-access-oidc-link')).toBeVisible()
-    await Promise.all([
-      page.waitForEvent('domcontentloaded'),
+    const [callback] = await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === '/auth/oidc/callback'),
+      page.waitForEvent('domcontentloaded'),
       page.locator('#options-access-oidc-link').click(),
     ])
+    expect(new URL(callback.headers().location, callback.url()).pathname).toBe('/')
+    await expect(page).toHaveURL(url => url.pathname === '/')
     await ensurePromptReady(page)
     await expect.poll(async () => {
       const response = await page.request.get('/auth/oidc/identity')

@@ -26,12 +26,13 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   projects: profiles.map(([name, , , tls], index) => ({
     name,
-    testMatch: ['auth-profile-qualification.spec.js'],
+    workers: 1,
+    testMatch: ['auth-profile-qualification.spec.js', 'operator-console.spec.js'],
     use: {
       ...devices['Desktop Chrome'],
       baseURL: `${tls ? 'https' : 'http'}://127.0.0.1:${basePort + index}`,
       ignoreHTTPSErrors: tls,
-      trace: 'on-first-retry',
+      trace: 'retain-on-failure',
     },
   })),
   webServer: profiles.map(([, slot, profile, tls], index) =>

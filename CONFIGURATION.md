@@ -156,18 +156,28 @@ Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
 
 ## Principal Access Operations
 
-The release image includes `/app/tools/manage_principal_access.py` for local recovery and incident response. It deliberately refuses to run outside the application container, and its status, expiry, revoke, disable, and enable commands print only safe JSON metadata.
+The operator verification form at `/admin/reauth` requires an eligible browser session and a current operator grant. Credential re-entry must belong to the same principal. Provider verification requests fresh sign-in and checks the signed authentication time; a silent provider session without that proof cannot qualify. Successful verification rotates the browser session while preserving its original absolute expiry. Reads refresh ordinary activity but never verified authentication time: the 30-minute operator verification window and 30-minute idle defaults deliberately measure different things. Idle or absolute expiry requires a new ordinary sign-in.
 
-Run it through the installed Compose project:
+Provider sign-in time and verified provider authentication time are tracked separately. Ordinary sign-in still allows **Sign out everywhere** for five minutes, even when the provider omits `auth_time`. Operator pages require an integer `auth_time` in the signed ID token from fresh authentication (`max_age=0`, `prompt=login`). In `oidc_required` and for provider sessions in `mixed`, configure and verify that claim before granting operator access. A provider that omits it can still support ordinary sign-in, but cannot verify operator access; the verification page explains this requirement instead of suggesting repeated retries.
+
+Instance inspection grants are explicit principal records. Bootstrap and Team roles never create a grant. `operator-grant` requires an active principal; `operator-status` and `operator-revoke` also work for disabled principals. `operator-list` lists current grants, including disabled principals whose grants are retained but ineligible. Results contain safe identifiers, status, and grant timestamps. The default page holds 100 grants; use `--limit` (1–1000) and pass a returned `next_after` to `--after` until it is null. Repeating a grant or revocation is a no-op, and changes carry local-operator audit attribution. Grants travel with database backups and SQLite-to-Postgres migration; they do not confer workspace or Team permissions.
+
+Use `./darklab-deploy access` for local recovery and incident response in a managed installation. It selects the installation beside the helper, checks its managed files and image, and uses its `.env`, `compose.yaml`, and optional `compose.operator.yaml`, even when called from another directory. It runs the packaged principal tool in the running `shell` service with its configured execution identity. An unhealthy service is allowed; a missing or stopped service is reported without starting, upgrading, or retrying an operation. `access --help` works without Docker or database access.
+
+Host access to this deployment command is separate from a browser operator grant. Local access commands keep JSON results on stdout and send configured application logs to stderr, including completed grant changes. The Python tool still owns confirmations, lockout protection, disabled-principal checks, transactions, and audit records. Commands print safe JSON metadata on stdout and deployment diagnostics on stderr:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py status prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py expiry prn_example crd_example 2026-12-31T23:59:59Z
-docker compose exec -T shell python /app/tools/manage_principal_access.py revoke prn_example crd_example --reason "lost device" --pause-related-work
-docker compose exec -T shell python /app/tools/manage_principal_access.py disable prn_example --reason "incident review"
-docker compose exec -T shell python /app/tools/manage_principal_access.py enable prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py revoke-all-sessions prn_example
-docker compose exec -T shell python /app/tools/manage_principal_access.py rotate-session-signing-key
+./darklab-deploy access status prn_example
+./darklab-deploy access expiry prn_example crd_example 2026-12-31T23:59:59Z
+./darklab-deploy access revoke prn_example crd_example --reason "lost device" --pause-related-work
+./darklab-deploy access disable prn_example --reason "incident review"
+./darklab-deploy access enable prn_example
+./darklab-deploy access revoke-all-sessions prn_example
+./darklab-deploy access rotate-session-signing-key
+./darklab-deploy access operator-grant prn_example
+./darklab-deploy access operator-status prn_example
+./darklab-deploy access operator-list
+./darklab-deploy access operator-revoke prn_example
 ```
 
 `status` includes a `suspended_work` list for principal disablement: affected definitions and stopped jobs, their names and IDs, their personal or team workspace, and where to review them. It stays available while the principal is disabled and after re-enabling. Review that list before using `enable`, then resume approved schedules, watchers, notification channels, and Project digests through their usual controls. Enabling the principal leaves work stopped; failed jobs need a new request. Work that was already paused or muted by the user keeps that choice.
@@ -176,15 +186,38 @@ docker compose exec -T shell python /app/tools/manage_principal_access.py rotate
 
 For CLI and integration tokens, follow [Create a PAT](docs/api.md#create-a-pat). It covers browser and operator issuance, permissions, expiry, private one-time output, and verification with `darklab whoami`.
 
-`issue`, `rotate`, and `recover` return a new secret once. They require `--secret-file` and create that path inside the container as a new owner-only file; the command won't overwrite or follow an existing path. Copy the file to an operator-controlled secret store, verify the saved value, and remove the container copy when you're done. Use the principal ID recorded by bootstrap, or returned by `darklab whoami` with an existing PAT; verify it with `status`.
+`bootstrap`, `issue`, `rotate`, and `recover` accept `--output-file HOST_PATH`. The helper reserves a new owner-only host file before issuing access, retrieves the one-time credential without displaying it, and removes the private container copy after the host file is saved. Existing files, directories, and symlinks are rejected. Relative output paths use your current working directory, not the installation directory. JSON identifies the saved host path as `secret_file`, with `secret_file_location: "host"`; it never contains the credential. Use the principal ID recorded by bootstrap, or returned by `darklab whoami` with an existing PAT, and verify it with `status` before changing access.
+
+If a transfer fails or is interrupted, the helper removes incomplete host output and reports the retained private container path when available. If no credential file exists, it removes the unused staging directory and asks you to inspect principal status. An empty file is preserved because issuance may still be running. Access may already have been issued: the failure does not roll back the mutation. Retrieve that file into a new destination instead of repeating issuance or recovery:
+
+```bash
+./darklab-deploy access retrieve /data/.darklab-access-example/credential \
+  --output-file ./retrieved-access.credential
+```
+
+In an installed release, the underlying tool is `/app/tools/manage_principal_access.py`. Its `--secret-file` names a new private file inside the container and requires manual retrieval and cleanup. The deployment wrapper forwards that option for advanced use, but rejects combining it with `--output-file`.
+
+For a running source-development stack, use `compose.dev.yaml`. That stack stages the application's source into `/app` and doesn't retain the image's packaged `/app/tools` directory. Copy the checkout's access script into the container's temporary directory, then run it there:
+
+```bash
+docker compose -f compose.dev.yaml exec -T shell mkdir -p /tmp/darklab-tools
+docker compose -f compose.dev.yaml cp scripts/operations/manage_principal_access.py \
+  shell:/tmp/darklab-tools/manage_principal_access.py
+docker compose -f compose.dev.yaml exec -T shell \
+  python3 /tmp/darklab-tools/manage_principal_access.py --help
+```
+
+Replace `--help` with the required access operation. Recopy the script after recreating the development container. Use a private container `--secret-file` for issuance and retrieve it manually; the managed installation's host-output wrapper isn't part of this source-development workflow.
 
 To add a portable credential while keeping existing credentials, API integrations, browser sessions, and automation working, use `issue`:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   issue prn_example --type portable --label "Additional device" \
-  --secret-file /data/additional-device.credential
+  --output-file ./additional-device.credential
 ```
+
+To replace one credential, use `./darklab-deploy access rotate prn_example crd_example --output-file ./replacement.credential`. Review the returned metadata and update that credential's clients before removing the local copy.
 
 **Recovery revokes every portable credential, PAT, and browser session for the principal.** It also pauses schedules and watchers, mutes notification channels, and disables Project digests created or last changed with those newly revoked credentials. This happens automatically; `recover` has no option to keep that work running. Existing provider links and workspace data stay in place.
 
@@ -193,16 +226,12 @@ Before recovery, review the principal's credentials and related work in **Option
 For a full access reset, replace both occurrences of `prn_example` with the intended principal ID and choose a new output filename:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   recover prn_example --confirm-principal prn_example \
-  --label "Recovered access" --secret-file /data/recovered-access.credential
-
-umask 077
-docker compose cp shell:/data/recovered-access.credential ./recovered-access.credential
-chmod 600 ./recovered-access.credential
+  --label "Recovered access" --output-file ./recovered-access.credential
 ```
 
-Save and verify the copied credential in the operator's secret store, then remove both temporary copies. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
+Save and verify the credential in the operator's secret store, then remove the local temporary file. Sign in with the replacement, create new credentials for the intended devices and new PATs for integrations, and update each client before resuming reviewed work through its usual controls. Recovery doesn't resume paused work. A disabled principal must be reviewed and enabled before issuing replacement access.
 
 For provider-only deployments, enable `mixed` before using a portable credential to sign in. Use `issue` when the purpose is only to regain a browser path for repairing a provider link; use `recover` when all existing credentials and sessions must be invalidated.
 
@@ -236,20 +265,16 @@ docker compose up -d --force-recreate shell
 
 #### Bootstrap credential-required access
 
-A fresh restricted deployment has no public bootstrap endpoint. Create the first principal from inside the running application container and write the one-time credential to a new path under the private `/data` mount:
+A fresh restricted deployment has no public bootstrap endpoint. Use the deployment helper to create the first principal in the running application container and save the one-time credential to a new private host file:
 
 ```bash
-docker compose exec -T shell python /app/tools/manage_principal_access.py \
+./darklab-deploy access \
   bootstrap \
   --label "Initial operator access" \
-  --secret-file /data/initial-operator.credential
-
-docker compose cp shell:/data/initial-operator.credential ./initial-operator.credential
-chmod 600 ./initial-operator.credential
-docker compose exec -T shell rm /data/initial-operator.credential
+  --output-file ./initial-operator.credential
 ```
 
-The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the copied credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
+The bootstrap command succeeds only when `token_required` is active and no principal exists. It prints safe metadata and the output path, never the credential. Sign in at `/auth/sign-in`, save the credential in an operator-controlled password manager, and create separately labeled credentials for additional browsers from **Options → Access**.
 
 #### Session lifetime and sign-out
 
@@ -282,6 +307,7 @@ The provider client must meet these requirements:
 | ID-token signing | `RS256`, `PS256`, or `ES256`, with the matching public key in the provider's JWKS. |
 | Identity and audience | A stable, non-empty `sub` of at most 512 characters, the configured issuer, the client ID in `aud`, and the requested nonce. When `aud` contains multiple audiences, `azp` must equal the client ID. |
 | Token times | Include `iat` and `exp`; keep the provider and app clocks synchronized. Validation allows 30 seconds of clock skew. |
+| Operator verification | Honor `max_age=0` and `prompt=login`; return an integer `auth_time` in the signed ID token, no earlier than the verification request and no more than 30 seconds ahead of the app clock. Required for provider-based operator access in `oidc_required` and `mixed`. |
 | Linking freshness | Honor the linking request's `max_age=300` and include an integer `auth_time` in the ID token. At callback it must be no more than five minutes old or 30 seconds ahead of the app clock. The source credential sign-in must also be within five minutes and still valid. |
 
 #### Provider provisioning
@@ -313,6 +339,62 @@ The browser shows a generic failure message; the safe server records distinguish
 
 Public share permalinks are disabled by default in every restricted profile: snapshot controls are disabled on desktop and mobile, keyboard sharing explains the policy, authenticated share creation returns `403`, and share reads return `404`. Set `RESTRICTED_PUBLIC_SHARES_ENABLED=true` only when those bearer-capability URLs are an intentional unauthenticated exception. Health, status, CIDR-gated metrics, built assets, and the sign-in boundary remain public; every other route is gated before its handler can read scoped data.
 
+## Operator Settings Console
+
+Explicitly granted operators can open **Operator settings**, **diag**, and **audit log** from the desktop More menu or mobile menu, or go directly to `/admin/`, `/diag`, and `/audit`. Desktop menu links open a separate tab or window; mobile opens the page in place with a back-to-shell link. Diagnostics, Audit log, and Operator settings share a header with links to the other two pages. Search by setting name or description and combine the group, source, and warning filters. The address retains those filters across reloads, shared links, and verification. Groups start collapsed with setting counts; filtering opens matching groups, and clearing filters restores your earlier expanded groups. Expand all and Collapse all control the visible groups. Refresh preserves expanded guidance, permitted long values, focus, and scroll where the setting remains available. This page is read only: it has no edit, reveal, save, or restart controls.
+
+**Loaded from** identifies the winning source, including built-in defaults, shipped `config.yaml`, local `config.local.yaml`, or the supported environment variable. **Defaults and host configuration** explains where to configure the setting, its accepted values, and which processes need a restart. Usual paths distinguish source checkouts (`app/conf/config.local.yaml`) from packaged deployments (`conf/config.local.yaml`); custom directories may differ. Environment values take precedence, but the worker cannot identify their original host file. A host `.env` participates only when the deployment uses or passes that variable. Raw schema is available in a separate disclosure.
+
+The console is unavailable by default. To enable access:
+
+1. Choose `token_required`, `oidc_required`, or `mixed` in the host configuration. Follow [restricted browser access](#restricted-browser-access), including HTTPS, bootstrap/provider setup, and profile-transition precautions before switching a live deployment. For provider-based operator access, confirm that fresh authentication returns the signed integer `auth_time` required by [provider compatibility](#provider-compatibility).
+2. Apply the required container recreation through the deployment workflow. Production startup copies local overlays into a private snapshot; a web-worker reload cannot read later host edits. See [reload behavior](#config-file-reload-behavior).
+3. Establish an active principal and run `./darklab-deploy access operator-grant prn_example`. Bootstrap credentials and Team roles do not grant console access automatically.
+4. Sign in at `/admin/`. Use `operator-status` or `operator-revoke` through the same local tool to inspect or remove access. If account access is lost, follow [local recovery](#issuing-credentials-and-recovering-access), then review the principal's grant.
+
+The same access policy protects `/admin/`, `/diag`, `/audit`, and their child routes, from any network. Each request checks the restricted profile, browser session, active principal, operator grant, and recent verification. Open profiles and ineligible principals receive a generic 404; team roles, API tokens, direct credential headers, and metrics permissions don't qualify. Missing or expired sessions require sign-in; stale verification requires credential re-entry or fresh provider authentication. The [verification policy](#principal-access-operations) preserves the original absolute session deadline. Activity and automatic refreshes don't renew verification. A visible operator page does refresh ordinary session activity, so leaving it open can keep the idle timer from expiring; the absolute session deadline and verification window still apply.
+
+Operator responses are private and aren't cached. Background requests receive a JSON authorization error and a safe sign-in or verification destination. Verification returns to the requested page, retaining audit filters without replaying a probe or export. Visible pages check access every ten seconds and when returning to the tab; access loss clears displayed data, stops protected refreshes, and discards pending results. Previously downloaded data can't be recalled.
+
+The page labels its result as the **serving web worker's loaded configuration**, with the serving process, the process that loaded the configuration, and its load time. It identifies configuration inherited from a parent process. Refresh samples whichever worker handles the request; it does not establish agreement across web or background workers. Host deployment settings and their defaults are listed separately as unobserved, rather than secret. The same [reviewed disclosure rules](#validating-instance-configuration) protect the page, JSON inventory, and local checker: secrets are withheld, sensitive lists show counts, and the AI endpoint shows only whether it is configured. Diagnostics shares the access policy and retains its existing permitted values.
+
+## Validating Instance Configuration
+
+Use `./darklab-deploy config check` to validate a managed installation, including when the application is stopped or its configuration prevents startup. The command uses the installed image and the same configuration rules as startup. It prints a fresh evaluation of supplied inputs, including reviewed values, source layers, and normalization warnings; existing web and background workers can have different loaded settings.
+
+```bash
+./darklab-deploy config check
+./darklab-deploy config check --json --strict
+./darklab-deploy config check --local-yaml ./candidate.yaml --json
+```
+
+The helper selects the installation beside itself and applies its `.env` and optional `compose.operator.yaml`. It runs the packaged checker in a disposable container with an explicit Python entrypoint, without starting services or running entrypoint maintenance. Without a candidate, the checker reads the local YAML selected by the container's resolved environment and mounts, including a changed `APP_LOCAL_CONF_DIR` or `/config` mount in the Compose override. An absent optional overlay uses the existing defaults; an unused host `conf/config.local.yaml` is ignored. `--local-yaml` replaces that overlay with a host file relative to your current directory. The checker reads the input through a read-only pipe, so no temporary YAML copy, host-to-daemon path translation, or extra bind mount is needed for a candidate. Missing or unreadable candidates fail without creating paths. Temporary containers and their anonymous volumes are removed after completion or interruption.
+
+Supported environment overrides still win over YAML, including candidate files. Checking does not apply settings, write configuration, create keys, or initialize or migrate a database. Exit status is `0` for valid input, `1` for warnings under `--strict`, and `2` for invalid or unreadable input. JSON output has `schema_version: 1`; deployment diagnostics stay on stderr. Image selection, published ports, worker counts, and other host-only settings still need Compose/startup validation.
+
+For installed-image troubleshooting, the packaged checker can run directly from the installation directory. This example requires an existing `conf/config.local.yaml`; include `-f compose.operator.yaml` after `-f compose.yaml` if that override is present:
+
+```bash
+docker compose --env-file .env -f compose.yaml run --rm --no-deps -T --entrypoint python3 \
+  --volume "$PWD/conf/config.local.yaml:/candidate/config.local.yaml:ro" \
+  shell /app/tools/check_instance_config.py --local-yaml /candidate/config.local.yaml --json
+```
+
+In a source checkout, use the repository virtual environment and source paths instead. From the repository root:
+
+```bash
+APP_CONF_DIR="$PWD/app/conf" APP_LOCAL_CONF_DIR="$PWD/app/conf" \
+  .venv/bin/python scripts/operations/check_instance_config.py --json
+```
+
+This reads shipped YAML and `app/conf/config.local.yaml` when present. Add `--local-yaml ./candidate.yaml` to substitute a proposed overlay. Supply the intended supported environment overrides in the command's process environment; the checker doesn't load `.env` itself. Neither command reports what an existing worker has loaded. The source-development Compose stack needs its normal entrypoint to populate `/app`, so bypassing it to run an installed `/app/tools` path isn't a source-checkout alternative.
+
+The inspection catalog allows only reviewed full values, declared summaries, or withheld values. Custom redaction rules and provider subject allowlists expose counts only; the AI endpoint exposes presence only. Credentials and protected references remain withheld. Unknown input values never appear in diagnostics. Long permitted values have explicit truncation markers, and inspection doesn't offer a secret reveal.
+
+`admin_console_reauth_minutes` is host-owned YAML with a default of `30` and accepted range of `5`–`60` minutes. It controls verified authentication freshness for operator inspection without changing the five-minute provider-linking policy. Browser idle and absolute deadlines apply independently.
+
+---
+
 ## Application YAML Settings
 
 The values below are the built-in server defaults that operators can fine-tune with `config.local.yaml`. Deployment-owned settings are intentionally omitted and live in `.env` instead.
@@ -321,6 +403,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `admin_console_reauth_minutes` | `30` | Verified authentication age allowed for settings, diagnostics, and audit pages, from 5 through 60 minutes. Browser idle and absolute deadlines still apply |
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages. Values longer than 20 visible characters are shortened at startup |
 | `app_public_base_url` | _(empty)_ | Public URL used by background workers for outbound notification links. Leave empty to send in-app relative paths |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their personal workspace |
@@ -331,8 +414,8 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, hostnames/dotted domains, and PEM or PGP private-key blocks. Private-key blocks are removed even when they span several output lines. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction runs |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag`, `/diag/audit`, and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the diagnostics and audit pages and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Anyone allowed here can use the operator-wide audit viewer, including personal/team activity and stored request metadata, so keep this list narrow. Matching clients also bypass the per-workspace AI assist write quota for operator testing, but the global AI write limit still applies |
-| `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
+| `metrics_allowed_cidrs` | `[]` | IPs / CIDRs allowed to scrape `/metrics` when metrics are enabled. An empty list disables scrapes. Forwarded client IPs are honored only from `trusted_proxy_cidrs`. This setting grants no operator access or AI quota exemption |
+| `metrics_enabled` | `true` | Enables `/metrics` for addresses allowed by `metrics_allowed_cidrs`, independently of operator pages and browser sign-in |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_ai_provider_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60]` | Prometheus AI provider duration histogram buckets, in seconds |
@@ -343,7 +426,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `ai_next_commands_max_output_tokens` | `180` | Provider output cap for next-command JSON responses. This is higher than summaries because suggestions need enough room to close valid JSON |
 | `ai_max_concurrent` | `1` | Global provider-call concurrency target for the AI worker path |
 | `ai_max_queue_depth` | `20` | Maximum queued/in-progress assist backlog before writes should return busy |
-| `ai_rate_limit_per_session_hour` | `5` | Per-workspace AI write limit enforced through Redis before new assists are queued. Clients allowed by `diagnostics_allowed_cidrs` bypass this workspace quota only |
+| `ai_rate_limit_per_session_hour` | `5` | Per-workspace AI write limit enforced through Redis before new assists are queued. Applies to all workspaces, including operator requests |
 | `ai_rate_limit_global_per_minute` | `2` | Deployment-wide AI write limit enforced through Redis so multiple workers cannot overload a local model |
 | `ai_allow_full_output` | `false` | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
 | `ai_require_private_base_url` | `true` | Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR |
@@ -358,7 +441,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `permalink_retention_days` | `365` | Delete runs, snapshots, and related run-output artifacts older than this many days at startup and during the scheduler worker's daily retention pass. `0` means unlimited retention |
 | `audit_log_enabled` | `true` | Server-side only. Enables audit event recording. When set to `false`, the audit recorder writes no rows and normal product writes continue; the app logs this once at startup so operators know the compliance trail is disabled |
 | `audit_retention_days` | `90` | Server-side only. Delete audit event rows older than this many days on startup and periodically while the app is running. `0` means unlimited retention |
-| `audit_export_max_rows` | `10000` | Server-side only. Maximum number of audit rows `/diag/audit` CSV/JSON exports return in one request. Values above `200000` are capped, and truncated exports include a marker row or flag |
+| `audit_export_max_rows` | `10000` | Server-side only. Maximum number of audit rows `/audit` CSV/JSON exports return in one request. Values above `200000` are capped, and truncated exports include a marker row or flag |
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
@@ -1385,7 +1468,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:3.0.0` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:3.0.1` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 
@@ -1430,7 +1513,7 @@ docker compose --env-file .env -f compose.yaml -f compose.operator.yaml config -
 docker compose --env-file .env -f compose.yaml -f compose.operator.yaml up -d
 ```
 
-`darklab-deploy` manages the release-owned base stack and automatically adds an existing `compose.operator.yaml` after it for lifecycle work. Backup, restore, database migration, upgrade validation, and removal all use the layered configuration; restore restarts and upgrade instructions do too. Keep a private copy of this operator-owned file with your deployment backups because managed backups don't automatically include additional top-level Compose files. Application log format remains separate: set `log_format: gelf` in installed `conf/config.local.yaml` only when the application itself should emit GELF-shaped JSON.
+`darklab-deploy` manages the release-owned base stack and automatically adds an existing `compose.operator.yaml` after it for lifecycle work. Backup, restore, database migration, upgrade validation, and removal all use the layered configuration; restore restarts and upgrade instructions do too. Managed backups include this file when it exists. Restore keeps the destination's current override; see [Operator Backups](#operator-backups) for manual recovery. Application log format remains separate: set `log_format: gelf` in installed `conf/config.local.yaml` only when the application itself should emit GELF-shaped JSON.
 
 ### Source-checkout development
 
@@ -1455,7 +1538,7 @@ docker compose -f compose.dev.yaml up --build
 Application log format is independent of container log transport. Development
 can set `log_format: gelf` in `app/conf/config.local.yaml`, while production
 uses installed `conf/config.local.yaml`. A host-local collector can forward the
-resulting standard output without changing the application stack.
+resulting stdout and stderr streams without changing the application stack.
 
 ### Docker Labels
 
@@ -1489,7 +1572,7 @@ For a local development image, pass the metadata values you want Docker inventor
 
 ```bash
 docker compose -f compose.dev.yaml build \
-  --build-arg APP_VERSION=3.0.0 \
+  --build-arg APP_VERSION=3.0.1 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
@@ -1570,7 +1653,9 @@ Production installations include the backup and restore path in `darklab-deploy`
 ./darklab-deploy restore backups/darklab-backup-<timestamp>.tar.gz
 ```
 
-Managed backups include the SQLite snapshot or Postgres dump, `.env`, `conf/`, `/data` including `.secrets_master_key`, the complete managed `/workspaces` directory, release metadata, a redacted manifest, restore notes, and checksums. The workspace directory is included even when Files is currently disabled or `.env` uses optional whitespace or quoting that Compose accepts, so dormant files aren't lost because of configuration state or formatting. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. Files are staged inside their destination mounts, and Postgres uses one transaction before staged files are committed. Ordinary restores require the backup and target to use the same database backend, and the target keeps its backend, URL, Postgres credentials, and current image. Restored host files return to the UID/GID that invoked the command. When restored `.env` content changes, the wrapper force-recreates the app container so the restored values take effect, and every successful restore waits for app health before returning. An installed `compose.operator.yaml` remains active for the stop, restore, and restart sequence. A failed restore leaves the app stopped and prints the safety-backup recovery command, so it never deliberately starts against partially restored state.
+Managed backups include the SQLite snapshot or Postgres dump, `.env`, `compose.operator.yaml` when present, `conf/`, `/data` including `.secrets_master_key`, the complete managed `/workspaces` directory, release metadata, a redacted manifest, restore notes, and checksums. The workspace directory is included even when Files is currently disabled or `.env` uses optional whitespace or quoting that Compose accepts, so dormant files aren't lost because of configuration state or formatting. The archive stays under the private `backups/` directory and is owned by the host user who ran the command. Restore verifies the archive and creates another verified backup before it stops the app or writes any state. Files are staged inside their destination mounts, and Postgres uses one transaction before staged files are committed. Ordinary restores require the backup and target to use the same database backend, and the target keeps its backend, URL, Postgres credentials, and current image. Restored host files return to the UID/GID that invoked the command. When restored `.env` content changes, the wrapper force-recreates the app container so the restored values take effect, and every successful restore waits for app health before returning. An installed `compose.operator.yaml` remains active for the stop, restore, and restart sequence; restore doesn't replace it or create one on a host without it. A failed restore leaves the app stopped and prints the safety-backup recovery command, so it never deliberately starts against partially restored state.
+
+The archived override is stored as `operator/compose.operator.yaml` with owner-only permissions (`0600`) and is covered by `checksums.sha256`. To recover it, extract the archive into a private directory and verify its checksums, then review the saved host paths, mounts, and settings before copying it beside the installed `compose.yaml`. Keep permissions at `0600` and validate with `docker compose --env-file .env -f compose.yaml -f compose.operator.yaml config --quiet` before starting the stack. Older backups may not include the override and still restore normally. Other top-level Compose files aren't included automatically.
 
 To move a managed Postgres backup to a newly installed replacement host, use the explicit backend-adoption path:
 
@@ -1583,6 +1668,8 @@ This option is only for a Postgres backup restored into a fresh install that's s
 `./darklab-deploy upgrade X.Y.Z` uses the same path automatically. It refuses to continue when release-owned files have changed, the target isn't newer, the release archive can't be verified, the candidate base stack doesn't work with the installed `compose.operator.yaml`, or the pre-upgrade backup fails. Every archive must produce a complete readable listing, and each member path is checked before anything is extracted. Online upgrades verify the release's signed `SHA256SUMS` with a digest-pinned Cosign container and the exact GitLab tag identity before downloading the archive. A supplied `--backup /path/to/archive` must pass the same checksum verification. `--archive /path/to/archive` is an operator-trusted offline path: the command checks the adjacent `.sha256` file, but you must verify the publisher's `SHA256SUMS.sigstore.json` separately. The command updates only managed files and the `DARKLAB_IMAGE` line; other `.env` settings and every operator directory stay in place. When a release adds keys to `.env.example`, the command prints only their names and asks you to review the installed example before restarting. It doesn't append defaults, replace existing values, or print values from either file. Afterward, run the printed pull, image-verification, and restart commands; the printed Compose commands include the operator override when it exists. Changing an image tag never reverses a database migration.
 
 The underlying `scripts/operations/backup_system.py` helper is also available to development checkouts and custom test environments. It isn't a supported production lifecycle interface; production automation should invoke `darklab-deploy backup` from the installation directory.
+
+Explicit Docker volume sources must already exist and be accessible. The helper checks them before export and stops if inspection fails. Export reads the source volume without removing it.
 
 Completed backups use microsecond UTC names and add a sequence when a timestamp is already present. Archives are published without replacing an existing file, and checksum generation reads large payloads in bounded chunks instead of holding a full file in memory.
 
@@ -1686,16 +1773,24 @@ Non-Compose source runs export `INTERACTIVE_PTY_ENABLED=true`. Multi-worker depl
 
 ### Enable Diagnostics
 
+Follow [operator access setup](#operator-settings-console) to choose a restricted profile, grant a principal, and sign in. The grant covers diagnostics, audit, and settings from any network. Open deployments don't expose operator pages, including deployments that previously enabled diagnostics with a network allowlist.
+
+Metrics has its own network permission and needs no browser identity or operator grant:
+
 ```yaml
 # conf/config.local.yaml
-diagnostics_allowed_cidrs:
+metrics_allowed_cidrs:
   - 192.0.2.10/32
 trusted_proxy_cidrs:
   - 127.0.0.1/32
   - ::1/128
 ```
 
-The same allowlist gates Prometheus metrics. Keep the process-level scratch directory in `.env`:
+Only list proxies you control in `trusted_proxy_cidrs`; other peers can't supply a trusted forwarded client address.
+
+For the 3.0.1 compatibility release, `diagnostics_allowed_cidrs` is accepted as a deprecated **metrics-only** alias. Rename it to `metrics_allowed_cidrs` before upgrading to 3.1.0, which removes the alias. The canonical key wins when both appear in the same configuration layer, including an explicit empty list. Normal layer precedence still applies: a local alias overrides a shipped canonical value. The checker and operator inventory show only the canonical setting, its actual winning source, and a deprecation warning without CIDR values. Neither name grants operator access or bypasses AI limits. Apply YAML changes through the documented [container recreation workflow](#config-file-reload-behavior).
+
+Keep the process-level scratch directory in `.env`:
 
 ```env
 PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
@@ -1724,7 +1819,7 @@ scrape_configs:
 
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
 
-Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-workspace AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
+Ordinary AI assists follow the same workspace and global limits for every caller. The explicit diagnostics **Test prompt** action uses a separate limit of one request per operator per minute, shared across workers through Redis, plus the global AI write limit. A request rejected because global capacity is full leaves the operator’s one-minute allowance available. Opening or refreshing diagnostics never submits a test prompt; the action requires the current operator session and CSRF protection.
 
 ### Tune Atlas Import Limits
 
@@ -1760,8 +1855,10 @@ log_format: gelf
 log_level: INFO
 ```
 
-The application writes GELF-shaped JSON to standard output. Use a host-local
-collector when those container logs should be sent to a remote log service.
+The application writes GELF-shaped JSON to stdout for DEBUG/INFO and stderr for
+WARNING, ERROR, and CRITICAL. Collect both streams when forwarding container logs
+to a remote service. Gunicorn process messages retain their native format; see
+the [logging reference](docs/logging.md#runtime-and-redaction-boundaries).
 HTTP response codes are indexed under numeric `_http_status`; provider,
 workflow, schedule/watcher, AI, Project, team, and export states use their
 documented feature-specific fields. Existing Graylog/OpenSearch dashboards

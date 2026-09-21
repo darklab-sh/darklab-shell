@@ -55,6 +55,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Audit Log](#audit-log)
+- [Operator Settings](#operator-settings)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Related Docs](#related-docs)
 
@@ -769,9 +770,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
 - The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **terminal** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group that keeps Options and Access first, then follows the desktop tool order for workflows, scope, Atlas, Quick Lookup, Projects, History, Files, Schedules, Watchers, Findings, Status, Commands, FAQ, Theme, and diag. Access shows **Anonymous**, **Kept**, or **Check** without exposing an identifier; other rows show compact hints when there is useful context. The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The History panel's search, filters, and bulk controls stay behind a dedicated **history tools** toggle to preserve result space.
 
-**Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
+**Limits:** the diagnostics and settings entries appear only for eligible operators. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 
-**Configuration:** no mobile-specific config keys beyond `diagnostics_allowed_cidrs`; layout activates automatically on touch viewports.
+**Configuration:** no mobile-specific config keys; layout activates automatically on touch viewports.
 
 ---
 
@@ -1511,7 +1512,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - Private host permissions stay intact: container startup validates and stages the complete `conf/` overlay tree into an app-owned runtime copy before the web and worker processes start.
 - Optional `zap` and `oast` profiles run the Assessment connector workers from the same release image, configuration, database, app data, and Files storage as the web app. Each worker has a read-only root filesystem, private scratch space, a health check, and no published port or scanner capability. The matching provider credentials stay in the installation's private `.env` file.
 - The installer verifies its exact release files and prepares the directory, but it doesn't pull or start containers until the operator runs the printed commands.
-- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates SQLite to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, and removes managed files without deleting operator state. When `compose.operator.yaml` exists beside the installed stack, every lifecycle Compose invocation uses it automatically and upgrade instructions include it. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The migration reads locked-down app data through Docker and keeps host-side files owned by the installation user. Offline archives remain an explicit operator-verified path.
+- `darklab-deploy` checks release-owned file drift, creates and verifies SQLite or Postgres backups through one-off release-image containers, restores managed backups, migrates SQLite to bundled Postgres with backup and row-count validation, verifies online upgrade archives against the publisher's signed checksum manifest, upgrades only to a newer exact release, and removes managed files without deleting operator state. When `compose.operator.yaml` exists beside the installed stack, every lifecycle Compose invocation uses it automatically, upgrade instructions include it, and backups keep a private copy for manual recovery. Restore keeps the destination host's current Compose settings. Fresh replacement installs can explicitly adopt a managed Postgres backup while retaining their new database credentials, and the destination must be empty before the transactional restore starts. Migration and adoption inspect bundled Postgres through its local container socket, safely synchronize an empty retained cluster's password, and refuse to overwrite a named volume containing user tables. The migration reads locked-down app data through Docker and keeps host-side files owned by the installation user. Offline archives remain an explicit operator-verified path.
 
 **Limits:** The current production platform and compatibility status live in the canonical [Supported Runtimes](CONFIGURATION.md#supported-runtimes) table. The default `open` profile permits anonymous use, so an all-interface listener still belongs on a trusted network. The `token_required` profile adds a browser access gate but requires HTTPS because its session cookies are Secure. Production reads a private snapshot of `conf/` at container start, so host-side overlay edits need `docker compose restart shell`. Tour chapters and the curated wordlist map are image-owned rather than operator overlays. Database migrations can be forward-only, so the lifecycle command refuses downgrades and takes a verified backup before upgrades and restores. Tags ending in `-rc.N` are validation candidates rather than official releases and may be removed after testing.
 
@@ -1659,7 +1660,7 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 - `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
-- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`, `/diag/audit`, and `/metrics`.
+- `metrics_allowed_cidrs` in `config.yaml` — CIDRs permitted to scrape `/metrics`; operator pages require a principal grant and recent browser verification.
 - `compose.dev.yaml` for development and the installed `compose.yaml` for production — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 - `RAW_PACKET_SCANNING_ENABLED` in `.env` — capability-backed raw scanning opt-in.
 
@@ -1690,11 +1691,11 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 
 ## Audit Log
 
-**Purpose:** a trail of important app actions. Operators get the full IP-gated diagnostics view, while project users and team owners/admins get scoped Activity views for work they can already see.
+**Purpose:** a trail of important app actions. Operators get the full grant-protected diagnostics view, while project users and team owners/admins get scoped Activity views for work they can already see.
 
 **Behavior:**
 
-- Open `/diag/audit` from an allowed operator network to review audit rows across the instance. The page uses the same `diagnostics_allowed_cidrs` gate as `/diag` and `/metrics`.
+- Choose **audit log** from the desktop More menu or mobile menu, or open `/audit`, as a signed-in, recently verified operator to review audit rows across the instance. It shares the same principal grant as Diagnostics and Operator settings.
 - The viewer lists recent rows with created time, event type, actor, target, scope, and a native details drawer. Details are a safe JSON envelope with allowlisted fields such as actor context, scope, target, job/correlation ids, and bounded action metadata.
 - Filters cover event type, actor, team, project, target type, target id, correlation/job chain, date range, and page size. Event choices include short hints so rows such as `history.delete` read as run-deletion events instead of opaque codes.
 - CSV and JSON export buttons download the currently filtered result set. Exports honor `audit_export_max_rows`; when more rows match, CSV adds a truncation marker and JSON returns `truncated: true` with a short hint to narrow the filters.
@@ -1704,39 +1705,60 @@ Restricted-CIDR deployments add another boundary. Raw Nmap activates only when t
 - The Projects modal also exposes a scoped Activity tab. It shows safe project activity for personal project owners and team members who can view that team project, with filters and pagination but without operator-only request/session metadata. Project metadata edit sheets include a compact Recent activity panel for the current item and can jump into the filtered Activity tab.
 - Options → Teams exposes an Activity subtab for team owners and admins. It focuses on team governance and shared-configuration rows, keeps invite/recovery codes, raw tokens, session hashes, IPs, and user agents out of the browser response, and stays unavailable to operators/viewers. The selected team overview shows owners/admins a small Recent activity preview before the full subtab.
 
-**Limits:** `/diag/audit` is an operator-wide view. Anyone allowed through `diagnostics_allowed_cidrs` can see personal and team activity, actor labels, target ids, request metadata, and safe details visible to the audit table. Do not expose it broadly in multi-tenant deployments until you have a narrower owner-scoped audit surface in front of it. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
+**Limits:** `/audit` is an operator-wide view of personal and team activity, actor labels, target ids, request metadata, and reviewed audit details. Grant operator access only to people trusted to inspect the instance. Exports recheck access while streaming and stop if access is lost. A CSV interrupted by access loss or a failed access check includes a final warning row before the download aborts. Discard that incomplete file, resolve the access problem, and export again. Interrupted JSON remains incomplete and cannot be parsed. The audit log is a product-action trail, not a complete replacement for infrastructure logs.
 
-**Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, `diagnostics_allowed_cidrs`, and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** `audit_log_enabled`, `audit_retention_days`, `audit_export_max_rows`, and `admin_console_reauth_minutes`; see [operator setup](CONFIGURATION.md#operator-settings-console).
+
+---
+
+## Operator Settings
+
+**Purpose:** help authorized operators understand loaded settings and how to change their host configuration safely.
+
+### Browsing settings
+
+Open **Operator settings** from the desktop or mobile menu. The desktop menu keeps the shell open in its original tab, and shared page headers let you move between settings, diagnostics, and the audit log.
+
+- Browse collapsed groups with setting counts, or combine search with group, source, and warning filters. Matching groups open automatically; clearing filters restores your earlier browsing view.
+- The page address keeps your filters through reloads and verification. Refresh preserves expanded details and your place.
+- Cards separate loaded values and sources from defaults, accepted values, and host configuration instructions. Sensitive settings show only an approved count, presence indicator, or withheld marker. There is no reveal or edit action.
+
+### Understanding loaded values
+
+Each snapshot identifies the web worker that served it and when its configuration was loaded, including when it inherited configuration from another process. Refreshing samples one worker; it doesn't prove that every worker agrees. Deployment settings and defaults that the worker can't observe are clearly marked.
+
+### Access requirements
+
+Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. Visible pages clear displayed information and stop protected refreshes after access is lost. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console) for the shared settings, diagnostics, and audit policy.
+
+### Host validation and access commands
+
+Managed installations provide `darklab-deploy config check` to validate current or proposed configuration while the app is running or stopped. A fresh check evaluates the supplied inputs; it doesn't inspect running workers or apply changes. See [configuration validation](CONFIGURATION.md#validating-instance-configuration).
+
+Use `darklab-deploy access` for principal access and private credential-file retrieval. Local administrators can list current grants with `operator-list`, including grants retained for disabled accounts. These commands use the selected installation and preserve the same access safeguards. See [principal access operations](CONFIGURATION.md#principal-access-operations).
 
 ---
 
 ## Operator Diagnostics
 
-**Purpose:** restricted operator-only surfaces for inspecting current runtime health and scraping trendable Prometheus metrics without opening a shell session.
+**Purpose:** inspect runtime health in the operator browser pages, and monitor trends through separately authorized Prometheus metrics.
 
 **Behavior:**
 
 - `/diag` provides a live operator view of the running instance and is disabled by default.
-- `/diag/audit` provides the audit-log workflow described in [Audit Log](#audit-log), using the same diagnostics allowlist.
+- `/audit` provides the audit-log workflow described in [Audit Log](#audit-log), using the same operator grant and recent verification.
 - The diagnostics page includes a classifier inspector near the top of the page. Paste one output line, optionally add the command context, and it shows the line's `kind`, `role`, signals, entities, command root, and target using the same backend classifier used for saved runs without rerunning the heavier diagnostics probes. An Advanced disclosure keeps the legacy line-class override available when you need to debug old transcript classes.
 - The classifier drift report samples recent saved output on demand and calls out spots where stored metadata no longer matches today's classifier, where help output produced findings/entities, or where useful-looking output stayed as plain body text. Samples can be sent straight into the one-line inspector for a closer look.
-- `/metrics` returns Prometheus text for scrape-based monitoring and uses the same IP/CIDR allowlist as `/diag`.
-- When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It stays hidden for all other visitors.
+- `/metrics` returns Prometheus text for scrape-based monitoring and uses its own `metrics_allowed_cidrs` permission.
+- Eligible operators see Diagnostics, Audit log, and Operator settings in desktop and mobile navigation. If verification has expired, selecting a page asks them to verify again.
 
 ### Enabling access
 
-Add the IP addresses or CIDR ranges that should be allowed to reach the page to `config.yaml`:
+Choose a restricted sign-in profile, grant operator access to a principal, and sign in. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console). Team roles and monitoring IPs don't grant operator access. Credential or provider verification returns you to the page you requested, including useful audit filters.
 
-```yaml
-diagnostics_allowed_cidrs:
-  - "127.0.0.1/32"    # localhost curl
-  - "172.16.0.0/12"   # Docker bridge networks
-```
+Visible pages check access periodically. Losing access clears displayed information and stops protected refreshes. The AI test runs only when you select **Test prompt** and has a per-operator limit; ordinary AI assists still use normal workspace quotas.
 
-- Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting.
-- `X-Forwarded-For` is honored only when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied.
-- `/diag` and `/metrics` return 404 for all other requests.
-- Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
+For Prometheus, configure `metrics_allowed_cidrs` separately. See [metrics setup and legacy-setting migration](CONFIGURATION.md#enable-diagnostics).
 
 ### What the page shows
 
@@ -1757,11 +1779,7 @@ diagnostics_allowed_cidrs:
 
 ### JSON output
 
-Append `?format=json` to get the same data as a JSON object, suitable for scripting or monitoring integrations:
-
-```bash
-curl http://localhost:8888/diag?format=json
-```
+Open `/diag?format=json` in the same HTTPS browser session to view diagnostics as JSON. It requires an eligible, recently verified operator session, just like the page; portable credentials and API tokens don't provide access. For routine monitoring, use the independently authorized [Prometheus metrics](#prometheus-metrics) endpoint.
 
 ### Prometheus metrics
 
@@ -1773,9 +1791,9 @@ curl http://localhost:8888/metrics
 
 The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
-**Limits:** CIDR allowlists always gate `/diag`, `/diag/audit`, and `/metrics`. In restricted profiles, `/diag` and `/diag/audit` also require sign-in, while `/metrics` stays identity-free for monitoring systems and still requires an allowed source address. Empty `diagnostics_allowed_cidrs` disables all three surfaces. Set `metrics_enabled: false` to keep `/diag` and `/diag/audit` available while hiding `/metrics`.
+**Limits:** Settings, diagnostics, and audit require a granted principal and recent browser verification in a restricted sign-in profile; they remain unavailable in open mode. They work from any network. Metrics needs no sign-in and requires both `metrics_enabled: true` and an allowed source address. Empty `metrics_allowed_cidrs` disables scrapes without affecting operator pages.
 
-**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and metric histogram buckets live in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** Operator access uses the principal grant and `admin_console_reauth_minutes`. Metrics uses `metrics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and histogram buckets in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md#enable-diagnostics).
 
 ---
 

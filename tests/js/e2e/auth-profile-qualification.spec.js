@@ -173,7 +173,9 @@ async function qualifyBrowser(page, context, projectName) {
     await page.getByLabel('Access credential').fill(bootstrapCredential(profile))
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   }
-  await expect(page).toHaveURL(url => url.pathname === '/')
+  // Predicate URL assertions also wait for full load on the assertion timeout.
+  // Give navigation its own budget, then check that the shell is usable.
+  await page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await ensurePromptReady(page)
 
   if (profile === 'oidc_required') {
@@ -220,8 +222,8 @@ async function qualifyBrowser(page, context, projectName) {
   const rotatedCookie = (await context.cookies()).find(cookie => cookie.name === 'darklab_browser_session')
   expect(rotatedCookie?.value).not.toBe(sessionCookie.value)
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await ensurePromptReady(page)
-  await expect(page).toHaveURL(url => url.pathname === '/')
   expect((await readStatuses(page))['/projects']).toBe(200)
 
   const loggedOut = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/logout')
@@ -231,7 +233,7 @@ async function qualifyBrowser(page, context, projectName) {
   await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
   if (profile === 'mixed') {
     await page.getByRole('link', { name: 'Continue with identity provider' }).click()
-    await expect(page).toHaveURL(url => url.pathname === '/')
+    await page.waitForURL(url => url.pathname === '/', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await ensurePromptReady(page)
     const providerAuthentication = await page.evaluate(async () =>
       (await (await apiFetch('/auth/principal')).json()).authentication)

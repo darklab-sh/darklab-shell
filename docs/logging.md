@@ -6,9 +6,11 @@ This operator and developer reference describes darklab_shell log levels, output
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
 
-The container entrypoint runs before that logger exists, so its Nuclei cache bootstrap writes fixed plain-text markers to standard output. `NUCLEI_TEMPLATE_BOOTSTRAP_STARTED` begins an empty-cache install, `NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED` confirms that a manifest was created, and `NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED` records a disabled or already-populated cache. `NUCLEI_TEMPLATE_BOOTSTRAP_FAILED` reports only a fixed reason and, when the update process exits unsuccessfully, its numeric status. It never includes template contents, provider responses, commands, targets, credentials, or operator-authored values.
+Application and background-worker DEBUG/INFO records go to stdout; WARNING, ERROR, and CRITICAL records go to stderr. Each record uses one stream, including any traceback, and the configured `log_level` still controls which records are emitted. Text and GELF output use the same routing. Gunicorn's own master and worker process logs follow that policy from startup while retaining Gunicorn's native format and `--log-level`. Explicit Gunicorn file destinations or custom logging configurations keep their requested behavior; optional access logs retain their separate settings. Collect both container streams to retain warnings and failures. Local principal-access commands send all configured application logs to stderr so stdout remains a single JSON result.
 
-Configuration loading starts before runtime bootstrap can build the final logger. `startup_logging.py` captures those records in memory without attaching a handler, and `configure_logging()` replays each one once through the selected formatter while applying the effective level. If configuration can't finish, the same boundary writes one safe `CONFIG_LOAD_FAILED` record in the most recent usable text or GELF format. OIDC policy, scope, allowlist, required-setting, and URL rejections use `phase=oidc_validation` with a fixed reason in `error`. Inconsistent browser-session durations use `phase=access_profile_validation` and `error=idle_exceeds_absolute`. That fallback includes only the bounded phase, source, key, and an error class or fixed reason; it doesn't include parser contents, configuration values, or a traceback. Ignored, dropped, defaulted, clamped, and truncated configuration values all contribute to the `warning_count` reported by `CONFIG_VALIDATED` and `CONFIG_LOADED`.
+The container entrypoint runs before that logger exists, so its Nuclei cache bootstrap writes fixed plain-text progress and success markers to stdout and failure markers to stderr. `NUCLEI_TEMPLATE_BOOTSTRAP_STARTED` begins an empty-cache install, `NUCLEI_TEMPLATE_BOOTSTRAP_SUCCEEDED` confirms that a manifest was created, and `NUCLEI_TEMPLATE_BOOTSTRAP_SKIPPED` records a disabled or already-populated cache. `NUCLEI_TEMPLATE_BOOTSTRAP_FAILED` reports only a fixed reason and, when the update process exits unsuccessfully, its numeric status. It never includes template contents, provider responses, commands, targets, credentials, or operator-authored values.
+
+Configuration loading starts before runtime bootstrap can build the final logger. `startup_logging.py` captures those records in memory without attaching a handler, and `configure_logging()` replays each one once through the selected formatter while applying the effective level. If configuration can't finish, the same boundary writes one safe `CONFIG_LOAD_FAILED` record to stderr in the most recent usable text or GELF format. Fatal entrypoint failures also stay on stderr. OIDC policy, scope, allowlist, required-setting, and URL rejections use `phase=oidc_validation` with a fixed reason in `error`. Inconsistent browser-session durations use `phase=access_profile_validation` and `error=idle_exceeds_absolute`. That fallback includes only the bounded phase, source, key, and an error class or fixed reason; it doesn't include parser contents, configuration values, or a traceback. Ignored, dropped, defaulted, clamped, and truncated configuration values all contribute to the `warning_count` reported by `CONFIG_VALIDATED` and `CONFIG_LOADED`.
 
 Structured events use the `session` field for request correlation. It contains a validated anonymous UUID or personal-workspace id, never a submitted credential secret. Credential attribution uses the safe credential id and type when an event needs it.
 
@@ -68,8 +70,7 @@ The logging layer supports two output formats selected by `log_format` in instal
   - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
 
 Container log transport and the application formatter are intentionally
-separate controls. A host-local collector can forward container standard
-output, while `log_format: gelf` controls whether the application itself emits
+separate controls. A host-local collector must forward both container stdout and stderr, while `log_format: gelf` controls whether the application itself emits
 GELF-shaped records or plain text.
 
 ### Field type contract
@@ -282,6 +283,12 @@ The current event inventory is:
 | INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `INSTANCE_OPERATOR_REAUTHENTICATED` | committed verification and browser-session rotation | principal_id, source; no proof, tokens, or configuration values |
+| WARNING | `INSTANCE_OPERATOR_REAUTH_FAILED` | credential verification rejected or throttled | fixed `credential_rejected`, `rate_limited`, or `source_unavailable` reason, numeric http_status, request_id, endpoint, suppressed_repeat_count; sampled per reason each minute, no credential or proof |
+| WARNING | `INSTANCE_OPERATOR_ACCESS_DENIED` | operator profile or eligibility denied | fixed reason, numeric http_status, request_id, endpoint, suppressed_repeat_count; sampled per reason each minute, no inventory or search text |
+| ERROR | `INSTANCE_OPERATOR_ACCESS_UNAVAILABLE` | initial or live operator authority check unavailable | bounded exception class as reason, fixed initial_check/live_check stage, numeric http_status, request_id, endpoint, permitted principal_id/credential_id and ip; no exception details or traceback |
+| WARNING | `CONFIG_ALIAS_DEPRECATED` | configuration layer normalization | canonical key, alias name, fixed reason, removal_version; once per evaluation, no setting values |
+| INFO | `INSTANCE_OPERATOR_GRANT_CHANGED` | committed local operator grant or revocation; local CLI diagnostics use stderr and repeated unchanged operations are quiet | principal_id, source, granted |
 | INFO | `PRINCIPAL_CREATED` | committed workspace creation, operator bootstrap, or provider provisioning | principal_id, status, source, request_id |
 | INFO | `CREDENTIAL_CREATED` | committed portable credential or PAT issuance, including a prepared rotation | principal_id, credential_id, credential_type, scope_count, source, request_id |
 | INFO | `CREDENTIAL_ROTATED` | committed immediate credential replacement | principal_id, credential_id, previous_credential_id, credential_type, scope_count, source, request_id |
@@ -291,7 +298,7 @@ The current event inventory is:
 | DEBUG | `CREDENTIAL_RATE_LIMIT_BACKEND_SELECTED` | credential-counter reads and writes | namespace, operation, backend, reason |
 | WARNING | `CREDENTIAL_RATE_LIMIT_BACKEND_DEGRADED` | credential counters lose a Redis operation | backend, fallback, namespace, operation, error_type |
 | INFO | `CREDENTIAL_RATE_LIMIT_BACKEND_RECOVERED` | all failed operations for a credential-counter namespace succeed again | backend, namespace, failure_count, duration_ms |
-| WARNING | `OIDC_AUTH_FAILED` | rejected or expired OIDC sign-in and linking attempts | stage, reason, error_type, http_status, duration_ms, purpose, request_id, endpoint, suppressed_repeat_count |
+| WARNING | `OIDC_AUTH_FAILED` | rejected or expired OIDC sign-in, linking, and operator verification attempts | stage, reason, error_type, http_status, duration_ms, purpose, request_id, endpoint, suppressed_repeat_count |
 | ERROR | `OIDC_PROVIDER_FAILED` | unavailable or unusable OIDC dependency or local persistence | stage, reason, error_type, http_status, duration_ms, purpose, request_id |
 | INFO | `OIDC_BROWSER_SESSION_CREATED` | completed provider sign-in or linking | principal_id, purpose |
 | INFO | `OIDC_IDENTITY_UNLINKED` | completed provider unlink request | principal_id, changed |
@@ -409,7 +416,6 @@ The current event inventory is:
 | INFO | `WATCHER_BASELINE_ACCEPTED` | watcher service | watcher_id, baseline_run_id, session |
 | INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
-| INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
 | INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, assist_status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
 | INFO | `AI_WORKER_DEPENDENCIES_LOADED` | AI worker startup | variants, metrics_initialized |
 | INFO | `AI_WORKER_STARTED` | AI worker startup | — |
@@ -437,7 +443,13 @@ The current event inventory is:
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session, cleanup flags, removed/curated/kept counts |
 | INFO | `PROJECT_LINK_REMOVED` | Project unlink route | project_id, entity_type, entity_id, cleanup flags, unlinked/curated/kept counts |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
-| INFO | `DIAG_VIEWED` | `diag()` | ip |
+| INFO / DEBUG | `DIAG_VIEWED` | diagnostics view / automatic refresh | principal_id, credential_id, request_id, resolved ip; background XHR reads use DEBUG |
+| INFO / DEBUG | `DIAG_AUDIT_VIEWED` | operator audit view / background read | operator context, event_count, limit, offset, has_more, audit_log_enabled, filter_count, filter_keys; no filter values |
+| INFO | `DIAG_AUDIT_EXPORTED` | fully consumed operator audit stream | operator context, format, limit, event_count, truncated, filter_count, filter_keys |
+| WARNING | `DIAG_AUDIT_EXPORT_INTERRUPTED` | cancelled, failed, or access-revoked export | operator context, format, limit, filter_count, filter_keys, fixed interrupted/access_lost/check_unavailable reason; unavailable live checks also emit one safe operator ERROR; no completed event |
+| INFO | `AI_DIAG_TEST_COMPLETED` | explicit operator AI test completes | principal_id, credential_id, request_id, resolved ip |
+| WARNING | `AI_DIAG_TEST_REJECTED` | shared operator or global AI test limit | operator context, fixed reason, numeric http_status |
+| WARNING | `METRICS_DENIED` | client outside metrics allowlist | resolved ip only; no configured CIDRs |
 | WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
 | WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
 | WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
@@ -532,7 +544,6 @@ The current event inventory is:
 | ERROR | `ATLAS_QUICK_LOOKUP_OPEN_FAILED` | desktop rail, mobile menu, or keyboard shortcut through `/log` | ip, session, context, client_message, client_details with source and stage |
 | WARN / ERROR | `HISTORY_COMPARE_CANDIDATES_FETCH_FAILED` / `HISTORY_COMPARE_MANUAL_CANDIDATES_FETCH_FAILED` | comparison launcher through `client_log` | ip, session, context, client_details with bounded error_name, stage, status, run_id, route |
 | WARN / ERROR | `HISTORY_COMPARE_API_FETCH_FALLBACK` / `HISTORY_COMPARE_FETCH_FAILED` | comparison renderer through `client_log` | ip, session, context, client_details with bounded error_name, status, left_run_id, right_run_id, route, compare_request_error |
-| WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | HTTP rate-limit handlers | ip, request_id, path, limit_policy, scope |
@@ -563,7 +574,7 @@ The current event inventory is:
 | WARN | `AI_PROVIDER_SCHEMA_RETRY` | AI provider JSON validation | variant, attempt, model, finish_reason, output_chars, error_type, provider_truncated |
 | WARN | `AI_SUGGESTION_SECRET_LOOKUP_FAILED` | AI suggestion validation | session, env, error_type (+ traceback) |
 | WARN | `AI_SUGGESTIONS_REJECTED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
-| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, http_status |
+| WARNING | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | principal_id, credential_id, request_id, ip, provider, model, error_code, numeric http_status |
 | WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, http_status, latency_ms |
 | WARN | `AI_COORDINATION_RELEASE_SKIPPED` | AI Redis coordination release | reason |
 | WARN | `AI_COORDINATION_RELEASE_FAILED` | AI Redis coordination release | (+ traceback) |
@@ -671,7 +682,7 @@ Principal and credential lifecycle milestones reach INFO only after the enclosin
 
 Credential-counter backend diagnostics distinguish intentional process-local operation from failed Redis reads, increments, count conversion, or expiry updates. Each fixed counter namespace emits one degradation warning, coalesces further failures, and reports recovery only after every failed operation has succeeded again. A successful read cannot hide a write or expiry fault. Recovery records the failure count and elapsed outage time; DEBUG identifies the backend used by each check. The small state map contains only fixed namespace and operation names. Redis URLs, keys, IP addresses, credential lookup IDs, subject hashes, and exception messages never enter these records.
 
-OIDC diagnostics identify discovery, flow creation or validation, callback validation, provider authorization, token exchange, signing-key retrieval, token validation, identity binding, and browser-session creation. `OIDC_PROVIDER_FAILED` records dependency and local storage failures at ERROR; `OIDC_AUTH_FAILED` records expected denials and validation failures at WARNING, sampled once per fixed stage/reason per minute. The next warning reports suppressed repeats. Fixed reasons distinguish CA-file faults, TLS and network failures, timeouts, HTTP errors, invalid JSON or metadata, client authentication failures, rejected codes, signature and claim failures, and unavailable workspace storage. `http_status` is the provider's numeric response status when known, otherwise null; duration is in milliseconds. DEBUG adds stage completion, outcome, purpose, and elapsed time, including cached provider lookups. Request IDs correlate stages within a request. No event uses OIDC state for correlation or includes provider URLs, subjects, codes, cookies, tokens, secrets, CA paths, response bodies, exception messages, or tracebacks.
+OIDC diagnostics identify discovery, flow creation or validation, callback validation, provider authorization, token exchange, signing-key retrieval, token validation, identity binding, and browser-session creation. `OIDC_PROVIDER_FAILED` records dependency and local storage failures at ERROR; `OIDC_AUTH_FAILED` records expected denials and validation failures at WARNING, sampled once per fixed stage/reason per minute. The next warning reports suppressed repeats. Operator verification rejects revoked grants, unavailable source sessions, and changed provider identities at WARNING with `purpose=admin_reauth`, `stage=identity_binding`, and `reason=operator_source_unavailable`; actual storage and provider failures remain ERROR. Fixed reasons distinguish CA-file faults, TLS and network failures, timeouts, HTTP errors, invalid JSON or metadata, client authentication failures, rejected codes, signature and claim failures, and unavailable workspace storage. `http_status` is the provider's numeric response status when known, otherwise null; duration is in milliseconds. DEBUG adds stage completion, outcome, purpose, and elapsed time, including cached provider lookups. Request IDs correlate stages within a request. No event uses OIDC state for correlation or includes provider URLs, subjects, codes, cookies, tokens, secrets, CA paths, response bodies, exception messages, or tracebacks.
 
 `CREDENTIAL_LIFECYCLE_FAILED` reports caught internal storage faults once at ERROR. Fixed reasons distinguish unavailable verifier keys, workspace storage, and other identity storage failures. The response is a generic HTTP 500. Records retain the original error class and bounded file/function/line locations, without the original message, source text, or exception chain. Invalid inputs and expected permission, missing-credential, and lockout responses keep their client status without this ERROR event.
 

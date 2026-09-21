@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "3.0.0"
+RELEASE_VERSION = "3.0.1"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
@@ -41,7 +41,7 @@ NEXT_RC_VERSION = (
     if _CURRENT_RC_NUMBER
     else RC_TWO_VERSION
 )
-NEXT_VERSION = "3.0.1"
+NEXT_VERSION = "3.0.2"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
@@ -1516,11 +1516,13 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert 'pg_restore_version "PostgreSQL 18"' in image_smoke
     assert (
         "COPY scripts/operations/backup_system.py "
+        "scripts/operations/check_instance_config.py "
         "scripts/operations/manage_principal_access.py "
         "scripts/operations/migrate_sqlite_to_postgres.py "
         "scripts/operations/restore_system.py /app/tools/"
     ) in dockerfile
     assert "!scripts/operations/backup_system.py" in dockerignore
+    assert "!scripts/operations/check_instance_config.py" in dockerignore
     assert "!scripts/operations/manage_principal_access.py" in dockerignore
     assert "!scripts/container/install_go_tool.sh" in dockerignore
     assert "!scripts/container/patches/httpx-disable-leakless.patch" in dockerignore
@@ -2132,6 +2134,101 @@ def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
 
     assert result.returncode == 1
     assert expected_error in result.stderr
+
+
+def test_trufflehog_build_verifies_the_upstream_amqp_dependency():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG TRUFFLEHOG_VERSION=v3.97.5" in dockerfile
+    assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0" in dockerfile
+    build = dockerfile.split('RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}"', 1)[1]
+    build = build.split("\nRUN ", 1)[0]
+    compile_tool = "go -C /tmp/trufflehog install"
+    verify_binary = "sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog"
+    assert "go -C /tmp/trufflehog get" not in build
+    assert build.index(compile_tool) < build.index(verify_binary)
+    assert 'github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}"' in build
+    assert "amqp091-go@${TRUFFLEHOG_AMQP_VERSION}/LICENSE" in build
+    assert "/licenses/go-modules/amqp091-go.txt" in build
+    assert "COPY scripts/container/verify_go_dependency.sh /usr/local/bin/verify-go-dependency" in dockerfile
+    assert "!scripts/container/verify_go_dependency.sh" in (ROOT / ".dockerignore").read_text()
+    # Changing only this dependency must not invalidate unrelated Go tool builds.
+    assert dockerfile.index("go -C /tmp/gosu build") < dockerfile.index(
+        "\nARG TRUFFLEHOG_AMQP_VERSION\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("dependency_info", "go_status", "accepted"),
+    [
+        ("dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n", 0, True),
+        ("dep github.com/rabbitmq/amqp091-go v1.10.0 h1:test\n", 0, False),
+        ("", 0, False),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0\n"
+            "=> github.com/rabbitmq/amqp091-go v1.10.0 h1:test\n",
+            0,
+            False,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0\n"
+            "=> /tmp/local-amqp (devel)\n",
+            0,
+            False,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n"
+            "dep example.test/other v1.0.0\n=> /tmp/local-other (devel)\n",
+            0,
+            True,
+        ),
+        (
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n"
+            "dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n",
+            0,
+            False,
+        ),
+        ("dep github.com/rabbitmq/amqp091-go v1.13.0 h1:test\n", 1, False),
+    ],
+    ids=["patched", "vulnerable", "missing", "replaced-version", "replaced-path",
+         "unrelated-replacement", "duplicate", "unreadable-binary"],
+)
+def test_go_dependency_guard_checks_the_executable(
+    tmp_path: Path, dependency_info: str, go_status: int, accepted: bool,
+):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_go = fake_bin / "go"
+    fake_go.write_text(
+        '#!/bin/sh\nset -eu\n'
+        'test "$*" = "version -m /out/usr/local/bin/trufflehog"\n'
+        'cat "$GO_TEST_BUILD_INFO"\nexit "$GO_TEST_STATUS"\n',
+        encoding="utf-8",
+    )
+    fake_go.chmod(0o755)
+    metadata = tmp_path / "build-info"
+    metadata.write_text(
+        "/out/usr/local/bin/trufflehog: go1.27.0\n"
+        "path github.com/trufflesecurity/trufflehog/v3\n"
+        "mod github.com/trufflesecurity/trufflehog/v3 (devel)\n"
+        + dependency_info + "build -buildmode=exe\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "sh", str(ROOT / "scripts" / "container" / "verify_go_dependency.sh"),
+            "/out/usr/local/bin/trufflehog", "github.com/rabbitmq/amqp091-go", "v1.13.0",
+        ],
+        env={
+            **os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "GO_TEST_BUILD_INFO": str(metadata), "GO_TEST_STATUS": str(go_status),
+        },
+        capture_output=True, text=True, check=False,
+    )
+    assert (result.returncode == 0) is accepted, result.stderr
+    if accepted:
+        assert "module=github.com/rabbitmq/amqp091-go version=v1.13.0" in result.stdout
+    elif go_status == 0:
+        assert "Go binary dependency mismatch" in result.stderr
 
 
 def test_container_license_inventory_matches_dockerfile_and_release():
@@ -4764,6 +4861,7 @@ def test_restore_wrapper_recreates_for_changed_env_and_leaves_app_stopped_after_
     assert "environment settings changed" in recreated.stdout
     recreated_log = log_path.read_text(encoding="utf-8")
     assert " up -d --wait --force-recreate shell" in recreated_log
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in recreated_log
     _assert_compose_log_uses_operator_override(recreated_log, install_dir)
 
     log_path.unlink()
@@ -5323,6 +5421,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert (install_dir / "backups" / "darklab-backup-auto.tar.gz").is_file()
     upgrade_log = log_path.read_text(encoding="utf-8")
     assert "--result-path-only" in upgrade_log
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in upgrade_log
     _assert_compose_log_uses_operator_override(upgrade_log, install_dir)
     manifest = json.loads((install_dir / "release-manifest.json").read_text())
     assert manifest["version"] == next_version
@@ -5375,6 +5474,7 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert "--workspace-source bind:/workspaces" in postgres_backup_command
     assert "--include-workspaces always" in postgres_backup_command
     assert "--include-workspaces never" not in postgres_backup_command
+    assert "--operator-compose-file /deployment/compose.operator.yaml" in postgres_backup_command
     postgres_stop = next(
         index for index, line in enumerate(stopped_postgres_log)
         if " stop postgres" in line
@@ -5396,6 +5496,22 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert " up -d --wait postgres" not in running_postgres_log
     assert " stop postgres" not in running_postgres_log
     (install_dir / ".env").write_text(env_text, encoding="utf-8")
+
+    (install_dir / "compose.operator.yaml").unlink()
+    log_path.write_text("", encoding="utf-8")
+    backup_without_override = subprocess.run(
+        [str(install_dir / "darklab-deploy"), "backup"],
+        cwd=install_dir,
+        env=lifecycle_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert backup_without_override.returncode == 0, backup_without_override.stderr
+    assert "--operator-compose-file" not in log_path.read_text(encoding="utf-8")
+    (install_dir / "compose.operator.yaml").write_text(
+        operator_files["compose.operator.yaml"], encoding="utf-8",
+    )
 
     downgrade = subprocess.run(
         [

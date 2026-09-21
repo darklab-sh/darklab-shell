@@ -5,7 +5,7 @@
 Centralized logging configuration for darklab_shell.
 
 Two output formats, controlled by CFG['log_format']:
-  text  — human-readable key=value lines (default, good for Docker stdout)
+  text  — human-readable key=value lines (default, good for container logs)
   gelf  — newline-delimited GELF 1.1 JSON for Graylog / GELF-capable back-ends
 
 Log level is controlled by CFG['log_level'] (default: INFO).
@@ -20,10 +20,12 @@ or connect to Redis by itself.
 import json
 import logging
 import socket
+import sys
 from collections.abc import Mapping
 from typing import Any
 
 from config import APP_VERSION
+from core.log_streams import console_handlers
 from core.startup_logging import drain_config_log_records, gelf_additional_field
 
 # ---------------------------------------------------------------------------
@@ -148,12 +150,12 @@ class _TextFormatter(logging.Formatter):
 # Public API
 # ---------------------------------------------------------------------------
 
-def configure_logging(cfg: Mapping[str, Any]) -> None:
+def configure_logging(cfg: Mapping[str, Any], *, stderr_only: bool = False) -> None:
     """
     Apply level and format from cfg to the 'shell' logger.
 
     Runtime bootstrap calls this before process, database, or app startup work
-    emits operational logs.
+    emits operational logs. Local JSON commands use stderr_only to reserve stdout.
     """
     logger = logging.getLogger("shell")
     buffered_records = drain_config_log_records(logger)
@@ -167,12 +169,11 @@ def configure_logging(cfg: Mapping[str, Any]) -> None:
         GELFFormatter(app_name, APP_VERSION) if fmt_name == "gelf" else _TextFormatter()
     )
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    handler.setLevel(logging.DEBUG)  # handler accepts all; the logger level gates first
-
     logger.handlers.clear()
-    logger.addHandler(handler)
+    handlers = [logging.StreamHandler(sys.stderr)] if stderr_only else console_handlers(formatter)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False  # do not forward to root — this is the complete pipeline
 

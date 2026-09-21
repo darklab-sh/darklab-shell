@@ -6,7 +6,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Sign in · {{ app_name }}</title>
+  <title>{{ "Verify access" if reauthentication else "Sign in" }} · {{ app_name }}</title>
   <link rel="icon" type="image/x-icon" href="{{ static_asset('/static/favicon.ico') }}">
   {% include "app_stylesheets.html" %}
   {% include "theme_vars_style.html" %}
@@ -15,17 +15,26 @@
   <main class="restricted-sign-in" aria-labelledby="restricted-sign-in-title">
     <section class="restricted-sign-in-card">
       <div class="restricted-sign-in-kicker">RESTRICTED ACCESS</div>
-      <h1 id="restricted-sign-in-title">Sign in to {{ app_name }}</h1>
-      {% if force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
+      <h1 id="restricted-sign-in-title">{% if reauthentication %}Verify operator access{% else %}Sign in to {{ app_name }}{% endif %}</h1>
+      {% if reauthentication %}<p>Verify your identity to inspect instance settings. This does not extend your browser session’s absolute expiry.</p>{% elif force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
       {% if error %}<div class="restricted-sign-in-error" role="alert">{{ error }}</div>{% endif %}
+      {% if csrf_rejected %}<a class="btn btn-secondary" href="{{ url_for('auth.sign_in', next=next_path) }}">Sign in again</a>{% endif %}
       {% if oidc_sign_in_enabled %}
+      {% if reauthentication %}
+      <form method="post" action="{{ url_for('admin.reauthenticate') }}">
+        <input type="hidden" name="next" value="{{ next_path }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn btn-primary">Verify with identity provider</button>
+      </form>
+      {% else %}
       <a class="btn btn-primary restricted-sign-in-provider" href="{{ url_for('auth.oidc_start', next=next_path) }}">Continue with identity provider</a>
       {% endif %}
+      {% endif %}
       {% if credential_sign_in_enabled %}
-      <form method="post" action="{{ url_for('auth.sign_in') }}" autocomplete="off">
+      <form method="post" action="{{ url_for('admin.reauthenticate' if reauthentication else 'auth.sign_in') }}" autocomplete="off">
         <input type="hidden" name="next" value="{{ next_path }}">
         {% if force_credential %}<input type="hidden" name="force" value="credential">{% endif %}
-        <input type="hidden" name="sign_in_nonce" value="{{ sign_in_nonce }}">
+        {% if reauthentication %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% else %}<input type="hidden" name="sign_in_nonce" value="{{ sign_in_nonce }}">{% endif %}
         <label for="restricted-credential">Access credential</label>
         <input
           id="restricted-credential"
@@ -38,10 +47,11 @@
           autocomplete="off"
           spellcheck="false"
         >
-        <button type="submit" class="btn btn-primary">Sign in</button>
+        <button type="submit" class="btn btn-primary">{{ "Verify access" if reauthentication else "Sign in" }}</button>
       </form>
       <p class="restricted-sign-in-help">If you don't have a credential, contact the shell operator.</p>
       {% endif %}
+      {% if reauthentication %}<a class="btn btn-secondary" href="/">Cancel</a>{% endif %}
     </section>
   </main>
 </body>

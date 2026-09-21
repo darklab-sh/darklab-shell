@@ -38,14 +38,13 @@ WORKSPACE_DIR="$DATA_DIR/workspaces"
 
 # Build a per-slot local config dir so tests always have predictable overrides
 # regardless of whether a config.local.yaml exists on the host. Shipped catalogs
-# stay under app/conf; the overlay enables /diag for loopback connections so
-# Playwright can navigate there without forging IP headers.
+# stay under app/conf. Operator fixtures grant browser access explicitly; an
+# empty metrics allowlist proves those pages do not depend on scraper IPs.
 SHIPPED_CONF_DIR="$APP_DIR/conf"
 LOCAL_CONF_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.conf.XXXXXX")"
 cat > "$LOCAL_CONF_DIR/config.local.yaml" << EOF
 # E2E test overlay — not for production use.
-diagnostics_allowed_cidrs:
-  - 127.0.0.0/8
+metrics_allowed_cidrs: []
 workspace_enabled: true
 workspace_backend: tmpfs
 workspace_root: "$WORKSPACE_DIR"
@@ -146,6 +145,10 @@ if [[ "$ACCESS_PROFILE_VALUE" == "token_required" || "$ACCESS_PROFILE_VALUE" == 
   else
     "${bootstrap_cmd[@]}"
   fi
+fi
+
+if [[ -n "${PW_E2E_SECRET_DIR:-}" ]]; then
+  "$PYTHON_BIN" "$SCRIPT_DIR/operator_fixture.py" record "$PW_E2E_SECRET_DIR/${SLOT}.runtime.json"
 fi
 
 server_cmd=(

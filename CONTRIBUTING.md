@@ -4,6 +4,8 @@ This guide is for developers and contributors working on darklab_shell locally. 
 
 For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOC_STANDARDS.md](DOC_STANDARDS.md).
 
+Coding agents should also follow [AGENTS.md](AGENTS.md), which collects the repository's working rules and links to the detailed contracts.
+
 ---
 
 ## Table of Contents
@@ -300,7 +302,7 @@ CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
 integration tests against isolated test schemas. The helper uses
 `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable
-Docker Postgres container and removes it after the run. Use
+Docker Postgres container and removes it and its anonymous volumes after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
 profile-gated Compose Postgres service without publishing the database port.
 
@@ -330,9 +332,9 @@ Playwright notes:
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and balances the open-profile browser suite across 5 isolated Chromium projects alongside dedicated restricted-profile projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - Playwright runs use generated bundle output by default. The wrapper runs `npm run assets:check` first and stops with a clear `run assets:sync` message if committed build output is missing or stale. `npm run test:e2e:source` runs the fast source-mode Assessment, boot, share, shell-output entity action, and lazy-surface browser slice that is also part of `npm test`; GitLab requires this source slice in its own job alongside the full bundled suite. Pass `--asset-bundle-mode source` to the wrapper when debugging other source-file loading paths without putting an environment variable before the approved helper command.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
-- CI retries a failed Playwright case once for trace evidence, but still fails the job when that retry passes. Focused `test.only` cases are also rejected in CI.
+- The parallel CLI suite uses at most three workers in CI across all open and restricted-profile projects, compared with seven locally. `PLAYWRIGHT_PROJECT_COUNT` only controls open-profile sharding; `--ci` also applies the CI worker cap locally. Browser runs retain a trace for every failed attempt, including the first attempt when a retry passes. CI retries once and still rejects flaky results and focused `test.only` cases.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
-- the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
+- Each parallel project runs one browser worker against its own Flask server and isolated app state. Separate projects still run concurrently, so browser workers never share a project server during a test.
 
 Relevant references:
 
@@ -559,7 +561,7 @@ Also verify:
 - docs match the behavior you changed
 - new functionality includes new or updated tests at the right layer (`pytest`, `Vitest`, and/or `Playwright`)
 - bug fixes include a regression test whenever the behavior can be locked in cleanly
-- test counts are updated if you added tests
+- testing guidance and live inventory commands stay current when coverage changes
 - screenshots, generated docs, or release notes are updated if the change requires them
 
 When choosing the test layer:

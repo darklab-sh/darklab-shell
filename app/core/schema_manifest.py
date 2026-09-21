@@ -84,6 +84,7 @@ SHARED_APP_TABLES: tuple[str, ...] = (
     "credential_scopes",
     "browser_session_signing_keys",
     "browser_sessions", "oidc_identities", "oidc_auth_flows",
+    "instance_operator_grants",
 )
 SQLITE_BACKEND_ARTIFACTS: tuple[str, ...] = (
     "runs_fts",

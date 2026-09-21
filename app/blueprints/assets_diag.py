@@ -8,10 +8,10 @@ from __future__ import annotations
 import json as _json
 from datetime import datetime, timezone
 
-from flask import abort, current_app, jsonify, render_template, request
+from flask import abort, current_app, g, jsonify, render_template, request
 
 from blueprints import assets as assets_routes
-from config import APP_VERSION, CFG, get_theme_entry
+from config import APP_VERSION, CFG, get_theme_entry, resolve_effective_cfg
 from core.helpers import FONT_FILES, WEB_FONT_FILES, current_theme_name, get_client_ip, ip_is_in_cidrs
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.process import fallback_pid_snapshot
@@ -20,10 +20,12 @@ from services.assets.diagnostics import (
     diag_database_stats,
     diag_table_storage_breakdown,
     diag_usage_stats,
-    format_bytes as _storage_fmt_bytes,
+    format_bytes as _diag_fmt_bytes,
 )
 from services.ai.client import AIClientError
 from services.ai.diagnostics import provider_probe as ai_provider_probe
+from services.ai.coordination import AICoordinationUnavailable, check_operator_test_rate_limit
+from services.auth import operator_access
 from services.commands.registry import command_root, load_command_policy
 from services.commands.raw_packets import raw_packet_diagnostics
 from services.runs.broker import broker_available, broker_mode, broker_unavailable_reason, memory_store_snapshot
@@ -31,8 +33,6 @@ from services.runs.output_model import line_event_from_legacy
 
 log = assets_routes.log
 assets_bp = assets_routes.assets_bp
-_DIAG_AI_TEST_LAST_BY_CLIENT = assets_routes._DIAG_AI_TEST_LAST_BY_CLIENT
-_DIAG_AI_TEST_RATE_SECONDS = assets_routes._DIAG_AI_TEST_RATE_SECONDS
 _DIAG_CLASSIFIER_CLS_LIMIT = assets_routes._DIAG_CLASSIFIER_CLS_LIMIT
 _DIAG_CLASSIFIER_CMD_TYPES = assets_routes._DIAG_CLASSIFIER_CMD_TYPES
 _DIAG_CLASSIFIER_COMMAND_LIMIT = assets_routes._DIAG_CLASSIFIER_COMMAND_LIMIT
@@ -43,20 +43,15 @@ _DIAG_REDIS_ORPHAN_PROBE_CAP = assets_routes._DIAG_REDIS_ORPHAN_PROBE_CAP
 _DIAG_REDIS_SCAN_COUNT = assets_routes._DIAG_REDIS_SCAN_COUNT
 _DIAG_REDIS_SCAN_KEY_CAP = assets_routes._DIAG_REDIS_SCAN_KEY_CAP
 _DIAG_REDIS_STREAM_SAMPLE_CAP = assets_routes._DIAG_REDIS_STREAM_SAMPLE_CAP
-_prune_diag_ai_test_clients = assets_routes._prune_diag_ai_test_clients
 
 def _require_diag_access() -> str:
-    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
-    client_ip = get_client_ip()
-    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
-        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+    try:
+        operator_access.recheck_access()
+    except operator_access.OperatorAccessLost:
         abort(404)
-    return client_ip
-
-
-def _diag_fmt_bytes(n) -> str:
-    """Short byte size: '12.4 KB', '3.0 MB', etc. Used by the vendor probe."""
-    return _storage_fmt_bytes(n)
+    except operator_access.OperatorAccessUnavailable:
+        abort(current_app.make_response(operator_access.unavailable_response()))
+    return get_client_ip()
 
 
 def _diag_row_value(row, key: str, index: int, default=None):
@@ -395,19 +390,8 @@ def _diag_db_stats() -> dict:
 
 @assets_bp.route("/diag")
 def diag():
-    """Operator diagnostics endpoint.
-
-    Returns 404 unless the resolved client IP falls within
-    diagnostics_allowed_cidrs. The client IP is resolved through the shared
-    trusted-proxy path, so X-Forwarded-For is only honored when the direct
-    peer IP is in trusted_proxy_cidrs.
-
-    Enable in config.local.yaml:
-        diagnostics_allowed_cidrs:
-          - "127.0.0.1/32"
-          - "172.16.0.0/12"
-    """
-    client_ip = _require_diag_access()
+    """Diagnostics for a recently verified operator browser session."""
+    _require_diag_access()
     result: dict = {}
     # ── App ──────────────────────────────────────────────────────────────────
     result["app"] = {"version": APP_VERSION, "name": CFG.get("app_name", "")}
@@ -464,6 +448,8 @@ def diag():
         "ai_feature_next_commands":   CFG.get("ai_feature_next_commands"),
         "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
+    from config_inspection import diagnostic_values
+    result["config"], result["config_truncated"], result["config_withheld"] = diagnostic_values(result["config"], CFG)
     result["raw_packets"] = raw_packet_diagnostics(CFG)
 
     # ── AI assists ───────────────────────────────────────────────────────────
@@ -566,7 +552,9 @@ def diag():
             present_entries.append(entry)
     result["tools"] = {"present": present_entries, "missing": missing}
 
-    log.info("DIAG_VIEWED", extra={"ip": client_ip})
+    (log.debug if request.headers.get("X-Requested-With") == "XMLHttpRequest" else log.info)(
+        "DIAG_VIEWED", extra=operator_access.log_context(),
+    )
 
     if request.args.get("format") == "json":
         return jsonify(result)
@@ -607,17 +595,18 @@ def diag_classifier_drift():
 
 @assets_bp.route("/diag/ai-test", methods=["POST"])
 def diag_ai_test():
-    client_ip = _require_diag_access()
-    now = assets_routes.time.monotonic()
-    _prune_diag_ai_test_clients(now)
-    last = _DIAG_AI_TEST_LAST_BY_CLIENT.get(client_ip, 0.0)
-    if now - last < _DIAG_AI_TEST_RATE_SECONDS:
-        return jsonify({
-            "ok": False,
-            "error_code": "ai_rate_limited",
-            "error": "AI test prompt is limited to once per minute per diagnostics client.",
-        }), 429
-    _DIAG_AI_TEST_LAST_BY_CLIENT[client_ip] = now
+    _require_diag_access()
+    try:
+        limited = check_operator_test_rate_limit(g.operator_context.principal_id, cfg=resolve_effective_cfg())
+    except AICoordinationUnavailable:
+        log.warning("AI_DIAG_TEST_REJECTED",
+                    extra={**operator_access.log_context(), "reason": "coordination_unavailable", "http_status": 503})
+        return jsonify({"ok": False, "error_code": "ai_unavailable", "error": "AI tests are temporarily unavailable."}), 503
+    if not limited.allowed:
+        log.warning("AI_DIAG_TEST_REJECTED",
+                    extra={**operator_access.log_context(), "reason": "rate_limited", "http_status": 429})
+        return jsonify({"ok": False, "error_code": limited.error_code, "error": limited.message}), 429
+    _require_diag_access()
     try:
         payload = assets_routes.ai_run_test_prompt()
     except AIClientError as exc:
@@ -631,7 +620,7 @@ def diag_ai_test():
         log.warning(
             "AI_DIAG_TEST_FAILED",
             extra={
-                "ip": client_ip,
+                **operator_access.log_context(),
                 "provider": CFG.get("ai_provider", "openai_compatible"),
                 "model": CFG.get("ai_model", ""),
                 "error_code": exc.code,
@@ -639,18 +628,20 @@ def diag_ai_test():
             },
         )
         return jsonify({"ok": False, "error_code": exc.code, "error": str(exc)}), 502
+    log.info("AI_DIAG_TEST_COMPLETED", extra=operator_access.log_context())
     return jsonify(payload)
 
 
 @assets_bp.route("/metrics")
 def metrics():
-    """Prometheus scrape endpoint, hidden behind the diagnostics IP gate."""
-    if not CFG.get("metrics_enabled", True):
+    """Prometheus scrapes use only the metrics enable flag and network allowlist."""
+    cfg = resolve_effective_cfg()
+    if not cfg.get("metrics_enabled", True):
         abort(404)
-    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    allowed_cidrs = cfg.get("metrics_allowed_cidrs") or []
     client_ip = get_client_ip()
     if not ip_is_in_cidrs(client_ip, allowed_cidrs):
-        log.warning("METRICS_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+        log.warning("METRICS_DENIED", extra={"ip": client_ip})
         abort(404)
 
     from services.metrics import PROMETHEUS_CONTENT_TYPE, render_latest_metrics  # noqa: PLC0415

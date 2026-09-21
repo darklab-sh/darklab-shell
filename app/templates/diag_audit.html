@@ -17,24 +17,8 @@
 {% block body_class %}permalink-page diag-page{% endblock %}
 
 {% block content %}
-<div class="diag-topbar">
-  <header class="export-header diag-header">
-    <div class="export-header-copy diag-header-copy">
-      <h1 class="diag-header-title">{{ app_name }}</h1>
-      <span class="diag-header-meta">audit log</span>
-    </div>
-    <div class="diag-header-actions">
-      <a href="/diag" class="btn btn-secondary btn-compact diag-nav-btn">diagnostics</a>
-      <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
-    </div>
-  </header>
-  <div class="diag-status-bar">
-    <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">
-      <span class="diag-live-dot"></span>
-      <span>Refreshed at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
-    </span>
-  </div>
-</div>
+{% from "operator_header.html" import operator_header %}
+{{ operator_header(app_name, 'audit', 'audit log', generated_at) }}
 
 <main class="diag-main diag-audit-main">
   {% set filters = data.filters or {} %}
@@ -53,7 +37,7 @@
     </div>
     {% endif %}
 
-    <form class="diag-audit-filter-form" method="get" action="/diag/audit">
+    <form class="diag-audit-filter-form" method="get" action="/audit">
       <div class="diag-audit-filter-grid">
         <label class="diag-field">
           <span>Event type</span>
@@ -108,9 +92,9 @@
       </div>
       <div class="diag-classifier-actions">
         <button class="btn btn-primary btn-compact" type="submit">Apply</button>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit">Clear</a>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}">CSV</a>
-        <a class="btn btn-secondary btn-compact" href="/diag/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}">JSON</a>
+        <a class="btn btn-secondary btn-compact" href="/audit">Clear</a>
+        <a class="btn btn-secondary btn-compact" href="/audit/export{% if data.export_query %}?{{ data.export_query }}{% endif %}">CSV</a>
+        <a class="btn btn-secondary btn-compact" href="/audit/export?format=json{% if data.export_query %}&amp;{{ data.export_query }}{% endif %}">JSON</a>
       </div>
     </form>
 
@@ -187,13 +171,19 @@
 
     <div class="diag-audit-pagination">
       {% if data.offset > 0 %}
-      <a class="btn btn-secondary btn-compact" href="/diag/audit{% if data.previous_query %}?{{ data.previous_query }}{% endif %}">Previous</a>
+      <a class="btn btn-secondary btn-compact" href="/audit{% if data.previous_query %}?{{ data.previous_query }}{% endif %}">Previous</a>
       {% endif %}
       {% if data.has_more %}
-      <a class="btn btn-secondary btn-compact" href="/diag/audit?{{ data.next_query }}">Next</a>
+      <a class="btn btn-secondary btn-compact" href="/audit?{{ data.next_query }}">Next</a>
       {% endif %}
       <span class="diag-muted">Exports cap at {{ data.export_max_rows }} rows and mark truncation when filters match more.</span>
     </div>
   </section>
 </main>
+{% endblock %}
+
+{% block body_scripts %}
+{% for src in asset_bundle('operator-pages') %}
+<script type="{{ asset_bundle_script_type('operator-pages') }}" src="{{ src }}"></script>
+{% endfor %}
 {% endblock %}

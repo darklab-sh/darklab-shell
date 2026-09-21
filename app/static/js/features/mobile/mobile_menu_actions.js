@@ -149,7 +149,9 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'findings-board') void _mobileMenuCall('openFindingsBoard', { source: 'mobile-menu' });
   if (action === 'workspace') void _mobileMenuImportedCall(importedOpenWorkspace, 'openWorkspace');
   if (action === 'faq') _mobileMenuImportedCall(importedOpenFaq, 'openFaq');
+  if (action === 'admin') MOBILE_MENU_ACTIONS_GLOBAL.location.href = '/admin/';
   if (action === 'diag') MOBILE_MENU_ACTIONS_GLOBAL.location.href = '/diag';
+  if (action === 'audit') MOBILE_MENU_ACTIONS_GLOBAL.location.href = '/audit';
 }
 
 if (typeof window !== 'undefined') {

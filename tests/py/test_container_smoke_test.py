@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import time
 import sys
 import urllib.parse
@@ -79,8 +80,10 @@ TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
 class _ContainerSmokeEnvironment(str):
     restricted_url: str
     raw_target_ip: str
+    raw_target_mac: str
     allowed_target_ip: str
     compose: list[str]
+    image_tag: str
 
     def __new__(
         cls,
@@ -88,14 +91,18 @@ class _ContainerSmokeEnvironment(str):
         *,
         restricted_url: str,
         raw_target_ip: str,
+        raw_target_mac: str,
         allowed_target_ip: str,
         compose: list[str],
+        image_tag: str,
     ):
         instance = str.__new__(cls, base_url)
         instance.restricted_url = restricted_url
         instance.raw_target_ip = raw_target_ip
+        instance.raw_target_mac = raw_target_mac
         instance.allowed_target_ip = allowed_target_ip
         instance.compose = compose
+        instance.image_tag = image_tag
         return instance
 
 
@@ -305,7 +312,7 @@ def _cleanup_compose_project_resources(project: str) -> None:
     )
     container_ids = [line.strip() for line in containers.stdout.splitlines() if line.strip()]
     if container_ids:
-        _run(["docker", "rm", "-f", *container_ids], timeout=60, check=False)
+        _run(["docker", "rm", "--force", "--volumes", *container_ids], timeout=60, check=False)
 
     networks = _run(
         ["docker", "network", "ls", "--filter", f"label={label}", "--format", "{{.ID}}"],
@@ -1572,17 +1579,22 @@ def container_smoke_test():
                     timeout=30,
                 ).stdout.strip()
                 assert raw_target_container, "raw-target container id was not available"
-                raw_target_ip = _run(
+                raw_target_networks = json.loads(_run(
                     [
                         "docker",
                         "inspect",
                         "--format",
-                        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                        "{{json .NetworkSettings.Networks}}",
                         raw_target_container,
                     ],
                     timeout=30,
-                ).stdout.strip()
+                ).stdout)
+                assert len(raw_target_networks) == 1, "raw-target must use one test network"
+                raw_target_network = next(iter(raw_target_networks.values()))
+                raw_target_ip = raw_target_network["IPAddress"]
+                raw_target_mac = raw_target_network["MacAddress"]
                 assert raw_target_ip, "raw-target container address was not available"
+                assert raw_target_mac, "raw-target container MAC address was not available"
                 allowed_target_container = _run(
                     compose + ["ps", "-q", "allowed-target"],
                     timeout=30,
@@ -1671,14 +1683,18 @@ def container_smoke_test():
                 base_url,
                 restricted_url=restricted_url,
                 raw_target_ip=raw_target_ip,
+                raw_target_mac=raw_target_mac,
                 allowed_target_ip=allowed_target_ip,
                 compose=compose,
+                image_tag=image_tag,
             )
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
             if logs.stdout.strip():
                 print("[container-smoke-test] container logs:\n" + logs.stdout, flush=True)
-            subprocess.run(["docker", "rm", "-f", runtime_container_name], cwd=ROOT, capture_output=True, text=True)
+            subprocess.run(
+                ["docker", "rm", "--force", "--volumes", runtime_container_name], cwd=ROOT, capture_output=True, text=True
+            )
             print(f"[container-smoke-test] stopping services: {project}", flush=True)
             subprocess.run(compose + ["down", "--rmi", "local", "--volumes"], cwd=ROOT, capture_output=True, text=True)
             _cleanup_compose_project_resources(project)
@@ -1759,8 +1775,130 @@ def container_smoke_test_nuclei_templates(container_smoke_test) -> None:
     )
 
 
+def test_container_smoke_test_validator_bypasses_broken_startup(container_smoke_test, tmp_path):
+    # Run the installed tool with the same bypass-entrypoint shape documented
+    # for a deployment that cannot start. The development smoke service has an
+    # /app tmpfs, so use the production image without that source overlay.
+    compose_file = tmp_path / "validator-compose.yaml"
+    compose_file.write_text(yaml.safe_dump({"services": {"shell": {
+        "image": container_smoke_test.image_tag, "read_only": True,
+        "network_mode": "none", "user": "appuser",
+    }}}))
+    command = ["docker", "compose", "-p", "validator-" + uuid.uuid4().hex[:12], "-f", str(compose_file)] + [
+        "run", "--rm", "--no-deps", "--entrypoint", "python",
+    ]
+    tool = ["shell", "/app/tools/check_instance_config.py"]
+    broken = command + ["-e", "ACCESS_PROFILE=invalid-private-profile"] + tool
+    help_result = _run(broken + ["--help"], timeout=60)
+    assert "--local-yaml" in help_result.stdout
+    invalid = _run(broken + ["--json"], timeout=60, check=False)
+    assert invalid.returncode == 2
+    payload = json.loads(invalid.stdout)
+    assert payload["valid"] is False and payload["fields"] == ["access_profile"]
+    assert "invalid-private-profile" not in invalid.stdout + invalid.stderr
+    assert "Traceback" not in invalid.stderr
+    valid = _run(command + ["-e", "ACCESS_PROFILE=open"] + tool + ["--json"], timeout=60)
+    evaluated = json.loads(valid.stdout)
+    assert evaluated["valid"] is True and evaluated["schema_version"] == 1
+    assert evaluated["settings"]
+
+
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_gunicorn_log_streams(container_smoke_test):
+    # A rejected request exercises Gunicorn's worker logger without entering Flask.
+    _run(container_smoke_test.compose + ["exec", "-T", "--user", "appuser", "shell", "python", "-c", textwrap.dedent("""
+        import socket
+        with socket.create_connection(('127.0.0.1', 8888), timeout=30) as connection:
+            connection.sendall(b'SMOKE_BAD_REQUEST\\r\\n\\r\\n')
+            assert b'400 Bad Request' in connection.recv(4096)
+    """)], timeout=60)
+    container_id = _run(container_smoke_test.compose + ["ps", "-q", "shell"], timeout=30).stdout.strip()
+    # Unlike compose logs, docker logs keeps the container's stream identities.
+    captured = _run(["docker", "logs", container_id], timeout=30)
+    for event in ("Starting gunicorn", "Booting worker with pid:", "GUNICORN_WORKER_BOOTED"):
+        assert event in captured.stdout, captured.stdout + captured.stderr
+        assert event not in captured.stderr
+    assert "Invalid request from ip=" in captured.stderr
+    assert "SMOKE_BAD_REQUEST" in captured.stderr
+    assert "Invalid request from ip=" not in captured.stdout
+    assert (
+        any(f"NUCLEI_TEMPLATE_BOOTSTRAP_{state}" in captured.stdout for state in ("SKIPPED", "SUCCEEDED"))
+        or "NUCLEI_TEMPLATE_BOOTSTRAP_FAILED" in captured.stderr
+    )
+    for state in ("STARTED", "SKIPPED", "SUCCEEDED"):
+        assert f"NUCLEI_TEMPLATE_BOOTSTRAP_{state}" not in captured.stderr
+    assert "NUCLEI_TEMPLATE_BOOTSTRAP_FAILED" not in captured.stdout
+
+
+@pytest.mark.parametrize("log_format", ["text", "gelf"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_container_smoke_test_notification_worker_log_streams(container_smoke_test, log_format, fail):
+    # Use the real worker bootstrap and loop in the disposable smoke stack.
+    # Fault injection stops at dispatch, so it can't deliver notifications.
+    program = textwrap.dedent("""
+        import json
+        import os
+        import sys
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as config_dir:
+            Path(config_dir, 'config.local.yaml').write_text(json.dumps({'log_format': sys.argv[1]}))
+            os.environ['APP_LOCAL_CONF_DIR'] = config_dir
+            from services.notifications import worker
+            def fail_dispatch(**kwargs):
+                raise RuntimeError('controlled worker failure')
+            worker.run_once = fail_dispatch
+            worker._STOP = sys.argv[2] == 'False'
+            try:
+                worker.main()
+            except RuntimeError:
+                if sys.argv[2] != 'True':
+                    raise
+    """)
+    captured = _run(container_smoke_test.compose + [
+        "exec", "-T", "--user", "appuser", "shell", "python", "-c", program, log_format, str(fail),
+    ], timeout=120)
+    assert captured.stdout.count("NOTIFICATION_WORKER_STARTED") == 1
+    assert "NOTIFICATION_WORKER_STARTED" not in captured.stderr
+    assert "NOTIFICATION_WORKER_CRASHED" not in captured.stdout
+    assert "Traceback" not in captured.stdout
+    if fail:
+        assert captured.stderr.count("NOTIFICATION_WORKER_CRASHED") == 1
+        assert captured.stderr.count("RuntimeError: controlled worker failure") == 1
+        assert "NOTIFICATION_WORKER_STOPPED" not in captured.stdout + captured.stderr
+        if log_format == "gelf":
+            failure = next(json.loads(line) for line in captured.stderr.splitlines()
+                           if "NOTIFICATION_WORKER_CRASHED" in line)
+            assert failure["level"] == 3 and failure["_phase"] == "run_once"
+            assert "Traceback" in failure["full_message"]
+    else:
+        assert captured.stdout.count("NOTIFICATION_WORKER_STOPPED") == 1
+        assert "NOTIFICATION_WORKER_STOPPED" not in captured.stderr
+        assert "NOTIFICATION_WORKER_CRASHED" not in captured.stderr
+
+
+def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):
+    name = "trufflehog-smoke-" + uuid.uuid4().hex[:12]
+    try:
+        result = _run([
+            "docker", "run", "--rm", "--name", name,
+            "--network", "none", "--read-only", "--user", "scanner:appuser",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
+            "--entrypoint", "sh", container_smoke_test.image_tag, "-c",
+            "set -eu; mkdir /tmp/trufflehog-fixture; "
+            "printf 'An ordinary file without credentials.\\n' > /tmp/trufflehog-fixture/readme.txt; "
+            "exec trufflehog --no-update --no-verification --json filesystem /tmp/trufflehog-fixture",
+        ], timeout=60)
+        assert not result.stdout.strip(), "the innocuous fixture must not produce secret findings"
+        events = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+        completed = [event for event in events if event.get("msg") == "finished scanning"]
+        assert completed, f"TruffleHog did not report scan completion: {result.stderr}"
+        assert completed[-1]["chunks"] >= 1
+    finally:
+        _run(["docker", "rm", "--force", "--volumes", name], timeout=30, check=False)
 
 
 def test_container_smoke_test_workflow_capture_feeds_linked_run(container_smoke_test):
@@ -1909,8 +2047,12 @@ def test_container_smoke_test_raw_naabu_and_masscan_find_test_owned_port(contain
             ("8888",),
         ),
         (
-            f"masscan -p 8888 --rate 100 {container_smoke_test.raw_target_ip}",
-            ("Discovered open port 8888/tcp", container_smoke_test.raw_target_ip),
+            # Masscan otherwise sends even same-subnet probes to the gateway MAC.
+            # Address this bridge peer directly so host forwarding policy cannot
+            # turn a healthy test-owned target into a false closed-port result.
+            f"masscan -p 8888 --rate 100 --router-mac {container_smoke_test.raw_target_mac} "
+            f"--packet-trace {container_smoke_test.raw_target_ip}",
+            ("Discovered open port 8888/tcp", container_smoke_test.raw_target_ip, "SYN-ACK"),
         ),
     )
     for command, expected_output in scanner_commands:

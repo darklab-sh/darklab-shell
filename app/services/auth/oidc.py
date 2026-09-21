@@ -7,21 +7,27 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 import ssl
-import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import requests
-from authlib.integrations.requests_client import OAuth2Session
 from authlib.integrations.base_client.errors import OAuthError
+from authlib.integrations.requests_client import OAuth2Session
 from joserfc import jwk, jwt
 from joserfc.errors import (
-    BadSignatureError, ClaimError, ExpiredTokenError, InvalidKeyIdError, JoseError, MissingClaimError,
+    BadSignatureError,
+    ClaimError,
+    ExpiredTokenError,
+    InvalidKeyIdError,
+    JoseError,
+    MissingClaimError,
 )
 
 from services.audit.models import AuditEventType
@@ -30,13 +36,18 @@ from services.storage.transactions import run_read, run_transaction
 from services.workspace.settings import workspace_settings
 
 from .contracts import new_identifier, timestamp
-from .oidc_diagnostics import (
-    OIDCError, OIDCUnavailable, exception_reason, observe_oidc, oidc_purpose, provider_status,
-)
 from .lifecycle_logging import LifecycleEvents
+from .oidc_cache import cached_provider_value, combined_trust_bundle, trust_cache_key
+from .oidc_diagnostics import (
+    OIDCError,
+    OIDCUnavailable,
+    exception_reason,
+    observe_oidc,
+    oidc_purpose,
+    provider_status,
+)
 from .storage import get_principal
 from .workspace_storage import new_workspace_storage_key, validate_workspace_storage_key
-from .oidc_cache import cached_provider_value, combined_trust_bundle, trust_cache_key
 
 FLOW_SECONDS = 300
 RECENT_AUTH_SECONDS = 300
@@ -53,6 +64,14 @@ class OIDCFlow:
     principal_id: str
     browser_session_id: str
     next_path: str
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class OIDCProof:
+    issuer: str
+    subject: str
+    authenticated_at: str | None
 
 
 @dataclass(frozen=True)
@@ -235,12 +254,12 @@ def start_flow(
     config: Mapping[str, Any], *, purpose: str, principal_id: str = "",
     browser_session_id: str = "", next_path: str = "/",
 ) -> tuple[str, str]:
-    if purpose not in {"sign_in", "link"}:
+    if purpose not in {"sign_in", "link", "admin_reauth"}:
         raise OIDCError("Unsupported OIDC flow.", reason="invalid_purpose")
-    if purpose == "link" and (not principal_id or not browser_session_id):
+    if purpose in {"link", "admin_reauth"} and (not principal_id or not browser_session_id):
         raise OIDCError("A current credential session is required to link OIDC.", reason="recent_credential_required")
     metadata = provider_metadata(config)
-    state = secrets.token_urlsafe(32)
+    state = ("admin_" if purpose == "admin_reauth" else "") + secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     client = _client(config)
@@ -249,7 +268,8 @@ def start_flow(
         state=state,
         code_verifier=verifier,
         nonce=nonce,
-        max_age=RECENT_AUTH_SECONDS if purpose == "link" else None,
+        max_age=0 if purpose == "admin_reauth" else RECENT_AUTH_SECONDS if purpose == "link" else None,
+        prompt="login" if purpose == "admin_reauth" else None,
     )
     created = _now()
 
@@ -289,6 +309,7 @@ def consume_flow(state: str, cookie_state: str) -> OIDCFlow:
             principal_id=str(data.get("principal_id") or ""),
             browser_session_id=str(data.get("browser_session_id") or ""),
             next_path=str(data["next_path"]),
+            created_at=timestamp(_as_utc(data["created_at"])),
         )
 
     return run_transaction(operation)
@@ -363,7 +384,7 @@ def _token_rejection_reason(exc: BaseException) -> str:
 @observe_oidc("token_validation")
 def _verify_id_token(
     config: Mapping[str, Any], flow: OIDCFlow, id_token: str, keyset: jwk.KeySet, metadata: Mapping[str, Any],
-) -> str:
+) -> tuple[str, str | None]:
     try:
         try:
             verified = jwt.decode(id_token, keyset, algorithms=_ALGORITHMS)
@@ -389,8 +410,13 @@ def _verify_id_token(
         subject = claims["sub"]
         if not isinstance(subject, str) or not 0 < len(subject) <= 512:
             raise OIDCError("The OIDC subject is invalid.", reason="subject_invalid")
+        auth_time = claims.get("auth_time")
+        if flow.purpose == "admin_reauth" and (
+            not flow.created_at or type(auth_time) is not int
+            or auth_time < int(_as_utc(flow.created_at).timestamp()) or auth_time > now + 30
+        ):
+            raise OIDCError("Fresh provider authentication is required.", reason="recent_provider_required")
         if flow.purpose == "link":
-            auth_time = claims.get("auth_time")
             if not isinstance(auth_time, int) or auth_time < now - RECENT_AUTH_SECONDS or auth_time > now + 30:
                 raise OIDCError("Recent provider authentication is required to link OIDC.", reason="recent_provider_required")
     except OIDCError:
@@ -399,10 +425,14 @@ def _verify_id_token(
         raise OIDCError(
             "The OIDC ID token could not be verified.", reason=_token_rejection_reason(exc), error_type=type(exc).__name__,
         ) from None
-    return subject
+    authenticated_at = (
+        timestamp(datetime.fromtimestamp(auth_time, timezone.utc))
+        if type(auth_time) is int and 0 <= auth_time <= now + 30 else None
+    )
+    return subject, authenticated_at
 
 
-def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple[str, str]:
+def exchange_code_proof(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> OIDCProof:
     with oidc_purpose(flow.purpose):
         if not code or len(code) > 4096:
             raise OIDCError(
@@ -411,7 +441,8 @@ def exchange_code(config: Mapping[str, Any], flow: OIDCFlow, code: str) -> tuple
         metadata = provider_metadata(config)
         id_token = _exchange_token(config, flow, code, metadata)
         keyset = _provider_keys(config, metadata)
-        return str(config["oidc_issuer"]), _verify_id_token(config, flow, id_token, keyset, metadata)
+        subject, authenticated_at = _verify_id_token(config, flow, id_token, keyset, metadata)
+        return OIDCProof(str(config["oidc_issuer"]), subject, authenticated_at)
 
 
 def _create_principal(conn: Any) -> str:

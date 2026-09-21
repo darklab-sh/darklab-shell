@@ -92,21 +92,6 @@ _DIAG_CLASSIFIER_LINE_LIMIT = 4096
 _DIAG_CLASSIFIER_COMMAND_LIMIT = 512
 _DIAG_CLASSIFIER_CLS_LIMIT = 80
 _DIAG_CLASSIFIER_CMD_TYPES = frozenset({"real", "builtin"})
-_DIAG_AI_TEST_RATE_SECONDS = 60
-_DIAG_AI_TEST_LAST_BY_CLIENT: dict[str, float] = {}
-
-
-def _prune_diag_ai_test_clients(now: float) -> None:
-    cutoff = now - _DIAG_AI_TEST_RATE_SECONDS
-    stale_clients = [
-        client_ip
-        for client_ip, last_seen in _DIAG_AI_TEST_LAST_BY_CLIENT.items()
-        if last_seen <= cutoff
-    ]
-    for client_ip in stale_clients:
-        _DIAG_AI_TEST_LAST_BY_CLIENT.pop(client_ip, None)
-
-
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
 # invisible on the rendered page (the drift test

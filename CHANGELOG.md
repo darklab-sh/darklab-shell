@@ -6,8 +6,51 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## Archives
 
-- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.9.0
+- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.9.1
 - [1.x releases](docs/changelog/1.x.md) - versions 1.0 through 1.7
+
+---
+
+## [3.0.1] - Unreleased
+
+**Upgrade note:** Diagnostics, Audit log, and Operator settings now require a restricted sign-in profile and an explicit principal grant. Open-profile installations no longer expose these pages. To retain operator access, choose a restricted profile and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect.
+
+### Added
+
+- **Operators can inspect settings, diagnostics, and audit activity through one protected console.** Desktop and mobile navigation connects the three read-only pages.
+  - **Settings:** Search and filter reviewed values by group, source, and warning. Filter links survive reloads and verification; refresh preserves expanded details, focus, and position. Cards distinguish loaded values, accepted inputs, host guidance, and unobserved deployment defaults across all themes.
+  - **Snapshots and privacy:** Each snapshot identifies the serving worker, the process that loaded configuration, and its load time. Sensitive settings show approved summaries or withheld markers; diagnostics distinguishes withheld values from unset ones. Private responses and access checks clear stale page data after authority is lost.
+  - **Grants and verification:** Restricted-profile browser sessions need an explicit principal grant and recent same-account credential or signed-provider proof. Verification preserves the session's original deadline, explains missing provider freshness, and supports expired-form recovery. Team roles, direct credentials, and PATs don't grant console access; denied requests retain HTTP and failed-authentication limits.
+  - **Local administration:** Grant, list, inspect, and revoke operator access independently of Team roles. Grants survive backups and database migration, repeated changes are quiet, and disabled principals can't gain access. CLI changes emit post-commit logs on stderr while stdout remains JSON.
+  - **Audit and diagnostics:** Audit viewing and exports move to `/audit` and `/audit/export`; old URLs don't redirect. Filters explain operator events and survive verification. Exports recheck authority between pages and abort on access loss or lookup failure; interrupted CSV ends with an incomplete-file warning, while interrupted JSON remains unparseable. Lookup failures and genuine denials have separate safe log classifications, and repeated warnings are sampled.
+  - **Qualification:** Coverage includes both databases, streamed grant/session/freshness changes, and desktop/mobile navigation, filtering, and verification. Screenshot scenes cover all three pages in each theme.
+
+- **Managed installations can administer access through `darklab-deploy access`.** Commands preserve principal safeguards, use the selected installation's Compose files, and write credentials to private host files with recovery after interrupted transfers. Host checks support GNU and BSD `stat`, reject unsafe or replaced destinations, and keep secrets out of command output. Required tests execute the shipped private-file transport against disposable paths.
+
+- **Configuration can be validated without a working application process.** `darklab-deploy config check` and the standalone checker evaluate current or candidate YAML without applying changes, initializing services, or creating keys.
+  - **Inputs:** Shared startup rules preserve normalization, validation, environment precedence, and warnings. Current checks honor the selected container mounts and local configuration root; only explicit candidates replace the selected overlay.
+  - **Results:** Strict mode and versioned JSON report reviewed values, source layers, warnings, counts, presence, and withheld markers. A fresh evaluation is distinct from a running worker's captured startup snapshot; the field catalog also explains host apply requirements.
+  - **Qualification:** Loader characterization, invalid-input checks, and generated-helper tests cover precedence, disclosure, custom mounts, and cleanup. Configuration guidance separates installed-image commands from source-checkout commands.
+
+- **Coding agents have a shared repository guide.** `AGENTS.md` links the architecture, security, UI, testing, logging, documentation, and authorized Git/CI contracts. Contributor guidance uses live test inventories instead of maintaining exact totals.
+
+### Changed
+
+- **Metrics network permissions are independent of operator access.** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The deprecated `diagnostics_allowed_cidrs` alias remains metrics-only for 3.0.1, with layer precedence, source reporting, and a bounded warning; upgrade guidance identifies its removal in 3.1.0. Neither setting bypasses AI workspace quotas, and diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
+
+- **Browser CI uses isolated app servers and preserves failure evidence.** Each project runs one browser worker, with a total CI cap of three; independent workflows and controlled readiness keep shared-runner contention from distorting checks. Traces retain original failed attempts, and CI still rejects flaky results.
+
+### Fixed
+
+- **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Collector guidance covers both streams.
+
+- **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
+
+- **Backup exports reject missing Docker volume sources.** The helper checks source volumes before export, so a misspelled or unavailable source fails instead of creating an empty named volume and recording an empty export. Existing source volumes remain in place.
+
+- **Managed backups include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
+
+- **The bundled TruffleHog uses a patched AMQP dependency.** TruffleHog v3.97.5 includes `amqp091-go` v1.13.0 upstream to address AMQP parser and TLS vulnerabilities, removing the local dependency override. The image build verifies the dependency embedded in the executable and includes its license notice.
 
 ---
 
@@ -88,11 +131,3 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **The desktop and mobile demo tours now reflect the current investigation workflow.** Both recordings cover reusable Workflows, the Project overview, Assessment planning, report preview, and Atlas Quick Lookup alongside the existing command, Files, comparison, monitoring, History, theme, and desktop PTY scenes. The wrappers also accept `--playback-only` to run the complete seeded journey headlessly and catch stale selectors or stalled scenes without requiring OBS.
 - **The UI screenshot review pack now covers the current desktop and mobile investigation surfaces.** Its 48 desktop and 41 mobile scenes add the Files inspector and full viewer, parameterized Workflows, Project Overview, monitoring digest settings, Assessment planning, Web Surface, and Atlas Quick Lookup. Filtered History deletion previews now show their real scope and counts, and the capture wrapper uses the normal Playwright helper for both source and bundle runs.
-
----
-
-## [2.9.1] - 2026-08-26
-
-### Fixed
-
-- **DNS command options and resolvers no longer become Project entities.** `dig` and `nslookup` target discovery now recognizes the actual query and waits for a matching parsed answer before adding it. Record types, output options, selected resolvers, and names from negative lookups stay out of Atlas and Project targets.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Destructive PostgreSQL statement support for schema-manifest parsing."""
+"""PostgreSQL schema mutation support for schema-manifest parsing."""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from typing import Any
 
 
 _IDENTIFIER = r'"[^"]+"|[A-Za-z_][A-Za-z0-9_]*'
+_RENAME_RE = re.compile(
+    rf"ALTER\s+(?P<kind>TABLE|INDEX)\s+(?P<old>{_IDENTIFIER})\s+"
+    rf"RENAME\s+TO\s+(?P<new>{_IDENTIFIER})",
+    re.IGNORECASE,
+)
 _DROP_TABLE_RE = re.compile(
     rf"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>{_IDENTIFIER})",
     re.IGNORECASE,
@@ -49,8 +54,43 @@ def apply_destructive_schema_statement(
     indexes: dict[str, Any],
     triggers: dict[str, Any],
 ) -> bool:
-    """Apply a supported destructive statement and report whether it matched."""
+    """Apply a supported schema mutation and report whether it matched."""
     statement = normalized.rstrip(";")
+    match = _RENAME_RE.fullmatch(statement)
+    if match:
+        old_name, new_name = (_identifier(match.group(key)) for key in ("old", "new"))
+        new_sql_name = match.group("new")
+        if match.group("kind").upper() == "TABLE":
+            existing = tables.pop(old_name, None)
+            if existing is not None:
+                tables[new_name] = replace(
+                    existing, name=new_name,
+                    create_sql=re.sub(
+                        rf"^(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:{_IDENTIFIER})",
+                        lambda item: item.group(1) + new_sql_name, existing.create_sql, flags=re.IGNORECASE,
+                    ),
+                )
+            for objects in (indexes, triggers):
+                for name, item in list(objects.items()):
+                    if item.table_name == old_name:
+                        objects[name] = replace(
+                            item, table_name=new_name,
+                            sql=re.sub(
+                                rf"(\bON\s+)(?:{_IDENTIFIER})", lambda part: part.group(1) + new_sql_name,
+                                item.sql, count=1, flags=re.IGNORECASE,
+                            ),
+                        )
+        else:
+            existing = indexes.pop(old_name, None)
+            if existing is not None:
+                indexes[new_name] = replace(
+                    existing, name=new_name,
+                    sql=re.sub(
+                        rf"^(CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:{_IDENTIFIER})",
+                        lambda item: item.group(1) + new_sql_name, existing.sql, flags=re.IGNORECASE,
+                    ),
+                )
+        return True
     match = _DROP_TABLE_RE.fullmatch(statement)
     if match:
         table_name = _identifier(match.group("name"))

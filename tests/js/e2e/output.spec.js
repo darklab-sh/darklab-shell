@@ -211,7 +211,7 @@ test.describe('output actions', () => {
     await expect(page.locator('#search-summary-btn')).toBeDisabled()
   })
 
-  test('entity text stays selectable and deliberate activation opens the accessible action menu', async ({ page }) => {
+  test('entity text stays selectable and deliberate activation offers clipboard actions', async ({ page }) => {
     await appendEntityOutput(page)
     const token = page.locator('.tab-panel.active .atlas-entity-token')
     const menu = page.locator('.atlas-output-entity-menu')
@@ -251,7 +251,12 @@ test.describe('output actions', () => {
     await expect(menu).toHaveCount(0)
     await expect(page.locator('#permalink-toast')).toContainText('Entity copied')
     await expect(page.evaluate(() => window.__copiedEntity)).resolves.toBe('ip.darklab.sh')
+  })
 
+  test('entity menus support keyboard navigation, focus restoration, and opening Atlas', async ({ page }) => {
+    await appendEntityOutput(page)
+    const token = page.locator('.tab-panel.active .atlas-entity-token')
+    const menu = page.locator('.atlas-output-entity-menu')
     await token.focus()
     await token.press('Enter')
     await expect(menu).toBeVisible()

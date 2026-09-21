@@ -5,19 +5,19 @@
 
 from __future__ import annotations
 
-import csv
-import io
 import json as _json
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from flask import Response, jsonify, render_template, request, stream_with_context
+from flask import jsonify, render_template, request
 
 from blueprints import assets as assets_routes
 from blueprints import assets_diag as diag_routes
 from config import CFG, get_theme_entry
 from core.helpers import current_theme_name
+from services.auth import operator_access
+from services.audit.exports import export_csv, export_json
 from services.audit.models import AuditTargetType, EVENT_SPECS
 from services.audit.queries import AuditEventFilters, list_events
 from services.audit.retention import audit_export_max_rows, audit_log_enabled
@@ -61,40 +61,23 @@ def _audit_filter_values(filters: AuditEventFilters) -> dict[str, str]:
     }
 
 
-_AUDIT_LOG_FILTER_VALUE_KEYS = frozenset({
-    "event_type",
-    "actor_member_id",
-    "actor_session_hash",
-    "owner_session_hash",
-    "team_id",
-    "project_id",
-    "target_type",
-    "target_id",
-    "correlation_id",
-    "date_from",
-    "date_to",
-})
-
-
 def _audit_log_filter_context(filters: AuditEventFilters) -> dict[str, Any]:
     active_filters = {
         key: str(value or "").strip()
         for key, value in _audit_filter_values(filters).items()
         if str(value or "").strip()
     }
-    safe_values = {
-        key: active_filters[key][:128]
-        for key in sorted(active_filters)
-        if key in _AUDIT_LOG_FILTER_VALUE_KEYS
-    }
     return {
         "filter_count": len(active_filters),
         "filter_keys": sorted(active_filters),
-        "filter_values": safe_values,
     }
 
 
 _AUDIT_EVENT_ACTION_HINTS = {
+    "instance_operator.grant": "operator access granted",
+    "instance_operator.revoke": "operator access revoked",
+    "instance_operator.view": "operator settings inspected",
+    "instance_operator.reauthenticate": "operator identity verified",
     "build": "build",
     "change": "change",
     "config_change": "config change",
@@ -133,9 +116,10 @@ def _audit_event_type_options() -> list[dict[str, str]]:
         spec = EVENT_SPECS[event_type]
         action = event_type.split(".", 1)[-1]
         hint = _AUDIT_EVENT_ACTION_HINTS.get(action, action.replace("_", " "))
+        description = _AUDIT_EVENT_ACTION_HINTS.get(event_type, f"{spec.target_type.value.replace('_', ' ')} {hint}")
         options.append({
             "value": event_type,
-            "label": f"{event_type} - {spec.target_type.value.replace('_', ' ')} {hint}",
+            "label": f"{event_type} - {description}",
             "target_type": spec.target_type.value,
         })
     return options
@@ -210,129 +194,22 @@ def _decorate_audit_events(events: list[dict]) -> list[dict]:
     return decorated
 
 
-_AUDIT_EXPORT_FIELDNAMES = [
-    "id",
-    "created",
-    "event_type",
-    "target_type",
-    "target_id",
-    "project_id",
-    "actor_member_id",
-    "actor_display_name",
-    "actor_session_label",
-    "team_id",
-    "correlation_id",
-    "job_id",
-    "details",
-]
+def _audit_export_csv(filters: AuditEventFilters, *, limit: int):
+    return export_csv(filters, limit=limit,
+                      log_context={**operator_access.log_context(), **_audit_log_filter_context(filters)},
+                      iter_pages=assets_routes.iter_event_pages)
 
 
-def _audit_csv_row(payload: dict[str, Any]) -> str:
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=_AUDIT_EXPORT_FIELDNAMES)
-    writer.writerow(payload)
-    return output.getvalue()
+def _audit_export_json(filters: AuditEventFilters, *, limit: int, audit_enabled: bool):
+    return export_json(filters, limit=limit, audit_enabled=audit_enabled,
+                       filter_values=_audit_filter_values(filters),
+                       log_context={**operator_access.log_context(), **_audit_log_filter_context(filters)},
+                       iter_pages=assets_routes.iter_event_pages)
 
 
-def _audit_csv_header() -> str:
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=_AUDIT_EXPORT_FIELDNAMES)
-    writer.writeheader()
-    return output.getvalue()
-
-
-def _audit_export_event_csv_row(event: dict) -> str:
-    return _audit_csv_row({
-        key: _json.dumps(event.get("details") or {}, sort_keys=True) if key == "details" else event.get(key, "")
-        for key in _AUDIT_EXPORT_FIELDNAMES
-    })
-
-
-def _audit_export_truncation_hint(limit: int) -> str:
-    return f"Export capped at {int(limit)} rows. Narrow the filters to include older matching rows."
-
-
-def _audit_export_csv(filters: AuditEventFilters, *, limit: int, client_ip: str) -> Response:
-    log_context = _audit_log_filter_context(filters)
-
-    def generate():
-        truncated = False
-        event_count = 0
-        yield _audit_csv_header()
-        for page in assets_routes.iter_event_pages(filters, max_rows=limit):
-            truncated = bool(page.get("truncated"))
-            for event in page["events"]:
-                event_count += 1
-                yield _audit_export_event_csv_row(event)
-        if truncated:
-            yield _audit_csv_row({
-                "id": "__truncated__",
-                "event_type": "export.truncated",
-                "details": _audit_export_truncation_hint(limit),
-            })
-        log.info(
-            "DIAG_AUDIT_EXPORTED",
-            extra={
-                "ip": client_ip,
-                "format": "csv",
-                "limit": int(limit),
-                "event_count": event_count,
-                "truncated": truncated,
-                **log_context,
-            },
-        )
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=audit-events.csv"},
-    )
-
-
-def _audit_export_json(filters: AuditEventFilters, *, limit: int, client_ip: str, audit_enabled: bool) -> Response:
-    filter_values = _audit_filter_values(filters)
-    log_context = _audit_log_filter_context(filters)
-
-    def generate():
-        truncated = False
-        event_count = 0
-        first = True
-        yield "{\n  \"events\": ["
-        for page in assets_routes.iter_event_pages(filters, max_rows=limit):
-            truncated = bool(page.get("truncated"))
-            for event in page["events"]:
-                event_count += 1
-                prefix = "\n    " if first else ",\n    "
-                first = False
-                yield prefix + _json.dumps(event, sort_keys=True)
-        yield "\n  ],\n"
-        yield f"  \"filters\": {_json.dumps(filter_values, sort_keys=True)},\n"
-        yield f"  \"limit\": {int(limit)},\n"
-        yield f"  \"truncated\": {_json.dumps(truncated)},\n"
-        yield f"  \"truncation_hint\": {_json.dumps(_audit_export_truncation_hint(limit) if truncated else '')},\n"
-        yield f"  \"audit_log_enabled\": {_json.dumps(bool(audit_enabled))}\n"
-        yield "}\n"
-        log.info(
-            "DIAG_AUDIT_EXPORTED",
-            extra={
-                "ip": client_ip,
-                "format": "json",
-                "limit": int(limit),
-                "event_count": event_count,
-                "truncated": truncated,
-                **log_context,
-            },
-        )
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="application/json",
-        headers={"Content-Disposition": "attachment; filename=audit-events.json"},
-    )
-
-@assets_bp.route("/diag/audit")
+@assets_bp.route("/audit")
 def diag_audit():
-    client_ip = diag_routes._require_diag_access()
+    diag_routes._require_diag_access()
     filters = _audit_filters_from_args(request.args)
     limit = diag_routes._diag_bounded_int(request.args.get("limit"), 50, minimum=1, maximum=500)
     offset = diag_routes._diag_bounded_int(request.args.get("offset"), 0, minimum=0, maximum=1_000_000)
@@ -352,10 +229,10 @@ def diag_audit():
         "event_type_options": _audit_event_type_options(),
         "target_types": sorted(item.value for item in AuditTargetType),
     }
-    log.info(
+    (log.debug if request.headers.get("X-Requested-With") == "XMLHttpRequest" else log.info)(
         "DIAG_AUDIT_VIEWED",
         extra={
-            "ip": client_ip,
+            **operator_access.log_context(),
             "limit": payload["limit"],
             "offset": payload["offset"],
             "event_count": len(payload["events"]),
@@ -379,16 +256,15 @@ def diag_audit():
     )
 
 
-@assets_bp.route("/diag/audit/export")
+@assets_bp.route("/audit/export")
 def diag_audit_export():
-    client_ip = diag_routes._require_diag_access()
+    diag_routes._require_diag_access()
     filters = _audit_filters_from_args(request.args)
     max_rows = audit_export_max_rows()
     if request.args.get("format") == "json":
         return _audit_export_json(
             filters,
             limit=max_rows,
-            client_ip=client_ip,
             audit_enabled=audit_log_enabled(),
         )
-    return _audit_export_csv(filters, limit=max_rows, client_ip=client_ip)
+    return _audit_export_csv(filters, limit=max_rows)

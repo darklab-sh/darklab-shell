@@ -14,7 +14,8 @@ Usage:
 
 Runs the opt-in Postgres pytest lane. By default, the script uses
 DARKLAB_TEST_POSTGRES_DSN when it is set; otherwise it starts a disposable
-Postgres test container, exports the DSN, and removes the container on exit.
+Postgres test container, exports the DSN, and removes the container and its
+anonymous volumes on exit.
 The --browser lane always uses a disposable container and runs the focused
 four-profile Playwright matrix against isolated schemas.
 
@@ -76,6 +77,10 @@ default_args=(
   -c .tooling/pytest.ini
   --rootdir=.
   tests/py/test_postgres_backend.py
+  tests/py/test_operator_grants.py
+  tests/py/test_operator_console.py
+  tests/py/test_operator_diagnostics.py
+  tests/py/test_operator_reauthentication.py
   tests/py/test_backend_modules.py::TestDatabaseBackend
   tests/py/test_backend_modules.py::TestPostgresMigrations
   tests/py/test_backend_modules.py::TestRunHistorySearchClauses
@@ -110,7 +115,7 @@ PY
 
 cleanup_container() {
   if [ -n "$started_container" ]; then
-    docker container rm -f "$started_container" >/dev/null 2>&1 || true
+    docker container rm --force --volumes "$started_container" >/dev/null 2>&1 || true
   fi
 }
 

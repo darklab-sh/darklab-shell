@@ -83,6 +83,9 @@ def test_precheck_reads_both_limits_without_counting_successes(backend):
 
 def _attempt(client, kind, secret, ip="192.0.2.5"):
     kwargs = {"base_url": "https://localhost", "environ_overrides": {"REMOTE_ADDR": ip}}
+    if kind.startswith("operator-"):
+        path = {"operator-settings": "/admin/settings", "operator-diag": "/diag", "operator-audit": "/audit/export"}[kind]
+        return client.get(path, headers={"X-Darklab-Credential": secret}, **kwargs)
     if kind == "portable":
         return client.get("/config", headers={"X-Darklab-Credential": secret}, **kwargs)
     if kind == "pat":
@@ -95,7 +98,7 @@ def _attempt(client, kind, secret, ip="192.0.2.5"):
     return client.post("/auth/sign-in", data={"credential": secret, "sign_in_nonce": nonce.value}, **kwargs)
 
 
-@pytest.mark.parametrize("kind", ["portable", "pat", "redeem", "form"])
+@pytest.mark.parametrize("kind", ["portable", "pat", "redeem", "form", "operator-settings", "operator-diag", "operator-audit"])
 @pytest.mark.parametrize("limit_scope", ["lookup", "ip"])
 def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeypatch, kind, limit_scope, warning_records):
     import core.process as process_state
@@ -116,12 +119,16 @@ def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeyp
     if limit_scope == "lookup":
         for _ in range(rate_limit.FAILED_REDEMPTION_LIMIT_PER_LOOKUP_MINUTE):
             response = _attempt(client, kind, invalid)
-            assert response.status_code == (200 if kind == "form" else 401)
+            assert response.status_code == (404 if kind.startswith("operator-") else 200 if kind == "form" else 401)
         ip = "192.0.2.6"  # The lookup limit also applies from another IP.
     else:
         ip = "192.0.2.5"
         for _ in range(rate_limit.FAILED_REDEMPTION_LIMIT_PER_IP_MINUTE):
-            rate_limit.check_failed_redemption(ip, now=now[0])
+            if kind.startswith("operator-"):
+                # Invalid values without a lookup id must fill the shared IP budget too.
+                assert _attempt(client, kind, "malformed", ip).status_code == 404
+            else:
+                rate_limit.check_failed_redemption(ip, now=now[0])
 
     def unexpected_verification(*_args, **_kwargs):
         pytest.fail("A throttled request reached the credential database lookup")
@@ -139,9 +146,45 @@ def test_throttled_routes_skip_verification_even_for_correct_credentials(monkeyp
     assert warnings[0].endpoint != "unknown" and warnings[0].request_id != "unknown"
     assert warnings[0].levelno == logging.WARNING
     assert secret not in GELFFormatter().format(warnings[0])
+    if kind.startswith("operator-"):
+        assert response.headers["Cache-Control"] == "private, no-store"
+        # Operator failures also protect ordinary routes that use the same credential budget.
+        assert _attempt(client, "portable", secret, ip).status_code == 429
     now[0] += 60
     response = _attempt(client, kind, secret, ip)
-    assert response.status_code == (302 if kind == "form" else 200)
+    assert response.status_code == (404 if kind.startswith("operator-") else 302 if kind == "form" else 200)
+
+
+@pytest.mark.parametrize("profile", ["open", "token_required"])
+@pytest.mark.parametrize("path", ["/admin/unknown", "/diag/unknown", "/audit/unknown"])
+def test_operator_denials_consume_the_shared_http_budget(monkeypatch, profile, path):
+    import app as application
+    import core.process as process_state
+    from core import http_rate_limit
+
+    cfg = build_test_config({
+        "access_profile": profile, "rate_limit_enabled": True,
+        "http_rate_limit_per_minute": 2, "http_rate_limit_per_second": 0,
+    })
+    monkeypatch.setattr(application, "CFG", cfg)
+    monkeypatch.setattr(process_state, "redis_client", None)
+    monkeypatch.setattr(http_rate_limit, "_LOCAL_COUNTERS", {})
+    clock = SimpleNamespace(time=lambda: 1_000.0)
+    monkeypatch.setattr(http_rate_limit, "time", clock)
+    app = application.create_app(cfg)
+    app.config.update(TESTING=True, RATELIMIT_ENABLED=True)
+    client = app.test_client()
+    expected = 404 if profile == "open" else 302
+    for _ in range(2):
+        assert client.get(path, base_url="https://localhost").status_code == expected
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            resolver, "resolve_authentication", lambda *_args, **_kwargs: pytest.fail("Throttled request resolved identity")
+        )
+        denied = client.get(path, base_url="https://localhost")
+        assert denied.status_code == 429
+        assert denied.headers["Cache-Control"] == "private, no-store"
+        assert client.get("/config", base_url="https://localhost").status_code == 429
 
 
 def test_ip_limit_precedes_cookie_verification_and_can_be_disabled(monkeypatch, warning_records):

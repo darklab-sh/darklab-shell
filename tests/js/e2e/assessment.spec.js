@@ -199,7 +199,7 @@ async function installSafeAssessmentLaunchFixture(page) {
   })
 }
 
-async function installAssessmentBatchLifecycleFixture(page) {
+async function installAssessmentBatchLifecycleFixture(page, { holdLoadingStates = false } = {}) {
   const state = {
     launched: false,
     canceling: false,
@@ -209,6 +209,21 @@ async function installAssessmentBatchLifecycleFixture(page) {
     startBody: null,
     retryBody: null,
     preview: null,
+  }
+  state.holdNextPoll = () => {
+    let release
+    let requested
+    const held = new Promise(resolve => { release = resolve })
+    const started = new Promise(resolve => { requested = resolve })
+    state.pollGate = { held, requested }
+    return { started, release }
+  }
+  // Keep transient loading states visible until the test has checked them.
+  const previewHeld = new Promise(resolve => { state.releasePreview = resolve })
+  const templateRefreshHeld = new Promise(resolve => { state.releaseTemplateRefresh = resolve })
+  if (!holdLoadingStates) {
+    state.releasePreview()
+    state.releaseTemplateRefresh()
   }
   const batchId = 'wfx_assessment_batch_playwright'
   const retryBatchId = 'wfx_assessment_batch_retry_playwright'
@@ -357,7 +372,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         reason_code: '',
       }
       state.preview = refreshed
-      await new Promise(resolve => setTimeout(resolve, 125))
+      await templateRefreshHeld
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -388,7 +403,7 @@ async function installAssessmentBatchLifecycleFixture(page) {
         operator_action: 'Update the managed templates when network access is available.',
       }
       state.preview = payload.preview
-      await new Promise(resolve => setTimeout(resolve, 125))
+      await previewHeld
       await route.fulfill({
         response,
         contentType: 'application/json',
@@ -411,6 +426,12 @@ async function installAssessmentBatchLifecycleFixture(page) {
     if ([batchId, retryBatchId].some(id => path === `/assessment-batches/${id}`)
         && request.method() === 'GET') {
       const id = path.endsWith(`/${retryBatchId}`) ? retryBatchId : batchId
+      const gate = state.pollGate
+      if (gate) {
+        state.pollGate = null
+        gate.requested()
+        await gate.held
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -506,6 +527,24 @@ async function installAssessmentBatchLifecycleFixture(page) {
   return state
 }
 
+async function restoreRunningAssessmentBatch(page) {
+  const fixture = await installAssessmentBatchLifecycleFixture(page)
+  const { project, assessment } = await startNetworkAssessment(page, `Assessment Batch ${Date.now()}`)
+  const section = assessment.locator('.project-assessment-batch')
+  fixture.projectId = project.id
+  fixture.assessmentId = await section.getAttribute('data-assessment-id')
+  expect(fixture.assessmentId).toBeTruthy()
+  // Seed the same durable backend response used after the launch test. Each
+  // monitor/recovery journey gets its own real Project and assessment cycle.
+  fixture.launched = true
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await ensurePromptReady(page)
+  await openAssessment(page)
+  await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+  await expect(section).toContainText('Recent activity')
+  return { fixture, section, explorerBody: page.locator('#project-explorer-body') }
+}
+
 test.describe('project assessment qualification', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -587,9 +626,9 @@ test.describe('project assessment qualification', () => {
     )
   })
 
-  test('previews starts restores and cancels a bounded assessment batch', async ({ page }) => {
+  test('previews, refreshes templates, and starts a bounded assessment batch', async ({ page }) => {
     test.setTimeout(90_000)
-    const fixture = await installAssessmentBatchLifecycleFixture(page)
+    const fixture = await installAssessmentBatchLifecycleFixture(page, { holdLoadingStates: true })
     const { assessment } = await startNetworkAssessment(
       page,
       `Assessment Batch ${Date.now()}`,
@@ -628,9 +667,13 @@ test.describe('project assessment qualification', () => {
     })
     await previewButton.scrollIntoViewIfNeeded()
     const scrollBeforePreview = await explorerBody.evaluate(node => node.scrollTop)
-    await previewButton.click()
-    await expect(section.getByRole('button', { name: 'Building preview…' })).toBeVisible()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
+    try {
+      await previewButton.click()
+      await expect(section.getByRole('button', { name: 'Building preview…' })).toBeVisible()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
+    } finally {
+      fixture.releasePreview()
+    }
     expect((await previewResponse).status()).toBe(201)
     await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePreview)
     await expect(section.locator('.project-assessment-batch-summary-grid')).toContainText('Commands')
@@ -666,10 +709,14 @@ test.describe('project assessment qualification', () => {
     })
     await expect(updateTemplates).toBeVisible()
     const scrollBeforeTemplateRefresh = await explorerBody.evaluate(node => node.scrollTop)
-    await updateTemplates.click()
-    await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
-      .toBe(scrollBeforeTemplateRefresh)
+    try {
+      await updateTemplates.click()
+      await expect(section.getByRole('button', { name: 'Updating templates…' })).toBeVisible()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
+        .toBe(scrollBeforeTemplateRefresh)
+    } finally {
+      fixture.releaseTemplateRefresh()
+    }
     expect((await templateRefresh).status()).toBe(200)
     await expect.poll(() => explorerBody.evaluate(node => node.scrollTop))
       .toBe(scrollBeforeTemplateRefresh)
@@ -702,23 +749,36 @@ test.describe('project assessment qualification', () => {
     await expect(section).toContainText('Assessment batch')
     await expect(section).toContainText('Running')
     await expect(section.getByRole('button', { name: 'Open run' })).toBeVisible()
+  })
 
-    const scrollBeforePoll = await explorerBody.evaluate((node) => {
-      node.scrollTop = node.scrollHeight
-      return node.scrollTop
+  test('restores an active assessment batch and preserves monitor focus across polling', async ({ page }) => {
+    test.setTimeout(90_000)
+    const { fixture, section, explorerBody } = await restoreRunningAssessmentBatch(page)
+    await explorerBody.evaluate(node => {
+      node.style.height = '220px'
+      node.style.overflow = 'auto'
     })
-    expect(scrollBeforePoll).toBeGreaterThan(0)
-    await section.getByRole('button', { name: 'Open run' }).evaluate((node) => {
-      node.focus({ preventScroll: true })
-    })
-    const polledBatch = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'GET'
-        && url.pathname === '/assessment-batches/wfx_assessment_batch_playwright'
-    })
-    expect((await polledBatch).status()).toBe(200)
-    await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
-    await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePoll)
+    // Hold a real scheduled poll, then observe its DOM replacement. A response
+    // header alone doesn't establish that the monitor has finished rendering.
+    const poll = fixture.holdNextPoll()
+    await poll.started
+    try {
+      const scrollBeforePoll = await explorerBody.evaluate((node) => {
+        node.scrollTop = node.scrollHeight
+        return node.scrollTop
+      })
+      expect(scrollBeforePoll).toBeGreaterThan(0)
+      const previousMonitor = await section.locator('.project-assessment-batch-monitor').elementHandle()
+      await section.getByRole('button', { name: 'Open run' }).evaluate(node => node.focus({ preventScroll: true }))
+      await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
+      poll.release()
+      await expect.poll(() => previousMonitor.evaluate(node => node.isConnected)).toBe(false)
+      await expect(section.getByRole('button', { name: 'Open run' })).toBeFocused()
+      await expect.poll(() => explorerBody.evaluate(node => node.scrollTop)).toBe(scrollBeforePoll)
+      await previousMonitor.dispose()
+    } finally {
+      poll.release()
+    }
 
     await page.keyboard.press('Escape')
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
@@ -745,7 +805,11 @@ test.describe('project assessment qualification', () => {
     await expect(restored).toContainText('ping -c 4 -W 2 127.0.0.1')
     await expect(restored.getByRole('button', { name: 'Open run' })).toBeVisible()
     await expect(restored).toContainText('Recent activity')
+  })
 
+  test('cancels a restored assessment batch and previews a bounded retry', async ({ page }) => {
+    test.setTimeout(90_000)
+    const { fixture, section: restored } = await restoreRunningAssessmentBatch(page)
     await restored.getByRole('button', { name: 'Cancel batch' }).click()
     await expect(page.locator('#confirm-host')).toContainText(
       'Active commands receive a cancellation request',
