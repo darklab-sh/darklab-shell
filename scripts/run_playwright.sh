@@ -137,7 +137,7 @@ if [[ "$ASSET_BUNDLE_MODE" != "source" && "$ASSET_BUNDLE_MODE" != "bundle" ]]; t
   exit 2
 fi
 if [[ "$ASSET_BUNDLE_MODE" == "bundle" ]]; then
-  if ! npm run assets:check; then
+  if ! npm run assets:fresh; then
     echo "run_playwright.sh: asset_bundle_mode=bundle requires current committed build output; run assets:sync" >&2
     exit 1
   fi

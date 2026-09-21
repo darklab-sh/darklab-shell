@@ -34,6 +34,7 @@
     "vendor:check": "tmp=$(mktemp -d) && node scripts/frontend/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/",
     "assets:inventory": "node scripts/frontend/inventory_frontend_modules.mjs",
     "assets:inventory:check": "node scripts/frontend/inventory_frontend_modules.mjs --check",
+    "assets:fresh": "node scripts/frontend/asset_freshness.mjs",
     "assets:sync": "node scripts/frontend/build_assets.mjs",
     "assets:check": "tmp=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$tmp\" --check && root_cwd=$(mktemp -d) && scripts_cwd=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$root_cwd\" --no-precompress && (cd scripts/frontend && node build_assets.mjs --out-dir \"$scripts_cwd\" --no-precompress) && diff -qr \"$root_cwd\" \"$scripts_cwd\""
   },

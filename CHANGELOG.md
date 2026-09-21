@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Browser preparation checks freshness without rebuilding every bundle.** Source, configuration, lockfile, toolchain, generated outputs, and decoded compression sidecars remain checked before bundle tests; CI retains full build reproducibility checks. Browser jobs reuse versioned package/headless-browser downloads while keeping locked installs and OS dependency setup.
+
 - **Template asset lookups reuse a validated manifest per app.** File edits and atomic replacement invalidate cached data; missing or malformed manifests retain their existing errors.
 
 - **The shell becomes usable without waiting for command recall.** It reuses page configuration, defers secondary catalogs, and preserves privacy defaults, restored runs, typed drafts, and scope isolation when startup responses arrive late.

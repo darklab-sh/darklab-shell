@@ -61,6 +61,21 @@ before_script:
   image: $CI_PYTHON_E2E_IMAGE
   variables:
     PLAYWRIGHT_PROJECT_COUNT: "3"
+    PLAYWRIGHT_BROWSERS_PATH: "$CI_PROJECT_DIR/.cache/ms-playwright"
+  cache:
+    - key: "$CI_COMMIT_REF_SLUG"
+      paths:
+        - .cache/pip/
+    # The lockfile pins Playwright; the CI file pins the OS image/dependency setup.
+    # Runner identity separates native platforms without slashes in cache keys.
+    - key:
+        prefix: "browser-downloads-$CI_RUNNER_ID"
+        files:
+          - package-lock.json
+          - .gitlab-ci.yml
+      paths:
+        - .cache/ms-playwright/
+        - .cache/npm/_cacache/
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -73,8 +88,9 @@ before_script:
   before_script:
     - curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && apt-get install -y -q nodejs iputils-ping
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
-    - npm ci
-    - npx playwright install --with-deps chromium
+    - npm ci --cache .cache/npm --prefer-offline
+    - export PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH/$(node -p 'process.platform + "-" + process.arch')"
+    - npx playwright install --with-deps --only-shell chromium
   artifacts:
     when: on_failure
     paths:
