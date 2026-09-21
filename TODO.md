@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Remove the legacy metrics CIDR alias in 3.1.0](#remove-the-legacy-metrics-cidr-alias-in-310)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Feature Enhancements](#feature-enhancements)
 - [Technical Debt](#technical-debt)
@@ -30,15 +29,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-**v3.0 delivery scope.** Managed sign-in is implemented; production-like staging qualification remains the access release gate. The ARM64 release-runner autoscaling work remains independent and is not a v3.0 release requirement.
+**v3.1 delivery scope.** Managed sign-in and the operator console are implemented; production-like staging qualification remains the access release gate. The ARM64 release-runner autoscaling work remains independent and is not a v3.1 release requirement.
 
 Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile changes reviewable with explicit transition tests.
 
-Exercise open and restricted modes in a production-like staging deployment during the `release/3.0` candidate cycle, starting with `v3.0.0-rc.1`. Use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Confirm the release gates pass on both database backends and the complete documentation reflects shipped behavior before the final release.
-
-### Remove the legacy metrics CIDR alias in 3.1.0
-
-After the 3.0.1 compatibility release, remove `diagnostics_allowed_cidrs` alias normalization and its deprecation warning. Keep `metrics_allowed_cidrs` as the sole scrape allowlist, with an empty-list default and no operator-access or AI-quota effect. Update migration guidance, the inspection catalog, and compatibility tests; verify canonical configuration precedence and metrics/operator isolation remain covered.
+Exercise open and restricted modes in a production-like staging deployment during the `release/3.0` candidate cycle, starting with `v3.1.0-rc.1`. Use that feedback to close any browser-session, recovery, bootstrap, proxy, and operator-workflow gaps. Confirm the release gates pass on both database backends and the complete documentation reflects shipped behavior before the final release.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 

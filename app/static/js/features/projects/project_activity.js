@@ -49,6 +49,7 @@ let exportedDarklabProjectActivity = null;
         states.set(id, {
           events: [],
           error: '',
+          filterDraft: null,
           filters: {
             event_type: '',
             actor: '',
@@ -171,12 +172,14 @@ let exportedDarklabProjectActivity = null;
       root.querySelectorAll('[data-project-activity-filter]').forEach((control) => {
         st.filters[control.dataset.projectActivityFilter] = String(control.value || '').trim();
       });
+      st.filterDraft = null;
     }
 
     function resetFilters(st) {
       Object.keys(st.filters).forEach((key) => {
         st.filters[key] = '';
       });
+      st.filterDraft = null;
       st.offset = 0;
     }
 
@@ -368,17 +371,27 @@ let exportedDarklabProjectActivity = null;
     }
 
     function renderFilters(projectId, st) {
+      const values = st.filterDraft || st.filters;
       const form = document.createElement('div');
       form.className = 'project-activity-filters';
       form.dataset.projectActivityFilters = projectId;
       form.append(
-        field('Event type', 'event_type', st.filters.event_type, { placeholder: 'finding.review_change' }),
-        field('Actor', 'actor', st.filters.actor, { placeholder: 'name or member id' }),
-        selectField('Target type', 'target_type', st.filters.target_type, targetTypes),
-        field('Target id', 'target_id', st.filters.target_id, { placeholder: 'target id' }),
-        field('From', 'date_from', st.filters.date_from, { type: 'date' }),
-        field('To', 'date_to', st.filters.date_to, { type: 'date' }),
+        field('Event type', 'event_type', values.event_type, { placeholder: 'finding.review_change' }),
+        field('Actor', 'actor', values.actor, { placeholder: 'name or member id' }),
+        selectField('Target type', 'target_type', values.target_type, targetTypes),
+        field('Target id', 'target_id', values.target_id, { placeholder: 'target id' }),
+        field('From', 'date_from', values.date_from, { type: 'date' }),
+        field('To', 'date_to', values.date_to, { type: 'date' }),
       );
+      // Keep pending edits through redraws; only Apply changes request filters.
+      const rememberDraft = (event) => {
+        const key = event.target.dataset?.projectActivityFilter;
+        if (!Object.hasOwn(st.filters, key)) return;
+        if (!st.filterDraft) st.filterDraft = { ...st.filters };
+        st.filterDraft[key] = String(event.target.value || '');
+      };
+      form.addEventListener('input', rememberDraft);
+      form.addEventListener('change', rememberDraft);
       const actions = document.createElement('div');
       actions.className = 'project-activity-filter-actions';
       const apply = ctx.makeProjectButton

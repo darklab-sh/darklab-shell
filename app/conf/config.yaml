@@ -575,10 +575,10 @@
 # metrics_allowed_cidrs:
 #   - 127.0.0.1/32
 #
-# diagnostics_allowed_cidrs is accepted as a metrics-only alias in 3.0.1.
-# Rename it before 3.1.0. The canonical key wins within one YAML layer,
-# including an explicit empty list; normal precedence applies across layers.
-# Neither key grants operator access or an AI quota exemption.
+# diagnostics_allowed_cidrs is no longer supported. Rename it to
+# metrics_allowed_cidrs in each YAML layer before upgrading to 3.1.0.
+# Normal layer precedence applies, including an explicit empty list.
+# This setting grants no operator access or an AI quota exemption.
 #
 # Server default if unset: true
 # metrics_enabled: true

@@ -255,6 +255,8 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 Assessment lifecycle unit and browser checks refresh the Project while its confirmation is open, then verify that canceling restores focus to the replacement button without sending a mutation. A late-response check redraws the Assessment again and verifies focus stays on its current control.
 
+Project Activity unit tests cover pending text, select, and date filters across desktop/mobile redraws, isolation between Projects, Apply, paging, and Clear. Its browser test refreshes the workspace after typing an event filter, then checks that Apply sends the preserved value.
+
 `project_click_dispatch.test.js` binds the actual mobile capture and modal bubbling handlers and checks one action per click on both layouts. The mobile Projects browser journey also checks that the link confirmation stays closed after success. Pointer-refresh tests hold a desktop action through coalesced redraws, release, cancellation, and window blur; the finding-authoring browser journey waits for an actionable button and an installed pointer listener, captures the actual pointer-down target, and refreshes the workspace between pressing and releasing Create finding.
 
 `test_anonymous_workspace_retirement.py` and the PostgreSQL counterpart exercise anonymous file reads, writes, downloads, deletion, existing download tickets, and stale owner contexts after attachment. They cover credential rotation and revocation, principal disablement, failed-attachment rollback, and credential-based browser recovery. History fallback-search coverage removes only the FTS table from the current schema, so it still exercises authentication and ownership checks. Rejected retired-identity requests do not consume the allowance for actual credential attempts; the Access browser journey restores an old anonymous ID and proves recovery in both asset modes.
@@ -276,6 +278,8 @@ Each browser qualification case has a two-minute budget for its full sign-in, sc
 Run the SQLite browser matrix with `bash scripts/run_playwright.sh --asset-bundle-mode source tests/js/e2e/auth-profile-qualification.spec.js` and repeat with `--asset-bundle-mode bundle`. Run the disposable Postgres browser matrix with `bash scripts/run_postgres_tests.sh --browser -- --asset-bundle-mode source`, then repeat with `--asset-bundle-mode bundle`; CI runs both modes against its temporary Postgres service. The Postgres request-policy lane uses `bash scripts/run_postgres_tests.sh`; its credential-resolution case prints safe portable/PAT concurrency measurements when pytest output capture is disabled. For a disposable SQLite lookup measurement, run `.venv/bin/python scripts/test-support/measure_credential_resolution.py`. Both measurements check the five-minute last-used write bound and reject stored reusable credential material. The complete suite commands above remain the final regression check; the matrix smoke isn't a replacement for the deeper product journeys.
 
 ### Pytest
+
+`test_metrics_config_alias.py` verifies removal of the old diagnostics CIDR alias: YAML warnings, strict checker failure, rejected runtime mutations, unchanged canonical precedence, and no disclosure of ignored CIDR values. Metrics endpoint and operator-console tests keep scrape permissions separate from operator access and AI quotas.
 
 Use pytest for backend rules, Flask routes, persistence, configuration, command policy, and structured server behavior:
 
