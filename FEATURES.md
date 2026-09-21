@@ -1131,7 +1131,7 @@ If a plan says it is unavailable, check the action's target compatibility, insta
 
 - The Activity tab gives project users a scoped change trail without opening the operator-wide diagnostics view.
   - Personal project owners and team members who can view the project can see safe rows for project-linked activity, report/package builds, finding review changes, imports, and related evidence actions.
-  - Filters for event type, actor, target type, target id, and date range keep busy projects readable, and pagination loads only the current page.
+  - Filters for event type, actor, target type, target id, and date range keep busy projects readable, and pagination loads only the current page. Pending edits survive background refreshes; choose **Apply** to use them or **Clear** to reset the filters.
   - Rows show time, actor, action, target, summary, and collapsed safe details. Team-viewer access stays read-only, and older rows may disappear when audit retention is configured.
   - Metadata edit sheets show a compact Recent activity panel for the item you're editing. The panel loads a small page, then links into the filtered Activity tab when you need the broader trail.
 - The Monitoring tab gives project users a project-scoped view of scheduled watchers that belong to the project, with a **New monitor** action that opens the watcher form already linked to the current project.

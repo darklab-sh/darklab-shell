@@ -1123,6 +1123,9 @@ test.describe('project workspace modal', () => {
     await expect(activityRoot.locator('.project-activity-row').first()).toContainText('Project Link', { timeout: 15_000 })
 
     await activityRoot.locator('[data-project-activity-filter="event_type"]').fill('project.link')
+    // A completed background load can redraw the explorer before Apply.
+    await page.evaluate(async () => { await refreshProjectWorkspace() })
+    await expect(activityRoot.locator('[data-project-activity-filter="event_type"]')).toHaveValue('project.link')
     const filtered = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return url.pathname === `/projects/${projectId}/activity`

@@ -74,7 +74,7 @@ services:
       start_period: 30s
 
   shell:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.0.1}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.1.0-rc.1}
     labels:
       sh.darklab.config.database_backend: ${DATABASE_BACKEND:-sqlite}
       sh.darklab.metrics.path: /metrics
@@ -195,7 +195,7 @@ services:
         required: false
 
   zap-worker:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.0.1}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.1.0-rc.1}
     profiles:
       - zap
     init: true
@@ -238,7 +238,7 @@ services:
         required: false
 
   oast-worker:
-    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.0.1}
+    image: ${DARKLAB_IMAGE:-docker.io/darklabsh/darklab-shell:3.1.0-rc.1}
     profiles:
       - oast
     init: true
