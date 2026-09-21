@@ -358,6 +358,64 @@ describe('project activity controller', () => {
     expect(ctx.renderProjectExplorer).toHaveBeenCalled()
   })
 
+  it.each([false, true])('keeps pending filters through refreshes without applying them (mobile=%s)', async (mobile) => {
+    const activityApi = loadActivityModule()
+    const projectWorkspaceRequest = vi.fn(async () => apiResponse({ ...eventPayload, has_more: true }))
+    const controller = activityApi.createProjectActivityController(makeContext(projectWorkspaceRequest))
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const render = (projectId = 'proj_1') => {
+      const summary = { project: { id: projectId } }
+      if (mobile) container.replaceChildren(controller.renderMobileActivityTab(projectId, summary))
+      else controller.renderActivity(container, projectId, summary)
+    }
+    const control = key => container.querySelector(`[data-project-activity-filter="${key}"]`)
+
+    await controller.load('proj_1', { render: false })
+    render()
+    const edits = {
+      event_type: ' project.link ', actor: ' reviewer ', target_type: 'project',
+      target_id: 'prj_1', date_from: '2026-09-01', date_to: '2026-09-21',
+    }
+    Object.entries(edits).forEach(([key, value]) => {
+      control(key).value = value
+      control(key).dispatchEvent(new Event(key === 'target_type' ? 'change' : 'input', { bubbles: true }))
+    })
+
+    controller.invalidate('proj_1')
+    await controller.load('proj_1', { render: false })
+    render()
+    Object.entries(edits).forEach(([key, value]) => expect(control(key).value).toBe(value))
+    expect(projectWorkspaceRequest).toHaveBeenLastCalledWith(
+      '/projects/proj_1/activity?limit=25&offset=0', { cache: 'no-store' },
+    )
+
+    await controller.load('proj_2', { render: false })
+    render('proj_2')
+    Object.keys(edits).forEach(key => expect(control(key).value).toBe(''))
+    render()
+    await controller.handleClick({ target: container.querySelector('[data-project-activity-action="apply"]') })
+    const params = new URL(projectWorkspaceRequest.mock.lastCall[0], 'https://example.test').searchParams
+    Object.entries(edits).forEach(([key, value]) => expect(params.get(key)).toBe(value.trim()))
+
+    render()
+    control('event_type').value = 'finding.review_change'
+    control('event_type').dispatchEvent(new Event('input', { bubbles: true }))
+    expect(container.querySelector('[data-project-activity-action="next"]').disabled).toBe(false)
+    await controller.handleClick({ target: container.querySelector('[data-project-activity-action="next"]') })
+    expect(projectWorkspaceRequest.mock.lastCall[0]).toContain('event_type=project.link')
+    expect(projectWorkspaceRequest.mock.lastCall[0]).toContain('offset=25')
+    render()
+    expect(control('event_type').value).toBe('finding.review_change')
+
+    await controller.handleClick({ target: container.querySelector('[data-project-activity-action="clear"]') })
+    render()
+    Object.keys(edits).forEach(key => expect(control(key).value).toBe(''))
+    expect(projectWorkspaceRequest).toHaveBeenLastCalledWith(
+      '/projects/proj_1/activity?limit=25&offset=0', { cache: 'no-store' },
+    )
+  })
+
   it('renders empty and mobile activity states with collapsed details', async () => {
     const activityApi = loadActivityModule()
     const emptyRequest = vi.fn(async () => apiResponse({

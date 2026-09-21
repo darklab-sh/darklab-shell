@@ -920,6 +920,8 @@ Project click delegation marks each event before asynchronous handlers run, so m
 
 Team list refreshes preserve the top form's controls and focus; form submissions still disable them while the change is saved.
 
+Project Activity keeps pending filter values separate from the applied request filters, scoped to each Project. Desktop and mobile redraws retain edits; Apply commits them, paging uses the applied values, and Clear resets both.
+
 Assessment lifecycle confirmations resolve the current opening control after a refresh before returning focus. If that control is absent during an Assessment reload, restoration waits for the existing load and respects focus moved elsewhere in the meantime. Replacement controls must belong to the same Project. Later Assessment redraws preserve a focused lifecycle control.
 
 Package wizard redraws reuse a focused text field when it remains on the current step, preserving its live value and cursor selection while background presets or Assessment choices load.
@@ -2556,7 +2558,7 @@ Denied operator requests consume the baseline HTTP request budget. In restricted
 
 Standalone operator pages use the shared `features/admin/operator_access.js` fetch guard. Data requests receive JSON 401 responses with safe document destinations; return paths preserve reviewed audit query keys and never replay a POST or probe. `/admin/access` provides a private 204 eligibility check without reading the settings inventory. A ten-second visible-page check and visibility changes detect lost access, clear rendered data, abort pending requests, and stop further refreshes. Body reads check eligibility state again so late responses can't repopulate a cleared page. Export downloads use the same guard. Access loss during CSV streaming emits a fixed `__access_lost__` sentinel before the stream aborts, without another audit row or a completion event; interrupted JSON stays unterminated. Operator success, redirect, and error responses carry private/no-store headers.
 
-The configuration builder normalizes the deprecated `diagnostics_allowed_cidrs` alias into `metrics_allowed_cidrs` within each layer before merging and validation. Explicit canonical values, including empty lists, win within a layer; ordinary precedence applies across layers. Provenance names the winning layer, the inspection catalog exposes one setting, and a bounded warning contains no CIDR values. The 3.0.1 compatibility contract and upgrade guidance live in [CONFIGURATION.md](CONFIGURATION.md#enable-diagnostics).
+`metrics_allowed_cidrs` is the sole scrape allowlist. Ordinary configuration precedence applies across layers, including explicit empty lists. The removed `diagnostics_allowed_cidrs` key follows the normal unknown-key path: YAML loading ignores it with `CONFIG_UNKNOWN_KEY_IGNORED`, while typed runtime mutations reject it. It can't change the effective allowlist or its provenance. The inspection catalog exposes only the canonical setting; warnings omit the removed key's values. The upgrade guidance lives in [CONFIGURATION.md](CONFIGURATION.md#enable-diagnostics).
 
 Operationally, `/diag` sits on top of the same underlying sources described earlier in the document:
 

@@ -21,7 +21,7 @@ from config_builder import AppConfig as AppConfig, ConfigLoadError, PROJECT_NAME
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES
 from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
 
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.1.0-rc.1"
 PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []

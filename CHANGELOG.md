@@ -11,9 +11,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [3.0.1] - Unreleased
+## [3.1.0] - Unreleased
 
-**Upgrade note:** Diagnostics, Audit log, and Operator settings now require a restricted sign-in profile and an explicit principal grant. Open-profile installations no longer expose these pages. To retain operator access, choose a restricted profile and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect.
+**Upgrade note:** Diagnostics, Audit log, and Operator settings now require a restricted sign-in profile and an explicit principal grant. Open-profile installations no longer expose these pages. To retain operator access, choose a restricted profile and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect. Rename `diagnostics_allowed_cidrs` to `metrics_allowed_cidrs` before upgrading; the removed key is ignored and no longer enables metrics scrapes. Complete the [operator upgrade preflight](CONFIGURATION.md#upgrade-preflight) and keep a verified backup before changing the image.
 
 ### Added
 
@@ -36,11 +36,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Metrics network permissions are independent of operator access.** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The deprecated `diagnostics_allowed_cidrs` alias remains metrics-only for 3.0.1, with layer precedence, source reporting, and a bounded warning; upgrade guidance identifies its removal in 3.1.0. Neither setting bypasses AI workspace quotas, and diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
+- **Metrics network permissions are independent of operator access.**
+  - **Before:** Metrics and diagnostics shared the `diagnostics_allowed_cidrs` network gate.
+  - **After:** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The old key is removed starting with 3.1.0-rc.1: YAML loading warns and ignores it, strict configuration checks fail on the warning, and runtime mutations reject it. Metrics permissions don't bypass AI workspace quotas; diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
+  - **Tests:** Configuration and checker cases preserve canonical layer precedence, source reporting, the empty-list default, and safe warnings. Metrics and operator checks verify independent access controls and AI limits.
+
+- **3.1.0-rc.1 is the release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag; the 3.1.0 section remains unreleased during candidate qualification.
 
 - **Browser CI uses isolated app servers and preserves failure evidence.** Each project runs one browser worker, with a total CI cap of three; independent workflows and controlled readiness keep shared-runner contention from distorting checks. Traces retain original failed attempts, and CI still rejects flaky results.
 
 ### Fixed
+
+- **Project Activity keeps pending filter edits during background refreshes.** Refreshing project data no longer clears fields before Apply is clicked. Paging continues to use the applied filters, and Clear resets both pending and applied values. Unit and browser regressions cover refreshes between editing and applying.
 
 - **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Collector guidance covers both streams.
 
