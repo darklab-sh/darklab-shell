@@ -1555,7 +1555,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - **Use an existing credential** opens a kept workspace on another browser. **Sign out** ends this browser's temporary session; it doesn't delete the kept workspace or revoke other devices.
 - Anonymous browsers see keep and open actions, an invalid saved credential shows its removal action, and kept workspaces show credential management. Other tabs and panels refresh when access changes. Invalid or revoked credentials show an access warning until you remove or replace them.
 
-Kept workspaces use protected browser sessions in every profile. After upgrading, an older browser-saved credential is exchanged once and removed from browser storage after success. A failed exchange stays blocked until you sign in or explicitly remove the saved access. Save credentials in a password manager for future sign-ins.
+Kept workspaces use protected browser sessions in every profile. If your browser rejects the session when you keep a workspace, Access still shows the one-time credential so you can save it and sign in over HTTPS with cookies enabled. After upgrading, an older browser-saved credential is exchanged once and removed from browser storage after success. A failed exchange stays blocked until you sign in or explicitly remove the saved access. Save credentials in a password manager for future sign-ins.
 
 ### Credentials for devices and integrations
 

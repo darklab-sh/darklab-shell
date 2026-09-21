@@ -257,6 +257,19 @@ describe('session.js', () => {
     expect(_getSessionId()).toBe(`crd_${'c'.repeat(32)}`)
   })
 
+  it('blocks retired anonymous requests while a rejected attachment cookie is recovered', async () => {
+    const { apiFetch, fetchCalls, activateAccessCredential, storage } = loadSession({
+      storageData: { anonymous_id: 'original-uuid' },
+    })
+
+    expect(() => activateAccessCredential(`dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`, { attached: true }))
+      .toThrow('Sign-in needs HTTPS and browser cookies.')
+    await expect(apiFetch('/history')).rejects.toThrow('Browser access is changing.')
+    expect(fetchCalls).toHaveLength(0)
+    expect(storage.getItem('access_credential')).toBeNull()
+    expect(storage.getItem('browser_session')).toBeNull()
+  })
+
   it('rejects browser credentials that do not match the portable server format', () => {
     const { activateAccessCredential } = loadSession({
       storageData: { anonymous_id: 'original-uuid' },

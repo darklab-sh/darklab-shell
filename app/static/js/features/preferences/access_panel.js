@@ -405,7 +405,25 @@ function _showEditor(mode, credential = null, returnFocus = null) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ label: labelInput?.value.trim() || '', browser_session: true }),
         });
-        importedActivateAccessCredential(payload.secret, { attached: true });
+        try {
+          importedActivateAccessCredential(payload.secret, { attached: true });
+        } catch (_) {
+          _closeEditor({ restoreFocus: false });
+          const note = "Your workspace was kept, but this browser couldn't start a session. Save this credential now, then sign in over HTTPS with browser cookies enabled.";
+          _setMessage(note, 'error');
+          elements.summary.textContent = 'Workspace kept; sign-in needed';
+          elements.summaryDetail.textContent = 'The old anonymous access has ended. Use your new credential to return.';
+          [elements.keep, elements.use, elements.refresh].forEach(control => {
+            if (control) control.disabled = true;
+          });
+          showCredentialReveal({
+            host: elements.reveal,
+            secret: payload.secret,
+            note,
+            onSaved: importedRedirectToSignIn,
+          });
+          return;
+        }
         _closeEditor({ restoreFocus: false });
         await refreshAccessPanel();
         showCredentialReveal({ host: elements.reveal, secret: payload.secret, restoreFocus: elements.add });

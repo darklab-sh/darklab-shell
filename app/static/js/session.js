@@ -240,7 +240,12 @@ function activateAccessCredential(secret, { attached = false, refresh = true } =
   if (!_sessionCore().credentialPublicId(normalized).startsWith('crd_')) {
     throw new Error('Invalid access credential format');
   }
-  if (!_cookieValue('darklab_csrf')) throw new Error('Sign-in needs HTTPS and browser cookies.');
+  if (!_cookieValue('darklab_csrf')) {
+    // Attachment already retired the anonymous identity. Keep this page still
+    // while Access reveals the recovery credential, without more scoped calls.
+    if (attached) _identityNavigationPending = true;
+    throw new Error('Sign-in needs HTTPS and browser cookies.');
+  }
   _sessionCsrfToken = _cookieValue('darklab_csrf');
   importedRememberBrowserSession(_sessionStorageApi, { credential_id: _sessionCore().credentialPublicId(normalized) });
   if (attached) {
