@@ -18,6 +18,7 @@ APP_ROOT = ROOT / "app"
 sys.path.insert(0, str(APP_ROOT))
 
 from config import CFG  # noqa: E402
+from core.logging_setup import configure_logging  # noqa: E402
 from runtime_bootstrap import init_database  # noqa: E402
 from services.auth import lifecycle, operator_grants  # noqa: E402
 from services.auth.suspended_work import operator_suspended_work  # noqa: E402
@@ -92,6 +93,10 @@ def _parser() -> argparse.ArgumentParser:
         operator = commands.add_parser(command, help="Manage the explicit instance settings inspection grant.")
         operator.add_argument("principal_id")
 
+    operators = commands.add_parser("operator-list", help="List current instance inspection grants.")
+    operators.add_argument("--limit", type=int, default=100, help="Page size, from 1 to 1000 (default: 100).")
+    operators.add_argument("--after", default="", help="Continue after the previous page's next_after principal id.")
+
     issue = commands.add_parser("issue", help="Issue a portable credential or PAT.")
     issue.add_argument("principal_id")
     issue.add_argument("--type", choices=("portable", "pat"), default="portable")
@@ -146,6 +151,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.command == "operator-list":
+        return operator_grants.list_grants(limit=args.limit, after=args.after)
     if args.command == "operator-status":
         return operator_grants.grant_status(args.principal_id)
     if args.command in {"operator-grant", "operator-revoke"}:
@@ -249,7 +256,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     try:
         _require_container()
-        payload = run(_parser().parse_args(argv))
+        args = _parser().parse_args(argv)
+        configure_logging(CFG, stderr_only=True)
+        payload = run(args)
     except (RuntimeError, ValueError, PermissionError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

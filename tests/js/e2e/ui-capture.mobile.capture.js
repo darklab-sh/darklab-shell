@@ -888,6 +888,30 @@ const scenes = [
       await expect(page.locator('body.diag-page')).toBeVisible()
     },
   },
+  {
+    slug: 'operator-settings-page',
+    title: 'Operator settings - loaded values and host guidance',
+    route: '/admin/',
+    operator: true,
+    run: async (page) => {
+      await expect(page.locator('#admin-status')).toHaveText('Snapshot loaded. Settings are read only.')
+      await page.getByRole('searchbox', { name: 'Search settings' }).fill('admin_console_reauth_minutes')
+      const card = page.locator('[data-key="admin_console_reauth_minutes"]')
+      await expect(card).toBeVisible()
+      await expect(card).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+      await card.getByRole('button', { name: 'Defaults and host configuration' }).click()
+    },
+  },
+  {
+    slug: 'operator-audit-page',
+    title: 'Operator audit log',
+    route: '/audit',
+    operator: true,
+    run: async (page) => {
+      await expect(page.locator('.diag-audit-table')).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Operator pages' })).toBeVisible()
+    },
+  },
 ]
 
 test('mobile screenshot capture pack', async ({ page }, testInfo) => {
@@ -913,7 +937,7 @@ test('mobile screenshot capture pack', async ({ page }, testInfo) => {
             route: scene.route,
           })
         }
-        if (scene.operator) await withOperatorCapture(page, testInfo, capture)
+        if (scene.operator) await withOperatorCapture(page, testInfo, capture, { route: scene.route, themeName })
         else await capture()
       })
     }

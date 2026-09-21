@@ -11,6 +11,7 @@ from flask import current_app, g, jsonify, redirect, request
 
 from .access_profile import active_config, active_profile, safe_next_path
 from .operator_grants import has_grant
+from .observability import _request_value, log_operator_access_denied
 from .resolver import AuthenticatedContext, AuthenticationState, resolve_authentication
 
 log = logging.getLogger("shell")
@@ -75,8 +76,21 @@ def private_response(response):
 
 def hidden_response(reason):
     request.environ["darklab_operator_denied"] = True
-    log.warning("INSTANCE_OPERATOR_ACCESS_DENIED", extra={"reason": reason, "http_status": 404})
+    log_operator_access_denied(reason)
     return current_app.response_class(status=404)
+
+
+def unavailable_response():
+    request.environ["darklab_operator_denied"] = True
+    return jsonify({"error": "operator_access_unavailable"}), 503
+
+
+def _log_unavailable(exc, *, stage):
+    log.error("INSTANCE_OPERATOR_ACCESS_UNAVAILABLE", extra={
+        **log_context(), "reason": _request_value(type(exc).__name__, 80),
+        "stage": stage, "http_status": 503,
+        "endpoint": _request_value(request.endpoint, 160),
+    })
 
 
 def return_path(value):
@@ -126,16 +140,16 @@ def enforce_operator_access():
         # The matched Lax state cookie binds a provider return to the source
         # session. Strict browser-session cookies need not survive that return.
         return None
-    from core.helpers import AuthenticationRejected, get_authentication_result
+    from core.helpers import AuthenticationRejected, get_authentication_result, record_failed_authentication
     try:
         authentication = get_authentication_result()
+        record_failed_authentication(authentication)
         eligible = browser_eligible(authentication.context)
     except AuthenticationRejected:
         raise
     except Exception as exc:
-        request.environ["darklab_operator_denied"] = True
-        log.error("INSTANCE_OPERATOR_ACCESS_UNAVAILABLE", extra={"reason": type(exc).__name__, "http_status": 503})
-        return jsonify({"error": "operator_access_unavailable"}), 503
+        _log_unavailable(exc, stage="initial_check")
+        return unavailable_response()
     if authentication.failed and authentication.state != AuthenticationState.EXPIRED_CREDENTIAL:
         return hidden_response("ineligible")
     context = authentication.context
@@ -153,6 +167,10 @@ class OperatorAccessLost(RuntimeError):
     """A protected operation can no longer emit data or launch a probe."""
 
 
+class OperatorAccessUnavailable(RuntimeError):
+    """Live operator authority could not be checked because a dependency failed."""
+
+
 def recheck_access():
     """Re-resolve live authority at export and probe boundaries without the request cache."""
     try:
@@ -166,8 +184,9 @@ def recheck_access():
             raise OperatorAccessLost("operator access unavailable")
     except OperatorAccessLost:
         raise
-    except Exception:
-        raise OperatorAccessLost("operator access unavailable") from None
+    except Exception as exc:
+        _log_unavailable(exc, stage="live_check")
+        raise OperatorAccessUnavailable("operator access unavailable") from None
 
 
 def log_context():

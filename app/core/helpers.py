@@ -206,6 +206,28 @@ def get_authentication_result():
     return result
 
 
+def record_failed_authentication(result):
+    """Account for one rejected request before its caller chooses the response."""
+    import core.process as process_state  # noqa: PLC0415
+    from services.audit.context import request_audit_fields  # noqa: PLC0415
+    from services.auth.lifecycle import record_authentication_failure  # noqa: PLC0415
+    from services.auth.observability import log_credential_rate_limited  # noqa: PLC0415
+    from services.auth.rate_limit import check_failed_redemption  # noqa: PLC0415
+    from services.auth.resolver import public_lookup_id_from_headers  # noqa: PLC0415
+
+    if not result.failed or result.error_code == "anonymous_workspace_attached":
+        return
+    limited = check_failed_redemption(
+        get_client_ip(), public_lookup_id_from_headers(request.headers),
+        redis_client=process_state.redis_client,
+        enabled=bool(current_app.config.get("RATELIMIT_ENABLED", resolve_effective_cfg().rate_limit_enabled)),
+    )
+    if not limited.allowed:
+        log_credential_rate_limited(limited)
+        raise CredentialAuthenticationRateLimited(limited.retry_after)
+    record_authentication_failure(result, request_fields=request_audit_fields(request))
+
+
 def get_session_id():
     """Return the request's validated workspace or anonymous owner id."""
     from services.auth.resolver import (  # noqa: PLC0415

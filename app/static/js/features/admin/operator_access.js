@@ -1,6 +1,21 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
 
+export function operatorDestination(value) {
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || !['/auth/sign-in', '/admin/reauth'].includes(url.pathname)) return null;
+    if (['/admin', '/admin/'].includes(window.location.pathname)) {
+      const filters = new URLSearchParams();
+      for (const [key, item] of new URLSearchParams(window.location.search)) {
+        if (['view', 'search', 'group', 'source', 'warnings'].includes(key)) filters.set(key, item.slice(0, 256));
+      }
+      url.searchParams.set('next', '/admin/' + (filters.size ? '?' + filters.toString() : ''));
+    }
+    return url.pathname + url.search;
+  } catch { return null; }
+}
+
 /** Keep standalone operator pages private when a session or grant expires. */
 export function createOperatorAccess({ root = document.querySelector('main'), fetcher = fetch,
   navigate = path => window.location.assign(path) } = {}) {
@@ -8,13 +23,6 @@ export function createOperatorAccess({ root = document.querySelector('main'), fe
   const controllers = new Set();
   const lost = () => { throw new Error('Operator access unavailable'); };
   const verifyActive = () => { if (!active) lost(); };
-  const safeDestination = value => {
-    try {
-      const url = new URL(value, window.location.origin);
-      return url.origin === window.location.origin && ['/auth/sign-in', '/admin/reauth'].includes(url.pathname)
-        ? url.pathname + url.search : null;
-    } catch { return null; }
-  };
   function clear(message = 'Operator access is unavailable.') {
     active = false;
     clearInterval(timer);
@@ -51,7 +59,7 @@ export function createOperatorAccess({ root = document.querySelector('main'), fe
         controllers.delete(controller);
         clear(response.status === 401 ? 'Sign in or verify your identity to continue.' : undefined);
         const data = await response.json().catch(() => null);
-        const destination = safeDestination(data?.destination);
+        const destination = operatorDestination(data?.destination);
         if (destination) {
           const link = document.createElement('a');
           link.href = destination;

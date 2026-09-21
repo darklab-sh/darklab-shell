@@ -8,7 +8,7 @@ import pytest
 
 from admin_helpers import operator_db as _operator_db
 from core.database_access import get_db_connect
-from services.auth import operator_access, operator_grants
+from services.auth import browser_sessions, operator_access, operator_grants
 from services.auth.contracts import IdentityStorageError, timestamp
 from test_operator_reauthentication import ORIGIN, credential_setup
 
@@ -32,6 +32,22 @@ def test_audit_routes_use_top_level_urls(operator_db, monkeypatch):
         assert url_for("assets.diag_audit_export") == "/audit/export"
     for old_path in ("/diag/audit", "/diag/audit/export"):
         assert request(client, old_path).status_code == 404
+
+
+def test_diagnostics_distinguishes_withheld_configuration_from_unset(operator_db, monkeypatch):
+    import config_inspection
+
+    _app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch)
+    entries = {**config_inspection.catalog()}
+    entries["command_timeout_seconds"] = {**entries["command_timeout_seconds"], "disclosure": "withheld"}
+    monkeypatch.setattr(config_inspection, "catalog", lambda: entries)
+    data = request(client, "/diag?format=json").get_json()
+    assert data["config"]["command_timeout_seconds"] is None
+    assert data["config_withheld"] == ["command_timeout_seconds"]
+    html = request(client, "/diag").get_data(as_text=True)
+    row = html.split('command_timeout_seconds</td>', 1)[1].split('</tr>', 1)[0]
+    assert "Value withheld" in row
+    assert "—" not in row
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -95,27 +111,74 @@ def test_storage_failure_hides_operator_data(operator_db, monkeypatch):
     assert b"PRIVATE" not in response.data
 
 
+@pytest.mark.parametrize("path", ["/diag?format=json", "/diag/ai-test", "/audit/export"])
+def test_live_check_failure_returns_unavailable_and_one_safe_error(operator_db, monkeypatch, caplog, path):
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
+    def unavailable(*args, **kwargs):
+        raise OSError("PRIVATE_STORAGE_DETAILS")
+    monkeypatch.setattr(operator_access, "resolve_authentication", unavailable)
+    response = request(client, path, headers={"X-Darklab-CSRF": issued.csrf_token})
+    assert response.status_code == 503
+    assert response.get_json() == {"error": "operator_access_unavailable"}
+    assert response.headers["Cache-Control"] == "private, no-store"
+    [error] = [record for record in caplog.records if record.message == "INSTANCE_OPERATOR_ACCESS_UNAVAILABLE"]
+    assert error.levelname == "ERROR" and error.reason == "OSError" and error.stage == "live_check"
+    assert error.principal_id == bundle.principal.id and error.request_id and error.endpoint
+    assert error.exc_info is None
+    assert "PRIVATE_STORAGE_DETAILS" not in caplog.text + response.get_data(as_text=True)
+
+
 @pytest.mark.parametrize("format", ["csv", "json"])
-def test_export_stops_after_grant_revocation_and_never_logs_completion(operator_db, monkeypatch, caplog, format):
+@pytest.mark.parametrize("failure", ["revoked", "session", "verification", "storage"])
+def test_export_stops_after_access_failure_and_never_logs_completion(operator_db, monkeypatch, caplog, format, failure):
     import blueprints.assets as assets
     caplog.set_level("INFO", logger="shell")
-    _app, client, bundle, _issued = credential_setup(operator_db, monkeypatch)
+    _app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
     def pages(*args, **kwargs):
         yield {"events": [{"id": "first-safe-row"}], "truncated": False}
-        operator_grants.set_grant(bundle.principal.id, granted=False)
+        if failure == "revoked":
+            operator_grants.set_grant(bundle.principal.id, granted=False)
+        elif failure == "session":
+            browser_sessions.revoke_browser_session(issued.id, reason="test logout")
+            assert operator_grants.has_grant(bundle.principal.id)
+        elif failure == "verification":
+            with get_db_connect()() as conn:
+                conn.execute("UPDATE browser_sessions SET authenticated_at = ? WHERE id = ?",
+                             (timestamp(datetime.now(timezone.utc) - timedelta(hours=1)), issued.id))
+                conn.commit()
+            assert operator_grants.has_grant(bundle.principal.id)
+        else:
+            def unavailable(*args, **kwargs):
+                raise OSError("PRIVATE_STORAGE_DETAILS")
+            monkeypatch.setattr(operator_access, "has_grant", unavailable)
         yield {"events": [{"id": "must-not-escape"}], "truncated": False}
     monkeypatch.setattr(assets, "iter_event_pages", pages)
     response = request(client, "/audit/export?format=" + format, buffered=False)
     emitted = []
-    with pytest.raises(operator_access.OperatorAccessLost):
+    unavailable = failure == "storage"
+    with pytest.raises(operator_access.OperatorAccessUnavailable if unavailable else operator_access.OperatorAccessLost):
         for chunk in response.response:
             emitted.append(chunk)
     assert b"first-safe-row" in b"".join(emitted)
     assert b"must-not-escape" not in b"".join(emitted)
+    if format == "csv":
+        import csv
+        import io
+        rows = list(csv.DictReader(io.StringIO(b"".join(emitted).decode())))
+        assert [row["id"] for row in rows] == ["first-safe-row", "__access_unavailable__" if unavailable else "__access_lost__"]
+        assert rows[-1]["event_type"] == "export.interrupted"
+        assert "Discard this file" in rows[-1]["details"]
     assert not any(record.message == "DIAG_AUDIT_EXPORTED" for record in caplog.records)
     interrupted = [record for record in caplog.records if record.message == "DIAG_AUDIT_EXPORT_INTERRUPTED"]
     assert len(interrupted) == 1 and interrupted[0].principal_id == bundle.principal.id
-    assert interrupted[0].format == format and interrupted[0].reason == "access_lost"
+    assert interrupted[0].format == format
+    assert interrupted[0].reason == ("check_unavailable" if unavailable else "access_lost")
+    errors = [record for record in caplog.records if record.message == "INSTANCE_OPERATOR_ACCESS_UNAVAILABLE"]
+    assert len(errors) == int(unavailable)
+    if unavailable:
+        assert errors[0].reason == "OSError" and errors[0].stage == "live_check"
+        assert errors[0].principal_id == bundle.principal.id and errors[0].exc_info is None
+    assert "PRIVATE_STORAGE_DETAILS" not in caplog.text + b"".join(emitted).decode()
 
 
 def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch):
@@ -131,20 +194,28 @@ def test_ai_probe_requires_csrf_and_current_grant(operator_db, monkeypatch):
 
 def test_operator_probe_limit_is_shared_by_identity_and_fails_closed(monkeypatch):
     from core import process
+    from services.ai import coordination
     from services.ai.coordination import AICoordinationUnavailable, check_operator_test_rate_limit
     from conftest import build_test_config
     cfg = build_test_config({"ai_rate_limit_global_per_minute": 2})
     redis = process._FakeRedisClient()
+    now = [125.0]
+    monkeypatch.setattr(coordination.time, "time", lambda: now[0])
     assert check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
     assert not check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
     assert check_operator_test_rate_limit("operator-two", cfg=cfg, redis_client=redis).allowed
     denied = check_operator_test_rate_limit("operator-three", cfg=cfg, redis_client=redis)
     assert not denied.allowed and "busy" in denied.message
+    now[0] = 181.0  # Global capacity is free while the first operator's slot is still held.
+    assert check_operator_test_rate_limit("operator-three", cfg=cfg, redis_client=redis).allowed
+    assert not check_operator_test_rate_limit("operator-one", cfg=cfg, redis_client=redis).allowed
+    assert check_operator_test_rate_limit("operator-four", cfg=cfg, redis_client=redis).allowed
     def unavailable(*args, **kwargs):
         raise ConnectionError("private")
     monkeypatch.setattr(redis, "set", unavailable)
     with pytest.raises(AICoordinationUnavailable, match="AI coordination is unavailable"):
-        check_operator_test_rate_limit("operator-four", cfg=cfg, redis_client=redis)
+        check_operator_test_rate_limit("operator-five", cfg=cfg.with_overrides({"ai_rate_limit_global_per_minute": 10}),
+                                       redis_client=redis)
 
 
 def test_metrics_scrapes_are_independent_of_operator_identity(operator_db, monkeypatch):

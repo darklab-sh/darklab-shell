@@ -73,6 +73,8 @@ async function browseOperatorPages(page, appName, width, testInfo) {
 }
 
 async function browseInventory(page, inventory, width, testInfo) {
+  // This fixture replaces the inventory; discard filters for the earlier real rows.
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
   const base = inventory.settings.find(row => row.key === 'ai_allow_full_output');
   const data = { ...inventory, warnings: [], host_settings: inventory.host_settings.slice(0, 1), settings: [
     { ...base, key: 'alpha', label: 'Alpha value', group: 'Alpha group', description: 'Permitted long value',
@@ -437,10 +439,18 @@ for (const width of [1280, 375]) {
         await expect(page.locator('#admin-status')).toContainText('Try refreshing');
         await page.getByRole('button', { name: 'Refresh snapshot' }).click();
         await expect(page.locator('#admin-status')).toContainText('Snapshot loaded');
+        await page.getByRole('searchbox', { name: 'Search settings' }).fill('APP_PORT');
+        await choose(page, 'Source', 'Host · not observed');
+        await expect(page.locator('#admin-count')).toContainText('1 of');
+        const filteredAddress = new URL(page.url()).search;
         control('stale', slot, principal);
         await page.getByRole('button', { name: 'Refresh snapshot' }).click();
         await expect(page.getByRole('heading', { name: 'Verify operator access' })).toBeVisible();
         await verify(page, provider, credential);
+        expect(new URL(page.url()).search).toBe(filteredAddress);
+        await expect(page.getByRole('searchbox', { name: 'Search settings' })).toHaveValue('APP_PORT');
+        await expect(page.getByRole('button', { name: 'Source', exact: true })).toContainText('Host · not observed');
+        await expect(page.locator('#admin-count')).toContainText('1 of');
         expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain('playwright-only-secret');
         control('revoke', slot, principal);
         await page.getByRole('button', { name: 'Refresh snapshot' }).click();

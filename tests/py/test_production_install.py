@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
 EVIDENCE_BUILDER = ROOT / "scripts" / "release" / "build_release_evidence.py"
 RELEASE_PUBLISHER = ROOT / "scripts" / "release" / "publish_release_artifacts.sh"
-RELEASE_VERSION = "3.0.0"
+RELEASE_VERSION = "3.0.1"
 FINAL_VERSION = RELEASE_VERSION.partition("-rc.")[0]
 RC_ONE_VERSION = f"{FINAL_VERSION}-rc.1"
 RC_TWO_VERSION = f"{FINAL_VERSION}-rc.2"
@@ -41,7 +41,7 @@ NEXT_RC_VERSION = (
     if _CURRENT_RC_NUMBER
     else RC_TWO_VERSION
 )
-NEXT_VERSION = "3.0.1"
+NEXT_VERSION = "3.0.2"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
@@ -2136,18 +2136,16 @@ def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
     assert expected_error in result.stderr
 
 
-def test_trufflehog_build_patches_and_verifies_the_bundled_amqp_dependency():
+def test_trufflehog_build_verifies_the_upstream_amqp_dependency():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "ARG TRUFFLEHOG_VERSION=v3.97.0" in dockerfile
+    assert "ARG TRUFFLEHOG_VERSION=v3.97.5" in dockerfile
     assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0" in dockerfile
     build = dockerfile.split('RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}"', 1)[1]
     build = build.split("\nRUN ", 1)[0]
-    select_dependency = (
-        'go -C /tmp/trufflehog get "github.com/rabbitmq/amqp091-go@${TRUFFLEHOG_AMQP_VERSION}"'
-    )
     compile_tool = "go -C /tmp/trufflehog install"
     verify_binary = "sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog"
-    assert build.index(select_dependency) < build.index(compile_tool) < build.index(verify_binary)
+    assert "go -C /tmp/trufflehog get" not in build
+    assert build.index(compile_tool) < build.index(verify_binary)
     assert 'github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}"' in build
     assert "amqp091-go@${TRUFFLEHOG_AMQP_VERSION}/LICENSE" in build
     assert "/licenses/go-modules/amqp091-go.txt" in build

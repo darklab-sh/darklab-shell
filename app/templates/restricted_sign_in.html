@@ -18,6 +18,7 @@
       <h1 id="restricted-sign-in-title">{% if reauthentication %}Verify operator access{% else %}Sign in to {{ app_name }}{% endif %}</h1>
       {% if reauthentication %}<p>Verify your identity to inspect instance settings. This does not extend your browser session’s absolute expiry.</p>{% elif force_credential %}<p>Sign in again with your access credential to manage provider links for your workspace.</p>{% elif credential_sign_in_enabled %}<p>Enter an access credential supplied by your operator. It will be exchanged for a protected browser session and won't be stored in this page.</p>{% else %}<p>Continue with your identity provider to open your workspace.</p>{% endif %}
       {% if error %}<div class="restricted-sign-in-error" role="alert">{{ error }}</div>{% endif %}
+      {% if csrf_rejected %}<a class="btn btn-secondary" href="{{ url_for('auth.sign_in', next=next_path) }}">Sign in again</a>{% endif %}
       {% if oidc_sign_in_enabled %}
       {% if reauthentication %}
       <form method="post" action="{{ url_for('admin.reauthenticate') }}">

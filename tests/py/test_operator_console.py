@@ -216,8 +216,8 @@ def test_diagnostics_keeps_existing_config_disclosure():
         for key in keys:
             source, kind = DERIVED_SUMMARIES.get(key, (key, ""))
             before[key] = len(cfg[source]) if kind == "count" else bool(cfg[source]) if kind == "presence" else cfg[key]
-    after, truncated = diagnostic_values(before, cfg)
-    assert after == before and truncated == []
+    after, truncated, withheld = diagnostic_values(before, cfg)
+    assert after == before and truncated == [] and withheld == []
     assert "PRIVATE_" not in json.dumps(after)
 
 

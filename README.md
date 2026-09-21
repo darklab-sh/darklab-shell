@@ -35,13 +35,13 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Quick Start
 
-On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, create a new installation of release `3.0.0` with:
+On a Linux AMD64 or ARM64 host with Docker, Docker Compose 2.20.0 or newer, `curl`, `tar`, `gzip`, and a SHA-256 tool, create a new installation of release `3.0.1` with:
 
 ```bash
 # Change this if you want to install darklab_shell somewhere else.
 DARKLAB_INSTALL_DIR="$HOME/darklab-shell"
 
-curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
+curl -fsSL https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.1/setup.sh | sh -s -- --dir "$DARKLAB_INSTALL_DIR"
 cd "$DARKLAB_INSTALL_DIR"
 docker compose pull
 ./verify-release-image.sh
@@ -148,7 +148,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Authorized operators can use the read-only [Operator settings console](CONFIGURATION.md#operator-settings-console) to browse expandable setting groups, combine search and filters, and find readable input rules and host configuration guidance. The same principal grant and recent sign-in verification open Diagnostics and Audit log from the desktop More menu or mobile menu, from any network in a restricted sign-in profile. Metrics has a separate IP allowlist. Refresh keeps your place and expanded details. A local checker also validates proposed YAML when the application cannot start. Sensitive values remain withheld or summarized.
+Authorized operators can use the read-only [Operator settings console](CONFIGURATION.md#operator-settings-console) to browse expandable setting groups, combine search and filters, and find readable input rules and host configuration guidance. The same principal grant and recent sign-in verification open Diagnostics and Audit log from the desktop More menu or mobile menu, from any network in a restricted sign-in profile. Metrics has a separate IP allowlist. Refresh keeps your place and expanded details. A local checker also validates proposed YAML when the application cannot start. Sensitive values remain withheld or summarized. Local administrators can list current operator grants with `darklab-deploy access operator-list`.
 
 Released images keep shipped defaults under `/app/conf`; production installations keep private operator overrides under `./conf`, and source-mounted development uses `*.local.*` files beside the shipped catalogs. SQLite is the default database, with Postgres available for larger deployments.
 
@@ -235,8 +235,8 @@ If you prefer to inspect the exact release installer before it runs, download it
 ```bash
 mkdir darklab-shell-download
 cd darklab-shell-download
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/setup.sh.sha256
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.1/setup.sh
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.1/setup.sh.sha256
 sha256sum -c setup.sh.sha256
 less setup.sh
 ```
@@ -244,11 +244,11 @@ less setup.sh
 The checksum catches download corruption. To confirm that the checksum manifest came from this project's protected GitLab tag pipeline, install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/), download the signed manifest, and verify the exact release identity:
 
 ```bash
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/SHA256SUMS
-curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.0/SHA256SUMS.sigstore.json
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.1/SHA256SUMS
+curl -fSLO https://gitlab.com/api/v4/projects/darklab.sh%2Fdarklab_shell/packages/generic/darklab-shell-deploy/3.0.1/SHA256SUMS.sigstore.json
 cosign verify-blob SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v3.0.0" \
+  --certificate-identity "https://gitlab.com/darklab.sh/darklab_shell//.gitlab-ci.yml@refs/tags/v3.0.1" \
   --certificate-oidc-issuer "https://gitlab.com"
 grep '  setup.sh$' SHA256SUMS | sha256sum -c -
 ```

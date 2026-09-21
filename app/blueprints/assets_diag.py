@@ -49,6 +49,8 @@ def _require_diag_access() -> str:
         operator_access.recheck_access()
     except operator_access.OperatorAccessLost:
         abort(404)
+    except operator_access.OperatorAccessUnavailable:
+        abort(current_app.make_response(operator_access.unavailable_response()))
     return get_client_ip()
 
 
@@ -447,7 +449,7 @@ def diag():
         "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
     from config_inspection import diagnostic_values
-    result["config"], result["config_truncated"] = diagnostic_values(result["config"], CFG)
+    result["config"], result["config_truncated"], result["config_withheld"] = diagnostic_values(result["config"], CFG)
     result["raw_packets"] = raw_packet_diagnostics(CFG)
 
     # ── AI assists ───────────────────────────────────────────────────────────

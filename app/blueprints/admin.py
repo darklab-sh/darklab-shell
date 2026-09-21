@@ -3,7 +3,6 @@
 
 """Read-only operator console and verified session step-up."""
 
-import logging
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -15,6 +14,7 @@ from services.auth import lifecycle, oidc, operator_access, operator_reauth
 from services.auth.access_profile import active_config
 from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_COOKIE
 from services.auth.contracts import IdentityStorageError
+from services.auth.observability import log_operator_reauthentication_failed
 from services.auth.oidc_diagnostics import log_oidc_failure
 from services.auth.resolver import AuthenticatedContext, redeem_portable_credential
 
@@ -26,7 +26,6 @@ from .auth import (
 )
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
-log = logging.getLogger("shell")
 
 
 @admin_bp.route("/reauth", methods=["GET", "POST"])
@@ -34,6 +33,11 @@ def reauthenticate():
     context = g.operator_context
     next_path = operator_access.return_path(request.values.get("next"))
     error = "Verification couldn't be completed. Please try again." if request.args.get("error") else ""
+    if request.args.get("error") == "provider_freshness":
+        error = (
+            "Your identity provider didn't confirm a fresh sign-in. Operator access requires a signed auth_time "
+            "from a new authentication. Ask your operator to check the provider configuration before trying again."
+        )
     status = 200
     limited = None
     provider = context.credential_type == "oidc"
@@ -68,7 +72,7 @@ def reauthenticate():
                         request_fields=request_audit_fields(request),
                     )
                 except IdentityStorageError:
-                    log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={"reason": "source_unavailable"})
+                    log_operator_reauthentication_failed("source_unavailable")
                     return redirect("/admin/reauth?" + urlencode({"next": next_path, "error": "1"}))
                 response = redirect(next_path)
                 _set_browser_session_cookies(response, issued)
@@ -77,17 +81,25 @@ def reauthenticate():
                 limited = _redemption_limit(secret, failed=True)
                 if result.failed and limited.allowed:
                     lifecycle.record_authentication_failure(result, request_fields=request_audit_fields(request))
-            log.warning("INSTANCE_OPERATOR_REAUTH_FAILED", extra={"reason": "credential_rejected"})
+            log_operator_reauthentication_failed("credential_rejected" if limited.allowed else "rate_limited")
             error = "Verification failed. Use an active credential for this account."
             status = 400
             if not limited.allowed:
                 error, status = "Too many attempts. Wait a moment and try again.", 429
+    return render_reauthentication_form(error=error, status=status, limited=limited)
+
+
+def render_reauthentication_form(*, error="", status=200, limited=None, csrf_rejected=False):
+    """Render verification errors without replaying a rejected form submission."""
+    provider = g.operator_context.credential_type == "oidc"
+    next_path = operator_access.return_path(request.values.get("next"))
     theme = get_theme_entry(current_theme_name(), fallback=str(active_config().get("default_theme")))
     response = current_app.make_response(render_template(
         "restricted_sign_in.html", app_name=active_config()["app_name"], current_theme=theme,
         current_theme_css=theme["vars"], next_path=next_path, error=error,
         reauthentication=True, credential_sign_in_enabled=not provider, oidc_sign_in_enabled=provider,
         csrf_token=request.cookies.get(BROWSER_CSRF_COOKIE, ""),
+        csrf_rejected=csrf_rejected,
     ))
     response.status_code = status
     if status == 429 and limited is not None:
