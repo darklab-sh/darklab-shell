@@ -1629,6 +1629,7 @@ def _run_backend_smoke(conn: Any, *, backend: str) -> None:
     assert snapshot_row["content"] == "snapshot body"
 
 
+@pytest.mark.sqlite_backend
 def test_sqlite_backend_smoke_exercises_phase6_contract():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -8336,6 +8337,7 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     assert (tmp_path / pointer["rel_path"]).exists()
 
 
+@pytest.mark.postgres
 def test_postgres_lifecycle_milestones_wait_for_commit_and_deduplicate_revocation(
     postgres_schema, postgres_dsn, tmp_path, monkeypatch,
 ):

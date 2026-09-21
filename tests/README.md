@@ -166,6 +166,15 @@ npx playwright test --config .tooling/playwright.capture.mobile.config.js --list
 
 The direct Playwright commands above only list dedicated suites. Use `bash scripts/run_playwright.sh ...` for actual end-to-end runs so the approved helper handles assets, ports, isolated servers, and failure logs.
 
+The default Postgres helper runs live backend cases and Postgres operator variants.
+SQLite operator cases, SQLite FTS search, and offline backend/dialect/migration
+checks run in the required fast lane. Reporting-only options keep the helper
+selection; explicit pytest arguments retain their normal selection behavior.
+Small unmarked operator-policy checks remain alongside live cases; excluding
+only explicitly marked SQLite variants prevents a missing Postgres marker from
+silently losing integration coverage. Helper regressions exercise argument
+forwarding without a database or container.
+
 Playwright notes:
 
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. Each server keeps the shipped catalogs under `app/conf` and writes only its private settings overlay to a per-slot temporary directory. The helper uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `--asset-bundle-mode source` to debug source-file loading instead of the default bundles, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.

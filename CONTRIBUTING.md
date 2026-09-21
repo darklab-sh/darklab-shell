@@ -304,7 +304,11 @@ path.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
-integration tests against isolated test schemas. The helper uses
+integration tests against isolated test schemas. Its default selection excludes
+SQLite operator variants and offline dialect/migration checks, which remain in
+the required fast lane. Reporting-only flags such as `--durations=0` and
+`--junitxml=report.xml` extend that selection; explicit pytest selections replace
+it and retain SQLite variants when requested. The helper uses
 `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable
 Docker Postgres container and removes it and its anonymous volumes after the run. Use
 `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the

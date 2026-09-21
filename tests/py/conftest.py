@@ -302,6 +302,10 @@ def pytest_configure(config):
         "markers",
         "postgres: opt-in tests that require DARKLAB_TEST_POSTGRES_DSN or --postgres-dsn",
     )
+    config.addinivalue_line(
+        "markers",
+        "sqlite_backend: SQLite variants already covered by the required fast lane",
+    )
     xmlpath = getattr(config.option, "xmlpath", None)
     if xmlpath and not Path(xmlpath).is_absolute():
         config.option.xmlpath = str(ROOT_DIR / xmlpath)

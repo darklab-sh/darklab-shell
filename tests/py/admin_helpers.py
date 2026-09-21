@@ -16,7 +16,10 @@ from core.database_backend import DatabaseBackend, PostgresSqliteCompatConnectio
 from services.secrets.vault import reset_master_key_cache_for_tests
 
 
-@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+@pytest.fixture(params=[
+    pytest.param("sqlite", marks=pytest.mark.sqlite_backend),
+    pytest.param("postgres", marks=pytest.mark.postgres),
+])
 def operator_db(request, tmp_path, monkeypatch):
     data = tmp_path / "data"
     data.mkdir()

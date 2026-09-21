@@ -72,21 +72,38 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# Offline dialect/migration checks and SQLite variants run in the required fast
+# lane. Retain unmarked checks in the integration modules so missing markers
+# cannot silently remove live database coverage.
 default_args=(
   -q
   -c .tooling/pytest.ini
   --rootdir=.
+  -m 'not sqlite_backend'
   tests/py/test_postgres_backend.py
   tests/py/test_operator_grants.py
   tests/py/test_operator_console.py
   tests/py/test_operator_diagnostics.py
   tests/py/test_operator_reauthentication.py
-  tests/py/test_backend_modules.py::TestDatabaseBackend
-  tests/py/test_backend_modules.py::TestPostgresMigrations
-  tests/py/test_backend_modules.py::TestRunHistorySearchClauses
-  tests/py/test_backend_modules.py::TestPostgresMigrationHelper
-  tests/py/test_output_search.py
 )
+
+reporting_args_only() {
+  local value_pending=0 argument
+  for argument in "$@"; do
+    if [ "$value_pending" -eq 1 ]; then
+      value_pending=0
+      continue
+    fi
+    case "$argument" in
+      --durations|--durations-min|--junitxml|--junit-xml|--tb|--color|--capture|-r)
+        value_pending=1 ;;
+      --durations=*|--durations-min=*|--junitxml=*|--junit-xml=*|--tb=*|--color=*|--capture=*) ;;
+      -q|-qq|-v|-vv|-vvv|-s|-ra|-rx|--collect-only|--co|--no-header|--no-summary) ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
 
 wait_for_postgres() {
   "${PYTHON_BIN:-python}" - <<'PY'
@@ -169,8 +186,8 @@ if [ "$browser_mode" -eq 1 ]; then
   mode="container"
 fi
 
-if [ "$browser_mode" -eq 0 ] && [ "${#pytest_args[@]}" -eq 0 ]; then
-  pytest_args=("${default_args[@]}")
+if [ "$browser_mode" -eq 0 ] && reporting_args_only "${pytest_args[@]}"; then
+  pytest_args=("${default_args[@]}" "${pytest_args[@]}")
 fi
 if [ "$browser_mode" -eq 0 ] && [ -n "${PYTEST_JUNIT_XML:-}" ]; then
   pytest_args+=("--junitxml=${PYTEST_JUNIT_XML}")

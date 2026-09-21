@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **The Postgres test lane avoids repeating fast-lane coverage.** Its default selection keeps live Postgres integration and operator cases, while SQLite variants and offline database checks remain in the required fast lane. Timing and report flags retain the default selection; explicit focused arguments still run exactly the requested cases.
+
 - **Shell and shared pages send smaller theme payloads.** Their inline registry omits the unused duplicate theme map while keeping the same palettes, selector previews, and export variables. Server-side theme definitions and `/themes` remain unchanged.
 
 - **CI preserves timing evidence from successful test runs.** Pytest reports collection and per-case setup, call, teardown, and process CPU costs; Playwright traces retain per-spec/project attempt timings, navigation percentiles, asset mode, and effective worker/server counts. Reports omit credentials, environment values, and captured application output.
