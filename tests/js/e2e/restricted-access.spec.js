@@ -54,7 +54,7 @@ test.describe('restricted access profile', () => {
       visibleCookies: document.cookie,
     }))
     expect(localIdentity.credential).toBeNull()
-    expect(localIdentity.anonymous).toBeNull()
+    expect(localIdentity.anonymous).toBe('legacy-anonymous-value')
     expect(localIdentity.visibleCookies).not.toContain('darklab_browser_session=')
     expect(localIdentity.visibleCookies).toContain('darklab_csrf=')
 

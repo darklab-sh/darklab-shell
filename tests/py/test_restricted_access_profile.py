@@ -449,7 +449,7 @@ def test_operator_bootstrap_is_one_time_and_writes_only_an_owner_file(
     reset_master_key_cache_for_tests()
 
 
-def test_open_mode_keeps_anonymous_identity_and_does_not_issue_browser_cookies(
+def test_open_mode_preserves_anonymous_access_and_redeems_protected_browser_cookies(
     anonymous_identity_factory,
 ):
     from conftest import make_test_app
@@ -457,6 +457,8 @@ def test_open_mode_keeps_anonymous_identity_and_does_not_issue_browser_cookies(
     client = make_test_app().test_client()
     anonymous = anonymous_identity_factory("restricted-open-mode")
     client.set_cookie(BROWSER_SESSION_COOKIE, "stale-restricted-session")
+    assert client.get("/config", headers=anonymous.headers).status_code == 401
+    assert client.post("/auth/logout", headers={"Origin": "http://localhost"}).status_code == 204
     config_response = client.get("/config", headers=anonymous.headers)
     assert config_response.status_code == 200
     assert config_response.get_json()["access_profile"] == "open"
@@ -468,7 +470,11 @@ def test_open_mode_keeps_anonymous_identity_and_does_not_issue_browser_cookies(
         json={"secret": upgraded.get_json()["secret"]},
     )
     assert redeemed.status_code == 200
-    assert not any(
-        header.startswith(BROWSER_SESSION_COOKIE + "=")
+    assert any(
+        header.startswith(BROWSER_SESSION_COOKIE + "=") and "HttpOnly" in header and "Secure" in header
         for header in redeemed.headers.getlist("Set-Cookie")
     )
+    current = client.get("/auth/principal")
+    assert current.status_code == 200
+    assert current.get_json()["authentication"]["authentication_method"] == "browser_cookie"
+    assert client.get("/config", headers=anonymous.headers).status_code == 401

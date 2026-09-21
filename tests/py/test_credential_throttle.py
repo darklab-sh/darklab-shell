@@ -174,9 +174,10 @@ def test_operator_denials_consume_the_shared_http_budget(monkeypatch, profile, p
     app = application.create_app(cfg)
     app.config.update(TESTING=True, RATELIMIT_ENABLED=True)
     client = app.test_client()
-    expected = 404 if profile == "open" else 302
     for _ in range(2):
-        assert client.get(path, base_url="https://localhost").status_code == expected
+        response = client.get(path, base_url="https://localhost")
+        assert response.status_code == 302
+        assert "/auth/sign-in?next=" in response.headers["Location"]
     with monkeypatch.context() as patch:
         patch.setattr(
             resolver, "resolve_authentication", lambda *_args, **_kwargs: pytest.fail("Throttled request resolved identity")

@@ -14,7 +14,7 @@ from services.audit.recorder import record_event
 from services.storage.transactions import run_read, run_transaction
 from services.workspace.models import WorkspaceSettings
 
-from . import storage
+from . import browser_sessions, storage
 from .contracts import (
     CredentialMetadata,
     InvalidIdentityValue,
@@ -53,34 +53,59 @@ def create_principal(
 ) -> PrincipalBundle:
     events = LifecycleEvents("anonymous_upgrade", request_fields)
 
-    def operation(conn: Any) -> PrincipalBundle:
-        bundle = storage.create_principal_with_credential(
-            anonymous_id=anonymous_id,
-            credential_label=credential_label,
-            settings=settings,
-            conn=conn,
+    return events.run(lambda conn: _create_principal(
+        conn, events, anonymous_id, credential_label, settings, request_fields,
+    ), connect=connect)
+
+
+def create_browser_principal(
+    *, anonymous_id: str, credential_label: str = "", absolute_seconds: int,
+    settings: WorkspaceSettings | None = None, request_fields: Mapping[str, Any] | None = None,
+    connect: Callable[[], Any] | None = None,
+) -> tuple[PrincipalBundle, browser_sessions.IssuedBrowserSession]:
+    """Attach a workspace and create its browser session in the same transaction."""
+    events = LifecycleEvents("anonymous_upgrade", request_fields)
+
+    def operation(conn: Any) -> tuple[PrincipalBundle, browser_sessions.IssuedBrowserSession]:
+        bundle = _create_principal(conn, events, anonymous_id, credential_label, settings, request_fields)
+        issued = browser_sessions.create_browser_session(
+            principal_id=bundle.principal.id, credential_id=bundle.credential.metadata.id,
+            absolute_seconds=absolute_seconds, conn=conn,
         )
-        record_event(
-            AuditEventType.PRINCIPAL_CREATE,
-            target_type=AuditTargetType.PRINCIPAL,
-            target_id=bundle.principal.id,
-            details={"source": "anonymous_upgrade"},
-            conn=conn,
-            **_audit_fields(request_fields),
-        )
-        record_event(
-            AuditEventType.CREDENTIAL_CREATE,
-            target_type=AuditTargetType.CREDENTIAL,
-            target_id=bundle.credential.metadata.id,
-            details=_credential_details(bundle.credential.metadata, source="anonymous_upgrade"),
-            conn=conn,
-            **_audit_fields(request_fields),
-        )
-        events.principal("PRINCIPAL_CREATED", bundle.principal)
-        events.credential("CREDENTIAL_CREATED", bundle.credential.metadata)
-        return bundle
+        return bundle, issued
 
     return events.run(operation, connect=connect)
+
+
+def _create_principal(
+    conn: Any, events: LifecycleEvents, anonymous_id: str, credential_label: str,
+    settings: WorkspaceSettings | None, request_fields: Mapping[str, Any] | None,
+) -> PrincipalBundle:
+    bundle = storage.create_principal_with_credential(
+        anonymous_id=anonymous_id,
+        credential_label=credential_label,
+        settings=settings,
+        conn=conn,
+    )
+    record_event(
+        AuditEventType.PRINCIPAL_CREATE,
+        target_type=AuditTargetType.PRINCIPAL,
+        target_id=bundle.principal.id,
+        details={"source": "anonymous_upgrade"},
+        conn=conn,
+        **_audit_fields(request_fields),
+    )
+    record_event(
+        AuditEventType.CREDENTIAL_CREATE,
+        target_type=AuditTargetType.CREDENTIAL,
+        target_id=bundle.credential.metadata.id,
+        details=_credential_details(bundle.credential.metadata, source="anonymous_upgrade"),
+        conn=conn,
+        **_audit_fields(request_fields),
+    )
+    events.principal("PRINCIPAL_CREATED", bundle.principal)
+    events.credential("CREDENTIAL_CREATED", bundle.credential.metadata)
+    return bundle
 
 
 def operator_bootstrap(

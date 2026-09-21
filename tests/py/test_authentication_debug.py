@@ -26,13 +26,13 @@ from services.auth.browser_sessions import BROWSER_SESSION_COOKIE, create_browse
     ("cookie", "browser_cookie", "valid", "personal", "browser_cookie"),
     ("malformed", "rejected", "malformed_credential", "none", "portable_header"),
     ("conflict", "rejected", "malformed_credential", "none", "portable_header,browser_cookie"),
-    ("ignored_cookie", "portable_header", "valid", "personal", "portable_header,browser_cookie"),
+    ("open_conflict", "rejected", "malformed_credential", "none", "portable_header,browser_cookie"),
 ])
 @pytest.mark.parametrize("level", [logging.DEBUG, logging.INFO])
 def test_cached_resolution_logs_safe_branch_once(tmp_path, monkeypatch, kind, method, state, owner, transports, level):
     monkeypatch.setattr(database, "DB_PATH", str(copy_pristine_sqlite_database(tmp_path / "debug.db")))
     app = make_test_app()
-    restricted = kind != "ignored_cookie"
+    restricted = kind != "open_conflict"
     app.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": "token_required" if restricted else "open"})
     app.config["RATELIMIT_ENABLED"] = False
     identity = principal_identity("authentication debug")
@@ -44,13 +44,13 @@ def test_cached_resolution_logs_safe_branch_once(tmp_path, monkeypatch, kind, me
     headers = {}
     if kind == "anonymous":
         headers["X-Darklab-Anonymous-ID"] = anonymous
-    if kind in {"portable", "conflict", "ignored_cookie"}:
+    if kind in {"portable", "conflict", "open_conflict"}:
         headers["X-Darklab-Credential"] = identity.portable_secret
     if kind == "pat":
         headers["Authorization"] = f"Bearer {identity.pat_secret}"
     if kind == "malformed":
         headers["X-Darklab-Credential"] = "private-invalid-credential-canary"
-    if kind in {"cookie", "conflict", "ignored_cookie"}:
+    if kind in {"cookie", "conflict", "open_conflict"}:
         headers["Cookie"] = f"{BROWSER_SESSION_COOKIE}={issued.cookie_value}"
 
     records = []
@@ -78,15 +78,15 @@ def test_cached_resolution_logs_safe_branch_once(tmp_path, monkeypatch, kind, me
     assert record.msg == "AUTHENTICATION_RESOLVED" and record.levelno == logging.DEBUG
     assert record.method == method and record.state == state and record.owner_kind == owner
     assert record.supplied_transports == transports
-    assert record.browser_cookie_enabled is restricted
-    assert record.last_used_write_due is (True if kind in {"portable", "pat", "ignored_cookie"} else None)
+    assert record.browser_cookie_enabled is True
+    assert record.last_used_write_due is (True if kind in {"portable", "pat"} else None)
     assert record.request_id == "auth-debug-request"
     assert set(_extra_fields(record)) == {
         "request_id", "endpoint", "method", "state", "owner_kind", "supplied_transports",
         "browser_cookie_enabled", "last_used_write_due",
     }
     gelf = json.loads(GELFFormatter().format(record))
-    assert gelf["_method"] == method and gelf["_browser_cookie_enabled"] is restricted
+    assert gelf["_method"] == method and gelf["_browser_cookie_enabled"] is True
     rendered = _TextFormatter().format(record) + json.dumps(gelf)
     for private in (
         identity.principal_id, credential_id, identity.portable_secret, identity.pat_secret,

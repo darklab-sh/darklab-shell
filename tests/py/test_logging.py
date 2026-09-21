@@ -664,7 +664,7 @@ class TestConfigStartupLogging:
         ({"oidc_redirect_uri": "https://[private-invalid-host"}, "oidc_redirect_uri", "invalid_redirect_uri", True),
         ({"oidc_provisioning": "allowlist"}, "oidc_allowed_subjects", "allowlist_required", True),
         ({"oidc_allowed_subjects": ["private-subject"]}, "oidc_allowed_subjects", "allowlist_not_enabled", True),
-        ({"access_profile": "open", "oidc_provisioning": "automatic"},
+        ({"access_profile": "token_required", "oidc_provisioning": "automatic"},
          "oidc_provisioning", "access_profile_disallows_provisioning", True),
         ({"access_profile": "open", "browser_session_idle_minutes": 61, "browser_session_absolute_hours": 1},
          "browser_session_idle_minutes", "idle_exceeds_absolute", False),

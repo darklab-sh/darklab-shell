@@ -98,10 +98,18 @@ async function openFullMobileHistoryPanel(page) {
 }
 
 // Granted operator layout and timezone coverage lives in operator-console.spec.js.
-test('open-profile diagnostics remain unavailable on mobile', async ({ page }) => {
+test('open-profile diagnostics require sign-in on mobile', async ({ page }) => {
   await page.setViewportSize(MOBILE)
-  expect((await page.request.get('/diag?tz_offset=0')).status()).toBe(404)
-  expect((await page.request.get('/audit')).status()).toBe(404)
+  for (const path of ['/diag?tz_offset=0', '/audit']) {
+    const denied = await page.request.get(path, { maxRedirects: 0 })
+    expect(denied.status()).toBe(302)
+    expect(new URL(denied.headers().location, denied.url()).pathname).toBe('/auth/sign-in')
+    await page.goto(path)
+    await expect(page).toHaveURL(url => url.pathname === '/auth/sign-in')
+    await expect(page.getByRole('heading', { name: 'Sign in to darklab_shell' })).toBeVisible()
+    await expect(page.locator('body.diag-page')).toHaveCount(0)
+    await expect(page.locator('.diag-audit-table')).toHaveCount(0)
+  }
 })
 
 test.describe('mobile menu', () => {

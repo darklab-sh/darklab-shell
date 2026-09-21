@@ -32,6 +32,7 @@ from services.commands.registry import (
 from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, resolve_theme
 from services.auth.operator_access import navigation_eligible
+from services.auth.access_profile import browser_identity_payload
 from services.theme_payload import browser_theme_registry
 from services.intel.registry import app_native_secret_consumers, provider_status_catalog
 from services.assessments.batch.settings import assessment_batch_settings
@@ -151,6 +152,7 @@ def _frontend_config_payload():
         "max_tabs":              cfg["max_tabs"],
         "history_panel_limit":      cfg["history_panel_limit"],
         "access_profile":          str(cfg.get("access_profile") or "open"),
+        "browser_identity":        browser_identity_payload(),
         "public_shares_enabled":    str(cfg.get("access_profile") or "open") == "open"
         or bool(cfg.get("restricted_public_shares_enabled", False)),
         "command_timeout_seconds":  cfg["command_timeout_seconds"],

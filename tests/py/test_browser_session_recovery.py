@@ -13,13 +13,13 @@ from services.auth import browser_sessions, storage
 from services.workspace.models import WorkspaceSettings
 
 
-@pytest.fixture
-def browser_identity(tmp_path, monkeypatch):
+@pytest.fixture(params=["open", "token_required"])
+def browser_identity(tmp_path, monkeypatch, request):
     path = copy_pristine_sqlite_database(tmp_path / "recovery.db")
     monkeypatch.setattr(database, "DB_PATH", str(path))
     app = make_test_app()
     app.config["RATELIMIT_ENABLED"] = False
-    app.config["DARKLAB_CONFIG"] = {**app.config["DARKLAB_CONFIG"], "access_profile": "token_required"}
+    app.config["DARKLAB_CONFIG"] = {**app.config["DARKLAB_CONFIG"], "access_profile": request.param}
     settings = WorkspaceSettings(True, "volume", tmp_path / "workspaces", 1024, 1024, 10, 1)
     settings.root.mkdir()
     with get_db_connect()() as conn:
@@ -52,7 +52,9 @@ def test_stale_session_logout_clears_both_cookies_only_from_same_origin(browser_
         client.set_cookie(browser_sessions.BROWSER_SESSION_COOKIE, "invalid-cookie")
     if state == "absent":
         client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE)
-    assert client.get("/projects", base_url="https://localhost").status_code == 401
+    # With no identity at all, open routes still need an anonymous workspace id.
+    # Check the identity boundary directly instead of entering a scoped handler.
+    assert client.get("/auth/principal", base_url="https://localhost").status_code == 401
     for origin in (None, "https://attacker.example", "null", "https://localhost.attacker.example"):
         response = client.post("/auth/logout", base_url="https://localhost", headers={"Origin": origin} if origin else {})
         assert response.status_code == 403
@@ -62,7 +64,8 @@ def test_stale_session_logout_clears_both_cookies_only_from_same_origin(browser_
     assert "no-store" in response.headers["Cache-Control"]
     assert client.get_cookie(browser_sessions.BROWSER_SESSION_COOKIE) is None
     assert client.get_cookie(browser_sessions.BROWSER_CSRF_COOKIE) is None
-    assert client.get("/", base_url="https://localhost").status_code == 302
+    open_profile = client.application.config["DARKLAB_CONFIG"]["access_profile"] == "open"
+    assert client.get("/", base_url="https://localhost").status_code == (200 if open_profile else 302)
 
 
 def test_valid_session_logout_still_requires_session_csrf(browser_identity):

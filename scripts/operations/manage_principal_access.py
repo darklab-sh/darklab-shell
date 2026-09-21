@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = ROOT / "app"
 sys.path.insert(0, str(APP_ROOT))
 
-from config import CFG  # noqa: E402
+from config import CFG, resolve_effective_cfg  # noqa: E402
 from core.logging_setup import configure_logging  # noqa: E402
 from runtime_bootstrap import init_database  # noqa: E402
-from services.auth import lifecycle, operator_grants  # noqa: E402
+from services.auth import lifecycle, oidc, operator_grants  # noqa: E402
 from services.auth.suspended_work import operator_suspended_work  # noqa: E402
 from services.auth.browser_sessions import (  # noqa: E402
     revoke_principal_browser_sessions,
@@ -154,7 +154,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "operator-list":
         return operator_grants.list_grants(limit=args.limit, after=args.after)
     if args.command == "operator-status":
-        return operator_grants.grant_status(args.principal_id)
+        cfg = resolve_effective_cfg()
+        profile = str(cfg.get("access_profile") or "open")
+        methods = []
+        if profile in {"open", "token_required", "mixed"}:
+            methods.append("portable")
+        if profile in {"open", "oidc_required", "mixed"} and oidc.configured(cfg):
+            methods.append("oidc")
+        return {
+            **operator_grants.grant_status(args.principal_id),
+            "eligibility_scope": "principal_grant",
+            "local_access_policy": {
+                "source": "cli_configuration",
+                "access_profile": profile,
+                "sign_in_methods": methods,
+                "browser_session_required": True,
+                "reauthentication_minutes": int(cfg.get("admin_console_reauth_minutes", 30)),
+            },
+            "serving_application": {"observed": False},
+            "browser_verification": {"observed": False},
+        }
     if args.command in {"operator-grant", "operator-revoke"}:
         return operator_grants.set_grant(args.principal_id, granted=args.command == "operator-grant")
     if args.command == "bootstrap":

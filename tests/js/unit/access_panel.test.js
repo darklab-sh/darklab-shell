@@ -157,6 +157,30 @@ describe('Access panel', () => {
     expect(document.body.innerHTML).not.toContain(SECRET)
   })
 
+  it('preserves the one-time recovery credential when the browser rejects the attached session', async () => {
+    globalThis.__accessPanelTest.apiFetch.mockResolvedValue(await response({ secret: SECRET }))
+    const session = await import('../../../app/static/js/session.js')
+    session.activateAccessCredential.mockImplementationOnce(() => { throw new Error('Sign-in needs HTTPS and browser cookies.') })
+    await import('../../../app/static/js/features/preferences/access_panel.js')
+
+    document.getElementById('options-access-keep-btn').click()
+    document.querySelector('#options-access-editor .btn-primary').click()
+
+    const reveal = document.getElementById('options-access-reveal')
+    await vi.waitFor(() => expect(reveal.hidden).toBe(false))
+    expect(reveal.textContent).toContain('workspace was kept')
+    expect(reveal.textContent).toContain('HTTPS with browser cookies enabled')
+    expect(document.getElementById('options-access-keep-btn').disabled).toBe(true)
+    expect(globalThis.__accessPanelTest.apiFetch).toHaveBeenCalledTimes(1)
+    expect(session.redirectToSignIn).not.toHaveBeenCalled()
+    ;[...reveal.querySelectorAll('button')].find(button => button.textContent === 'Copy').click()
+    await vi.waitFor(() => expect(globalThis.__accessPanelTest.copy).toHaveBeenCalledWith(SECRET))
+    ;[...reveal.querySelectorAll('button')].find(button => button.textContent === 'I saved it').click()
+    await vi.waitFor(() => expect(session.redirectToSignIn).toHaveBeenCalled())
+    expect(reveal.hidden).toBe(true)
+    expect(document.body.innerHTML).not.toContain(SECRET)
+  })
+
   it('does not switch identity when credential redemption fails', async () => {
     globalThis.__accessPanelTest.apiFetch.mockImplementation((url) => (
       url === '/auth/credentials/redeem'

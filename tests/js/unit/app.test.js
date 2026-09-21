@@ -1409,6 +1409,20 @@ describe('app helpers', () => {
     expect(getPromptUsernamePreference()).toBe('restored-operator')
   })
 
+  it('restores preferences with the runtime identity before browser test globals exist', async () => {
+    const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const { loadSessionPreferences, getPromptUsernamePreference } = await loadAppFns({ apiFetch })
+    delete window.SESSION_ID
+    let finishLoad
+    apiFetch.mockImplementationOnce(() => new Promise(resolve => { finishLoad = resolve }))
+    const loading = loadSessionPreferences()
+    // Test hooks may attach after startup; production does not expose this global.
+    window.SESSION_ID = 'late-test-global'
+    finishLoad({ ok: true, json: async () => ({ preferences: { pref_prompt_username: 'runtime-owner' } }) })
+    await loading
+    expect(getPromptUsernamePreference()).toBe('runtime-owner')
+  })
+
   it('ignores an older preference response after a newer workspace load finishes', async () => {
     const apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
     const { loadSessionPreferences, getPromptUsernamePreference } = await loadAppFns({ apiFetch })

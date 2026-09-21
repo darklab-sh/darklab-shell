@@ -16,11 +16,11 @@ from services.auth.browser_sessions import BROWSER_CSRF_COOKIE, BROWSER_SESSION_
 from services.auth.contracts import timestamp
 
 
-@pytest.fixture
-def app(tmp_path, monkeypatch):
+@pytest.fixture(params=["open", "token_required"])
+def app(tmp_path, monkeypatch, request):
     monkeypatch.setattr(database, "DB_PATH", str(copy_pristine_sqlite_database(tmp_path / "sessions.db")))
     application = make_test_app()
-    application.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": "token_required"})
+    application.config["DARKLAB_CONFIG"] = build_test_config({"access_profile": request.param})
     application.config["RATELIMIT_ENABLED"] = False
     return application
 

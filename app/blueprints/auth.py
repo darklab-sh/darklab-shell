@@ -9,6 +9,7 @@ import base64
 import hmac
 import logging
 import secrets
+from dataclasses import replace
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit
 
@@ -96,11 +97,11 @@ _SIGN_IN_NONCE_MAX_AGE = 600
 
 
 def _oidc_sign_in_enabled() -> bool:
-    return active_profile() in {"oidc_required", "mixed"} and oidc.configured(active_config())
+    return active_profile() in {"open", "oidc_required", "mixed"} and oidc.configured(active_config())
 
 
 def _credential_sign_in_enabled() -> bool:
-    return active_profile() in {"token_required", "mixed"}
+    return active_profile() in {"open", "token_required", "mixed"}
 
 
 def _payload() -> dict:
@@ -176,8 +177,6 @@ def _valid_sign_in_nonce(form_value: str) -> bool:
 
 @auth_bp.route("/sign-in", methods=["GET", "POST"])
 def sign_in():
-    if not is_restricted():
-        return redirect("/")
     next_path = safe_next_path(request.values.get("next"))
     force_credential = _credential_sign_in_enabled() and request.values.get("force") == "credential"
     error = "Provider sign-in couldn't be completed. Please try again." if request.args.get("oidc_error") else ""
@@ -237,6 +236,7 @@ def sign_in():
         credential_sign_in_enabled=_credential_sign_in_enabled(),
         oidc_sign_in_enabled=_oidc_sign_in_enabled() and not force_credential,
         force_credential=force_credential,
+        anonymous_access_enabled=active_profile() == "open",
     )))
     response.set_cookie(
         _SIGN_IN_NONCE_COOKIE,
@@ -309,7 +309,7 @@ def oidc_start():
 
 @auth_bp.get("/oidc/callback")
 def oidc_callback():
-    if not _oidc_sign_in_enabled() and not (is_restricted() and oidc.configured(active_config())):
+    if not oidc.configured(active_config()):
         return current_app.response_class(status=404)
     expected = urlsplit(str(active_config().get("oidc_redirect_uri") or ""))
     if request.host.lower() != expected.netloc.lower() or request.path != expected.path:
@@ -323,6 +323,10 @@ def oidc_callback():
             str(request.args.get("state") or ""),
             str(request.cookies.get(oidc.OIDC_STATE_COOKIE) or ""),
         )
+        if flow.purpose == "sign_in" and not _oidc_sign_in_enabled():
+            raise oidc.OIDCError(
+                "Provider sign-in is disabled.", stage="callback_validation", reason="sign_in_disabled",
+            )
         if request.args.get("error"):
             raise oidc.OIDCError(
                 "The provider declined the sign-in request.", stage="provider_authorization", reason="provider_denied",
@@ -377,7 +381,7 @@ def _recent_browser_session(context: AuthenticatedContext) -> bool:
 
 @auth_bp.post("/oidc/link")
 def oidc_link():
-    if not is_restricted() or not oidc.configured(active_config()):
+    if not oidc.configured(active_config()):
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
@@ -406,7 +410,7 @@ def oidc_link():
 
 @auth_bp.get("/oidc/identity")
 def oidc_identity():
-    if not is_restricted() or not oidc.configured(active_config()):
+    if not oidc.configured(active_config()):
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     linked = oidc.find_identity(context.principal_id, str(active_config()["oidc_issuer"]))
@@ -415,7 +419,7 @@ def oidc_identity():
 
 @auth_bp.post("/oidc/unlink")
 def oidc_unlink():
-    if not is_restricted() or not oidc.configured(active_config()):
+    if not oidc.configured(active_config()):
         return current_app.response_class(status=404)
     context = require_authenticated_context()
     if not _recent_credential_session(context):
@@ -502,17 +506,29 @@ def create_principal():
             "retry_after": limited.retry_after,
         }), 429
     try:
-        bundle = lifecycle.create_principal(
-            anonymous_id=result.context.anonymous_id,
-            credential_label=str(_payload().get("label") or ""),
-            request_fields=_request_fields(),
-        )
+        payload = _payload()
+        browser = payload.get("browser_session", False)
+        if not isinstance(browser, bool):
+            raise InvalidIdentityValue("browser_session must be a boolean")
+        options = dict(anonymous_id=result.context.anonymous_id,
+                       credential_label=str(payload.get("label") or ""), request_fields=_request_fields())
+        issued = None
+        if browser:
+            bundle, issued = lifecycle.create_browser_principal(**options, absolute_seconds=_session_cookie_seconds())
+        else:
+            bundle = lifecycle.create_principal(**options)
     except (IdentityStorageError, PermissionError) as exc:
         return _error(exc)
     response = jsonify({
         **bundle.to_safe_dict(),
         "secret": bundle.credential.secret,
     })
+    if issued is not None:
+        _set_browser_session_cookies(response, issued)
+        log.info("BROWSER_SESSION_CREATED", extra={
+            "principal_id": bundle.principal.id, "credential_id": bundle.credential.metadata.id,
+            "source": "anonymous_upgrade",
+        })
     return _no_store(response), 201
 
 
@@ -547,18 +563,20 @@ def redeem():
         log_authentication_rejected(result.error_code)
         return jsonify({"error": result.error_code or "invalid_credential", "message": result.message}), 401
     lifecycle.record_redemption(result.context, request_fields=_request_fields())
-    response = _no_store(jsonify({"authentication": _context_payload(result.context)}))
-    if is_restricted():
-        issued = _issue_browser_session(result.context)
-        _set_browser_session_cookies(response, issued)
-        log.info(
-            "BROWSER_SESSION_CREATED",
-            extra={
-                "principal_id": result.context.principal_id,
-                "credential_id": result.context.credential_id,
-                "source": "credential_redemption",
-            },
-        )
+    issued = _issue_browser_session(result.context)
+    context = replace(result.context, authentication_method="browser_cookie", browser_session_id=issued.id,
+                      browser_session_authenticated_at=issued.created_at,
+                      browser_session_absolute_expires_at=issued.absolute_expires_at)
+    response = _no_store(jsonify({"authentication": _context_payload(context)}))
+    _set_browser_session_cookies(response, issued)
+    log.info(
+        "BROWSER_SESSION_CREATED",
+        extra={
+            "principal_id": result.context.principal_id,
+            "credential_id": result.context.credential_id,
+            "source": "credential_redemption",
+        },
+    )
     return response
 
 
@@ -606,8 +624,6 @@ def current_principal():
 def logout():
     context = get_authentication_result().context
     if not isinstance(context, AuthenticatedContext):
-        if not is_restricted():
-            require_authenticated_context()
         # Invalid sessions cannot pass the normal session-backed CSRF check.
         # Only a same-origin browser POST may clear their leftover cookies.
         if request.headers.get("Origin") != request.host_url.rstrip("/"):
@@ -633,7 +649,7 @@ def logout():
 @auth_bp.post("/sessions/revoke-all")
 def revoke_all_sessions():
     context = require_authenticated_context()
-    if active_profile() in {"oidc_required", "mixed"} and not _recent_browser_session(context):
+    if not _recent_browser_session(context):
         return jsonify({
             "error": "recent_authentication_required",
             "message": "Sign in again before revoking every browser session.",

@@ -13,6 +13,7 @@ import pytest
 from admin_helpers import operator_db as _operator_db
 
 from core.database_access import get_db_connect
+from conftest import build_test_config
 from services.auth import operator_grants, storage
 from services.auth.contracts import PrincipalDisabled
 
@@ -109,6 +110,49 @@ def test_local_list_pages_current_grants_and_reports_disabled_principals(operato
     for target in (active, disabled):
         operator_grants.set_grant(target, granted=False)
     assert operator_grants.list_grants() == {"operators": [], "next_after": None}
+
+
+@pytest.mark.parametrize("profile,methods", [
+    ("open", ["portable", "oidc"]), ("token_required", ["portable"]),
+    ("oidc_required", ["oidc"]), ("mixed", ["portable", "oidc"]),
+])
+@pytest.mark.parametrize("state", ["active", "disabled", "ungranted"])
+def test_operator_status_distinguishes_grant_policy_and_unobserved_browser(
+    operator_db, monkeypatch, capsys, profile, methods, state,
+):
+    target = principal()
+    if state != "ungranted":
+        operator_grants.set_grant(target, granted=True)
+    if state == "disabled":
+        with get_db_connect()() as conn:
+            conn.execute("UPDATE principals SET status = 'disabled', disabled_at = ? WHERE id = ?",
+                         ("2026-09-20T00:00:00+00:00", target))
+            conn.commit()
+    path = Path(__file__).resolve().parents[2] / "scripts/operations/manage_principal_access.py"
+    spec = importlib.util.spec_from_file_location("operator_status_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cfg = build_test_config({"access_profile": profile, "admin_console_reauth_minutes": 12,
+                             "oidc_issuer": "https://provider.example", "oidc_client_id": "test-client",
+                             "oidc_client_secret": "private-provider-secret",
+                             "oidc_redirect_uri": "https://shell.example/auth/oidc/callback"})
+    monkeypatch.setattr(module, "resolve_effective_cfg", lambda: cfg)
+    monkeypatch.setattr(module, "_require_container", lambda: None)
+    monkeypatch.setattr(module, "configure_logging", lambda *args, **kwargs: None)
+    assert module.main(["operator-status", target]) == 0
+    output = capsys.readouterr().out
+    assert "private-provider-secret" not in output
+    result = json.loads(output)
+    assert result["eligible"] is (state == "active")
+    assert result["granted"] is (state != "ungranted")
+    assert result["eligibility_scope"] == "principal_grant"
+    assert result["local_access_policy"] == {
+        "source": "cli_configuration", "access_profile": profile, "sign_in_methods": methods,
+        "browser_session_required": True, "reauthentication_minutes": 12,
+    }
+    assert result["serving_application"] == {"observed": False}
+    assert result["browser_verification"] == {"observed": False}
 
 
 @pytest.mark.parametrize("audit_enabled", [True, False])

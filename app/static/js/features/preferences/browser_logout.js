@@ -18,6 +18,7 @@ export async function logOutCurrentBrowser() {
   if (identity.kind === 'browser_session') {
     const response = await apiFetch('/auth/logout', { method: 'POST', cache: 'no-store' });
     if (!response.ok) throw new Error('Could not log out. Try again.');
+    clearAccessCredential({ freshAnonymous: false });
     redirectToSignIn();
   } else if (identity.kind === 'credential') {
     clearAccessCredential();

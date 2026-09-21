@@ -60,6 +60,27 @@ describe('session.js', () => {
     expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('client-123')
   })
 
+  it('blocks old-page writes when another tab changes its browser session', async () => {
+    const location = { reload: vi.fn() }
+    const { apiFetch, fetchCalls, browserDocument } = loadSession({
+      cookie: 'darklab_csrf=old-proof', location,
+    })
+    await apiFetch('/auth/principal')
+    browserDocument.cookie = 'darklab_csrf=new-proof'
+    await expect(apiFetch('/session/preferences', { method: 'POST' })).rejects.toThrow('another tab')
+    expect(fetchCalls).toHaveLength(1)
+    expect(location.reload).toHaveBeenCalledOnce()
+  })
+
+  it('blocks old-page writes during a credential navigation handoff', async () => {
+    const { apiFetch, activateAccessCredential, fetchCalls, browserDocument } = loadSession()
+    await apiFetch('/config')
+    browserDocument.cookie = 'darklab_csrf=new-proof'
+    activateAccessCredential(`dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`, { refresh: false })
+    await expect(apiFetch('/session/preferences', { method: 'POST' })).rejects.toThrow('changing')
+    expect(fetchCalls).toHaveLength(1)
+  })
+
   it('apiFetch preserves existing headers while adding the anonymous identity header', async () => {
     const { apiFetch, fetchCalls } = loadSession({
       storageData: { anonymous_id: 'session-abc', client_id: 'client-abc' },
@@ -77,10 +98,11 @@ describe('session.js', () => {
     })
   })
 
-  for (const profile of ['token_required', 'oidc_required', 'mixed']) it(`${profile} removes reusable identity storage and relies on the browser session cookie`, async () => {
+  for (const profile of ['open', 'token_required', 'oidc_required', 'mixed']) it(`${profile} removes reusable identity storage and relies on the browser session cookie`, async () => {
     const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
     const { apiFetch, fetchCalls, getBrowserIdentitySnapshot, storage } = loadSession({
       appConfig: { access_profile: profile },
+      cookie: 'darklab_csrf=csrf-token-value',
       storageData: {
         anonymous_id: 'old-anonymous-id',
         access_credential: secret,
@@ -90,7 +112,7 @@ describe('session.js', () => {
 
     await apiFetch('/config')
 
-    expect(storage.getItem('anonymous_id')).toBeNull()
+    expect(storage.getItem('anonymous_id')).toBe('old-anonymous-id')
     expect(storage.getItem('access_credential')).toBeNull()
     expect(getBrowserIdentitySnapshot()).toEqual({
       kind: 'browser_session',
@@ -103,7 +125,7 @@ describe('session.js', () => {
     expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('restricted-client')
   })
 
-  for (const profile of ['token_required', 'oidc_required', 'mixed']) it(`${profile} copies the CSRF cookie into unsafe request headers`, async () => {
+  for (const profile of ['open', 'token_required', 'oidc_required', 'mixed']) it(`${profile} copies the CSRF cookie into unsafe request headers`, async () => {
     const { apiFetch, fetchCalls } = loadSession({
       appConfig: { access_profile: profile },
       cookie: 'darklab_csrf=csrf-token-value; preference=value',
@@ -225,13 +247,27 @@ describe('session.js', () => {
 
   it('activateAccessCredential switches the local identity at runtime', () => {
     const secret = `dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`
-    const { _getSessionId, activateAccessCredential } = loadSession({
+    const { _getSessionId, activateAccessCredential, browserDocument } = loadSession({
       storageData: { anonymous_id: 'original-uuid' },
     })
 
     expect(_getSessionId()).toBe('original-uuid')
+    browserDocument.cookie = 'darklab_csrf=csrf-value'
     activateAccessCredential(secret)
     expect(_getSessionId()).toBe(`crd_${'c'.repeat(32)}`)
+  })
+
+  it('blocks retired anonymous requests while a rejected attachment cookie is recovered', async () => {
+    const { apiFetch, fetchCalls, activateAccessCredential, storage } = loadSession({
+      storageData: { anonymous_id: 'original-uuid' },
+    })
+
+    expect(() => activateAccessCredential(`dlc_v1_crd_${'c'.repeat(32)}_${'d'.repeat(43)}`, { attached: true }))
+      .toThrow('Sign-in needs HTTPS and browser cookies.')
+    await expect(apiFetch('/history')).rejects.toThrow('Browser access is changing.')
+    expect(fetchCalls).toHaveLength(0)
+    expect(storage.getItem('access_credential')).toBeNull()
+    expect(storage.getItem('browser_session')).toBeNull()
   })
 
   it('rejects browser credentials that do not match the portable server format', () => {
@@ -248,24 +284,27 @@ describe('session.js', () => {
     }
   })
 
-  it('apiFetch sends the stored credential after activation', async () => {
+  it('apiFetch uses the cookie after activation without storing or sending the credential', async () => {
     const secret = `dlc_v1_crd_${'e'.repeat(32)}_${'f'.repeat(43)}`
-    const { apiFetch, fetchCalls, activateAccessCredential } = loadSession({
+    const { apiFetch, fetchCalls, activateAccessCredential, browserDocument, storage } = loadSession({
       storageData: { anonymous_id: 'original-uuid' },
     })
 
+    browserDocument.cookie = 'darklab_csrf=csrf-value'
     activateAccessCredential(secret)
     await apiFetch('/history')
 
-    expect(fetchCalls[0][1].headers['X-Darklab-Credential']).toBe(secret)
+    expect(fetchCalls[0][1].headers['X-Darklab-Credential']).toBeUndefined()
+    expect(storage.getItem('access_credential')).toBeNull()
     expect(fetchCalls[0][1].headers['X-Darklab-Anonymous-ID']).toBeUndefined()
   })
 
   it('credential activation reloads identity-bound preferences', () => {
     const loadSessionPreferences = vi.fn(() => Promise.resolve())
-    const { activateAccessCredential } = loadSession({
+    const { activateAccessCredential, browserDocument } = loadSession({
       storageData: { anonymous_id: 'original-uuid' },
     })
+    browserDocument.cookie = 'darklab_csrf=csrf-value'
     window.loadSessionPreferences = loadSessionPreferences
 
     activateAccessCredential(`dlc_v1_crd_${'1'.repeat(32)}_${'2'.repeat(43)}`)
@@ -368,5 +407,45 @@ describe('session.js', () => {
         new StorageEvent('storage', { key: 'access_credential', newValue: null }),
       )
     }).not.toThrow()
+  })
+})
+
+
+describe('saved browser credential exchange', () => {
+  const secret = `dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`
+
+  it('exchanges once and reloads before concurrent workspace reads can change owners', async () => {
+    const location = { reload: vi.fn() }
+    const fetchImpl = vi.fn(async () => {
+      session.browserDocument.cookie = 'darklab_csrf=csrf-proof'
+      return new Response(JSON.stringify({ authentication: { credential_id: `crd_${'a'.repeat(32)}` } }))
+    })
+    const session = loadSession({ storageData: { access_credential: secret }, fetchImpl, location })
+    const results = await Promise.allSettled([session.apiFetch('/history'), session.apiFetch('/projects')])
+    expect(results.every(result => result.status === 'rejected')).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toBe('/auth/credentials/redeem')
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ secret })
+    expect(location.reload).toHaveBeenCalledOnce()
+    expect(session.storage.getItem('access_credential')).toBeNull()
+    expect(session.getBrowserIdentitySnapshot().kind).toBe('browser_session')
+  })
+
+  it('keeps failed exchanges blocked and does not repeat credential guesses for every request', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: 'revoked_credential' }), { status: 401 }))
+    const session = loadSession({ storageData: { access_credential: secret }, fetchImpl })
+    for (const path of ['/history', '/projects', '/log']) expect((await session.apiFetch(path)).status).toBe(401)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(session.storage.getItem('access_credential')).toBe(secret)
+    expect(session.getBrowserIdentitySnapshot().kind).toBe('credential')
+  })
+
+  it('does not turn a missing cookie into anonymous access after a session was established', async () => {
+    const location = { pathname: '/', replace: vi.fn() }
+    const session = loadSession({ storageData: { browser_session: 'crd_public', anonymous_id: 'old-anonymous' }, location,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ error: 'credential_required' }), { status: 401 })) })
+    await session.apiFetch('/auth/principal')
+    expect(location.replace).toHaveBeenCalledWith('/auth/sign-in?next=%2F')
+    expect(session.getBrowserIdentitySnapshot().kind).toBe('browser_session')
   })
 })

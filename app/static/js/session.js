@@ -4,6 +4,7 @@
 // ── Shared utility module ──
 import { DarklabSessionCore as importedSessionCore } from './core/session_core.js';
 import { getAppConfig as importedGetAppConfig } from './core/config.js';
+import { redeemStoredCredential as importedRedeemStoredCredential, rememberBrowserSession as importedRememberBrowserSession } from './core/browser_credentials.js';
 import { loadSessionPreferences as importedLoadSessionPreferences } from './features/preferences/preferences.js';
 import { loadSessionVariables as importedLoadSessionVariables } from './features/autocomplete/runtime_context.js';
 import { getActiveTeamId as importedGetActiveTeamId } from './features/team_scope.js';
@@ -15,8 +16,7 @@ import {
   refreshOptionsSecrets as importedRefreshOptionsSecrets,
 } from './features/preferences/secrets_bridge.js';
 
-// Browser identity uses either one portable access credential or one anonymous
-// UUID. Reusable credential secrets stay out of UI state and cache keys.
+// Authenticated browsers use a protected cookie; anonymous browsers use a UUID.
 var SessionCore = typeof importedSessionCore !== 'undefined' && importedSessionCore
   ? importedSessionCore
   : null;
@@ -59,9 +59,19 @@ function _generateUUID() {
   return _sessionCore().generateUUID(cryptoApi);
 }
 
-function _restrictedBrowserSessionEnabled() {
+function _browserSessionEnabled() {
   const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
-  return ['token_required', 'oidc_required', 'mixed'].includes(config?.access_profile);
+  return ['token_required', 'oidc_required', 'mixed'].includes(config?.access_profile)
+    || Boolean(_cookieValue('darklab_csrf')) || Boolean(_sessionStorage().getItem('browser_session'));
+}
+
+function _browserSessionIdentity({ initial = false } = {}) {
+  const config = typeof importedGetAppConfig === 'function' ? importedGetAppConfig() : {};
+  const saved = _sessionStorageApi.getItem('browser_session');
+  const loaded = config?.browser_identity?.credential_id || config?.browser_identity?.principal_id;
+  const publicId = (initial ? loaded : saved) || loaded || saved || 'browser-session';
+  _sessionStorageApi.setItem('browser_session', publicId);
+  return Object.freeze({ kind: 'browser_session', publicId });
 }
 
 function _cookieValue(name) {
@@ -77,6 +87,8 @@ var _sessionUuid = '';
 var _browserIdentity = null;
 var CLIENT_ID = '';
 var SESSION_ID = '';
+var _sessionCsrfToken = '';
+var _identityNavigationPending = false;
 const SESSION_REFRESH_TASKS = [
   'reloadSessionHistory',
   'loadSessionPreferences',
@@ -95,13 +107,14 @@ function _ensureSessionIdentity() {
   const core = _sessionCore();
   _sessionStorageApi = _sessionStorage();
   CLIENT_ID = core.getOrCreateStorageValue(_sessionStorageApi, 'client_id', _generateUUID);
-  if (_restrictedBrowserSessionEnabled()) {
+  _sessionCsrfToken = _cookieValue('darklab_csrf');
+  if (_browserSessionEnabled()) {
     // A credential redeemed by the server must never survive in browser
     // storage or enter normal application JavaScript.
     _sessionStorageApi.removeItem('access_credential');
-    _sessionStorageApi.removeItem('anonymous_id');
-    _sessionUuid = '';
-    _browserIdentity = Object.freeze({ kind: 'browser_session', publicId: 'browser-session' });
+    // Keep an unrelated anonymous workspace available after explicit sign-out.
+    _sessionUuid = _sessionStorageApi.getItem('anonymous_id') || '';
+    _browserIdentity = _browserSessionIdentity({ initial: true });
     SESSION_ID = _browserIdentity.publicId;
     return;
   }
@@ -129,7 +142,7 @@ function _sessionLogRefreshTaskFailed(task, err, reason) {
   _sessionLogEvent('session refresh task failed', 'SESSION_REFRESH_TASK_FAILED', 'warning', {
     task,
     reason,
-    authenticated: _browserIdentity?.kind === 'credential',
+    authenticated: _browserIdentity?.kind === 'browser_session',
   });
   if (typeof console !== 'undefined' && typeof console.warn === 'function') {
     console.warn(`[client] session refresh task failed: ${task}`, err);
@@ -139,7 +152,7 @@ function _sessionLogRefreshTaskFailed(task, err, reason) {
 function _sessionLogIdentityUpdated(reason) {
   _sessionLogEvent('session identity updated', 'SESSION_ID_UPDATED', 'info', {
     reason,
-    authenticated: _browserIdentity?.kind === 'credential',
+    authenticated: _browserIdentity?.kind === 'browser_session',
     refresh_tasks: SESSION_REFRESH_TASKS,
   });
 }
@@ -200,8 +213,8 @@ function _emitIdentityChanged(reason) {
 
 function _applyIdentityChange(reason) {
   _ensureSessionIdentity();
-  _browserIdentity = _restrictedBrowserSessionEnabled()
-    ? Object.freeze({ kind: 'browser_session', publicId: 'browser-session' })
+  _browserIdentity = _browserSessionEnabled()
+    ? _browserSessionIdentity()
     : _sessionCore().resolveBrowserIdentity(_sessionStorageApi, _sessionUuid);
   SESSION_ID = _browserIdentity.publicId;
   _sessionLogIdentityUpdated(reason);
@@ -221,33 +234,43 @@ function _applyIdentityChange(reason) {
   _emitIdentityChanged(reason);
 }
 
-function activateAccessCredential(secret) {
+function activateAccessCredential(secret, { attached = false, refresh = true } = {}) {
   _ensureSessionIdentity();
-  if (_restrictedBrowserSessionEnabled()) {
-    _sessionStorageApi.removeItem('access_credential');
-    _applyIdentityChange('browser-session-activated');
-    return;
-  }
   const normalized = String(secret || '').trim();
   if (!_sessionCore().credentialPublicId(normalized).startsWith('crd_')) {
     throw new Error('Invalid access credential format');
   }
-  _sessionStorageApi.setItem('access_credential', normalized);
-  _applyIdentityChange('credential-activated');
+  if (!_cookieValue('darklab_csrf')) {
+    // Attachment already retired the anonymous identity. Keep this page still
+    // while Access reveals the recovery credential, without more scoped calls.
+    if (attached) _identityNavigationPending = true;
+    throw new Error('Sign-in needs HTTPS and browser cookies.');
+  }
+  _sessionCsrfToken = _cookieValue('darklab_csrf');
+  importedRememberBrowserSession(_sessionStorageApi, { credential_id: _sessionCore().credentialPublicId(normalized) });
+  if (attached) {
+    // The former anonymous identity is retired by attachment. Do not reuse it.
+    _sessionUuid = _generateUUID();
+    _sessionStorageApi.setItem('anonymous_id', _sessionUuid);
+  }
+  if (refresh) _applyIdentityChange('browser-session-activated');
+  else _identityNavigationPending = true;
 }
 
 function clearAccessCredential({ freshAnonymous = true } = {}) {
   _ensureSessionIdentity();
   const hadCredential = _browserIdentity?.kind === 'credential';
   _sessionStorageApi.removeItem('access_credential');
-  if (_restrictedBrowserSessionEnabled()) {
-    _applyIdentityChange('browser-session-cleared');
+  _sessionStorageApi.removeItem('browser_session');
+  _credentialMigration = null;
+  if (_browserSessionEnabled()) {
     return;
   }
   if (freshAnonymous && hadCredential) {
     _sessionUuid = _generateUUID();
     _sessionStorageApi.setItem('anonymous_id', _sessionUuid);
   }
+  _sessionUuid ||= _sessionCore().getOrCreateStorageValue(_sessionStorageApi, 'anonymous_id', _generateUUID);
   _applyIdentityChange('credential-removed');
 }
 
@@ -266,7 +289,7 @@ function getBrowserIdentitySnapshot() {
   return Object.freeze({
     kind: _browserIdentity.kind,
     anonymousId: _browserIdentity.kind === 'anonymous' ? _browserIdentity.anonymousId : '',
-    credentialId: _browserIdentity.kind === 'credential' && _browserIdentity.publicId !== 'credential-invalid'
+    credentialId: _browserIdentity.publicId.startsWith('crd_')
       ? _browserIdentity.publicId
       : '',
     validFormat: _browserIdentity.kind === 'browser_session' || _browserIdentity.publicId !== 'credential-invalid',
@@ -277,7 +300,12 @@ function getBrowserIdentitySnapshot() {
 // directly because the storage event only fires in the other tabs.
 if (SESSION_GLOBAL && typeof SESSION_GLOBAL.addEventListener === 'function') {
   SESSION_GLOBAL.addEventListener('storage', (e) => {
-    if (e.key === 'access_credential' || e.key === 'anonymous_id') _applyIdentityChange('storage-event');
+    if (['access_credential', 'anonymous_id', 'browser_session'].includes(e.key)) {
+      _credentialMigration = null;
+      if (e.key === 'browser_session') {
+        SESSION_GLOBAL.location?.reload?.();
+      } else _applyIdentityChange('storage-event');
+    }
   });
 }
 
@@ -299,6 +327,29 @@ function redirectToSignIn() {
 
 async function apiFetch(url, options = {}) {
   _ensureSessionIdentity();
+  if (_identityNavigationPending) throw new Error('Browser access is changing.');
+  if (_browserIdentity.kind === 'browser_session' && _cookieValue('darklab_csrf') !== _sessionCsrfToken) {
+    _identityNavigationPending = true;
+    SESSION_GLOBAL.location?.reload?.();
+    throw new Error('Browser access changed in another tab.');
+  }
+  if (_browserIdentity.kind === 'credential' && url !== '/auth/credentials/redeem') {
+    if (!_credentialMigration) {
+      _credentialMigration = importedRedeemStoredCredential(_sessionStorageApi);
+    }
+    const migration = await _credentialMigration;
+    if (migration && !migration.ok) return migration.clone();
+    _browserIdentity = _browserSessionIdentity();
+    SESSION_ID = _browserIdentity.publicId;
+    _sessionCsrfToken = _cookieValue('darklab_csrf');
+    // Server-rendered navigation and all cached state must belong to this
+    // session before any normal request continues under its authority.
+    if (!_identityNavigationPending) {
+      _identityNavigationPending = true;
+      SESSION_GLOBAL.location?.reload?.();
+    }
+    throw new Error('Browser sign-in completed. Reloading.');
+  }
   const requestOptions = _sessionCore().withIdentityHeaders(options, _browserIdentity, CLIENT_ID);
   const teamId = typeof importedGetActiveTeamId === 'function'
     ? importedGetActiveTeamId()
@@ -307,7 +358,7 @@ async function apiFetch(url, options = {}) {
     requestOptions.headers = Object.assign({}, requestOptions.headers || {}, { 'X-Team-ID': teamId });
   }
   const method = String(requestOptions.method || 'GET').toUpperCase();
-  if (_restrictedBrowserSessionEnabled() && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+  if (_browserSessionEnabled() && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
     const csrfToken = _cookieValue('darklab_csrf');
     if (csrfToken) {
       requestOptions.headers = Object.assign({}, requestOptions.headers || {}, {
@@ -316,7 +367,12 @@ async function apiFetch(url, options = {}) {
     }
   }
   const response = await fetch(url, requestOptions);
-  if (_restrictedBrowserSessionEnabled() && response.status === 401) {
+  // A successful local mutation may rotate the session (for example Team roles).
+  // Other tabs detect that cookie change before sending another scoped request.
+  if (response.ok && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+    _sessionCsrfToken = _cookieValue('darklab_csrf');
+  }
+  if (_browserSessionEnabled() && response.status === 401) {
     try {
       const payload = await response.clone().json();
       const code = typeof payload.error === 'string' ? payload.error : payload.error?.code;
@@ -327,6 +383,8 @@ async function apiFetch(url, options = {}) {
   }
   return response;
 }
+
+var _credentialMigration = null;
 
 function describeFetchError(err, context = 'server') {
   return _sessionCore().describeFetchError(err, context);

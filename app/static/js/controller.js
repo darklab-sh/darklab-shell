@@ -1387,6 +1387,7 @@ if (typeof window !== 'undefined') {
 }
 
 export {
+  shellStartup,
   acAutocompleteIsHintOnly,
   acAutocompleteNextSelectableIndex,
   acAutocompleteSelectableItems,

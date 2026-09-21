@@ -198,6 +198,18 @@ def test_resolver_distinguishes_every_principal_credential_state(auth_db, tmp_pa
     assert disabled.state == AuthenticationState.DISABLED_PRINCIPAL
 
 
+@pytest.mark.parametrize("header", ["X-Darklab-Credential", "X-Darklab-Anonymous-ID", "Authorization", "X-Session-ID"])
+def test_stale_cookie_recovery_cannot_ignore_explicit_identity_headers(header):
+    from conftest import make_test_app
+    from services.auth.browser_sessions import BROWSER_SESSION_COOKIE
+
+    client = make_test_app().test_client()
+    client.set_cookie(BROWSER_SESSION_COOKIE, "invalid-cookie")
+    assert client.get("/").status_code == 302
+    for path in ("/", "/auth/sign-in"):
+        assert client.get(path, headers={header: ""}).status_code == 401
+
+
 def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_path):
     now = datetime.now(timezone.utc)
     bundle = storage.create_principal_with_credential(settings=_settings(tmp_path), conn=auth_db)
@@ -474,11 +486,12 @@ def test_auth_routes_reveal_new_secrets_once_and_fail_closed(anonymous_identity_
     assert redeemed.status_code == 200
     assert secret not in redeemed.get_data(as_text=True)
 
-    attached_history = client.get("/history", headers=headers)
+    attached_history = client.get("/history")
     assert attached_history.status_code == 200
+    assert client.get("/history", headers=headers).get_json()["error"] == "multiple_credentials"
 
     unknown = _unknown_secret()
-    rejected = client.get("/history", headers={"X-Darklab-Credential": unknown})
+    rejected = flask_app.test_client().get("/history", headers={"X-Darklab-Credential": unknown})
     assert rejected.status_code == 401
     assert rejected.get_json()["error"] == "unknown_credential"
     with get_db_connect()() as conn:
@@ -1333,3 +1346,42 @@ def test_public_share_survives_upgrade_and_mutation_rekeys_to_workspace(anonymou
     assert client.get(f"/share/{share_id}").status_code == 200
     assert client.delete(f"/share/{share_id}", headers=headers).status_code == 200
     assert client.get(f"/share/{share_id}").status_code == 404
+
+
+@pytest.mark.parametrize("fail_session", [False, True])
+def test_browser_workspace_attachment_commits_session_and_ownership_together(
+    anonymous_identity_factory, monkeypatch, fail_session,
+):
+    from conftest import make_test_app
+    from services.auth import browser_sessions
+    from services.auth.contracts import IdentityStorageError
+
+    application = make_test_app()
+    application.config["RATELIMIT_ENABLED"] = False
+    client = application.test_client()
+    anonymous = anonymous_identity_factory(f"browser-attachment-atomic-{fail_session}")
+    if fail_session:
+        def fail(**_kwargs):
+            raise IdentityStorageError("private-session-failure")
+        monkeypatch.setattr(browser_sessions, "create_browser_session", fail)
+    response = client.post("/auth/principals", headers=anonymous.headers,
+                           json={"label": "Browser", "browser_session": True})
+    assert b"private-session-failure" not in response.data
+    if fail_session:
+        assert response.status_code == 500
+        assert not response.headers.getlist("Set-Cookie")
+        # Failure must leave the original workspace available for another attempt.
+        assert client.get("/projects", headers=anonymous.headers).status_code == 200
+    else:
+        assert response.status_code == 201
+        cookie = client.get_cookie(browser_sessions.BROWSER_SESSION_COOKIE)
+        assert cookie is not None and cookie.http_only and cookie.secure
+        principal = client.get("/auth/principal").get_json()
+        assert principal["principal"]["id"] == response.get_json()["principal"]["id"]
+        assert principal["authentication"]["browser_session"]
+        assert client.post("/auth/credentials", json={"label": "Other device"}).status_code == 403
+        csrf = client.get_cookie(browser_sessions.BROWSER_CSRF_COOKIE).value
+        assert client.post("/auth/credentials", json={"label": "Other device"},
+                           headers={"X-Darklab-CSRF": csrf}).status_code == 201
+        retired = application.test_client().get("/projects", headers=anonymous.headers)
+        assert retired.status_code == 401 and retired.get_json()["error"] == "anonymous_workspace_attached"

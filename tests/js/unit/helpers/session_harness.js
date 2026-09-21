@@ -17,6 +17,7 @@ export function loadSession({
   }
 
   const fetchCalls = []
+  const browserDocument = { cookie }
   const fetchFn =
     fetchImpl ||
     ((url, options) => {
@@ -26,6 +27,7 @@ export function loadSession({
 
   const fns = fromDomScripts(
     [
+      'app/static/js/core/browser_credentials.js',
       'app/static/js/core/session_core.js',
       'app/static/js/session.js',
     ],
@@ -34,7 +36,7 @@ export function loadSession({
       crypto: { randomUUID },
       fetch: fetchFn,
       getAppConfig: () => appConfig,
-      document: { cookie },
+      document: browserDocument,
       ...(location ? { window: { location } } : {}),
     },
     `{
@@ -49,5 +51,5 @@ export function loadSession({
   }`,
   )
 
-  return { ...fns, storage, fetchCalls }
+  return { ...fns, storage, fetchCalls, browserDocument }
 }

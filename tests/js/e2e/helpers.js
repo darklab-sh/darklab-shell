@@ -215,31 +215,33 @@ export async function browserSessionId(page) {
 export async function browserRequestIdentityHeaders(page) {
   await waitForE2ETestHooks(page)
   return page.evaluate(() => {
-    const credential = localStorage.getItem('access_credential') || ''
-    if (credential) return { 'X-Darklab-Credential': credential }
+    const csrf = document.cookie.split(';').map(value => value.trim()).find(value => value.startsWith('darklab_csrf='))
+    if (csrf) return { 'X-Darklab-CSRF': decodeURIComponent(csrf.slice('darklab_csrf='.length)) }
     return { 'X-Darklab-Anonymous-ID': localStorage.getItem('anonymous_id') || '' }
   })
 }
 
-export async function keepBrowserWorkspace(page, { label = 'Playwright browser', timeout = 30_000 } = {}) {
+export async function keepBrowserWorkspace(page, { label = 'Playwright browser', timeout = 30_000, returnCredential = false } = {}) {
   await waitForE2ETestHooks(page, { timeout })
-  const credentialId = await page.evaluate(async (credentialLabel) => {
+  const issued = await page.evaluate(async (credentialLabel) => {
     const response = await apiFetch('/auth/principals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: credentialLabel }),
+      body: JSON.stringify({ label: credentialLabel, browser_session: true }),
     })
     if (!response.ok) {
       throw new Error(`workspace keep failed: ${response.status}`)
     }
     const payload = await response.json()
-    localStorage.setItem('access_credential', payload.secret)
-    return payload.credential.id
+    localStorage.setItem('browser_session', payload.credential.id)
+    localStorage.setItem('anonymous_id', crypto.randomUUID())
+    return { id: payload.credential.id, secret: payload.secret }
   }, label)
   await page.reload({ waitUntil: 'domcontentloaded' })
   await ensurePromptReady(page, { timeout })
-  await expect.poll(() => page.evaluate(() => SESSION_ID), { timeout: 15_000 }).toBe(credentialId)
-  return credentialId
+  await expect.poll(() => page.evaluate(() => SESSION_ID), { timeout: 15_000 }).toBe(issued.id)
+  expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+  return returnCredential ? issued : issued.id
 }
 
 export function seedExternalHistoryRuns(testInfo, { sessionId, commands }) {
