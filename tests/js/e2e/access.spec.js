@@ -26,6 +26,16 @@ async function openAccess(page) {
   await expect(panel).toHaveAttribute('data-access-panel-bound', '1')
 }
 
+async function redeemAccessCredential(page, secret) {
+  await page.locator('#options-access-redemption-input').fill(secret)
+  await Promise.all([
+    page.waitForURL(url => url.searchParams.get('options') === 'access', { waitUntil: 'domcontentloaded' }),
+    page.locator('#options-access-redemption-apply').click(),
+  ])
+  await ensurePromptReady(page)
+  await expect(page.locator('#options-panel-access')).toHaveAttribute('data-access-panel-bound', '1')
+}
+
 async function saveCredentialReveal(page) {
   const reveal = page.locator('#options-access-reveal')
   await expect(reveal).toBeVisible()
@@ -299,8 +309,7 @@ test.describe('workspace Access', () => {
       }
       page.on('request', countCredentialReads)
       await page.locator('#options-access-use-btn').click()
-      await page.locator('#options-access-redemption-input').fill(replacementSecret)
-      await page.locator('#options-access-redemption-apply').click()
+      await redeemAccessCredential(page, replacementSecret)
       await expect(page.locator('#options-prompt-username-input')).toHaveValue('restored-operator')
       await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
       await expectAccessActions(page, 'kept')
@@ -323,8 +332,7 @@ test.describe('workspace Access', () => {
       await expect(page.locator('body')).not.toContainText(replacementSecret)
 
       await page.locator('#options-access-use-btn').click()
-      await page.locator('#options-access-redemption-input').fill(primarySecret)
-      await page.locator('#options-access-redemption-apply').click()
+      await redeemAccessCredential(page, primarySecret)
       await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
 
       await primaryRow.getByRole('button', { name: 'Revoke' }).click()

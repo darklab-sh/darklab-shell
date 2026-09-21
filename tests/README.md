@@ -333,7 +333,7 @@ Restricted-browser share checks verify disabled snapshot controls at desktop and
 
 Access browser journeys use separate test client IPs so anonymous issuance quotas don't leak between tests. Rate-limit checks still exercise the configured limits. Credential expiry journeys use dates 30 days after the runner clock, so active credentials don't become expired as the calendar advances; explicit expiry-rejection cases remain separate. Route and operator rotation checks also verify the replacement keeps the selected deadline.
 
-The restore journey supplies saved preferences with Access selected, waits for those preferences to appear, and checks that credential-list requests stay bounded while the workspace becomes authenticated. `app.test.js` also checks that repeated control syncs don't announce unchanged tabs, while real tab changes and focus restoration still work.
+The restore journey waits for the authenticated navigation and the shell and Access handlers before checking the new session. It supplies saved preferences with Access selected, waits for those preferences to appear, and checks that credential-list requests stay bounded while the workspace becomes authenticated. `app.test.js` also checks that repeated control syncs don't announce unchanged tabs, while real tab changes and focus restoration still work.
 
 Each browser qualification case has a two-minute budget for its full sign-in, scope, and recovery journey; individual assertions still use their own deadlines. The retired-anonymous restoration case has a one-minute budget for its workspace creation, reloads, credential redemption, and restored access checks.
 
