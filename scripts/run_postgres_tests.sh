@@ -81,6 +81,7 @@ default_args=(
   --rootdir=.
   -m 'not sqlite_backend'
   tests/py/test_postgres_backend.py
+  tests/py/test_postgres_templates.py
   tests/py/test_operator_grants.py
   tests/py/test_operator_console.py
   tests/py/test_operator_diagnostics.py

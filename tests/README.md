@@ -167,6 +167,16 @@ npx playwright test --config .tooling/playwright.capture.mobile.config.js --list
 The direct Playwright commands above only list dedicated suites. Use `bash scripts/run_playwright.sh ...` for actual end-to-end runs so the approved helper handles assets, ports, isolated servers, and failure logs.
 
 The default Postgres helper runs live backend cases and Postgres operator variants.
+Ordinary cases use `postgres_current` or `operator_db`, backed by a session-owned
+migrated template and an independent database per test. The helper closes all
+template connections and disables new connections before cloning. Roles without
+`CREATEDB`, and host databases with a custom encoding or locale, retain schema
+isolation. Migration, startup, schema-rejection, and initialization-failure
+contracts continue using the empty `postgres_schema` fixture. Fixtures close
+connections before cleanup; only names created and recorded by this invocation
+can be force-dropped after an interrupted test. Template regressions qualify the
+ledger, indexes, sequences, functions, triggers, foreign keys, committed-row
+isolation, schema fallback, failed initialization, and cleanup.
 SQLite operator cases, SQLite FTS search, and offline backend/dialect/migration
 checks run in the required fast lane. Reporting-only options keep the helper
 selection; explicit pytest arguments retain their normal selection behavior.

@@ -81,6 +81,18 @@ def postgres_schema(postgres_dsn):
             conn.commit()
 
 
+@pytest.fixture
+def postgres_current(postgres_test_databases):
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from dataclasses import replace
+
+    with postgres_test_databases.current_database() as target:
+        with psycopg.connect(target.dsn, row_factory=dict_row) as conn:
+            yield replace(target, conn=conn)
+
+
 def _execute(conn: Any, sql: str, params: tuple[Any, ...] = (), *, backend: str) -> Any:
     if backend == "postgres":
         sql = sql.replace("?", "%s")
@@ -673,7 +685,7 @@ def test_oidc_identity_and_browser_session_migrate_on_postgres(postgres_schema, 
 
 
 @pytest.mark.postgres
-def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_schema, postgres_dsn, tmp_path, monkeypatch):
+def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_current, postgres_dsn, tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from statistics import median
     from time import perf_counter
@@ -688,7 +700,7 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
     from services.secrets.vault import reset_master_key_cache_for_tests
     from services.workspace.models import WorkspaceSettings
 
-    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    run_migrations_with_advisory_lock(postgres_current.conn, MIGRATIONS)
     data_dir = tmp_path / "credential-measure-data"
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
@@ -696,7 +708,7 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     settings = WorkspaceSettings(True, "volume", tmp_path / "credential-measure-workspaces", 1024, 1024, 10, 1)
     settings.root.mkdir()
-    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    conn = PostgresSqliteCompatConnection(postgres_current.conn)
     bundle = principal_storage.create_principal_with_credential(settings=settings, conn=conn)
     pat = principal_storage.issue_credential(
         bundle.principal.id,
@@ -704,8 +716,8 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
         created_by_credential_id=bundle.credential.metadata.id,
         conn=conn,
     )
-    postgres_schema.conn.commit()
-    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    postgres_current.conn.commit()
+    isolated_dsn = postgres_current.dsn
 
     def measure(headers: dict[str, str]) -> dict[str, float | int]:
         def resolve(_index: int) -> float:
@@ -752,19 +764,19 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
 
     now = datetime.now(timezone.utc)
     assert resolve_authentication(portable_headers, conn=conn, now=now).state == AuthenticationState.VALID
-    postgres_schema.conn.commit()
+    postgres_current.conn.commit()
     first = last_used()
     assert (
         resolve_authentication(portable_headers, conn=conn, now=now + timedelta(seconds=1)).state
         == AuthenticationState.VALID
     )
-    postgres_schema.conn.commit()
+    postgres_current.conn.commit()
     assert last_used() == first
     assert (
         resolve_authentication(portable_headers, conn=conn, now=now + timedelta(seconds=301)).state
         == AuthenticationState.VALID
     )
-    postgres_schema.conn.commit()
+    postgres_current.conn.commit()
     assert last_used() != first
     result["bounded_last_used_writes"] = "passed"
     print(json.dumps(result, sort_keys=True))
@@ -774,7 +786,7 @@ def test_postgres_credential_resolution_concurrency_and_bounded_writes(postgres_
 @pytest.mark.postgres
 @pytest.mark.parametrize("profile", ["open", "token_required", "oidc_required", "mixed"])
 @pytest.mark.parametrize("asset_mode", ["source", "bundle"])
-def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch, profile, asset_mode):
+def test_auth_profile_gate_and_pat_access_on_postgres(postgres_current, postgres_dsn, tmp_path, monkeypatch, profile, asset_mode):
     import app as application_module
     import config as shell_config
     from core.database_backend import close_postgres_pool
@@ -788,7 +800,7 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
     psycopg = pytest.importorskip("psycopg")
     from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
 
-    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    run_migrations_with_advisory_lock(postgres_current.conn, MIGRATIONS)
     data_dir = tmp_path / "auth-profile-data"
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
@@ -799,7 +811,7 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
     })
     cfg = base.with_overrides({
         "database_backend": "postgres",
-        "database_url": _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema),
+        "database_url": postgres_current.dsn,
         "data_dir": str(data_dir),
         "asset_bundle_mode": asset_mode,
     })
@@ -807,7 +819,7 @@ def test_auth_profile_gate_and_pat_access_on_postgres(postgres_schema, postgres_
     monkeypatch.setattr(application_module, "CFG", cfg)
     monkeypatch.setattr(core_database, "CFG", cfg)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    isolated_dsn = postgres_current.dsn
 
     @contextmanager
     def isolated_connect():
@@ -923,7 +935,7 @@ def test_oidc_link_callback_rejections_preserve_postgres_bindings(
 
 
 @pytest.mark.postgres
-def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch):
+def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_current, postgres_dsn, tmp_path, monkeypatch):
     psycopg = pytest.importorskip("psycopg")
     from psycopg.rows import dict_row
     import app as application_module
@@ -934,10 +946,10 @@ def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schem
     from services.auth import lifecycle
     from test_oidc_sign_in import LocalProvider, _callback, _start, _config, _response_cookie, _client_cookie, ORIGIN
 
-    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    run_migrations_with_advisory_lock(postgres_current.conn, MIGRATIONS)
     cfg = _config().with_overrides({
         "database_backend": "postgres",
-        "database_url": _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema),
+        "database_url": postgres_current.dsn,
         "data_dir": str(tmp_path / "oidc-pg-data"),
     })
     (tmp_path / "oidc-pg-data").mkdir()
@@ -945,7 +957,7 @@ def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schem
     monkeypatch.setattr(application_module, "CFG", cfg)
     monkeypatch.setattr(core_database, "CFG", cfg)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    isolated_dsn = postgres_current.dsn
 
     @contextmanager
     def isolated_connect():
@@ -1001,7 +1013,7 @@ def test_oidc_sign_in_link_unlink_recovery_and_logout_on_postgres(postgres_schem
 
 @pytest.mark.postgres
 def test_principal_credential_persistence_matches_postgres_contract(
-    postgres_schema,
+    postgres_current,
     tmp_path,
     monkeypatch,
 ):
@@ -1023,7 +1035,7 @@ def test_principal_credential_persistence_matches_postgres_contract(
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     conn = PostgresSqliteCompatConnection(raw_conn)
@@ -1144,7 +1156,7 @@ def test_principal_credential_persistence_matches_postgres_contract(
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("lifecycle", ["active", "rotated", "revoked", "disabled"])
-def test_anonymous_workspace_retirement_on_postgres(postgres_schema, postgres_dsn, tmp_path, monkeypatch, lifecycle):
+def test_anonymous_workspace_retirement_on_postgres(postgres_current, postgres_dsn, tmp_path, monkeypatch, lifecycle):
     import app as application_module
     import config as shell_config
     from core.database_backend import close_postgres_pool
@@ -1156,12 +1168,12 @@ def test_anonymous_workspace_retirement_on_postgres(postgres_schema, postgres_ds
     psycopg = pytest.importorskip("psycopg")
     from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
 
-    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    run_migrations_with_advisory_lock(postgres_current.conn, MIGRATIONS)
     data_dir = tmp_path / "retirement-data"
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    isolated_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    isolated_dsn = postgres_current.dsn
     cfg = build_test_config({
         "database_backend": "postgres", "database_url": isolated_dsn,
         "data_dir": str(data_dir), "workspace_enabled": True,
@@ -1190,7 +1202,7 @@ def test_anonymous_workspace_retirement_on_postgres(postgres_schema, postgres_ds
 
 @pytest.mark.postgres
 def test_principal_authentication_states_and_pat_contract_match_postgres(
-    postgres_schema,
+    postgres_current,
     postgres_dsn,
     tmp_path,
     monkeypatch,
@@ -1220,7 +1232,7 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     settings = WorkspaceSettings(
@@ -1323,7 +1335,7 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
         conn=conn,
     )
     raw_conn.commit()
-    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    schema_dsn = postgres_current.dsn
     psycopg_connect = cast(Any, psycopg.connect)
 
     @contextmanager
@@ -1379,7 +1391,7 @@ def test_principal_authentication_states_and_pat_contract_match_postgres(
 
 
 @pytest.mark.postgres
-def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema, tmp_path, monkeypatch):
+def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_current, tmp_path, monkeypatch):
     from contextlib import nullcontext
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
@@ -1393,8 +1405,8 @@ def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema
 
     monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
     reset_master_key_cache_for_tests()
-    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
-    conn = PostgresSqliteCompatConnection(postgres_schema.conn)
+    run_migrations_with_advisory_lock(postgres_current.conn, MIGRATIONS)
+    conn = PostgresSqliteCompatConnection(postgres_current.conn)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(channels_store.database, "db_connect", lambda: nullcontext(conn))
     monkeypatch.setattr("services.auth.background_runtime.stop_principal_active_work", lambda _principal: ())
@@ -1423,7 +1435,7 @@ def test_operator_suspended_work_and_explicit_resume_on_postgres(postgres_schema
 
 @pytest.mark.postgres
 def test_principal_background_authorization_matches_postgres_contract(
-    postgres_schema,
+    postgres_current,
     tmp_path,
     monkeypatch,
 ):
@@ -1445,7 +1457,7 @@ def test_principal_background_authorization_matches_postgres_contract(
     data_dir.mkdir()
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
     reset_master_key_cache_for_tests()
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
     conn = PostgresSqliteCompatConnection(raw_conn)
@@ -2754,7 +2766,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
 
 @pytest.mark.postgres
 def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
-    postgres_schema,
+    postgres_current,
     monkeypatch,
 ):
     from core.migrations import MIGRATIONS
@@ -2772,7 +2784,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
     from services.assessments.dalfox_xss_observations import DalfoxXssObservationState
     from services.runs.output_model import LineEvent, LineSignal, to_wire
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
@@ -2920,7 +2932,7 @@ def test_postgres_resolves_and_materializes_exact_project_dalfox_evidence(
 
 
 @pytest.mark.postgres
-def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_schema):
+def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -2929,7 +2941,7 @@ def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_
         mark_run_evidence_unavailable_on_conn,
     )
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     timestamp = "2026-08-04T12:00:00+00:00"
@@ -2987,7 +2999,7 @@ def test_postgres_assessment_run_evidence_cleanup_preserves_tombstones(postgres_
 
 
 @pytest.mark.postgres
-def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
+def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -2997,7 +3009,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
         update_assessment_cycle,
     )
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     timestamp = "2026-08-04T12:00:00+00:00"
@@ -3091,7 +3103,7 @@ def test_postgres_assessment_lifecycle_and_archived_deletion(postgres_schema):
 
 
 @pytest.mark.postgres
-def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
+def test_postgres_assessment_manual_check_state_records_actor(postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -3103,7 +3115,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
     from services.assessments.mutations import update_manual_check_state_on_conn
     from services.assessments.target_rollups import assessment_target_rollups
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     timestamp = "2026-08-04T12:00:00+00:00"
@@ -3220,7 +3232,7 @@ def test_postgres_assessment_manual_check_state_records_actor(postgres_schema):
 
 @pytest.mark.postgres
 def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
-    postgres_schema,
+    postgres_current,
     monkeypatch,
 ):
     from core.migrations import MIGRATIONS
@@ -3233,7 +3245,7 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
     from services.assessments.handoff import project_assessment_finding_changes_on_conn
     from services.projects.finding_identity import finding_identity_references
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
@@ -3364,7 +3376,7 @@ def test_postgres_assessment_finding_handoff_filters_exact_remediation_ids(
 @pytest.mark.postgres
 def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
     postgres_dsn,
-    postgres_schema,
+    postgres_current,
     monkeypatch,
 ):
     import psycopg
@@ -3377,7 +3389,7 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
     from services.cve_risk.parsers import ParsedFeed
     from services.cve_risk.store import accept_feed, get_cve_risk
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     accept_feed(
@@ -3456,7 +3468,7 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
         "lease_seconds": 30,
     }
     effective_lease = refresh._effective_lease_seconds(refresh_settings)
-    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    schema_dsn = postgres_current.dsn
 
     def steal_expired_lease(*_args, **_kwargs):
         thief_raw = psycopg.Connection[dict[str, Any]].connect(
@@ -3496,7 +3508,7 @@ def test_postgres_cve_risk_feeds_roundtrip_through_shared_service(
 
 @pytest.mark.postgres
 def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
-    postgres_schema,
+    postgres_current,
 ):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
@@ -3506,7 +3518,7 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
     from services.cve_risk.osv_parser import parse_osv_dataset
     from services.cve_risk.osv_store import accept_local_osv_dataset
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     payload = json.dumps([{
@@ -3674,7 +3686,7 @@ def test_postgres_osv_package_applicability_roundtrips_through_shared_service(
 
 
 @pytest.mark.postgres
-def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_schema):
+def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
@@ -3700,7 +3712,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
     )
     from services.cve_risk.links import changed_cve_observation_query
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     compat = PostgresSqliteCompatConnection(conn)
     for index in range(160):
@@ -4051,7 +4063,7 @@ def test_personal_scope_and_assessment_queries_use_postgres_indexes(postgres_sch
 
 @pytest.mark.postgres
 def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run_or_import(
-    postgres_schema,
+    postgres_current,
     monkeypatch,
 ):
     from core.migrations import MIGRATIONS
@@ -4061,7 +4073,7 @@ def test_postgres_exact_lookup_resolves_personal_entities_visible_to_team_by_run
     from services.atlas.materializer import upsert_entity
     from services.projects.contracts import ProjectWorkspaceError
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     compat = PostgresSqliteCompatConnection(conn)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
@@ -4487,7 +4499,7 @@ def test_postgres_watcher_monitoring_migration_backfills_legacy_rows(postgres_sc
 
 
 @pytest.mark.postgres
-def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema):
+def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -4495,7 +4507,7 @@ def test_team_mode_routes_use_postgres_scope_paths(monkeypatch, postgres_schema)
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     created = "2026-05-29T00:00:00+00:00"
 
@@ -4681,14 +4693,14 @@ print(json.dumps(payload))
 
 
 @pytest.mark.postgres
-def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema):
+def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     rows = [
@@ -4733,7 +4745,7 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
 
 
 @pytest.mark.postgres
-def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_schema, tmp_path):
+def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_current, tmp_path):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -4741,7 +4753,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.storage import body_store
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     monkeypatch.setattr(body_store, "DATA_DIR", str(tmp_path))
@@ -4859,7 +4871,7 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
 
 
 @pytest.mark.postgres
-def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
+def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -4867,7 +4879,7 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_rows = [
@@ -4924,12 +4936,12 @@ def test_history_stats_route_reads_from_postgres(monkeypatch, postgres_schema):
 
 
 @pytest.mark.postgres
-def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, postgres_schema):
+def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.commands import builtins_runtime
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_rows = [
@@ -4978,14 +4990,14 @@ def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, pos
 
 
 @pytest.mark.postgres
-def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
+def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
 
@@ -5025,12 +5037,12 @@ def test_client_side_run_route_writes_to_postgres(monkeypatch, postgres_schema):
 
 
 @pytest.mark.postgres
-def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_schema):
+def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_current):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     import services.runs.persistence as run_persistence
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
@@ -5066,7 +5078,7 @@ def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_sch
 
 
 @pytest.mark.postgres
-def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypatch, postgres_schema):
+def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypatch, postgres_current):
     import blueprints.run as run_blueprint
     from app import create_app
     app = create_app()
@@ -5075,7 +5087,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_id = "run-" + uuid.uuid4().hex
@@ -5236,7 +5248,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("registered", [True, False])
-def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_schema, registered):
+def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatch, postgres_current, registered):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from core.output_signals import OutputSignalClassifier
@@ -5245,7 +5257,7 @@ def test_whois_entity_materialization_and_project_linking_on_postgres(monkeypatc
     from services.projects.links import link_active_project_run_entities
     from services.runs.finalization_project_targets import discover_project_targets_for_finalize
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_id = "run-whois-" + uuid.uuid4().hex
@@ -5408,14 +5420,14 @@ def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch
 
 
 @pytest.mark.postgres
-def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schema):
+def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
 
@@ -5449,7 +5461,7 @@ def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schem
 
 
 @pytest.mark.postgres
-def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, postgres_schema):
+def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, postgres_current):
     from app import create_app
     from blueprints import workflows as workflow_routes
     from services.workflows.compiler import compile_execution_definition
@@ -5476,7 +5488,7 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     workflow_column_rows = conn.execute(
@@ -5949,8 +5961,8 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
         create_execution,
     )
 
-    postgres_schema.conn.commit()
-    schema_dsn = _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema)
+    postgres_current.conn.commit()
+    schema_dsn = postgres_current.dsn
     psycopg_connect = cast(Any, psycopg.connect)
 
     @contextmanager
@@ -6056,14 +6068,14 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_dsn, po
 @pytest.mark.postgres
 def test_retired_session_identity_surfaces_stay_unavailable_on_postgres(
     monkeypatch,
-    postgres_schema,
+    postgres_current,
 ):
     from app import create_app
     from core import database as core_database
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
     @contextmanager
@@ -6091,7 +6103,7 @@ def test_retired_session_identity_surfaces_stay_unavailable_on_postgres(
 
 
 @pytest.mark.postgres
-def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
+def test_project_routes_use_postgres_query_path(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -6110,7 +6122,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from services.nuclei.template_health import NucleiTemplateHealth
     from services.projects import findings as project_findings
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     @contextmanager
     def _postgres_db_connect():
@@ -6736,7 +6748,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 @pytest.mark.postgres
 def test_probe_launch_confirmation_uses_postgres_query_path(
     monkeypatch,
-    postgres_schema,
+    postgres_current,
     tmp_path,
 ):
     from app import create_app
@@ -6746,7 +6758,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
 
     app = create_app()
     app.config["TESTING"] = True
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
 
     @contextmanager
@@ -6896,7 +6908,7 @@ def test_probe_launch_confirmation_uses_postgres_query_path(
 
 
 @pytest.mark.postgres
-def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_schema):
+def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_current):
     from app import create_app
     from core import database as core_database
     from core.migrations import MIGRATIONS
@@ -6904,7 +6916,7 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
 
     app = create_app()
     app.config["TESTING"] = True
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
 
@@ -7006,7 +7018,7 @@ def test_manual_finding_routes_use_postgres_query_path(monkeypatch, postgres_sch
 
 
 @pytest.mark.postgres
-def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, postgres_schema):
+def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -7015,7 +7027,7 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_id = "run-" + uuid.uuid4().hex
@@ -7110,7 +7122,7 @@ def test_workspace_files_route_uses_postgres_metadata_query_path(monkeypatch, po
 
 
 @pytest.mark.postgres
-def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
+def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -7118,7 +7130,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     run_id = "run-" + uuid.uuid4().hex
@@ -7297,7 +7309,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 @pytest.mark.postgres
 def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     monkeypatch,
-    postgres_schema,
+    postgres_current,
     tmp_path,
 ):
     from core.migrations import MIGRATIONS
@@ -7306,7 +7318,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
     from services.atlas import intel_bridge
     from services.storage import body_store
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
     entity_id = "ent-" + uuid.uuid4().hex
@@ -7717,7 +7729,7 @@ def test_atlas_intel_and_large_entity_profiles_use_postgres_jsonb_and_indexes(
 
 
 @pytest.mark.postgres
-def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
+def test_diag_route_reports_postgres_storage(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -7726,7 +7738,7 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
     from core.migrations.runner import run_migrations_with_advisory_lock
     import services.assets.diagnostics as assets_diagnostics
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.execute(
         """
@@ -7790,7 +7802,7 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
 
 
 @pytest.mark.postgres
-def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_schema):
+def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_current):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
@@ -7799,7 +7811,7 @@ def test_metrics_route_scrapes_postgres_runtime_gauges(monkeypatch, postgres_sch
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
 
-    conn = postgres_schema.conn
+    conn = postgres_current.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.execute(
         """
@@ -8187,7 +8199,7 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
 
 
 @pytest.mark.postgres
-def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkeypatch):
+def test_postgres_persists_bounded_nmap_service_evidence(postgres_current, monkeypatch):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.assessments.nmap_service_evidence_persistence import (
@@ -8197,7 +8209,7 @@ def test_postgres_persists_bounded_nmap_service_evidence(postgres_schema, monkey
         nmap_service_evidence_for_run_on_conn,
     )
 
-    raw_conn = postgres_schema.conn
+    raw_conn = postgres_current.conn
     run_migrations_with_advisory_lock(raw_conn, MIGRATIONS)
     conn = PostgresSqliteCompatConnection(raw_conn)
     monkeypatch.setattr(core_database, "DB_BACKEND", DatabaseBackend.POSTGRES)

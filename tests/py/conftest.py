@@ -336,3 +336,14 @@ def postgres_dsn(request) -> str:
     if not dsn:
         pytest.skip(f"set {POSTGRES_DSN_ENV} or --postgres-dsn to run Postgres integration tests")
     return dsn
+
+
+@pytest.fixture(scope="session")
+def postgres_test_databases(postgres_dsn):
+    from postgres_helpers import PostgresTestDatabases  # noqa: PLC0415
+
+    databases = PostgresTestDatabases(postgres_dsn)
+    try:
+        yield databases
+    finally:
+        databases.close()
