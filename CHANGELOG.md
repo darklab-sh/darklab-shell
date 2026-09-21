@@ -36,6 +36,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Ordinary in-memory pytest fixtures reuse the validated SQLite schema.** CVE risk, OAST, Nmap evidence, principal ownership, and suspension cases clone a pristine database instead of replaying every migration. Each connection keeps independent rows and transactions; schema-upgrade cases still run real migrations. Regression coverage checks the migration ledger, FTS, foreign keys, rollback, and clone isolation.
+
 - **Metrics network permissions are independent of operator access.**
   - **Before:** Metrics and diagnostics shared the `diagnostics_allowed_cidrs` network gate.
   - **After:** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The old key is removed starting with 3.1.0-rc.1: YAML loading warns and ignores it, strict configuration checks fail on the warning, and runtime mutations reject it. Metrics permissions don't bypass AI workspace quotas; diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.

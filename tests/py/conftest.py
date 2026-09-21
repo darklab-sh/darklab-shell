@@ -179,6 +179,24 @@ def copy_pristine_sqlite_database(db_path: str | Path) -> Path:
     return target
 
 
+def create_pristine_sqlite_connection(*, foreign_keys: bool = True) -> sqlite3.Connection:
+    """Return an isolated current-schema memory database; the caller closes it."""
+    template = _ensure_pristine_sqlite_template()
+    conn = sqlite3.connect(":memory:")
+    try:
+        source = sqlite3.connect(f"{template.as_uri()}?mode=ro", uri=True)
+        try:
+            source.backup(conn)
+        finally:
+            source.close()
+        conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA foreign_keys = {int(foreign_keys)}")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
 def make_test_app(*, init_db: bool = True):
     import app as shell_app_module  # noqa: PLC0415
 
