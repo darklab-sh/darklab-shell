@@ -18,7 +18,7 @@ ENV_KEYS = ("APP_DATA_DIR", "APP_CONF_DIR", "APP_LOCAL_CONF_DIR", "ACCESS_PROFIL
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("record", "grant", "revoke", "stale", "seed-run"))
+    parser.add_argument("action", choices=("record", "grant", "revoke", "stale", "seed-run", "create-principal"))
     parser.add_argument("metadata")
     parser.add_argument("principal", nargs="?")
     args = parser.parse_args()
@@ -35,7 +35,15 @@ def main():
     os.environ.update(metadata)
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "app"))
     from services.auth.operator_grants import set_grant
-    if args.action in {"grant", "revoke"}:
+    if args.action == "create-principal":
+        from core.database_access import get_db_connect
+        from services.auth.storage import create_principal_with_credential
+        with get_db_connect()() as conn:
+            bundle = create_principal_with_credential(conn=conn)
+            conn.commit()
+        # Captured by the test process only, never written to an artifact or log.
+        print(json.dumps({"secret": bundle.credential.secret}))
+    elif args.action in {"grant", "revoke"}:
         set_grant(args.principal, granted=args.action == "grant")
     elif args.action == "seed-run":
         seed_run(args.principal)

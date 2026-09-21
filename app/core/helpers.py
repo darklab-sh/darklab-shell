@@ -183,9 +183,8 @@ def get_authentication_result():
     if blocked is not None:
         raise blocked
     active_cfg = current_app.config.get("DARKLAB_CONFIG", {}) if has_app_context() else {}
-    restricted = str(active_cfg.get("access_profile") or "open") in {"token_required", "oidc_required", "mixed"}
     supplied = any(name in request.headers for name in ("X-Darklab-Credential", "Authorization"))
-    if supplied or (restricted and request.cookies.get(BROWSER_SESSION_COOKIE)):
+    if supplied or request.cookies.get(BROWSER_SESSION_COOKIE):
         limited = check_credential_redemption(
             get_client_ip(), public_lookup_id_from_headers(request.headers), redis_client=process_state.redis_client,
             enabled=bool(current_app.config.get("RATELIMIT_ENABLED", active_cfg.get("rate_limit_enabled", True))),
@@ -198,11 +197,11 @@ def get_authentication_result():
     idle_seconds = int(active_cfg.get("browser_session_idle_minutes", 30)) * 60
     result = resolve_authentication(
         request.headers,
-        cookies=request.cookies if restricted else None,
+        cookies=request.cookies,
         browser_session_idle_seconds=idle_seconds,
     )
     setattr(g, _AUTH_RESULT_KEY, result)
-    log_authentication_resolved(result, cookies_enabled=restricted)
+    log_authentication_resolved(result, cookies_enabled=True)
     return result
 
 

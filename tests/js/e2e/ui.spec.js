@@ -1107,7 +1107,9 @@ test.describe('project workspace modal', () => {
     await linkExternalRunToOpenProject(page, testInfo)
 
     const response = await page.goto(`/audit?event_type=project.link&project_id=${encodeURIComponent(projectId)}`)
-    expect(response.status()).toBe(404)
+    expect(response.status()).toBe(200)
+    await expect(page).toHaveURL(url => url.pathname === '/auth/sign-in')
+    await expect(page.getByRole('heading', { name: 'Sign in to darklab_shell' })).toBeVisible()
     await expect(page.locator('body.diag-page')).toHaveCount(0)
     await expect(page.locator('.diag-audit-table')).toHaveCount(0)
   })

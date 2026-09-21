@@ -88,9 +88,7 @@ const DarklabSessionCore = (function (global) {
         delete headers[name];
       }
     });
-    if (identity && identity.kind === 'credential') {
-      headers['X-Darklab-Credential'] = String(identity.secret || '');
-    } else if (!identity || identity.kind !== 'browser_session') {
+    if (!identity || identity.kind === 'anonymous') {
       headers['X-Darklab-Anonymous-ID'] = String(identity?.anonymousId || '');
     }
     headers['X-Client-ID'] = clientId;

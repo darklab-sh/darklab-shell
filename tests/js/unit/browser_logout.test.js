@@ -41,7 +41,7 @@ it('ends a managed session before redirecting and keeps provider logout separate
   expect(mocks.showConfirm.mock.calls[0][0].body).toContain('identity provider, it stays signed in')
   expect(mocks.apiFetch).toHaveBeenCalledExactlyOnceWith('/auth/logout', { method: 'POST', cache: 'no-store' })
   expect(mocks.redirectToSignIn).toHaveBeenCalledOnce()
-  expect(mocks.clearAccessCredential).not.toHaveBeenCalled()
+  expect(mocks.clearAccessCredential).toHaveBeenCalledWith({ freshAnonymous: false })
 })
 
 it.each(['network', 'server'])('keeps failed %s logout retryable without exposing error details', async failure => {

@@ -221,10 +221,6 @@ async function refreshAccessPanel({ force = false } = {}) {
 async function _refreshOIDC(sequence) {
   if (!elements.oidcSection) return;
   const profile = importedGetAppConfig?.()?.access_profile;
-  if (!['token_required', 'oidc_required', 'mixed'].includes(profile)) {
-    elements.oidcSection.hidden = true;
-    return;
-  }
   const data = await loadOIDCIdentity();
   if (sequence !== refreshSequence) return;
   elements.oidcSection.hidden = data.disabled === true;
@@ -407,9 +403,27 @@ function _showEditor(mode, credential = null, returnFocus = null) {
         const payload = await _request('/auth/principals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label: labelInput?.value.trim() || '' }),
+          body: JSON.stringify({ label: labelInput?.value.trim() || '', browser_session: true }),
         });
-        importedActivateAccessCredential(payload.secret);
+        try {
+          importedActivateAccessCredential(payload.secret, { attached: true });
+        } catch (_) {
+          _closeEditor({ restoreFocus: false });
+          const note = "Your workspace was kept, but this browser couldn't start a session. Save this credential now, then sign in over HTTPS with browser cookies enabled.";
+          _setMessage(note, 'error');
+          elements.summary.textContent = 'Workspace kept; sign-in needed';
+          elements.summaryDetail.textContent = 'The old anonymous access has ended. Use your new credential to return.';
+          [elements.keep, elements.use, elements.refresh].forEach(control => {
+            if (control) control.disabled = true;
+          });
+          showCredentialReveal({
+            host: elements.reveal,
+            secret: payload.secret,
+            note,
+            onSaved: importedRedirectToSignIn,
+          });
+          return;
+        }
         _closeEditor({ restoreFocus: false });
         await refreshAccessPanel();
         showCredentialReveal({ host: elements.reveal, secret: payload.secret, restoreFocus: elements.add });
@@ -480,10 +494,11 @@ async function _redeemCredential() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret }),
     });
-    importedActivateAccessCredential(secret);
+    // A full navigation restores the new account and its server-rendered links.
+    // Do not refresh or persist the old page's preferences under its new cookie.
+    importedActivateAccessCredential(secret, { refresh: false });
     _closeRedemption({ restoreFocus: false });
-    await refreshAccessPanel();
-    _setMessage('This browser now uses the existing workspace.', 'success');
+    window.location.assign('/?options=access');
   } catch (error) {
     if (elements.redemptionInput) elements.redemptionInput.value = '';
     _setMessage(error.message || 'That credential was not accepted.', 'error');
@@ -563,7 +578,7 @@ async function _revokeCredential(credential, { rotationReplacement = null } = {}
   _renderAffectedWorkReview(revoked.durable_work || {});
   const paused = Number(revoked.durable_work?.paused_count || 0);
   _setMessage(paused ? `Credential revoked and ${paused} related tasks paused.` : 'Credential revoked.', 'success');
-  (importedGetBrowserIdentitySnapshot().kind === 'credential' ? elements.add : elements.keep)?.focus?.({ preventScroll: true });
+  (importedGetBrowserIdentitySnapshot().kind === 'browser_session' ? elements.add : elements.keep)?.focus?.({ preventScroll: true });
   return true;
 }
 
@@ -659,6 +674,7 @@ async function _signOutEverywhere() {
   if (elements.sessionReauth) elements.sessionReauth.hidden = true;
   try {
     await _request('/auth/sessions/revoke-all', { method: 'POST' });
+    importedClearAccessCredential({ freshAnonymous: false });
     importedRedirectToSignIn();
   } catch (error) {
     _setMessage(error.message || 'Could not sign out every browser. Try again.', 'error');
@@ -676,7 +692,7 @@ async function openAccessAction(action = '') {
   await refreshAccessPanel();
   const identity = importedGetBrowserIdentitySnapshot();
   if (pendingAction === 'use') _openRedemption(elements.use);
-  else if (pendingAction === 'create' && identity.kind === 'credential') _showEditor('create', null, elements.add);
+  else if (pendingAction === 'create' && identity.kind === 'browser_session') _showEditor('create', null, elements.add);
   else if (pendingAction === 'recover') {
     _setMessage('If every credential is lost, ask the local operator to run credential recover.', 'warning');
   } else if (['expiry', 'rotate', 'revoke'].includes(pendingAction)) {

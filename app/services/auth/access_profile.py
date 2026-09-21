@@ -20,7 +20,7 @@ from .browser_sessions import (
     create_browser_session,
     verify_csrf_token,
 )
-from .resolver import AuthenticatedContext
+from .resolver import AuthenticatedContext, has_explicit_identity_headers
 from .observability import log_browser_csrf_rejected
 
 OPEN = "open"
@@ -80,6 +80,16 @@ def active_profile() -> str:
 
 def is_restricted() -> bool:
     return active_profile() in {TOKEN_REQUIRED, OIDC_REQUIRED, MIXED}
+
+
+def browser_identity_payload():
+    """Public identity metadata for browser cache and navigation state."""
+    from core.helpers import get_authentication_result
+
+    context = get_authentication_result().context
+    if isinstance(context, AuthenticatedContext) and context.authentication_method == "browser_cookie":
+        return {"principal_id": context.principal_id, "credential_id": context.credential_id}
+    return None
 
 
 def public_shares_enabled() -> bool:
@@ -166,7 +176,7 @@ def enforce_restricted_access(authentication_result):
 
 
 def enforce_browser_csrf(authentication_result):
-    if not is_restricted() or request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
         return None
     # The standalone form has its own short-lived, HttpOnly double-submit nonce
     # and cannot add the application JavaScript's CSRF request header.
@@ -196,6 +206,15 @@ def enforce_browser_csrf(authentication_result):
     return jsonify({"error": "csrf_validation_failed", "message": message}), 403
 
 
+def browser_cookie_recovery_request() -> bool:
+    """Let a stale cookie reach sign-in assets without ignoring explicit credentials."""
+    return bool(request.cookies.get(BROWSER_SESSION_COOKIE)) and not has_explicit_identity_headers(request.headers)
+
+
+def redirect_browser_sign_in():
+    return redirect(url_for("auth.sign_in", next=safe_next_path(request.path)))
+
+
 def hmac_compare(left: str, right: str) -> bool:
     import hmac
 
@@ -205,8 +224,7 @@ def hmac_compare(left: str, right: str) -> bool:
 def rotate_browser_session_after_privilege_change(response):
     """Rotate the current cookie after a successful Team privilege change."""
     if (
-        not is_restricted()
-        or response.status_code >= 400
+        response.status_code >= 400
         or request.endpoint not in PRIVILEGE_CHANGE_ENDPOINTS
     ):
         return response

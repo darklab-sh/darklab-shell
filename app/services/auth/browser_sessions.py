@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-"""Signed, revocable browser sessions for restricted deployments."""
+"""Signed, revocable browser sessions shared by every access profile."""
 
 from __future__ import annotations
 

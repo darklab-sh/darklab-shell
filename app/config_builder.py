@@ -1291,9 +1291,9 @@ def _normalize_config_data(defaults: dict[str, Any], provenance: dict[str, str])
     if policy != "allowlist" and defaults["oidc_allowed_subjects"]:
         _reject_access_config(provenance, "oidc_allowed_subjects", "allowlist_not_enabled",
                               "oidc_allowed_subjects is only used with allowlist provisioning")
-    if access_profile not in {"oidc_required", "mixed"} and policy != "disabled":
+    if policy != "disabled" and (not configured or access_profile == "token_required"):
         _reject_access_config(provenance, "oidc_provisioning", "access_profile_disallows_provisioning",
-                              "OIDC provisioning requires oidc_required or mixed access")
+                              "OIDC provisioning requires configured provider sign-in")
     for key, (minimum, maximum) in DURATION_BOUNDS.items():
         parsed = _parse_int_value(defaults.get(key))
         if parsed is None or not minimum <= parsed <= maximum:

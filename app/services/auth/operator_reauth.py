@@ -27,7 +27,7 @@ def rotate_verified_session(
     context, config, *, credential_context=None, provider_proof=None, now=None, request_fields=None,
 ):
     if (context.authentication_method != "browser_cookie" or bool(credential_context) == bool(provider_proof)
-            or config["access_profile"] not in {"token_required", "oidc_required", "mixed"}):
+            or config["access_profile"] not in {"open", "token_required", "oidc_required", "mixed"}):
         raise OperatorReauthenticationError("verification is unavailable")
 
     def operation(conn):
@@ -57,7 +57,7 @@ def rotate_verified_session(
             credential_id, identity_id = credential_context.credential_id, ""
             provider_authenticated_at = None
         else:
-            if (provider_proof is None or config["access_profile"] not in {"oidc_required", "mixed"}
+            if (provider_proof is None or config["access_profile"] not in {"open", "oidc_required", "mixed"}
                     or not source["oidc_identity_id"]):
                 raise OperatorReauthenticationError("verification is unavailable")
             if (provider_proof.issuer != source["oidc_issuer"] or provider_proof.subject != source["oidc_subject"]

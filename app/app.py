@@ -55,11 +55,13 @@ from flask import current_app, has_app_context, jsonify, request
 from runtime_bootstrap import bootstrap_runtime
 from services.api_v1.serialization import json_error
 from services.auth.access_profile import (
+    browser_cookie_recovery_request,
     enforce_browser_csrf,
     enforce_pat_route_access,
     enforce_restricted_access,
     is_public_endpoint,
     is_restricted,
+    redirect_browser_sign_in,
     rotate_browser_session_after_privilege_change,
 )
 from services.auth.observability import (
@@ -430,6 +432,11 @@ def _enforce_authentication_resolution():
         raise AuthenticationRejected(result.error_code, result.message)
     if is_restricted() and (is_public_endpoint() or request.endpoint == "content.index"):
         return None
+    if browser_cookie_recovery_request():
+        if is_public_endpoint():
+            return None
+        if request.endpoint == "content.index":
+            return redirect_browser_sign_in()
     record_failed_authentication(result)
     raise AuthenticationRejected(result.error_code, result.message)
 

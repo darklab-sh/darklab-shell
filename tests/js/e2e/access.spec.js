@@ -26,6 +26,16 @@ async function openAccess(page) {
   await expect(panel).toHaveAttribute('data-access-panel-bound', '1')
 }
 
+async function redeemAccessCredential(page, secret) {
+  await page.locator('#options-access-redemption-input').fill(secret)
+  await Promise.all([
+    page.waitForURL(url => url.searchParams.get('options') === 'access', { waitUntil: 'domcontentloaded' }),
+    page.locator('#options-access-redemption-apply').click(),
+  ])
+  await ensurePromptReady(page)
+  await expect(page.locator('#options-panel-access')).toHaveAttribute('data-access-panel-bound', '1')
+}
+
 async function saveCredentialReveal(page) {
   const reveal = page.locator('#options-access-reveal')
   await expect(reveal).toBeVisible()
@@ -88,26 +98,44 @@ async function expectRedemptionSpacing(page) {
 test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => openAnonymousBrowser(page))
 
-  test('restores a kept workspace from a browser holding its retired anonymous identity', async ({ page }) => {
-    // Allow the complete keep/reload/restore journey to finish on a busy runner.
-    test.setTimeout(60_000)
+  test('exchanges a saved credential without restoring its retired anonymous identity', async ({ page, context }) => {
     const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
-    const credentialId = await keepBrowserWorkspace(page, { label: 'Restored browser' })
-    const savedCredential = await page.evaluate(() => localStorage.getItem('access_credential'))
-    await page.evaluate((retiredId) => {
-      localStorage.removeItem('access_credential')
+    const issued = await keepBrowserWorkspace(page, { label: 'Restored browser', returnCredential: true })
+    await context.clearCookies()
+    await page.evaluate(({ retiredId, secret }) => {
+      localStorage.removeItem('browser_session')
+      localStorage.setItem('access_credential', secret)
       localStorage.setItem('anonymous_id', retiredId)
-    }, anonymousId)
+    }, { retiredId: anonymousId, secret: issued.secret })
     await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(id => {
+      const boot = JSON.parse(document.getElementById('app-config-json')?.textContent || '{}')
+      return boot.browser_identity?.credential_id === id
+    }, issued.id)
     await ensurePromptReady(page)
-    expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(401)
     await openAccess(page)
-    await page.locator('#options-access-use-btn').click()
-    await page.locator('#options-access-redemption-input').fill(savedCredential)
-    await page.locator('#options-access-redemption-apply').click()
     await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
-    await expect(page.locator(`[data-credential-id="${credentialId}"]`)).toContainText('Current')
+    await expect(page.locator(`[data-credential-id="${issued.id}"]`)).toContainText('Current')
     expect(await page.evaluate(async () => (await apiFetch('/projects')).status)).toBe(200)
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+    expect((await context.cookies()).find(cookie => cookie.name === 'darklab_browser_session').httpOnly).toBe(true)
+    await expect(page.locator('body')).not.toContainText(issued.secret)
+  })
+
+  test('requires explicit removal of a saved credential before anonymous recovery', async ({ page }) => {
+    const anonymous = await page.evaluate(() => localStorage.getItem('anonymous_id'))
+    await page.evaluate(() => localStorage.setItem('access_credential', 'unusable-saved-credential'))
+    await page.goto('/auth/sign-in')
+    const resume = page.getByRole('button', { name: 'Continue anonymously' })
+    const consent = page.getByRole('checkbox', { name: 'I saved my credential elsewhere' })
+    await expect(consent).toBeVisible()
+    await expect(resume).toBeDisabled()
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBe('unusable-saved-credential')
+    await consent.check()
+    await resume.click()
+    await ensurePromptReady(page)
+    expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+    expect(await page.evaluate(() => localStorage.getItem('anonymous_id'))).toBe(anonymous)
   })
 
   for (const width of [1280, 375]) test.describe(`API tokens at ${width}px`, () => {
@@ -152,9 +180,9 @@ test.describe('workspace Access', () => {
       const statuses = await page.evaluate(async secret => {
         const headers = { Authorization: `Bearer ${secret}` }
         return [
-          (await fetch('/api/v1/whoami', { headers })).status,
-          (await fetch('/api/v1/projects', { headers })).status,
-          (await fetch('/projects', { headers })).status,
+          (await fetch('/api/v1/whoami', { headers, credentials: 'omit' })).status,
+          (await fetch('/api/v1/projects', { headers, credentials: 'omit' })).status,
+          (await fetch('/projects', { headers, credentials: 'omit' })).status,
         ]
       }, data.secret)
       expect(statuses).toEqual([200, 403, 403])
@@ -227,12 +255,11 @@ test.describe('workspace Access', () => {
     await expect(page.locator('body')).not.toContainText(replacementSecret)
   })
 
-  test('removes and restores a rotated credential across tabs without restarting Access', async ({ page }) => {
+  test('signs out and restores a rotated credential across tabs', async ({ page }) => {
     test.setTimeout(90_000)
     // Creation and rotation have their own UI journey. Seed this journey through
     // the real API so its budget covers removal, restoration, and revocation.
-    await keepBrowserWorkspace(page, { label: 'Primary browser' })
-    const primarySecret = await page.evaluate(() => localStorage.getItem('access_credential'))
+    const { secret: primarySecret } = await keepBrowserWorkspace(page, { label: 'Primary browser', returnCredential: true })
     const replacement = await page.evaluate(async () => {
       const options = { method: 'POST', headers: { 'Content-Type': 'application/json' } }
       const created = await apiFetch('/auth/credentials', {
@@ -256,6 +283,10 @@ test.describe('workspace Access', () => {
       await expect(peer.locator('#hud-session')).toContainText('crd_')
       await page.locator('#options-access-remove-btn').click()
       await chooseConfirmAction(page, 'remove')
+      await expect(page).toHaveURL(/\/auth\/sign-in/)
+      await page.getByRole('button', { name: 'Continue anonymously' }).click()
+      await ensurePromptReady(page)
+      await openAccess(page)
       await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
       await expectAccessActions(page, 'anonymous')
       await expect(page.locator('#hud-session')).toHaveText('ANON')
@@ -278,8 +309,7 @@ test.describe('workspace Access', () => {
       }
       page.on('request', countCredentialReads)
       await page.locator('#options-access-use-btn').click()
-      await page.locator('#options-access-redemption-input').fill(replacementSecret)
-      await page.locator('#options-access-redemption-apply').click()
+      await redeemAccessCredential(page, replacementSecret)
       await expect(page.locator('#options-prompt-username-input')).toHaveValue('restored-operator')
       await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
       await expectAccessActions(page, 'kept')
@@ -292,14 +322,17 @@ test.describe('workspace Access', () => {
       await page.unroute('**/session/preferences')
 
       await replacementRow.getByRole('button', { name: 'Revoke' }).click()
-      await expect(page.locator('#confirm-host')).toContainText('This credential is active in this browser')
+      await expect(page.locator('#confirm-host')).toContainText('This will sign out this browser')
       await chooseConfirmAction(page, 'revoke')
+      await expect(page).toHaveURL(/\/auth\/sign-in/)
+      await page.getByRole('button', { name: 'Continue anonymously' }).click()
+      await ensurePromptReady(page)
+      await openAccess(page)
       await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
       await expect(page.locator('body')).not.toContainText(replacementSecret)
 
       await page.locator('#options-access-use-btn').click()
-      await page.locator('#options-access-redemption-input').fill(primarySecret)
-      await page.locator('#options-access-redemption-apply').click()
+      await redeemAccessCredential(page, primarySecret)
       await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
 
       await primaryRow.getByRole('button', { name: 'Revoke' }).click()

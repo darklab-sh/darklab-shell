@@ -161,6 +161,13 @@ def _decode_secret(value: str, *, credential_type: Literal["portable", "pat"], m
     )
 
 
+def has_explicit_identity_headers(headers: HeaderValues) -> bool:
+    """Include empty and retired transports so cookie recovery cannot hide them."""
+    return any(name in headers for name in (
+        "X-Darklab-Credential", "X-Darklab-Anonymous-ID", "Authorization", "X-Session-ID",
+    ))
+
+
 def _bearer(headers: HeaderValues) -> tuple[str, AuthenticationResult | None]:
     raw = str(headers.get("Authorization") or "")
     if "Authorization" not in headers:
