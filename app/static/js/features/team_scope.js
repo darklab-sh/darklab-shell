@@ -11,7 +11,6 @@ import {
   syncModalOverlayState as importedSyncModalOverlayState,
 } from '../ui/ui_helpers.js';
 import { bindOutsideClickClose as importedBindOutsideClickClose } from '../ui/ui_outside_click.js';
-import { DarklabSessionCore as importedSessionCore } from '../core/session_core.js';
 import { loadRecentValues as importedLoadRecentValues } from './autocomplete/suggestions.js';
 import { reloadSessionHistory as importedReloadSessionHistory } from './history/history_actions.js';
 import { refreshActiveProjectContext as importedRefreshActiveProjectContext } from './projects/project_context_bridge.js';
@@ -79,8 +78,7 @@ let DarklabTeamScope = null;
   }
 
   function storageSessionId() {
-    const credentialId = importedSessionCore?.credentialPublicId?.(localStorageValue('access_credential')) || '';
-    return credentialId || localStorageValue('anonymous_id') || 'anonymous';
+    return localStorageValue('browser_session') || localStorageValue('anonymous_id') || 'anonymous';
   }
 
   function storageKey() {
@@ -94,7 +92,7 @@ let DarklabTeamScope = null;
   }
 
   function shouldRefreshTeamScopesOnBoot() {
-    return !!localStorageValue('access_credential') || hasStoredTeamScope();
+    return !!localStorageValue('browser_session') || hasStoredTeamScope();
   }
 
   function storageKeySuffix(key = storageKey()) {

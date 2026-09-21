@@ -61,15 +61,16 @@ def test_every_operator_route_denies_network_only_access(operator_db, monkeypatc
 
 
 @pytest.mark.parametrize("path", PATHS)
-def test_every_operator_route_is_unavailable_in_open_profile(operator_db, monkeypatch, path):
-    app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch)
-    app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({"access_profile": "open"})
+def test_every_operator_route_requires_a_grant_in_open_profile(operator_db, monkeypatch, path):
+    app, client, bundle, _issued = credential_setup(operator_db, monkeypatch, "open")
+    operator_grants.set_grant(bundle.principal.id, granted=False)
     assert request(client, path).status_code == 404
 
 
 @pytest.mark.parametrize("path", [p for p in PATHS if p != "/diag/ai-test"])
-def test_verified_operator_needs_no_metrics_allowlist(operator_db, monkeypatch, path):
-    app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch)
+@pytest.mark.parametrize("profile", ["open", "token_required"])
+def test_verified_operator_needs_no_metrics_allowlist(operator_db, monkeypatch, path, profile):
+    app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch, profile)
     app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides({
         "metrics_allowed_cidrs": [], "metrics_enabled": False,
     })

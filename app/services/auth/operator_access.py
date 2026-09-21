@@ -25,7 +25,7 @@ def is_operator_request():
 
 
 def profile_allowed():
-    return active_profile() in {"token_required", "oidc_required", "mixed"}
+    return active_profile() in {"open", "token_required", "oidc_required", "mixed"}
 
 
 def browser_eligible(context):

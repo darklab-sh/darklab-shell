@@ -59,8 +59,8 @@ def source_context(bundle, issued):
     )
 
 
-def credential_setup(operator_db, monkeypatch):
-    cfg = operator_db.cfg.with_overrides({"access_profile": "token_required", "metrics_allowed_cidrs": ["127.0.0.0/8"]})
+def credential_setup(operator_db, monkeypatch, profile="token_required"):
+    cfg = operator_db.cfg.with_overrides({"access_profile": profile, "metrics_allowed_cidrs": ["127.0.0.0/8"]})
     app = app_for(monkeypatch, cfg)
     bundle = create_identity()
     operator_grants.set_grant(bundle.principal.id, granted=True)
@@ -73,8 +73,9 @@ def credential_setup(operator_db, monkeypatch):
     return app, client, bundle, issued
 
 
-def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(operator_db, monkeypatch):
-    _app, client, bundle, original = credential_setup(operator_db, monkeypatch)
+@pytest.mark.parametrize("profile", ["open", "token_required"])
+def test_credential_step_up_checks_csrf_identity_and_keeps_absolute_expiry(operator_db, monkeypatch, profile):
+    _app, client, bundle, original = credential_setup(operator_db, monkeypatch, profile)
     peer = create_identity()
     page = client.get("/admin/reauth?next=/admin/", base_url=ORIGIN)
     assert page.status_code == 200 and b"Verify operator access" in page.data
@@ -301,7 +302,7 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
             client.delete_cookie(browser_sessions.BROWSER_SESSION_COOKIE, domain="shell.example")
     elif failure == "profile":
         app.config["DARKLAB_CONFIG"] = app.config["DARKLAB_CONFIG"].with_overrides(
-            {"access_profile": "open", "oidc_provisioning": "disabled"}
+            {"access_profile": "token_required", "oidc_provisioning": "disabled"}
         )
     elif failure == "provider":
         provider.available = False
@@ -340,7 +341,7 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
     assert "private" in result.headers["Cache-Control"]
 
 
-@pytest.mark.parametrize("profile", ["mixed", "oidc_required"])
+@pytest.mark.parametrize("profile", ["open", "mixed", "oidc_required"])
 @pytest.mark.parametrize("proof", ["missing", "stale"])
 def test_provider_proof_does_not_change_ordinary_sign_in_recency(operator_db, monkeypatch, profile, proof):
     _app, client, provider, _state, _principal = provider_setup(operator_db, monkeypatch, profile)
@@ -438,22 +439,16 @@ def test_team_rotation_preserves_provider_proof_without_refreshing_console_acces
         old = replacement
 
 
-@pytest.mark.parametrize("path", ["/admin/", "/admin/settings", "/admin/reauth", "/auth/oidc/callback?state=admin_test"])
-def test_closed_console_never_resolves_authentication_or_grants(operator_db, monkeypatch, path):
-    from core import helpers
-    cfg = operator_db.cfg.with_overrides({
-        "access_profile": "open",
-        "metrics_allowed_cidrs": ["127.0.0.0/8"],
-    })
+@pytest.mark.parametrize("path,status", [("/admin/", 302), ("/admin/settings", 401), ("/admin/reauth", 302)])
+def test_open_anonymous_operator_requests_require_sign_in_without_reading_grants(operator_db, monkeypatch, path, status):
+    cfg = operator_db.cfg.with_overrides({"access_profile": "open"})
     app = app_for(monkeypatch, cfg)
     def forbidden(*args, **kwargs):
-        pytest.fail("closed console resolved identity or grant")
-    monkeypatch.setattr(helpers, "get_authentication_result", forbidden)
+        pytest.fail("anonymous request read an operator grant")
     monkeypatch.setattr(operator_access, "has_grant", forbidden)
     response = app.test_client().get(path, base_url=ORIGIN)
-    assert response.status_code == 404 and not response.data
+    assert response.status_code == status
     assert response.headers["Cache-Control"] == "private, no-store"
-    assert "Location" not in response.headers
 
 
 def test_logout_committed_during_rotation_cannot_be_undone(operator_db, monkeypatch):

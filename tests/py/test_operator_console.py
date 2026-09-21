@@ -105,8 +105,9 @@ def test_settings_only_disclose_reviewed_values_and_audit_the_actor(operator_db,
         "idle",
     ],
 )
-def test_console_authorization_and_navigation(operator_db, monkeypatch, cause):
-    app, client, bundle, issued = credential_setup(operator_db, monkeypatch)
+@pytest.mark.parametrize("profile", ["open", "token_required"])
+def test_console_authorization_and_navigation(operator_db, monkeypatch, cause, profile):
+    app, client, bundle, issued = credential_setup(operator_db, monkeypatch, profile)
     install_snapshot(monkeypatch)
     navigation = (b'data-action="admin"', b'data-action="diag"', b'data-action="audit"', b'data-menu-action="audit"')
     shell = client.get("/", base_url=ORIGIN).data

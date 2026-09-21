@@ -57,6 +57,12 @@
       "entries": [
         "/static/js/operator_pages.entry.js"
       ]
+    },
+    "sign-in": {
+      "type": "esm",
+      "entries": [
+        "/static/js/sign_in.entry.js"
+      ]
     }
   },
   "order_checks": {

@@ -71,7 +71,7 @@ import './features/runner/runner_active_restore.js';
 import './features/runner/runner_workspace.js';
 import './features/runner/runner_persistence.js';
 import './runner.js';
-import './controller.js';
+import { shellStartup } from './controller.js';
 import './features/terminal/composer_controller.js';
 import './e2e_test_hooks_loader.js';
 import './shell_chrome.js';
@@ -82,5 +82,5 @@ const initialLocation = new URL(window.location.href);
 if (initialLocation.searchParams.get('options') === 'access') {
   initialLocation.searchParams.delete('options');
   window.history.replaceState(window.history.state, '', initialLocation.href);
-  openOptions({ tab: 'access' });
+  void shellStartup.ready.then(() => openOptions({ tab: 'access' }));
 }

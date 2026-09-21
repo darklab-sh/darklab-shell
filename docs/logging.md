@@ -301,7 +301,7 @@ The current event inventory is:
 | ERROR | `OIDC_PROVIDER_FAILED` | unavailable or unusable OIDC dependency or local persistence | stage, reason, error_type, http_status, duration_ms, purpose, request_id |
 | INFO | `OIDC_BROWSER_SESSION_CREATED` | completed provider sign-in or linking | principal_id, purpose |
 | INFO | `OIDC_IDENTITY_UNLINKED` | completed provider unlink request | principal_id, changed |
-| INFO | `BROWSER_SESSION_CREATED` | restricted sign-in and credential redemption | principal_id, credential_id, source |
+| INFO | `BROWSER_SESSION_CREATED` | sign-in, credential redemption, and browser workspace attachment in every profile | principal_id, credential_id, source |
 | INFO | `BROWSER_SESSION_ROTATED` | successful Team privilege-change response | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSION_REVOKED` | browser logout | principal_id, credential_id, reason |
 | INFO | `BROWSER_SESSIONS_REVOKED` | browser principal-wide session revocation | principal_id, credential_id, count, reason |

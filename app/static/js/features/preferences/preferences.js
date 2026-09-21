@@ -34,6 +34,7 @@ import {
 } from '../../output.js';
 import {
   apiFetch as importedApiFetch,
+  getSessionId as importedGetSessionId,
   logClientError as importedLogClientError,
 } from '../../runtime_bridge.js';
 import { showToast as importedShowToast } from '../../core/utils.js';
@@ -83,6 +84,7 @@ function _preferenceSavedThemeName() {
 }
 
 function _preferenceSessionId() {
+  if (typeof importedGetSessionId === 'function') return importedGetSessionId();
   return typeof PREFERENCE_GLOBAL?.SESSION_ID === 'string' ? PREFERENCE_GLOBAL.SESSION_ID : '';
 }
 

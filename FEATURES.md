@@ -1552,8 +1552,10 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 - In the `open` profile, a new browser starts with an anonymous workspace. You can use personal features without creating an account or saving a credential.
 - Choose **Keep this workspace** when you want to reopen it after a browser change. Files, History, Projects, preferences, workflows, and other personal data stay together. You can label the first credential; no username, email address, or password is required. The old anonymous identity and its download links stop working, so use the saved credential to return.
-- **Use an existing credential** opens a kept workspace on another browser. **Remove from browser** forgets this browser's saved access and starts a fresh anonymous workspace; it doesn't delete the kept workspace or revoke other devices.
+- **Use an existing credential** opens a kept workspace on another browser. **Sign out** ends this browser's temporary session; it doesn't delete the kept workspace or revoke other devices.
 - Anonymous browsers see keep and open actions, an invalid saved credential shows its removal action, and kept workspaces show credential management. Other tabs and panels refresh when access changes. Invalid or revoked credentials show an access warning until you remove or replace them.
+
+Kept workspaces use protected browser sessions in every profile. After upgrading, an older browser-saved credential is exchanged once and removed from browser storage after success. A failed exchange stays blocked until you sign in or explicitly remove the saved access. Save credentials in a password manager for future sign-ins.
 
 ### Credentials for devices and integrations
 
@@ -1566,7 +1568,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ### Restricted sign-in
 
-- Restricted profiles require sign-in instead of starting anonymously. In `token_required`, enter a portable credential on the sign-in screen. The browser then uses a temporary session, so the reusable credential doesn't need to remain saved in browser storage.
+- Restricted profiles require sign-in instead of starting anonymously. In `token_required`, enter a portable credential on the sign-in screen. As in open mode, the browser uses a temporary protected session and removes the reusable credential from browser storage.
 - In `oidc_required`, sign in through the configured identity provider to open the linked workspace. `mixed` offers both provider and portable-credential sign-in. A new provider identity receives a workspace only when the operator allows it; the app doesn't require an email address or real name.
 - Restricted deployments disable public snapshot sharing by default. Desktop and mobile controls explain when sharing is disabled.
 
@@ -1578,8 +1580,8 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 
 ### Sign-out and expiry
 
-- Choose **Log out** in the desktop rail's **more** menu or the mobile menu to leave the current workspace without opening Options. It appears when you're signed in and asks you to confirm. Open deployments return to a fresh anonymous workspace; restricted deployments return to sign-in. Your saved workspace, credentials, and access on other devices stay intact. If logout fails, you can try again from the same menu.
-- A restricted browser session ends when it reaches either its idle limit or maximum lifetime. If it expires or is revoked while the app is open, the next protected request returns you to sign-in.
+- Choose **Log out** in the desktop rail's **more** menu or the mobile menu to leave the current workspace without opening Options. It appears when you're signed in and asks you to confirm. Every profile returns to sign-in. Open deployments also offer **Continue anonymously**. Your saved workspace, credentials, and access on other devices stay intact. If logout fails, you can try again from the same menu.
+- A browser session ends when it reaches either its idle limit or maximum lifetime. If it expires or is revoked while the app is open, the next protected request returns you to sign-in.
 - **Sign out** closes this browser session. **Sign out everywhere** closes every browser session for the workspace while keeping saved credentials and PATs usable. If a fresh sign-in is required, Access provides a **Sign in again** link. Neither action ends the identity provider's own sign-in session.
 - Revoking or rotating a portable credential also closes sessions opened with it. Access warns before signing out the current browser, and rotation gives you time to save the replacement first.
 - Open streams disconnect within 15 seconds of losing access, and a controlling interactive terminal stops. Ordinary commands already running can finish and be viewed through another valid credential.
@@ -1592,7 +1594,7 @@ sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY 
 - `credential list` shows safe credential metadata.
 - `credential create`, `credential use`, `credential expiry`, `credential rotate`, `credential revoke`, and `credential recover` open **Options → Access** for the matching action. Extra values are rejected and removed before command history is saved.
 
-**Limits:** anyone holding a portable credential can open its workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until kept. Restricted sign-in requires HTTPS.
+**Limits:** anyone holding a portable credential can open its workspace, so store it like a password. Existing secrets aren't recoverable. Revoking the last active credential requires an explicit warning and may require operator recovery. Anonymous workspaces exist only in the `open` profile and stay tied to that browser until kept. Authenticated browser access requires HTTPS in every profile.
 
 **Configuration:** no user profile or email settings are needed. `ACCESS_PROFILE=open` is the default. See [Restricted browser access](CONFIGURATION.md#restricted-browser-access) for bootstrap, session lifetime, public shares, signing-key rotation, and recovery. Operators use [Principal Access Operations](CONFIGURATION.md#principal-access-operations) for recovery and incident response.
 
@@ -1730,7 +1732,7 @@ Each snapshot identifies the web worker that served it and when its configuratio
 
 ### Access requirements
 
-Access requires a restricted sign-in profile, an explicit principal grant, and recent verified authentication. The console is closed by default. Visible pages clear displayed information and stop protected refreshes after access is lost. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console) for the shared settings, diagnostics, and audit policy.
+Access requires an explicit principal grant and recent verified browser authentication in every access profile, including `open`. The console is closed by default. Visible pages clear displayed information and stop protected refreshes after access is lost. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console) for the shared settings, diagnostics, and audit policy.
 
 ### Host validation and access commands
 
@@ -1755,7 +1757,7 @@ Use `darklab-deploy access` for principal access and private credential-file ret
 
 ### Enabling access
 
-Choose a restricted sign-in profile, grant operator access to a principal, and sign in. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console). Team roles and monitoring IPs don't grant operator access. Credential or provider verification returns you to the page you requested, including useful audit filters.
+Grant operator access to an active principal and sign in, including when anonymous workspace access is enabled. See [operator setup and recovery](CONFIGURATION.md#operator-settings-console). Team roles and monitoring IPs don't grant operator access. Credential or provider verification returns you to the page you requested, including useful audit filters.
 
 Visible pages check access periodically. Losing access clears displayed information and stops protected refreshes. The AI test runs only when you select **Test prompt** and has a per-operator limit; ordinary AI assists still use normal workspace quotas.
 
@@ -1792,7 +1794,7 @@ curl http://localhost:8888/metrics
 
 The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
-**Limits:** Settings, diagnostics, and audit require a granted principal and recent browser verification in a restricted sign-in profile; they remain unavailable in open mode. They work from any network. Metrics needs no sign-in and requires both `metrics_enabled: true` and an allowed source address. Empty `metrics_allowed_cidrs` disables scrapes without affecting operator pages.
+**Limits:** Settings, diagnostics, and audit require a granted principal and recent browser verification in every access profile, including open mode. They work from any network. Metrics needs no sign-in and requires both `metrics_enabled: true` and an allowed source address. Empty `metrics_allowed_cidrs` disables scrapes without affecting operator pages.
 
 **Configuration:** Operator access uses the principal grant and `admin_console_reauth_minutes`. Metrics uses `metrics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, and histogram buckets in `config.local.yaml`; `PROMETHEUS_MULTIPROC_DIR` lives in `.env`. See [CONFIGURATION.md](CONFIGURATION.md#enable-diagnostics).
 
