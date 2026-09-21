@@ -198,6 +198,18 @@ def test_resolver_distinguishes_every_principal_credential_state(auth_db, tmp_pa
     assert disabled.state == AuthenticationState.DISABLED_PRINCIPAL
 
 
+@pytest.mark.parametrize("header", ["X-Darklab-Credential", "X-Darklab-Anonymous-ID", "Authorization", "X-Session-ID"])
+def test_stale_cookie_recovery_cannot_ignore_explicit_identity_headers(header):
+    from conftest import make_test_app
+    from services.auth.browser_sessions import BROWSER_SESSION_COOKIE
+
+    client = make_test_app().test_client()
+    client.set_cookie(BROWSER_SESSION_COOKIE, "invalid-cookie")
+    assert client.get("/").status_code == 302
+    for path in ("/", "/auth/sign-in"):
+        assert client.get(path, headers={header: ""}).status_code == 401
+
+
 def test_resolver_skips_last_used_write_inside_bounded_interval(auth_db, tmp_path):
     now = datetime.now(timezone.utc)
     bundle = storage.create_principal_with_credential(settings=_settings(tmp_path), conn=auth_db)

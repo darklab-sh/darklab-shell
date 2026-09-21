@@ -20,7 +20,7 @@ from .browser_sessions import (
     create_browser_session,
     verify_csrf_token,
 )
-from .resolver import AuthenticatedContext
+from .resolver import AuthenticatedContext, has_explicit_identity_headers
 from .observability import log_browser_csrf_rejected
 
 OPEN = "open"
@@ -208,10 +208,7 @@ def enforce_browser_csrf(authentication_result):
 
 def browser_cookie_recovery_request() -> bool:
     """Let a stale cookie reach sign-in assets without ignoring explicit credentials."""
-    return bool(request.cookies.get(BROWSER_SESSION_COOKIE)) and not any(
-        name in request.headers
-        for name in ("X-Darklab-Credential", "X-Darklab-Anonymous-ID", "Authorization", "X-Session-ID")
-    )
+    return bool(request.cookies.get(BROWSER_SESSION_COOKIE)) and not has_explicit_identity_headers(request.headers)
 
 
 def redirect_browser_sign_in():

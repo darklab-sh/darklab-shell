@@ -14848,11 +14848,12 @@ class TestDiagRoute:
         with mock.patch.dict("config.CFG", cfg_without_key, clear=True):
             assert client.get("/diag").status_code == 200
 
-    def test_returns_404_when_client_ip_not_in_cidrs(self):
+    def test_anonymous_diagnostics_requires_sign_in_outside_metrics_cidrs(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": ["10.0.0.0/8"]}):
             resp = client.get("/diag")
-        assert resp.status_code == 404
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/auth/sign-in?next=%2Fdiag"
 
     def test_returns_200_when_client_ip_in_cidrs(self):
         client = self._allowed_client()
@@ -15887,11 +15888,12 @@ class TestDiagRoute:
         viewed_call = next(c for c in mock_info.call_args_list if c[0][0] == "DIAG_VIEWED")
         assert viewed_call[1]["extra"]["ip"] == "127.0.0.1"
 
-    def test_audit_route_requires_diag_access(self):
+    def test_anonymous_audit_requires_sign_in(self):
         client = get_client()
         with mock.patch.dict("config.CFG", {"metrics_allowed_cidrs": []}):
             resp = client.get("/audit")
-        assert resp.status_code == 404
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/auth/sign-in?next=%2Faudit"
 
     def test_audit_html_lists_events_and_disabled_banner(self):
         client = self._allowed_client()
