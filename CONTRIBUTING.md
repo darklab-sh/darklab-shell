@@ -292,6 +292,11 @@ OIDC changes use the deterministic local provider in `tests/py/test_oidc_sign_in
 
 For cross-profile changes, run `tests/js/e2e/auth-profile-qualification.spec.js` through the Playwright helper in both source and bundle modes. It exercises `open`, `token_required`, `oidc_required`, and `mixed` at desktop and mobile widths. Repeat the browser matrix on disposable Postgres with `bash scripts/run_postgres_tests.sh --browser -- --asset-bundle-mode source` and then `--asset-bundle-mode bundle`. The Postgres request-policy lane also checks PAT access on isolated schemas. The full matrix and deeper feature evidence are in [tests/README.md](tests/README.md#access-profile-qualification).
 
+Request-event logging, stream authorization, and credential lifecycle/PAT cases
+reuse stable Flask wiring with fresh clients. Credential and stream fixtures
+still own separate databases. Construction logging and per-case factory
+configuration retain fresh applications.
+
 Ordinary isolated SQLite tests that only need an empty current schema should use
 `copy_pristine_sqlite_database()` for files or `create_pristine_sqlite_connection()`
 for an in-memory database, both from `tests/py/conftest.py`. The memory helper

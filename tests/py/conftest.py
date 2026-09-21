@@ -35,6 +35,7 @@ APP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__)
 ROOT_DIR = Path(APP_DIR).parent
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
+sys.path.insert(0, str(ROOT_DIR / "scripts" / "development"))
 
 import config as shell_config  # noqa: E402
 from identity_helpers import (  # noqa: E402
@@ -218,7 +219,7 @@ def reusable_test_app(scope: str, *, init_db: bool = True):
     """Return an opt-in shared app for stable route tests.
 
     Callers still create a function-scoped client and must not mutate extension
-    registration, request hooks, logging, imports, or construction-time config.
+    registration, request hooks, logging setup, imports, or construction-time config.
     Those contracts continue to use ``make_test_app()`` directly.
     """
     key = (scope, init_db)

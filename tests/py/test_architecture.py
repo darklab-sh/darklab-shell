@@ -16,6 +16,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from python_source import parse_python_source
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BLUEPRINT_DIR = _REPO_ROOT / "app" / "blueprints"
@@ -109,7 +111,7 @@ def _assignment_name(node: ast.AST) -> str:
 
 
 def _team_scope_sql_fragments(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = parse_python_source(path)
     fragments: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -1621,7 +1623,7 @@ class _BlueprintPersistenceVisitor(ast.NodeVisitor):
 
 def _blueprint_persistence_metrics(path: Path) -> BlueprintPersistenceMetrics:
     visitor = _BlueprintPersistenceVisitor()
-    visitor.visit(ast.parse(path.read_text(), filename=str(path)))
+    visitor.visit(parse_python_source(path))
     return visitor.metrics()
 
 
@@ -1660,7 +1662,7 @@ def _singleton_binding_guard_offenders(root: Path = _REPO_ROOT / "app") -> set[s
             relative_path = path.relative_to(root).as_posix()
         if relative_path in _SINGLETON_BINDING_SOURCE_OF_TRUTH_PATHS:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = parse_python_source(path)
         core_database_aliases = {
             alias.asname
             for node in ast.walk(tree)
@@ -1745,7 +1747,7 @@ def _bare_dict_cfg_monkeypatch_offenders(root: Path = _REPO_ROOT / "tests" / "py
     offenders: set[str] = set()
     for path in sorted(root.rglob("test_*.py")):
         relative_path = path.relative_to(_REPO_ROOT).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = parse_python_source(path)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

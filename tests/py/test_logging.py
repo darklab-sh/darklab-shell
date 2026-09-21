@@ -34,7 +34,7 @@ import pytest
 
 import app as shell_app_module
 import config as app_config
-from conftest import build_test_config
+from conftest import build_test_config, reusable_test_app
 from conftest import make_test_app as _test_app
 from identity_helpers import anonymous_session_id, browser_identity_headers, principal_identity
 import core.database as db_module
@@ -125,7 +125,8 @@ def _gelf_records(output: str) -> list[dict]:
 
 
 def get_client(*, use_forwarded_for=True):
-    client = _test_app().test_client()
+    # Request-event assertions share wiring; construction logging uses _test_app.
+    client = reusable_test_app(__name__ + ".request_events").test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client

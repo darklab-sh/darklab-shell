@@ -18689,6 +18689,8 @@ class TestEntrypointWorkspaceRepair:
                         f"data_dir: {data_dir}",
                         f"prometheus_multiproc_dir: {metrics_dir}",
                         "workspace_enabled: false",
+                        "cve_risk:",
+                        "  bootstrap_enabled: false",
                         "rate_limit_enabled: false",
                         "run_broker_require_redis: true",
                     ]
@@ -18699,6 +18701,7 @@ class TestEntrypointWorkspaceRepair:
             env.update(
                 {
                     "APP_CONF_DIR": str(conf_dir),
+                    "APP_LOCAL_CONF_DIR": str(conf_dir),
                     "APP_DATA_DIR": str(data_dir),
                     "PROMETHEUS_MULTIPROC_DIR": str(metrics_dir),
                     "REDIS_URL": "redis://redis.example.invalid:6379/0",
