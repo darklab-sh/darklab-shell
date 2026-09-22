@@ -41,6 +41,7 @@ from services.auth.access_profile import (
 from services.auth.browser_sessions import (
     BROWSER_CSRF_COOKIE,
     BROWSER_SESSION_COOKIE,
+    IssuedBrowserSession,
     create_browser_session,
     revoke_browser_session,
     revoke_principal_browser_sessions,
@@ -149,7 +150,7 @@ def _clear_browser_session_cookies(response) -> None:
         response.delete_cookie(name, secure=True, httponly=httponly, samesite="Strict", path="/")
 
 
-def _issue_browser_session(context: AuthenticatedContext) -> object:
+def _issue_browser_session(context: AuthenticatedContext) -> IssuedBrowserSession:
     previous = get_authentication_result().context
     replace_id = previous.browser_session_id if isinstance(previous, AuthenticatedContext) else ""
     issued = create_browser_session(
@@ -510,13 +511,19 @@ def create_principal():
         browser = payload.get("browser_session", False)
         if not isinstance(browser, bool):
             raise InvalidIdentityValue("browser_session must be a boolean")
-        options = dict(anonymous_id=result.context.anonymous_id,
-                       credential_label=str(payload.get("label") or ""), request_fields=_request_fields())
+        credential_label = str(payload.get("label") or "")
+        request_fields = _request_fields()
         issued = None
         if browser:
-            bundle, issued = lifecycle.create_browser_principal(**options, absolute_seconds=_session_cookie_seconds())
+            bundle, issued = lifecycle.create_browser_principal(
+                anonymous_id=result.context.anonymous_id, credential_label=credential_label,
+                request_fields=request_fields, absolute_seconds=_session_cookie_seconds(),
+            )
         else:
-            bundle = lifecycle.create_principal(**options)
+            bundle = lifecycle.create_principal(
+                anonymous_id=result.context.anonymous_id, credential_label=credential_label,
+                request_fields=request_fields,
+            )
     except (IdentityStorageError, PermissionError) as exc:
         return _error(exc)
     response = jsonify({

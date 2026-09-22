@@ -6,7 +6,7 @@
 from contextlib import ExitStack
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 import pytest
 
 from core.migrations import MIGRATIONS
@@ -35,21 +35,21 @@ def test_current_databases_preserve_objects_and_isolate_committed_state(postgres
             first, second = [stack.enter_context(databases.current_database()) for _ in range(2)]
             assert first.mode == ("schema" if force_schema or not databases.can_clone else "database")
             assert first.dsn != second.dsn
-            connections = [stack.enter_context(psycopg.connect(target.dsn, row_factory=dict_row))
+            connections = [stack.enter_context(psycopg.Connection[DictRow].connect(target.dsn, row_factory=dict_row))
                            for target in (first, second)]
             for conn in connections:
                 assert {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")} == {
                     migration.version for migration in MIGRATIONS
                 }
                 assert conn.execute("SELECT count(*) AS n FROM pg_indexes WHERE schemaname = current_schema() "
-                                    "AND indexname = 'template_probe_value_idx'").fetchone()["n"] == 1
+                                    "AND indexname = 'template_probe_value_idx'").fetchone() == {"n": 1}
                 row = conn.execute("INSERT INTO template_probe (value) VALUES ('clone') RETURNING id, value").fetchone()
                 assert row == {"id": 1, "value": "CLONE"}
                 conn.commit()
             connections[0].execute("INSERT INTO principals (id, created_at, updated_at) VALUES (%s, %s, %s)",
                                    ("prn_" + "a" * 32, "2026-09-21", "2026-09-21"))
             connections[0].commit()
-            assert connections[1].execute("SELECT count(*) AS n FROM principals").fetchone()["n"] == 0
+            assert connections[1].execute("SELECT count(*) AS n FROM principals").fetchone() == {"n": 0}
             with pytest.raises(psycopg.errors.ForeignKeyViolation):
                 connections[1].execute(
                     "INSERT INTO personal_workspaces (id, principal_id, storage_key, created_at) VALUES (%s, %s, %s, %s)",
@@ -60,8 +60,8 @@ def test_current_databases_preserve_objects_and_isolate_committed_state(postgres
             with pytest.raises(ValueError, match="not owned"):
                 databases._drop_database("postgres")
         with databases.current_database() as fresh, psycopg.connect(fresh.dsn) as conn:
-            assert conn.execute("SELECT count(*) FROM principals").fetchone()[0] == 0
-            assert conn.execute("SELECT count(*) FROM template_probe").fetchone()[0] == 0
+            assert conn.execute("SELECT count(*) FROM principals").fetchone() == (0,)
+            assert conn.execute("SELECT count(*) FROM template_probe").fetchone() == (0,)
     finally:
         databases.close()
     with psycopg.connect(postgres_dsn) as admin:
@@ -75,7 +75,7 @@ def test_current_databases_preserve_objects_and_isolate_committed_state(postgres
 def test_failed_template_initialization_removes_only_its_owned_resources(postgres_dsn, force_schema):
     databases = PostgresTestDatabases(postgres_dsn, force_schema=force_schema)
 
-    def fail(_dsn):
+    def fail(dsn: str) -> None:
         raise RuntimeError("injected initialization failure")
 
     databases._migrate = fail
@@ -98,7 +98,9 @@ def test_role_without_createdb_uses_its_own_schema(postgres_dsn):
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
     with psycopg.connect(postgres_dsn, autocommit=True) as admin:
-        if not admin.execute("SELECT rolsuper FROM pg_roles WHERE rolname = current_user").fetchone()[0]:
+        role_status = admin.execute("SELECT rolsuper FROM pg_roles WHERE rolname = current_user").fetchone()
+        assert role_status is not None
+        if not role_status[0]:
             pytest.skip("role-permission qualification needs a disposable superuser test target")
         role = "darklab_role_" + uuid4().hex
         admin.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
@@ -110,13 +112,13 @@ def test_role_without_createdb_uses_its_own_schema(postgres_dsn):
             admin.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
             # Authenticate as the test administrator, then run every helper SQL
             # statement under the restricted role; no new password/HBA rule is needed.
-            options = conninfo_to_dict(postgres_dsn).get("options", "") + f" -crole={role}"
+            options = str(conninfo_to_dict(postgres_dsn).get("options") or "") + f" -crole={role}"
             databases = PostgresTestDatabases(make_conninfo(postgres_dsn, options=options))
             try:
                 with databases.current_database() as target, psycopg.connect(target.dsn) as conn:
                     assert target.mode == "schema"
-                    assert conn.execute("SELECT current_user").fetchone()[0] == role
-                    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(MIGRATIONS)
+                    assert conn.execute("SELECT current_user").fetchone() == (role,)
+                    assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone() == (len(MIGRATIONS),)
                     assert not databases.owned_databases
             finally:
                 databases.close()
@@ -133,22 +135,33 @@ def test_browser_targets_keep_profile_state_private_and_clean_up_after_interrupt
 
     path = Path(__file__).resolve().parents[2] / "scripts/test-support/playwright/prepare_postgres_schema.py"
     spec = importlib.util.spec_from_file_location("browser_postgres_targets", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.selected_slots('["chromium-oidc", "chromium-w1"]') == ["pg-open", "pg-mixed"]
     with pytest.raises(ValueError, match="Unknown"):
         module.selected_slots('["unrecognized"]')
+    metadata: Path | None = None
+    targets: dict[str, dict[str, str]] = {}
+    resources: list[tuple[str, str]] = []
     with pytest.raises(KeyboardInterrupt):
         with module.browser_targets(postgres_dsn, tmp_path, ["pg-open", "pg-mixed"], fresh=fresh) as metadata:
+            assert isinstance(metadata, Path)
             assert metadata.stat().st_mode & 0o777 == 0o600
             targets = json.loads(metadata.read_text())
             assert targets["pg-open"]["dsn"] != targets["pg-mixed"]["dsn"]
-            resources = []
             for target in targets.values():
                 with psycopg.connect(target["dsn"]) as conn:
-                    resources.append((conn.info.dbname, conn.execute("SELECT current_schema()").fetchone()[0]))
-                    assert (conn.execute("SELECT to_regclass('schema_migrations')").fetchone()[0] is None) is fresh
+                    schema = conn.execute("SELECT current_schema()").fetchone()
+                    assert schema is not None
+                    resources.append((conn.info.dbname, schema[0]))
+                    relation = conn.execute("SELECT to_regclass('schema_migrations')").fetchone()
+                    assert relation is not None
+                    assert (relation[0] is None) is fresh
             raise KeyboardInterrupt
+    assert metadata is not None
+    assert set(targets) == {"pg-open", "pg-mixed"}
+    assert len(resources) == 2
     assert not metadata.exists()
     output = capsys.readouterr().out
     assert "DARKLAB_POSTGRES_BROWSER_PREPARATION" in output
