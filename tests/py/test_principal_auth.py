@@ -1380,7 +1380,9 @@ def test_browser_workspace_attachment_commits_session_and_ownership_together(
         assert principal["principal"]["id"] == response.get_json()["principal"]["id"]
         assert principal["authentication"]["browser_session"]
         assert client.post("/auth/credentials", json={"label": "Other device"}).status_code == 403
-        csrf = client.get_cookie(browser_sessions.BROWSER_CSRF_COOKIE).value
+        csrf_cookie = client.get_cookie(browser_sessions.BROWSER_CSRF_COOKIE)
+        assert csrf_cookie is not None
+        csrf = csrf_cookie.value
         assert client.post("/auth/credentials", json={"label": "Other device"},
                            headers={"X-Darklab-CSRF": csrf}).status_code == 201
         retired = application.test_client().get("/projects", headers=anonymous.headers)

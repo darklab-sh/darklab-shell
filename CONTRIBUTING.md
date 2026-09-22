@@ -110,8 +110,10 @@ Recommended extensions:
 Practical recommendations:
 
 - select `.venv` as the workspace Python interpreter
-- let Pylance use [pyrightconfig.json](pyrightconfig.json), which already adds `app/` to the analysis path
+- let Pylance use [pyrightconfig.json](pyrightconfig.json), which adds `app/`, `scripts/development/`, and `tests/py/` to the analysis path for application and shared test helpers
 - keep the repo opened at the project root so Playwright, Vitest, and relative config paths resolve correctly
+
+Pylance checks types separately from Ruff and pytest; passing `npm run lint` and the tests doesn't establish that type checking passes. When fixing reported IDE diagnostics, verify the affected files with the same Pyright version and type stubs as the installed Pylance extension, using the workspace interpreter. Keep these analysis paths aligned when shared helpers move or gain new callers.
 
 ---
 
@@ -174,14 +176,15 @@ Before merging the release branch back to `main`:
 - After changing the app version, regenerate the checked-in API contract with `python scripts/generate_api_openapi.py` so [docs/api-v1-openapi.json](docs/api-v1-openapi.json) matches `/api/v1/openapi.json`.
 - Ensure the version-derived `PROJECT_SOURCE` link in [app/config.py](app/config.py) resolves to the exact public release tag and opens its repository README.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
+- Run `npm run assets:sync` after updating npm metadata so the asset manifest records the current package fingerprints, then review the generated diff.
 - Before a final tag, ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`. The finalized release checkout keeps three dated sections in the root changelog: the current release and the two previous releases. Add the finalized section's hash to `_PUBLISHED_CHANGELOG_HASHES` in `tests/py/test_docs.py` without changing the existing hashes. Keep the section `Unreleased` for a release-candidate rehearsal.
-- After the normal branch workflow seeds the next active `Unreleased` section, keep only that section and the two newest dated releases in the root changelog. Move the oldest retained release intact into its major-version archive, then update the archive-integrity baseline. Never rotate published history during a release-candidate rehearsal.
+- After the normal branch workflow seeds the next active `Unreleased` section, keep exactly one `Unreleased` section first, followed by the two newest dated releases in the root changelog. Changelog checks reject multiple or misplaced `Unreleased` sections. Move the oldest retained release intact into its major-version archive, then update the archive-integrity baseline. Never rotate published history during a release-candidate rehearsal.
 - Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, any decision docs touched by the release, and the merge request and release notes under `docs/release-drafts/` when they exist. Candidate branches may use their exact `X.Y.Z-rc.N` installer, image, and signing examples so those instructions can be rehearsed; `main` and final release docs must use the final stable tag.
 - Search tracked files for the previous version and review every remaining match. Update stale installer URLs, signing identities, image examples, release-specific test fixtures, and current release prose, while leaving historical changelog entries and intentionally fixed compatibility fixtures alone.
 - Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
 - Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
-- Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
+- Require the normal merge-request pipeline to pass, including test, lint, audit, and build stages. Completed release-candidate testing supplies functional acceptance evidence for a preparation commit limited to release metadata, documentation, and changelog checks; it doesn't replace that commit's pipeline.
 - Confirm the latest protected `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm the candidate did not create a GitLab Release.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
 

@@ -84,12 +84,12 @@ def postgres_schema(postgres_dsn):
 @pytest.fixture
 def postgres_current(postgres_test_databases):
     import psycopg
-    from psycopg.rows import dict_row
+    from psycopg.rows import DictRow, dict_row
 
     from dataclasses import replace
 
     with postgres_test_databases.current_database() as target:
-        with psycopg.connect(target.dsn, row_factory=dict_row) as conn:
+        with psycopg.Connection[DictRow].connect(target.dsn, row_factory=dict_row) as conn:
             # Ordinary query fixtures use the production default. Dedicated pool
             # and startup tests continue through the real configuration path.
             conn.execute("SET jit = off")

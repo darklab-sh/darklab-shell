@@ -117,6 +117,7 @@ _ENVIRONMENT_OWNED_CONFIG_KEYS = frozenset({
 })
 
 _PUBLISHED_CHANGELOG_HASHES = {
+    "3.1.0": "89c3317cf422739f656088cdddadd245e501b1ac06ba4e296e43aaa1d0076d45",
     "3.0.0": "952912b9a10f16dee456b0f50ee411a19bb5b0b7cdc253bb0ecefe42a42746b3",
     "2.9.2": "d833472879c54cc34f4119c56e15e07e068bfd911ef2656798c94a3e187ac3f0",
     "2.9.1": "62cc5d27126cc1c653ef5591eb54ac781b2cf49304244ed22d3575c7327c3514",
@@ -797,9 +798,13 @@ class TestOperatorConfigurationDocs:
 
 
 class TestChangelogArchives:
-    def test_root_keeps_active_release_and_two_newest_published_releases(self):
+    def test_root_keeps_development_or_finalized_release_layout(self):
         sections = _changelog_sections(_CHANGELOG)
         assert len(sections) == 3
+        unreleased_positions = [
+            index for index, section in enumerate(sections) if section["label"] == "Unreleased"
+        ]
+        assert unreleased_positions in ([], [0]), "Only the first section may be Unreleased"
         published = sections[1:] if sections[0]["label"] == "Unreleased" else sections
         assert all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", section["label"]) for section in published)
 

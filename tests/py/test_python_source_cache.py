@@ -11,24 +11,31 @@ import pytest
 from python_source import PythonSourceCache
 
 
+def _assigned_constant(tree: ast.Module) -> ast.Constant:
+    statement = tree.body[0]
+    assert isinstance(statement, ast.Assign)
+    assert isinstance(statement.value, ast.Constant)
+    return statement.value
+
+
 def test_cached_syntax_is_independent_and_invalidates_same_metadata_edits(tmp_path):
     path = tmp_path / "sample.py"
     path.write_text("answer = 1\n")
     cache = PythonSourceCache()
     original = cache.parse(path)
-    original.body[0].value.value = 999
+    _assigned_constant(original).value = 999
     second = cache.parse(path)
-    assert second.body[0].value.value == 1
+    assert _assigned_constant(second).value == 1
     second.body.clear()
     assert len(cache.parse(path).body) == 1
     stamp = path.stat()
     path.write_text("answer = 2\n")
     os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
-    assert cache.parse(path).body[0].value.value == 2
+    assert _assigned_constant(cache.parse(path)).value == 2
     peer = tmp_path / "other" / path.name
     peer.parent.mkdir()
     peer.write_text("answer = 3\n")
-    assert cache.parse(peer).body[0].value.value == 3
+    assert _assigned_constant(cache.parse(peer)).value == 3
     path.write_text("answer =\n")
     with pytest.raises(SyntaxError) as error:
         cache.parse(path, filename="reviewed/sample.py")
