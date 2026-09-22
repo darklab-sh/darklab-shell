@@ -11,7 +11,7 @@ from uuid import uuid4
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class PostgresTestDatabases:
         from core.migrations import MIGRATIONS  # noqa: PLC0415
         from core.migrations.runner import run_migrations_with_advisory_lock  # noqa: PLC0415
 
-        with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        with psycopg.Connection[DictRow].connect(dsn, row_factory=dict_row) as conn:
             run_migrations_with_advisory_lock(conn, MIGRATIONS)
             applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
             if applied != {migration.version for migration in MIGRATIONS}:
@@ -66,9 +66,11 @@ class PostgresTestDatabases:
     def _ensure_template(self) -> bool:
         if self.can_clone is None:
             with psycopg.connect(self.dsn) as admin:
-                createdb = admin.execute(
+                role = admin.execute(
                     "SELECT rolcreatedb OR rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user"
-                ).fetchone()[0]
+                ).fetchone()
+                assert role is not None, "The current Postgres role must exist"
+                createdb = role[0]
                 settings = admin.execute(
                     "SELECT datname, to_jsonb(d) FROM pg_catalog.pg_database d "
                     "WHERE datname IN (current_database(), 'template0')"
@@ -101,6 +103,7 @@ class PostgresTestDatabases:
     def current_database(self):
         """Yield a clean target, then drop only this invocation's disposable state."""
         if self._ensure_template():
+            assert self.template is not None, "A cloneable Postgres target must have a migrated template"
             name = self.prefix + "_" + uuid4().hex[:12]
             self._create_database(name, self.template)
             try:

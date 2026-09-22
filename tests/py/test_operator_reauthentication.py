@@ -288,7 +288,9 @@ def test_profile_changes_preserve_browser_ownership_and_enforce_permitted_method
         assert _callback(client, state).status_code == 302
     else:
         app, client, _bundle, _issued = credential_setup(operator_db, monkeypatch, "mixed")
-    original = client.get("/auth/principal", base_url=ORIGIN).json["principal"]
+    original_payload = client.get("/auth/principal", base_url=ORIGIN).json
+    assert isinstance(original_payload, dict)
+    original = original_payload["principal"]
     cookie = _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE)
     csrf = _client_cookie(client, browser_sessions.BROWSER_CSRF_COOKIE)
     for profile in ["mixed", "token_required", "oidc_required", "open"]:
@@ -299,7 +301,9 @@ def test_profile_changes_preserve_browser_ownership_and_enforce_permitted_method
         identity = client.get("/auth/principal", base_url=ORIGIN)
         assert identity.status_code == (200 if allowed else 401)
         if allowed:
-            assert identity.json["principal"] == original
+            identity_payload = identity.json
+            assert isinstance(identity_payload, dict)
+            assert identity_payload["principal"] == original
             assert client.get("/admin/access", base_url=ORIGIN).status_code == 204
             assert client.post("/session/preferences", base_url=ORIGIN, json={}).status_code == 403
             written = client.post("/session/preferences", base_url=ORIGIN,
@@ -311,6 +315,7 @@ def test_profile_changes_preserve_browser_ownership_and_enforce_permitted_method
             assert client.get("/", base_url=ORIGIN).status_code == 302
         assert _client_cookie(client, browser_sessions.BROWSER_SESSION_COOKIE) == cookie
     saved = client.get("/session/preferences", base_url=ORIGIN).json
+    assert isinstance(saved, dict)
     assert saved["preferences"]["pref_prompt_username"] == "same-owner"
 
 
@@ -334,9 +339,13 @@ def test_inflight_provider_sign_in_cannot_override_new_token_required_policy(ope
 ])
 def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, monkeypatch, failure):
     app, client, provider, state, principal = provider_setup(operator_db, monkeypatch)
-    records = []
+    records: list[logging.LogRecord] = []
+
+    def capture_record(record: logging.LogRecord) -> None:
+        records.append(record)
+
     handler = logging.Handler()
-    handler.emit = records.append
+    handler.emit = capture_record
     logger = logging.Logger("operator-step-up-test", logging.WARNING)
     logger.addHandler(handler)
     monkeypatch.setattr(oidc_diagnostics, "log", logger)
@@ -374,12 +383,13 @@ def test_provider_step_up_rejects_unverified_or_changed_context(operator_db, mon
     if failure != "profile":
         assert len(terminals) == 1
         record = terminals[0]
-        assert record.purpose == ("unknown" if failure == "state" else "admin_reauth")
+        assert record.__dict__["purpose"] == ("unknown" if failure == "state" else "admin_reauth")
         assert record.levelno == (logging.ERROR if failure in {"provider", "storage"} else logging.WARNING)
         if failure in {"subject", "revoked", "session", "session_without_cookie"}:
-            assert record.stage == "identity_binding" and record.reason == "operator_source_unavailable"
+            assert record.__dict__["stage"] == "identity_binding"
+            assert record.__dict__["reason"] == "operator_source_unavailable"
         elif failure == "storage":
-            assert record.reason == "storage_failed"
+            assert record.__dict__["reason"] == "storage_failed"
         assert record.exc_info is None and record.stack_info is None
         assert "private-storage-sentinel" not in str(record.__dict__)
         assert provider.subject not in str(record.__dict__)

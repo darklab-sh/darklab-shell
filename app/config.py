@@ -13,7 +13,7 @@ import re
 from copy import deepcopy
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, overload
 import yaml
 import config_builder as _builder
 import config_paths
@@ -21,7 +21,7 @@ from config_builder import AppConfig as AppConfig, ConfigLoadError, PROJECT_NAME
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES
 from core.startup_logging import configure_config_log_fallback, install_config_log_buffer
 
-APP_VERSION = "3.1.0-rc.1"
+APP_VERSION = "3.1.0"
 PROJECT_SOURCE = f"https://gitlab.com/darklab.sh/darklab_shell/-/tree/v{APP_VERSION}#darklab_shell"
 
 CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
@@ -137,6 +137,14 @@ _LOADED_CONFIG_SNAPSHOT = {
 def get_loaded_config_snapshot():
     """Return the captured startup result; never re-read disk or environment."""
     return {**deepcopy(_LOADED_CONFIG_SNAPSHOT), "process_id": os.getpid()}
+
+
+@overload
+def resolve_effective_cfg(cfg: AppConfig | None = None) -> AppConfig: ...
+
+
+@overload
+def resolve_effective_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
 def resolve_effective_cfg(cfg: Mapping[str, Any] | None = None) -> Mapping[str, Any]:

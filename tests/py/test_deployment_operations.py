@@ -222,6 +222,7 @@ def test_private_transport_rejects_unsafe_paths_without_disclosure(private_trans
     path.write_text(SECRET)
     path.chmod(0o600)
     requested = path
+    target = tmp_path / "retained-credential"
     if unsafe == "outside":
         requested = tmp_path / "outside" / "credential"
         requested.parent.mkdir(mode=0o700)
@@ -239,7 +240,6 @@ def test_private_transport_rejects_unsafe_paths_without_disclosure(private_trans
     elif unsafe == "file_mode":
         path.chmod(0o644)
     elif unsafe in {"file_symlink", "hardlink"}:
-        target = tmp_path / "retained-credential"
         path.rename(target)
         if unsafe == "file_symlink":
             path.symlink_to(target)

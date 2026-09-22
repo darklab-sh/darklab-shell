@@ -11,7 +11,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [3.1.0] - Unreleased
+## [3.1.0] - 2026-09-21
 
 **Upgrade note:** Diagnostics, Audit log, and Operator settings now require a verified browser session and an explicit principal grant in every access profile, including `open`. To retain operator access, sign in and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect. Rename `diagnostics_allowed_cidrs` to `metrics_allowed_cidrs` before upgrading; the removed key is ignored and no longer enables metrics scrapes. Complete the [operator upgrade preflight](CONFIGURATION.md#upgrade-preflight) and keep a verified backup before changing the image.
 
@@ -24,7 +24,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Browser sessions:** Authenticated browsers in all profiles use protected cookie sessions with CSRF checks; each profile retains its permitted sign-in methods. Open browsers retain anonymous use, migrate older saved credentials once with an authenticated reload, and can return anonymously after sign-out. Removing an older saved credential requires explicit acknowledgment. Workspace attachment and session creation commit together; rejected cookies preserve the one-time credential for recovery, and failed exchanges stay blocked.
   - **Local administration:** Grant, list, inspect, and revoke operator access independently of Team roles. Grants survive backups and database migration, repeated changes are quiet, and disabled principals can't gain access. CLI changes emit post-commit logs on stderr while stdout remains JSON. `operator-status` separates grant eligibility from the CLI's evaluated access policy and explicitly reports that the serving application and browser verification were not observed.
   - **Audit and diagnostics:** Audit viewing and exports move to `/audit` and `/audit/export`; old URLs don't redirect. Filters explain operator events and survive verification. Exports recheck authority between pages and abort on access loss or lookup failure; interrupted CSV ends with an incomplete-file warning, while interrupted JSON remains unparseable. Lookup failures and genuine denials have separate safe log classifications, and repeated warnings are sampled.
-  - **Qualification:** All four profiles have SQLite/Postgres and desktop/mobile browser coverage in source and bundle modes, including navigation, filtering, verification, and anonymous sign-in redirects. Request checks cover profile transitions, CSRF, and streamed grant/session/freshness changes. Screenshot scenes cover all three pages in each theme.
+  - **Qualification:** All four profiles have SQLite/Postgres and desktop/mobile browser coverage in source and bundle modes, including navigation, filtering, verification, and anonymous sign-in redirects. Request checks cover profile transitions, CSRF, and streamed grant/session/freshness changes. Screenshot scenes cover all three pages in each theme. Production-like staging qualification covers open and restricted modes, including sign-in, recovery, bootstrap, proxy settings, and operator workflows.
 
 - **Managed installations can administer access through `darklab-deploy access`.** Commands preserve principal safeguards, use the selected installation's Compose files, and write credentials to private host files with recovery after interrupted transfers. Host checks support GNU and BSD `stat`, reject unsafe or replaced destinations, and keep secrets out of command output. Required tests execute the shipped private-file transport against disposable paths.
 
@@ -45,14 +45,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Metrics network permissions are independent of operator access.**
   - **Before:** Metrics and diagnostics shared the `diagnostics_allowed_cidrs` network gate.
-  - **After:** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The old key is removed starting with 3.1.0-rc.1: YAML loading warns and ignores it, strict configuration checks fail on the warning, and runtime mutations reject it. Metrics permissions don't bypass AI workspace quotas; diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
+  - **After:** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The old key is removed starting with 3.1.0: YAML loading warns and ignores it, strict configuration checks fail on the warning, and runtime mutations reject it. Metrics permissions don't bypass AI workspace quotas; diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
   - **Tests:** Configuration and checker cases preserve canonical layer precedence, source reporting, the empty-list default, and safe warnings. Metrics and operator checks verify independent access controls and AI limits.
 
-- **3.1.0-rc.1 is the release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag; the 3.1.0 section remains unreleased during candidate qualification.
+- **3.1.0 is the stable release.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the final version. Installation and signing examples select its exact tag. Changelog checks accept both the dated release layout and the active development layout, with the finalized 3.1.0 section included in the published-text integrity baseline.
 
 - **Browser CI uses isolated app servers and preserves failure evidence.** Each project runs one browser worker, with a total CI cap of three; independent workflows and controlled readiness keep shared-runner contention from distorting checks. Traces retain original failed attempts, and CI still rejects flaky results.
 
 ### Fixed
+
+- **Pylance resolves shared development and test helpers and checks their callers accurately.** Analysis paths include the shared helper directories, browser-session and configuration accessors preserve their concrete types, and Postgres tests declare dictionary rows explicitly. Tests check optional results and callback signatures without suppressing diagnostics or weakening their assertions.
 
 - **Project Activity keeps pending filter edits during background refreshes.** Refreshing project data no longer clears fields before Apply is clicked. Paging continues to use the applied filters, and Clear resets both pending and applied values. Unit and browser regressions cover refreshes between editing and applying.
 
