@@ -173,6 +173,50 @@ describe('session.js', () => {
     expect(location.replace).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['', 'credential_required'],
+    ['darklab_csrf=old-proof', 'revoked_browser_session'],
+  ])('does not redirect a new sign-in for an older %s request returning %s', async (cookie, error) => {
+    const location = { pathname: '/', replace: vi.fn() }
+    let finishRequest
+    const response = new Response(JSON.stringify({ error }), { status: 401 })
+    const { apiFetch, browserDocument } = loadSession({
+      cookie, location,
+      fetchImpl: () => new Promise(resolve => { finishRequest = resolve }),
+    })
+    const pending = apiFetch('/watchers')
+    browserDocument.cookie = 'darklab_csrf=new-proof'
+    finishRequest(response)
+    expect(await pending).toBe(response)
+    expect(await response.json()).toEqual({ error })
+    expect(location.replace).not.toHaveBeenCalled()
+  })
+
+  it.each(['cookie-change', 'navigation-handoff'])(
+    'rechecks %s after reading a delayed authentication error body', async change => {
+      const location = { pathname: '/', replace: vi.fn() }
+      const response = new Response(JSON.stringify({ error: 'revoked_browser_session' }), { status: 401 })
+      let finishBody
+      let startedBody
+      const readingBody = new Promise(resolve => { startedBody = resolve })
+      vi.spyOn(response, 'clone').mockReturnValue({ json: () => {
+        startedBody()
+        return new Promise(resolve => { finishBody = resolve })
+      } })
+      const { apiFetch, browserDocument, activateAccessCredential } = loadSession({
+        cookie: 'darklab_csrf=old-proof', location,
+        fetchImpl: () => Promise.resolve(response),
+      })
+      const pending = apiFetch('/watchers')
+      await readingBody
+      if (change === 'cookie-change') browserDocument.cookie = 'darklab_csrf=new-proof'
+      else activateAccessCredential(`dlc_v1_crd_${'a'.repeat(32)}_${'b'.repeat(43)}`, { refresh: false })
+      finishBody({ error: 'revoked_browser_session' })
+      expect(await pending).toBe(response)
+      expect(location.replace).not.toHaveBeenCalled()
+    },
+  )
+
   it('logClientError forwards safe event and level fields to the client log endpoint', async () => {
     const { logClientError, fetchCalls } = loadSession({
       storageData: { anonymous_id: 'session-log', client_id: 'client-log' },

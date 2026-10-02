@@ -160,6 +160,7 @@ function loadStatusMonitor({
       'app/static/js/features/status-monitor/status_monitor_data.js',
       'app/static/js/features/status-monitor/status_monitor_resources.js',
       'app/static/js/features/status-monitor/status_monitor_assessments.js',
+      'app/static/js/features/status-monitor/status_monitor_mobile_charts.js',
       'app/static/js/status_monitor.js',
     ],
     {
@@ -1293,6 +1294,123 @@ describe('Status Monitor', () => {
 
     expect(restoreHistoryRun).toHaveBeenCalledWith('run-star-1', { hidePanelOnSuccess: false })
     expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(true)
+  })
+
+  it.each(['Enter', ' '])('keeps desktop chart keyboard activation direct for %s', async key => {
+    const restoreHistoryRun = vi.fn(() => Promise.resolve('tab-restored'))
+    const openHistoryWithFilters = vi.fn()
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ restoreHistoryRun, openHistoryWithFilters })
+    await openStatusMonitor()
+    document.querySelector('.status-monitor-star-node').dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    )
+    await new Promise(resolve => setImmediate(resolve))
+    expect(restoreHistoryRun).toHaveBeenCalledExactlyOnceWith('run-star-1', { hidePanelOnSuccess: false })
+    await openStatusMonitor()
+    document.querySelector('.status-monitor-treemap-tile').dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    )
+    expect(openHistoryWithFilters).toHaveBeenCalledExactlyOnceWith({ type: 'runs', commandRoot: 'nmap' })
+    closeStatusMonitor()
+  })
+
+  function pointer(target, type, options = {}) {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 50, clientY: 50, ...options })
+    Object.defineProperties(event, {
+      pointerId: { value: 1 },
+      pointerType: { value: 'touch' },
+      isPrimary: { value: true },
+    })
+    target.dispatchEvent(event)
+  }
+
+  function tap(target) {
+    pointer(target, 'pointerdown')
+    pointer(target, 'pointerup')
+    pointer(target, 'click', { detail: 1 })
+  }
+
+  it.each([
+    ['.status-monitor-star-node', '.status-monitor-constellation-card', 'Open run'],
+    ['.status-monitor-treemap-tile', '.status-monitor-treemap-card', 'View history'],
+  ])('requires a separate mobile popover action for %s', async (selector, cardSelector, actionLabel) => {
+    const restoreHistoryRun = vi.fn(() => Promise.resolve('tab-restored'))
+    const openHistoryWithFilters = vi.fn()
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ mobile: true, restoreHistoryRun, openHistoryWithFilters })
+    await openStatusMonitor()
+    const target = document.querySelector(selector)
+    const popover = document.querySelector(`${cardSelector} .status-monitor-constellation-popover`)
+    pointer(target, 'pointerover')
+    pointer(target, 'pointermove')
+    expect(popover.getAttribute('aria-hidden')).toBe('true')
+    tap(target)
+    expect(popover.getAttribute('aria-hidden')).toBe('false')
+    expect(restoreHistoryRun).not.toHaveBeenCalled()
+    expect(openHistoryWithFilters).not.toHaveBeenCalled()
+    const button = popover.querySelector('button')
+    expect(button.textContent).toBe(actionLabel)
+    // A click retargeted onto the newly shown button has no fresh press.
+    pointer(button, 'click', { detail: 1 })
+    expect(restoreHistoryRun).not.toHaveBeenCalled()
+    expect(openHistoryWithFilters).not.toHaveBeenCalled()
+    pointer(target, 'pointerleave')
+    expect(popover.getAttribute('aria-hidden')).toBe('false')
+    tap(button)
+    await new Promise(resolve => setImmediate(resolve))
+    if (actionLabel === 'Open run') {
+      expect(restoreHistoryRun).toHaveBeenCalledExactlyOnceWith('run-star-1', { hidePanelOnSuccess: false })
+    } else {
+      expect(openHistoryWithFilters).toHaveBeenCalledExactlyOnceWith({ type: 'runs', commandRoot: 'nmap' })
+    }
+    closeStatusMonitor()
+  })
+
+  it.each(['pointermove', 'pointercancel', 'scroll'])('rejects mobile activation after %s, including popover buttons', async cancellation => {
+    const restoreHistoryRun = vi.fn()
+    const openHistoryWithFilters = vi.fn()
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ mobile: true, restoreHistoryRun, openHistoryWithFilters })
+    await openStatusMonitor()
+    for (const selector of ['.status-monitor-star-node', '.status-monitor-treemap-tile']) {
+      const target = document.querySelector(selector)
+      const card = target.closest('.status-monitor-visual-card')
+      const popover = card.querySelector('.status-monitor-constellation-popover')
+      const button = popover.querySelector('button')
+      for (const pressTarget of [target, button]) {
+        if (pressTarget === button) tap(target)
+        pointer(pressTarget, 'pointerdown')
+        if (cancellation === 'scroll') document.querySelector('.status-monitor-list').dispatchEvent(new Event('scroll'))
+        else pointer(pressTarget, cancellation, { clientY: 70 })
+        // Moving back to the start must not turn a drag into a tap.
+        pointer(pressTarget, 'pointerup')
+        pointer(pressTarget, 'click', { detail: 1 })
+        expect(popover.getAttribute('aria-hidden')).toBe('true')
+        expect(restoreHistoryRun).not.toHaveBeenCalled()
+        expect(openHistoryWithFilters).not.toHaveBeenCalled()
+      }
+    }
+    closeStatusMonitor()
+  })
+
+  it('supports mobile keyboard previews and dismisses them on outside clicks and resize', async () => {
+    const restoreHistoryRun = vi.fn()
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ mobile: true, restoreHistoryRun })
+    await openStatusMonitor()
+    const star = document.querySelector('.status-monitor-star-node')
+    const popover = document.querySelector('.status-monitor-constellation-popover')
+    star.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(popover.querySelector('button'))
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(popover.getAttribute('aria-hidden')).toBe('true')
+    expect(document.activeElement).toBe(star)
+    expect(document.getElementById('status-monitor').classList.contains('u-hidden')).toBe(false)
+    tap(star)
+    document.querySelector('#status-monitor-title').click()
+    expect(popover.getAttribute('aria-hidden')).toBe('true')
+    tap(star)
+    window.dispatchEvent(new Event('resize'))
+    expect(popover.getAttribute('aria-hidden')).toBe('true')
+    expect(restoreHistoryRun).not.toHaveBeenCalled()
+    closeStatusMonitor()
   })
 
   it('keeps failed constellation stars category-colored with a failure ring', async () => {
