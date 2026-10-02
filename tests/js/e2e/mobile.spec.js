@@ -723,6 +723,7 @@ test.beforeEach(async ({ page }) => {
       sessionId: await browserSessionId(page), commands: ['dig mobile-status.example.test +short'],
     })
     const monitor = page.locator('#status-monitor')
+    const scroller = monitor.locator('.status-monitor-list')
     const history = page.locator('#history-panel')
     const client = await page.context().newCDPSession(page)
     const openMonitor = async () => {
@@ -734,18 +735,35 @@ test.beforeEach(async ({ page }) => {
     const swipe = async target => {
       await target.scrollIntoViewIfNeeded()
       const box = await target.boundingBox()
-      const before = await monitor.locator('.status-monitor-list').evaluate(el => el.scrollTop)
-      await client.send('Input.synthesizeScrollGesture', {
-        x: box.x + box.width / 2, y: box.y + box.height / 2,
-        yDistance: -80, speed: 200, gestureSourceType: 'touch', preventFling: true,
-      })
-      await expect.poll(() => monitor.locator('.status-monitor-list').evaluate(el => el.scrollTop)).toBeGreaterThan(before + 20)
+      const before = await scroller.evaluate(el => el.scrollTop)
+      const x = box.x + box.width / 2
+      const y = box.y + box.height / 2
+      // Synthesized touch scrolling was a no-op on Linux CI. Explicit touch
+      // input exercises native scrolling and pointer cancellation on both platforms.
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+      try {
+        for (let step = 1; step <= 8; step += 1) {
+          await client.send('Input.dispatchTouchEvent', {
+            type: 'touchMove', touchPoints: [{ x, y: y - step * 10, id: 1 }],
+          })
+        }
+      } finally {
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      }
+      await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBeGreaterThan(before + 20)
+      // Wait for native momentum to finish before the next deliberate tap.
+      await expect(scroller).toHaveAttribute('data-test-scroll-state', 'idle')
       await expect(monitor).toBeVisible()
       await expect(history).not.toHaveClass(/\bopen\b/)
       await expect(monitor.locator('.status-monitor-constellation-popover-visible')).toHaveCount(0)
     }
 
     await openMonitor()
+    await scroller.evaluate(el => {
+      el.dataset.testScrollState = 'idle'
+      el.addEventListener('scroll', () => { el.dataset.testScrollState = 'scrolling' })
+      el.addEventListener('scrollend', () => { el.dataset.testScrollState = 'idle' })
+    })
     for (const selector of ['.status-monitor-star-node', '.status-monitor-treemap-tile']) {
       const target = monitor.locator(selector).first()
       await swipe(target)
