@@ -15,6 +15,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Signing in stays on the restored workspace when an older request finishes late.** Authentication errors from an anonymous request or a previous browser session no longer interrupt a successful sign-in, including when access changes across tabs.
+
+- **Mobile Status Monitor charts stay readable and let you scroll without opening runs or History.** Constellation and Command Territory legends wrap above their charts. Tap a star or territory to preview it, then use **Open run** or **View history** in the pop-up. Desktop interactions stay the same.
+
 - **Mobile sign-in avoids zooming when you tap the credential field.** The field uses 16px text on small screens, including when verifying operator access.
 
 - **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides.

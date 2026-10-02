@@ -638,6 +638,142 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('.status-monitor-close')).toBeHidden()
   })
 
+  test('mobile Status Monitor chart headers fit dense legends at narrow widths', async ({ page }, testInfo) => {
+    const categories = ['Network Diagnostics', 'DNS & Domain', 'Vulnerability Scanning', 'Web Recon']
+    const roots = ['ping', 'dig', 'nmap', 'curl']
+    const constellation = roots.map((root, index) => ({
+      id: `mobile-layout-${index}`, root, category: categories[index],
+      command: `${root} very-long-command-target-for-mobile-preview.example.test --verbose --additional-option`,
+      started: `2026-10-02T${index < 2 ? '01' : '21'}:30:00`,
+      elapsed_seconds: 10 + index * 30, exit_code: index === 1 ? 1 : 0,
+      output_line_count: 100, max_severity_kind: 'warning', finding_count: 3,
+    }))
+    await page.route('**/history/insights**', route => route.fulfill({ json: {
+      constellation,
+      command_mix: constellation.map(star => ({ ...star, count: 25, failed: 1, total_elapsed_seconds: 100 })),
+      activity: [], events: [],
+      windows: {
+        constellation: { days: 90, label: 'last 90 days' },
+        command_mix: { days: 90, label: 'last 90 days' },
+      },
+    } }))
+    await page.locator('#hamburger-btn').tap()
+    await page.locator('#mobile-menu-sheet [data-menu-action="status-monitor"]').tap()
+    await expect(page.locator('.status-monitor-star-node')).toHaveCount(4)
+
+    for (const width of [320, 375, 430]) {
+      await page.setViewportSize({ width, height: MOBILE.height })
+      for (const cardClass of ['constellation', 'treemap']) {
+        const card = page.locator(`.status-monitor-${cardClass}-card`)
+        await card.scrollIntoViewIfNeeded()
+        const layout = await card.evaluate(el => {
+          const rect = node => {
+            const { x, y, right, bottom, width, height } = node.getBoundingClientRect()
+            return { x, y, right, bottom, width, height }
+          }
+          const title = document.createRange()
+          title.selectNodeContents(el.querySelector('.status-monitor-visual-title'))
+          return {
+            card: rect(el), title: rect(title),
+            header: rect(el.querySelector('.status-monitor-visual-header')),
+            plot: rect(el.querySelector('.status-monitor-constellation-plot, .status-monitor-treemap')),
+            labels: [...el.querySelectorAll('.status-monitor-category-legend-item, .status-monitor-visual-meta')].map(rect),
+            toggle: el.querySelector('.status-monitor-constellation-toggle')
+              ? rect(el.querySelector('.status-monitor-constellation-toggle')) : null,
+          }
+        })
+        expect(layout.plot.y).toBeGreaterThanOrEqual(layout.header.bottom - 1)
+        expect(layout.plot.bottom).toBeLessThanOrEqual(layout.card.bottom)
+        expect(layout.plot.height).toBeGreaterThanOrEqual(180)
+        for (const label of layout.labels) {
+          expect(label.x).toBeGreaterThanOrEqual(layout.card.x)
+          expect(label.right).toBeLessThanOrEqual(layout.card.right)
+          expect(label.y).toBeGreaterThanOrEqual(layout.title.bottom)
+          expect(label.bottom).toBeLessThanOrEqual(layout.plot.y)
+        }
+        if (layout.toggle) {
+          expect(layout.title.right).toBeLessThanOrEqual(layout.toggle.x)
+          expect(layout.toggle.height).toBeGreaterThanOrEqual(44)
+        }
+        await card.locator('[role="button"][aria-label^="nmap"]').tap()
+        const action = card.locator('.status-monitor-chart-action')
+        await expect(action).toBeVisible()
+        const actionBox = await action.boundingBox()
+        const cardBox = await card.boundingBox()
+        expect(actionBox.y + actionBox.height).toBeLessThanOrEqual(cardBox.y + cardBox.height)
+        if (width === 320) {
+          await card.screenshot({ path: testInfo.outputPath(`mobile-${cardClass}-preview.png`) })
+        }
+        await page.keyboard.press('Escape')
+        await expect(card.locator('.status-monitor-constellation-popover')).toHaveAttribute('aria-hidden', 'true')
+      }
+    }
+    await page.setViewportSize(MOBILE)
+    const toggle = page.locator('.status-monitor-constellation-toggle')
+    await toggle.tap()
+    await expect(toggle).toHaveText('Full day')
+    for (const chart of ['constellation', 'treemap']) {
+      await page.locator(`.status-monitor-${chart}-card`).screenshot({ path: testInfo.outputPath(`mobile-${chart}.png`) })
+    }
+  })
+
+  test('mobile Status Monitor charts scroll freely and require a separate popup action', async ({ page }, testInfo) => {
+    await ensurePromptReady(page)
+    const [run] = seedExternalHistoryRuns(testInfo, {
+      sessionId: await browserSessionId(page), commands: ['dig mobile-status.example.test +short'],
+    })
+    const monitor = page.locator('#status-monitor')
+    const history = page.locator('#history-panel')
+    const client = await page.context().newCDPSession(page)
+    const openMonitor = async () => {
+      await page.locator('#hamburger-btn').tap()
+      await page.locator('#mobile-menu-sheet [data-menu-action="status-monitor"]').tap()
+      await expect(monitor).toBeVisible()
+      await expect(monitor.locator('.status-monitor-star-node')).toHaveCount(1)
+    }
+    const swipe = async target => {
+      await target.scrollIntoViewIfNeeded()
+      const box = await target.boundingBox()
+      const before = await monitor.locator('.status-monitor-list').evaluate(el => el.scrollTop)
+      await client.send('Input.synthesizeScrollGesture', {
+        x: box.x + box.width / 2, y: box.y + box.height / 2,
+        yDistance: -80, speed: 200, gestureSourceType: 'touch', preventFling: true,
+      })
+      await expect.poll(() => monitor.locator('.status-monitor-list').evaluate(el => el.scrollTop)).toBeGreaterThan(before + 20)
+      await expect(monitor).toBeVisible()
+      await expect(history).not.toHaveClass(/\bopen\b/)
+      await expect(monitor.locator('.status-monitor-constellation-popover-visible')).toHaveCount(0)
+    }
+
+    await openMonitor()
+    for (const selector of ['.status-monitor-star-node', '.status-monitor-treemap-tile']) {
+      const target = monitor.locator(selector).first()
+      await swipe(target)
+      await target.tap()
+      const action = monitor.locator('.status-monitor-constellation-popover-visible .status-monitor-chart-action')
+      await expect(action).toBeVisible()
+      await expect(history).not.toHaveClass(/\bopen\b/)
+      await swipe(action)
+    }
+
+    await monitor.locator('.status-monitor-treemap-tile').first().tap()
+    await monitor.getByRole('button', { name: 'View history', exact: true }).tap()
+    await expect(monitor).toBeHidden()
+    await expect(history).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#history-root-input')).toHaveValue('dig')
+    await expect(page.locator('#history-list .history-entry').first()).toContainText(run.command)
+    await page.keyboard.press('Escape')
+    await expect(history).not.toHaveClass(/\bopen\b/)
+
+    await openMonitor()
+    await monitor.locator('.status-monitor-star-node').first().tap()
+    await monitor.getByRole('button', { name: 'Open run', exact: true }).tap()
+    await expect(monitor).toBeHidden()
+    await expect.poll(() => page.evaluate(() => getActiveTab()?.historyRunId)).toBe(run.id)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(run.command)
+    await client.detach()
+  })
+
   test('mobile Files create inputs use mobile-safe text defaults', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()

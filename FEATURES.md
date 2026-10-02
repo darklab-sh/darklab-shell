@@ -295,6 +295,8 @@ When command outcome summaries are enabled, text, HTML, PDF, Run Details, and pe
 
 **Command Constellation:** the Status Monitor visualises recent run history as a constellation chart with a clock-time X axis and a log-elapsed Y axis. By default the X axis auto-fits to your active hours so the canvas stays a full sky rather than a long dead zone: edges with no activity are trimmed, and interior low-density bands (the sleep window of an operator whose runs span both ends of the day) collapse onto a `//` seam marker so the visible canvas reads as continuous clock time. Toggle to **Full day** in the legend if you want strict 24-hour reading; the seam disappears and every hour gets its proportional share of the axis. Hours with no real runs are filled by a desaturated ambient layer, and a clock-pinned daylight gradient paints the 24h cycle behind the stars so noon, dusk, and night always appear at their true hour-of-day positions in either mode. Stars use structured output metadata too: warning/error runs pick up stronger tones, and runs with more findings get a larger plotted point.
 
+On mobile, chart legends wrap above the plots so labels stay readable. Tap a constellation star or Command Territory tile to preview it, then tap **Open run** or **View history** in the pop-up to continue. Scrolling dismisses the preview without opening anything. Desktop charts keep their hover previews and direct click actions.
+
 ---
 
 ## Built-In Pipe Support

@@ -915,6 +915,9 @@ test.describe('Status Monitor', () => {
 
     const tile = page.getByRole('button', { name: /^ping: \d+ run\(s\),/ }).first()
     await expect(tile).toBeVisible({ timeout: 15_000 })
+    await tile.hover()
+    await expect(page.locator('.status-monitor-treemap-popover')).toHaveAttribute('aria-hidden', 'false')
+    await expect(page.getByRole('button', { name: 'View history', exact: true })).toBeHidden()
     await tile.click()
 
     await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
@@ -927,7 +930,11 @@ test.describe('Status Monitor', () => {
 
     await openRailAction(page, 'status-monitor')
     await expect(page.locator('#status-monitor')).toBeVisible()
-    await page.locator('#status-monitor .status-monitor-star-node[aria-label^="ping "]').first().click()
+    const star = page.locator('#status-monitor .status-monitor-star-node[aria-label^="ping "]').first()
+    await star.hover()
+    await expect(page.locator('.status-monitor-constellation-card .status-monitor-constellation-popover')).toHaveAttribute('aria-hidden', 'false')
+    await expect(page.getByRole('button', { name: 'Open run', exact: true })).toBeHidden()
+    await star.click()
 
     await expect(page.locator('#status-monitor')).toBeHidden()
     await page.waitForFunction((expectedCommand) => {

@@ -358,11 +358,12 @@ async function apiFetch(url, options = {}) {
     requestOptions.headers = Object.assign({}, requestOptions.headers || {}, { 'X-Team-ID': teamId });
   }
   const method = String(requestOptions.method || 'GET').toUpperCase();
-  if (_browserSessionEnabled() && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
-    const csrfToken = _cookieValue('darklab_csrf');
-    if (csrfToken) {
+  const requestUsesBrowserSession = _browserSessionEnabled();
+  const requestCsrfToken = _cookieValue('darklab_csrf');
+  if (requestUsesBrowserSession && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+    if (requestCsrfToken) {
       requestOptions.headers = Object.assign({}, requestOptions.headers || {}, {
-        'X-Darklab-CSRF': csrfToken,
+        'X-Darklab-CSRF': requestCsrfToken,
       });
     }
   }
@@ -372,11 +373,15 @@ async function apiFetch(url, options = {}) {
   if (response.ok && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
     _sessionCsrfToken = _cookieValue('darklab_csrf');
   }
-  if (_browserSessionEnabled() && response.status === 401) {
+  if (requestUsesBrowserSession && response.status === 401) {
     try {
       const payload = await response.clone().json();
       const code = typeof payload.error === 'string' ? payload.error : payload.error?.code;
-      if (BROWSER_SESSION_ERRORS.has(code)) redirectToSignIn();
+      // A delayed denial belongs to the session that sent the request. Check
+      // again after reading its body so it can't interrupt a newer sign-in.
+      if (BROWSER_SESSION_ERRORS.has(code)
+        && !_identityNavigationPending
+        && requestCsrfToken === _cookieValue('darklab_csrf')) redirectToSignIn();
     } catch (_) {
       // Keep the original response available for the caller's error handling.
     }
