@@ -6907,6 +6907,10 @@ body.mobile-terminal-mode .tabbar-scroll {
 
 /* ── Mobile ── */
 @media (max-width: 600px) {
+  .restricted-sign-in-card .form-control {
+    /* Keep credential entry from triggering iOS focus zoom. */
+    font-size: 16px;
+  }
   /* 100svh = small (stable) viewport height. 100vh on Chrome/Safari iOS equals
      the *large* viewport (address bar hidden), making the body taller than the
      visible area on first load and pushing #mobile-composer below the fold. */

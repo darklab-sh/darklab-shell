@@ -175,7 +175,7 @@ def test_credential_lifecycle_keeps_principal_workspace_and_path_stable(principa
         conn=principal_db,
     )
     assert renamed.label == "Primary laptop"
-    expires = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    expires = datetime.now(timezone.utc) + timedelta(days=30)
     expiring = storage.set_credential_expiry(
         bundle.principal.id,
         renamed.id,

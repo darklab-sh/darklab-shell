@@ -811,6 +811,7 @@ class TestChangelogArchives:
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
             "2.x.md": (
+                "2.9.2",
                 "2.9.1",
                 "2.9.0",
                 "2.8.3",

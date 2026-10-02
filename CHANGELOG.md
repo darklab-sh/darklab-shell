@@ -6,8 +6,20 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## Archives
 
-- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.9.1
+- [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.9.2
 - [1.x releases](docs/changelog/1.x.md) - versions 1.0 through 1.7
+
+---
+
+## [3.1.1] - Unreleased
+
+### Fixed
+
+- **Mobile sign-in avoids zooming when you tap the credential field.** The field uses 16px text on small screens, including when verifying operator access.
+
+- **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides.
+
+- **Credential lifecycle checks stay valid as the calendar advances.** The workspace-stability test uses a future expiry relative to its run date, preserving the final-credential lockout checks.
 
 ---
 
@@ -138,12 +150,3 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Stylelint tooling:** the resolved dependencies use `colord` 2.10.0, `js-yaml` 4.3.2, and `fast-uri` 3.1.7 without changing the parent tooling versions.
 
 - **Container vulnerability scans no longer flag the bundled OpenSSL build.** OpenSSL is updated to the 3.6.4 security patch release with its source archive still protected by a pinned SHA-256 checksum.
-
----
-
-## [2.9.2] - 2026-08-29
-
-### Changed
-
-- **The desktop and mobile demo tours now reflect the current investigation workflow.** Both recordings cover reusable Workflows, the Project overview, Assessment planning, report preview, and Atlas Quick Lookup alongside the existing command, Files, comparison, monitoring, History, theme, and desktop PTY scenes. The wrappers also accept `--playback-only` to run the complete seeded journey headlessly and catch stale selectors or stalled scenes without requiring OBS.
-- **The UI screenshot review pack now covers the current desktop and mobile investigation surfaces.** Its 48 desktop and 41 mobile scenes add the Files inspector and full viewer, parameterized Workflows, Project Overview, monitoring digest settings, Assessment planning, Web Surface, and Atlas Quick Lookup. Filtered History deletion previews now show their real scope and counts, and the capture wrapper uses the normal Playwright helper for both source and bundle runs.
