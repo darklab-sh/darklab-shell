@@ -177,6 +177,7 @@
     "/static/js/features/status-monitor/status_monitor_data.js",
     "/static/js/features/status-monitor/status_monitor_resources.js",
     "/static/js/features/status-monitor/status_monitor_assessments.js",
+    "/static/js/features/status-monitor/status_monitor_mobile_charts.js",
     "/static/js/status_monitor.js",
     "/static/js/workspace.js",
     "/static/js/features/workspace/workspace_drag_drop.js",
