@@ -4,8 +4,8 @@
   "bundles": {
     "app": {
       "type": "css",
-      "path": "/static/build/app.725dd3133cda.css",
-      "hash": "725dd3133cda1f879582ff61d2f3569820e8f1c316a3ad126880569f330a6f8d",
+      "path": "/static/build/app.4d3968f29552.css",
+      "hash": "4d3968f2955230b73fb0ffa76ce01d55b87c010dc6f2431895716b0d255d6b29",
       "sources": [
         "/static/css/core/fonts.css",
         "/static/css/core/base.css",
@@ -25,7 +25,7 @@
         "/static/css/primitives/components.css": "ca337727884ba26edc956d153ff26317fca1f064ef67a53a33b0ebdae5beca29",
         "/static/css/welcome.css": "a903960078807dddbd3b361e1ae546fde87411f0b29e035b1659dffe346f6ae3",
         "/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
-        "/static/css/mobile.css": "bb54ca9f1b307cd14db841e4419376b74d0f5943be99b6bc2a22033317f81633",
+        "/static/css/mobile.css": "a762371324b136ee909a4eb43ab5640d778d67025fc34a4dd3f36d40886ba5d4",
         "/static/css/features/faq-shortcuts.css": "adca339366f8d8c8d70becfa0a9223019b36327036e0773e59227dabc4ea1807",
         "/static/css/features/history.css": "c4f2c73edf19666dec7b5ec53cde498197da8e58844c1526db76a708777c15b3",
         "/static/css/mobile-chrome.css": "e07316c958ada0f7a1fb4b32fd289fe81a078575de33022ed0dfc8bd83a162a6"
@@ -951,7 +951,7 @@
       "app/static/css/features/workflows.css": "5dc7d608b44d451bbfd9038ab1a392365b7615d78b7e83a8e909ce01fb5aaba1",
       "app/static/css/features/workspace.css": "af1b54ff32a72396e18dfe0eab0d3b4300f6b61ced2d210d6a61fecb5c81a929",
       "app/static/css/mobile-chrome.css": "e07316c958ada0f7a1fb4b32fd289fe81a078575de33022ed0dfc8bd83a162a6",
-      "app/static/css/mobile.css": "bb54ca9f1b307cd14db841e4419376b74d0f5943be99b6bc2a22033317f81633",
+      "app/static/css/mobile.css": "a762371324b136ee909a4eb43ab5640d778d67025fc34a4dd3f36d40886ba5d4",
       "app/static/css/primitives/components.css": "ca337727884ba26edc956d153ff26317fca1f064ef67a53a33b0ebdae5beca29",
       "app/static/css/shell-chrome.css": "9560cf0be78ace064cc87d3af44beb93af9498ac6354c012aef0e56abb10dcad",
       "app/static/css/shell.css": "b2cf5bc080f2e044917a5d9c4ce5503d15d55b3fc12da9965046a1c40b543c5a",
@@ -1197,8 +1197,8 @@
       "app/static/js/workspace.js": "8234aeff32f637473b8f1facf4672551a08d4c568a593dbc3ad3dc4ff6df2f51",
       "app/static/js/workspace_bridge.js": "431541f795197e0b7809ed1a72b795da2ac5e8af27d21c5d65dd8f5e83e87f0f",
       "assets.config.json": "6cb3c1a2d44c4f1a3571df0c8549a099bd2e06a0599760740bbca130d7c81943",
-      "package-lock.json": "3299a13f9aa504b9882f2fbe0e745156013b1524a82cbfdbc8ca484c7ca370b1",
-      "package.json": "a4a29ffb552ba1806b7f7f997ec707f5fc10d98e6da6e14a633aca24545fcda5",
+      "package-lock.json": "1145967b809c89d08b94cbc9094b5aacf391a48f68a77885293215279580dc63",
+      "package.json": "e8b8af66d21a75058a848a22b4c3173731e354153943a8183b206d17cac6b122",
       "scripts/frontend/asset_freshness.mjs": "a3286c801ce65fdd407c6870f29c648bf5eb08741bf3bc95158ab3958ba8577a",
       "scripts/frontend/build_assets.mjs": "cce8f9a69f65aa8c7bd53c3ca7be7af20f4b754fd16d50072211169d2be91d1c",
       "scripts/frontend/build_vendor.mjs": "31091d594968d3e29a63770c684887b075592dc1274a2c7157e6ce8a14516382",
@@ -1215,9 +1215,9 @@
       "admin.30588f1e1c00.js.map": "400ecdd055dbf3942f3aa3e43061a299c4fad43809f670b016bb3e25cbe8da96",
       "admin.30588f1e1c00.js.map.br": "400ecdd055dbf3942f3aa3e43061a299c4fad43809f670b016bb3e25cbe8da96",
       "admin.30588f1e1c00.js.map.gz": "400ecdd055dbf3942f3aa3e43061a299c4fad43809f670b016bb3e25cbe8da96",
-      "app.725dd3133cda.css": "725dd3133cda1f879582ff61d2f3569820e8f1c316a3ad126880569f330a6f8d",
-      "app.725dd3133cda.css.br": "725dd3133cda1f879582ff61d2f3569820e8f1c316a3ad126880569f330a6f8d",
-      "app.725dd3133cda.css.gz": "725dd3133cda1f879582ff61d2f3569820e8f1c316a3ad126880569f330a6f8d",
+      "app.4d3968f29552.css": "4d3968f2955230b73fb0ffa76ce01d55b87c010dc6f2431895716b0d255d6b29",
+      "app.4d3968f29552.css.br": "4d3968f2955230b73fb0ffa76ce01d55b87c010dc6f2431895716b0d255d6b29",
+      "app.4d3968f29552.css.gz": "4d3968f2955230b73fb0ffa76ce01d55b87c010dc6f2431895716b0d255d6b29",
       "diag.5a8673886a4f.css": "5a8673886a4f41696ba2e3f8da24fbc9573dbbd688dcd846d8b058f4fb3f815f",
       "diag.5a8673886a4f.css.br": "5a8673886a4f41696ba2e3f8da24fbc9573dbbd688dcd846d8b058f4fb3f815f",
       "diag.5a8673886a4f.css.gz": "5a8673886a4f41696ba2e3f8da24fbc9573dbbd688dcd846d8b058f4fb3f815f",
@@ -2233,6 +2233,6 @@
       "vendor-xterm.854a7c0fb70e.css.br": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
       "vendor-xterm.854a7c0fb70e.css.gz": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
     },
-    "manifest_hash": "dfc27e2bc300d1dc7bb0db50350dd8b31c2bf9182cce67adc891ab140919494e"
+    "manifest_hash": "dbda2432fc3573212186e49c261e4f8337a116ae46ad74878e7619096d3a65f5"
   }
 }
