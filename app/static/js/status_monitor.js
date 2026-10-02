@@ -45,6 +45,7 @@ import { bindDismissible as importedBindDismissible } from './ui/ui_dismissible.
 import { bindFocusTrap as importedBindFocusTrap } from './ui/ui_focus_trap.js';
 import { syncModalOverlayState as importedSyncModalOverlayState } from './ui/ui_helpers.js';
 import { bindPressable as importedBindPressable } from './ui/ui_pressable.js';
+import { createStatusMonitorMobileCharts } from './features/status-monitor/status_monitor_mobile_charts.js';
 
 let exportedOpenStatusMonitor = null;
 let exportedCloseStatusMonitor = null;
@@ -115,6 +116,7 @@ let exportedConstellationTestHelpers = null;
   let scrimEl = null;
   let listEl = null;
   let summaryEl = null;
+  let mobileCharts = null;
   let pollTimer = null;
   let tickTimer = null;
   let closedPollTimer = null;
@@ -1093,6 +1095,8 @@ let exportedConstellationTestHelpers = null;
   }
 
   function _positionMonitor() {
+    mobileCharts?.reset();
+    monitorEl?.classList.toggle('status-monitor-mobile-charts', _isMobileStatusMonitor());
     const rail = document.getElementById('rail');
     const right = rail ? Math.ceil(rail.getBoundingClientRect().right) : 0;
     const hud = document.getElementById('hud');
@@ -1220,6 +1224,11 @@ let exportedConstellationTestHelpers = null;
     monitorEl.append(header, listEl);
     monitorEl.addEventListener('click', event => event.stopPropagation());
     document.body.append(scrimEl, monitorEl);
+    mobileCharts = createStatusMonitorMobileCharts({
+      monitor: monitorEl,
+      isMobile: () => isOpen && _isMobileStatusMonitor(),
+      hidePopover: _hideConstellationPopover,
+    });
     if (typeof bindFocusTrapFn === 'function') bindFocusTrapFn(monitorEl);
     if (typeof bindDismissibleFn === 'function') {
       bindDismissibleFn(monitorEl, {
@@ -2197,6 +2206,7 @@ let exportedConstellationTestHelpers = null;
   }
 
   function _rerenderConstellationPanelInPlace() {
+    mobileCharts?.reset();
     const existing = document.querySelector('.status-monitor-constellation-card');
     if (!existing) return;
     const fresh = _renderConstellationPanel();
@@ -2466,9 +2476,11 @@ let exportedConstellationTestHelpers = null;
 
     const plot = document.createElement('div');
     plot.className = 'status-monitor-constellation-plot';
-    plot.addEventListener('pointerleave', () => _hideConstellationPopover(panel));
+    plot.addEventListener('pointerleave', () => {
+      if (!_isMobileStatusMonitor()) _hideConstellationPopover(panel);
+    });
     plot.addEventListener('focusout', event => {
-      if (!plot.contains(event.relatedTarget)) _hideConstellationPopover(panel);
+      if (!_isMobileStatusMonitor() && !plot.contains(event.relatedTarget)) _hideConstellationPopover(panel);
     });
 
     const svg = _svgEl('svg', {
@@ -2488,14 +2500,17 @@ let exportedConstellationTestHelpers = null;
       return starsByNodeId.get(node.dataset.starId || '');
     };
     svg.addEventListener('pointerover', event => {
+      if (_isMobileStatusMonitor()) return;
       const payload = starPayloadFromEvent(event);
       if (payload) _showConstellationPopover(panel, payload.star, payload.x, payload.y);
     });
     svg.addEventListener('pointermove', event => {
+      if (_isMobileStatusMonitor()) return;
       const payload = starPayloadFromEvent(event);
       if (payload) _scheduleConstellationPopover(panel, payload.star, payload.x, payload.y);
     });
     svg.addEventListener('focusin', event => {
+      if (_isMobileStatusMonitor()) return;
       const payload = starPayloadFromEvent(event);
       if (payload) _showConstellationPopover(panel, payload.star, payload.x, payload.y);
     });
@@ -2694,6 +2709,13 @@ let exportedConstellationTestHelpers = null;
       plot.appendChild(sparse);
     }
     panel.append(header, plot);
+    mobileCharts.register(panel, {
+      targetSelector: '.status-monitor-star-node',
+      resolve: node => starsByNodeId.get(node.dataset.starId),
+      show: payload => _showConstellationPopover(panel, payload.star, payload.x, payload.y),
+      activate: payload => _restoreConstellationRun(payload.star),
+      label: 'Open run',
+    });
     _scheduleConstellationAspectSync(svg);
     return panel;
   }
@@ -2849,10 +2871,13 @@ let exportedConstellationTestHelpers = null;
 
     const map = document.createElement('div');
     map.className = 'status-monitor-treemap';
-    map.addEventListener('pointerleave', () => _hideConstellationPopover(panel));
-    map.addEventListener('focusout', event => {
-      if (!map.contains(event.relatedTarget)) _hideConstellationPopover(panel);
+    map.addEventListener('pointerleave', () => {
+      if (!_isMobileStatusMonitor()) _hideConstellationPopover(panel);
     });
+    map.addEventListener('focusout', event => {
+      if (!_isMobileStatusMonitor() && !map.contains(event.relatedTarget)) _hideConstellationPopover(panel);
+    });
+    const itemsByTile = new WeakMap();
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'status-monitor-visual-empty';
@@ -2861,6 +2886,7 @@ let exportedConstellationTestHelpers = null;
     } else {
       _treemapLayout(items, 0, 0, 100, 100).forEach(({ item, x, y, width, height }) => {
         const tile = document.createElement('div');
+        itemsByTile.set(tile, item);
         const tone = _categoryTone(item.category);
         const highlightKey = String(item.root || item.category || '').trim().toLowerCase();
         const highlightSeed = _normalizedHash(highlightKey);
@@ -2896,8 +2922,12 @@ let exportedConstellationTestHelpers = null;
         tile.style.setProperty('--failure-stop', `${Math.max(0, (failureRate * 100) - 8).toFixed(1)}%`);
         tile.style.setProperty('--failure-fade', `${Math.min(100, (failureRate * 100) + 22).toFixed(1)}%`);
         tile.setAttribute('aria-label', `${item.root}: ${item.count} run(s), ${item.category}`);
-        tile.addEventListener('pointermove', event => _showTreemapPopover(panel, item, tile, event));
-        tile.addEventListener('focus', () => _showTreemapPopover(panel, item, tile));
+        tile.addEventListener('pointermove', event => {
+          if (!_isMobileStatusMonitor()) _showTreemapPopover(panel, item, tile, event);
+        });
+        tile.addEventListener('focus', () => {
+          if (!_isMobileStatusMonitor()) _showTreemapPopover(panel, item, tile);
+        });
         tile.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
@@ -2930,6 +2960,13 @@ let exportedConstellationTestHelpers = null;
     popover.classList.add('status-monitor-treemap-popover');
     map.appendChild(popover);
     panel.append(header, map);
+    mobileCharts.register(panel, {
+      targetSelector: '.status-monitor-treemap-tile',
+      resolve: tile => itemsByTile.get(tile),
+      show: (item, tile) => _showTreemapPopover(panel, item, tile),
+      activate: item => _openHistoryForCommandRoot(item.root),
+      label: 'View history',
+    });
     return panel;
   }
 
@@ -3157,6 +3194,7 @@ let exportedConstellationTestHelpers = null;
   }
 
   function _renderVisualShowcaseGrid() {
+    mobileCharts?.reset();
     const grid = document.createElement('div');
     grid.className = 'status-monitor-showcase-grid';
     grid.dataset.visualSignature = _visualGridSignature();
@@ -3917,6 +3955,7 @@ let exportedConstellationTestHelpers = null;
   }
 
   function closeStatusMonitor() {
+    mobileCharts?.reset();
     isOpen = false;
     _stopPolling();
     _clearOpenFollowupTimer();

@@ -331,9 +331,43 @@ test.describe('workspace Access', () => {
       await expect(page.locator('#options-access-summary')).toHaveText('Anonymous workspace')
       await expect(page.locator('body')).not.toContainText(replacementSecret)
 
-      await page.locator('#options-access-use-btn').click()
-      await redeemAccessCredential(page, primarySecret)
+      // Let an anonymous denial arrive after redemption, while the new page
+      // is loading. It must not redirect the newly authenticated browser.
+      let releaseDenial
+      let denialReady
+      const heldDenial = new Promise(resolve => { releaseDenial = resolve })
+      const requestedDenial = new Promise(resolve => { denialReady = resolve })
+      const deniedUrl = '**/watchers?access-sign-in-race=1'
+      await page.route(deniedUrl, async route => {
+        const response = await route.fetch()
+        denialReady(response.status())
+        await heldDenial
+        await route.fulfill({ response })
+      })
+      const deniedStatus = page.evaluate(async () => (
+        await apiFetch('/watchers?access-sign-in-race=1')
+      ).status)
+      // Handle teardown of this pending evaluation if an earlier step fails.
+      void deniedStatus.catch(() => {})
+      try {
+        expect(await requestedDenial).toBe(401)
+        await page.route('**/?options=access', async route => {
+          releaseDenial()
+          expect(await deniedStatus).toBe(401)
+          await route.continue()
+        })
+        await page.locator('#options-access-use-btn').click()
+        await redeemAccessCredential(page, primarySecret)
+      } finally {
+        releaseDenial()
+        await page.unroute(deniedUrl)
+        await page.unroute('**/?options=access')
+      }
       await expect(page.locator('#options-access-summary')).toHaveText('Authenticated workspace')
+      await expect.poll(() => peer.evaluate(() => {
+        const boot = JSON.parse(document.getElementById('app-config-json')?.textContent || '{}')
+        return boot.browser_identity?.credential_id
+      })).toBe(primarySecret.match(/crd_[0-9a-f]{32}/)[0])
 
       await primaryRow.getByRole('button', { name: 'Revoke' }).click()
       await expect(page.locator('#confirm-host')).toContainText('last active access credential')
