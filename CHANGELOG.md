@@ -29,7 +29,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Mobile sign-in avoids zooming when you tap the credential field.** The field uses 16px text on small screens, including when verifying operator access.
 
-- **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides.
+- **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides. Markdown and CSS linting use a reviewed local `braces` patch that bounds recursive nesting for GHSA-vfj7-8cjw-p6xm. The audit command verifies that patched dependency with security regressions before running the existing high/critical registry audit.
 
 - **Credential lifecycle checks stay valid as the calendar advances.** The workspace-stability test uses a future expiry relative to its run date, preserving the final-credential lockout checks.
 

@@ -384,7 +384,7 @@ The checks and their scope:
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `app/static/js/`, `tests/js/`, `.tooling/`, `scripts/` | `npm run lint:js` |
-| JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm run audit:js` |
+| JS dep CVEs | installed-dependency regressions and `npm audit` | patched lint dependency plus all registry dependencies (high/critical gate) | `npm run audit:js` |
 | CSS style | `stylelint` | `app/static/css/**/*.css` | `npm run lint:css` |
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
@@ -399,6 +399,10 @@ Run all linters at once (Python + JS/CSS/shell/Docker/YAML/license/Markdown + ve
 Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
+
+**Patched lint dependency:** Markdownlint and Stylelint use the local MIT-licensed `braces` package in `tools/vendor/braces/`. It contains the nesting-depth fix proposed in [upstream PR 72](https://github.com/micromatch/braces/pull/72) for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The published `braces` package has no fixed release; the private version `3.0.3-darklab.1` identifies our patched copy. Its [notice](tools/vendor/braces/NOTICE.txt), [license](tools/vendor/braces/LICENSE), and [source patch](tools/vendor/braces/security.patch) preserve provenance and attribution. The root development dependency and `$braces` override make every lint dependency use this copy through a normal `npm ci`.
+
+`npm audit` doesn't scan linked local source. `npm run audit:js` therefore first runs the installed-dependency security tests, which check that both linters resolve the patched copy, deeply nested strings and supplied ASTs are rejected, and ordinary glob behavior still works. It then runs `npm audit --audit-level=high` for the registry dependency tree, including the patched package's dependencies. The package is development tooling and isn't included in browser bundles or the release image. When changing the patch or override, run `npm ci`, `npm run audit:js`, `npm run lint:md`, and `npm run lint:css`; retain the upstream MIT notices.
 
 ---
 

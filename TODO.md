@@ -115,7 +115,7 @@ These are possible future improvements, split by whether they look worth carryin
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Replace the local `braces` security patch with a fixed upstream release.** Track [upstream PR 72](https://github.com/micromatch/braces/pull/72) and [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). Once a maintained release fixes nesting in both string and AST entry points, replace the local package and override, update the provenance docs, and retain security regression coverage while qualifying clean installation, audit, Markdown lint, and CSS lint.
 
 ## Research
 

@@ -395,3 +395,4 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 | `docs/` | Focused user, operator, and contributor guides |
 | `scripts/` | Stable contributor commands with internal helpers grouped by purpose |
 | `tests/` | Backend, browser-unit, end-to-end, and visual-review coverage |
+| `tools/` | Headless CLI package and reviewed third-party development dependencies |
