@@ -13,6 +13,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.1.1] - Unreleased
 
+**Upgrade note:** This candidate retains the v3 access model: pseudonymous principals own personal workspaces, portable credentials sign browsers in, and scoped PATs authenticate API and CLI requests. Legacy `tok_` values are intentionally invalid, and databases with retired identity schemas are rejected. Private deployments can require credentials, OIDC, or either sign-in method over HTTPS. Operators must complete the [upgrade preflight](CONFIGURATION.md#upgrade-preflight), verify their explicit operator grant and recent browser verification, and preserve a tested backup of the database, matching secrets key, Files, and operator configuration before changing the image. These access requirements were introduced in earlier v3 releases.
+
+### Changed
+
+- **3.1.1-rc.1 is the release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag; the 3.1.1 changelog remains unreleased during candidate testing. Upgrade wording retains the legacy-credential warning and passes the retired-identity reference check.
+
 ### Fixed
 
 - **Mobile chart scrolling tests work on Linux CI runners as well as macOS.** They send native touch start, move, and end events while still checking that charts scroll and swipes don't open runs or History.
