@@ -17,7 +17,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **3.1.1-rc.1 is the release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag; the 3.1.1 changelog remains unreleased during candidate testing.
+- **3.1.1-rc.1 is the release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag; the 3.1.1 changelog remains unreleased during candidate testing. Upgrade wording retains the legacy-credential warning and passes the retired-identity reference check.
 
 ### Fixed
 
