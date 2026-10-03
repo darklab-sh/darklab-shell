@@ -187,6 +187,7 @@ Before merging the release branch back to `main`:
 - Require the normal merge-request pipeline to pass, including test, lint, audit, and build stages. Completed release-candidate testing supplies functional acceptance evidence for a preparation commit limited to release metadata, documentation, and changelog checks; it doesn't replace that commit's pipeline.
 - Confirm the latest protected `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm the candidate did not create a GitLab Release.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
+- Keep release-note and merge-request drafts outside the committed release. Preserve local copies before removing tracked drafts from the release checkout.
 
 When the checklist is complete, merge the release branch into `main`, then
 create the final annotated `vMAJOR.MINOR.PATCH` tag from that exact `main`
