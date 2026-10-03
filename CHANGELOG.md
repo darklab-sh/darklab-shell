@@ -11,7 +11,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [3.1.1] - Unreleased
+## [3.1.1] - 2026-10-03
+
+**Upgrade note:** This release retains the v3 access model: pseudonymous principals own personal workspaces, portable credentials sign browsers in, and scoped PATs authenticate API and CLI requests. Legacy `tok_` values are intentionally invalid, and databases with retired identity schemas are rejected. Private deployments can require credentials, OIDC, or either sign-in method over HTTPS. Operators must complete the [upgrade preflight](CONFIGURATION.md#upgrade-preflight), verify their explicit operator grant and recent browser verification, and preserve a tested backup of the database, matching secrets key, Files, and operator configuration before changing the image. These access requirements were introduced in earlier v3 releases.
+
+### Changed
+
+- **3.1.1 is the stable release.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the final version. Installation and signing examples select its exact tag. The dated changelog section is included in the published-text integrity baseline.
 
 ### Fixed
 
@@ -23,7 +29,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Mobile sign-in avoids zooming when you tap the credential field.** The field uses 16px text on small screens, including when verifying operator access.
 
-- **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides.
+- **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides. Markdown and CSS linting use a reviewed local `braces` patch that bounds recursive nesting for GHSA-vfj7-8cjw-p6xm. The audit command verifies that patched dependency with security regressions before running the existing high/critical registry audit.
 
 - **Credential lifecycle checks stay valid as the calendar advances.** The workspace-stability test uses a future expiry relative to its run date, preserving the final-credential lockout checks.
 

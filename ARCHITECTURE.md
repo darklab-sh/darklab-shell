@@ -2658,7 +2658,7 @@ Theme values are resolved server-side from named YAML variants in `app/conf/them
 The test stack is intentionally split into three layers:
 
 - `pytest` for backend contracts, route behavior, persistence, loaders, and logging
-- `Vitest` for client-side helpers and DOM-bound browser logic in jsdom
+- `Vitest` for client-side helpers, DOM-bound browser logic in jsdom, and tooling checks in Node
 - `Playwright` for the integrated browser UI against a live Flask server
 
 ### Testing Architecture

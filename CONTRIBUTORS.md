@@ -48,4 +48,5 @@ darklab_shell uses or builds on:
 - [Flask-Limiter](https://flask-limiter.readthedocs.io/) — rate limiting
 - [Playwright](https://playwright.dev/) — browser end-to-end testing
 - [Vitest](https://vitest.dev/) — JavaScript unit testing
+- [braces](https://github.com/micromatch/braces) — MIT-licensed glob handling for development tools, with FSDevelop's [nesting-depth security patch](https://github.com/micromatch/braces/pull/72)
 - [pytest](https://pytest.org/) — Python testing

@@ -187,6 +187,7 @@ Before merging the release branch back to `main`:
 - Require the normal merge-request pipeline to pass, including test, lint, audit, and build stages. Completed release-candidate testing supplies functional acceptance evidence for a preparation commit limited to release metadata, documentation, and changelog checks; it doesn't replace that commit's pipeline.
 - Confirm the latest protected `vMAJOR.MINOR.PATCH-rc.NUMBER` tag pipeline pushed the canonical GitLab image, passed production-installation and compatibility smoke validation, promoted the same digest to `docker.io/darklabsh/darklab-shell`, passed the fixed-Critical vulnerability gate, signed both image references, published the checksummed installer plus signed release evidence, and round-tripped API state through bundled-Postgres backup and restore with the normal process defaults. Confirm the candidate did not create a GitLab Release.
 - Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
+- Keep release-note and merge-request drafts outside the committed release. Preserve local copies before removing tracked drafts from the release checkout.
 
 When the checklist is complete, merge the release branch into `main`, then
 create the final annotated `vMAJOR.MINOR.PATCH` tag from that exact `main`
@@ -384,7 +385,7 @@ The checks and their scope:
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `app/static/js/`, `tests/js/`, `.tooling/`, `scripts/` | `npm run lint:js` |
-| JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm run audit:js` |
+| JS dep CVEs | installed-dependency regressions and `npm audit` | patched lint dependency plus all registry dependencies (high/critical gate) | `npm run audit:js` |
 | CSS style | `stylelint` | `app/static/css/**/*.css` | `npm run lint:css` |
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
@@ -399,6 +400,10 @@ Run all linters at once (Python + JS/CSS/shell/Docker/YAML/license/Markdown + ve
 Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
+
+**Patched lint dependency:** Markdownlint and Stylelint use the local MIT-licensed `braces` package in `tools/vendor/braces/`. It contains the nesting-depth fix proposed in [upstream PR 72](https://github.com/micromatch/braces/pull/72) for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The published `braces` package has no fixed release; the private version `3.0.3-darklab.1` identifies our patched copy. Its [notice](tools/vendor/braces/NOTICE.txt), [license](tools/vendor/braces/LICENSE), and [source patch](tools/vendor/braces/security.patch) preserve provenance and attribution. The root development dependency and `$braces` override make every lint dependency use this copy through a normal `npm ci`.
+
+`npm audit` doesn't scan linked local source. `npm run audit:js` therefore first runs the installed-dependency security tests, which check that both linters resolve the patched copy, deeply nested strings and supplied ASTs are rejected, and ordinary glob behavior still works. It then runs `npm audit --audit-level=high` for the registry dependency tree, including the patched package's dependencies. The package is development tooling and isn't included in browser bundles or the release image. When changing the patch or override, run `npm ci`, `npm run audit:js`, `npm run lint:md`, and `npm run lint:css`; retain the upstream MIT notices.
 
 ---
 
