@@ -29,7 +29,7 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "audit": "npm run audit:py && npm run audit:js",
     "audit:py": "python -m pip_audit -r app/requirements.txt -r requirements-dev.txt",
-    "audit:js": "npm audit --audit-level=high",
+    "audit:js": "npm run test:unit -- tests/js/unit/braces_security.test.js && npm audit --audit-level=high",
     "vendor:sync": "node scripts/frontend/build_vendor.mjs",
     "vendor:check": "tmp=$(mktemp -d) && node scripts/frontend/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/",
     "assets:inventory": "node scripts/frontend/inventory_frontend_modules.mjs",
@@ -47,6 +47,7 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "braces": "file:tools/vendor/braces",
     "esbuild": "0.28.2",
     "eslint": "^10.9.0",
     "js-yaml": "5.4.2",
@@ -57,6 +58,7 @@
   },
   "overrides": {
     "brace-expansion": "5.0.12",
+    "braces": "$braces",
     "js-yaml@^4.0.0": "4.3.2",
     "postcss": "8.5.23"
   }

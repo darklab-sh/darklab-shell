@@ -1,0 +1,35 @@
+braces: development-tool security patch
+======================================
+
+This directory contains braces 3.0.3 with the source changes proposed in
+micromatch/braces pull request 72 by FSDevelop. The original MIT license and
+copyright are preserved in LICENSE. The package is private and identified as
+3.0.3-darklab.1; it is not an upstream release.
+
+Original package: https://registry.npmjs.org/braces/-/braces-3.0.3.tgz
+Original source: https://github.com/micromatch/braces/tree/3.0.3
+Security advisory: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm
+Proposed patch: https://github.com/micromatch/braces/pull/72
+Patch commit: d0d575e55e74a4e0218e5248fafb79efc3e54ebb
+
+security.patch contains that commit's changes to lib/ only, applied to the
+published 3.0.3 package. index.js and the remaining lib/ files are unchanged.
+The local package metadata preserves upstream attribution and runtime
+dependencies and adds the private patch version and source reference.
+
+The patch limits brace and parenthesis nesting to 100 levels in the parser
+and recursive compile, expand, and stringify paths. A caller can request a
+lower maxDepth, but cannot raise it above the safety limit. The limit also
+covers callers that supply an AST directly.
+
+The root package.json installs this directory as a development dependency
+and overrides every transitive braces dependency to the same local package.
+It is used by Markdown and CSS lint tooling, not the application browser
+bundles or released container. npm audit does not scan linked local source;
+audit:js therefore runs the installed-dependency security regressions before
+the unchanged npm audit --audit-level=high check. Registry dependencies,
+including fill-range, remain in the ordinary dependency audit.
+
+Maintenance and validation are documented in CONTRIBUTING.md under
+"Linting and Security Scanning". Run npm ci, npm run audit:js, npm run lint:md,
+and npm run lint:css when changing this package or its dependency override.

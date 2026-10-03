@@ -474,6 +474,8 @@ the jsdom-heavy suites responsive on high-core development and CI hosts. Tests
 also have a 20-second wall-clock ceiling so a ready worker isn't mistaken for a
 hung interaction when a constrained host takes longer to schedule it.
 
+`braces_security.test.js` checks the installed Markdown/CSS lint dependency chain against the reviewed local patch. It rejects deeply nested brace and parenthesis strings and caller-supplied ASTs, checks the depth boundary and attempts to raise it, and preserves normal brace expansion and glob matching. `npm run audit:js` runs this suite before the registry audit because npm doesn't scan linked local source. See [Linting and Security Scanning](../CONTRIBUTING.md#linting-and-security-scanning) for the package's source and maintenance contract.
+
 #### Shared browser modules and Atlas
 
 Access coverage keeps one-time credentials masked until requested and removes them from the DOM on close. It also exercises invalid and out-of-order responses, safe metadata for every credential state, durable-work review before revocation, replacement-first rotation, browser-storage cleanup in every profile, cookie-owned identity, and automatic CSRF headers on unsafe requests.
