@@ -17931,6 +17931,12 @@ class TestDataAccessLayerServiceCoverage:
 
 
 class TestSessionWorkspace:
+    @pytest.fixture(autouse=True)
+    def _workspace_database(self, monkeypatch, tmp_path):
+        path = copy_pristine_sqlite_database(tmp_path / "workspace.db")
+        monkeypatch.setattr(database, "DB_PATH", str(path))
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+
     def _cfg(self, root, **overrides):
         cfg = {
             "workspace_enabled": True,

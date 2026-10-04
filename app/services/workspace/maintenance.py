@@ -202,7 +202,7 @@ def cleanup_inactive_workspaces(
     skip_session_id: str | None = None,
 ) -> int:
     from services.metrics_lazy import app_metrics
-    from services.workspace.files import session_workspace_name, workspace_root, workspace_settings
+    from services.workspace.files import session_workspace_dir, workspace_root, workspace_settings
 
     settings = workspace_settings(cfg)
     if not settings.enabled or settings.inactivity_ttl_hours <= 0:
@@ -210,7 +210,7 @@ def cleanup_inactive_workspaces(
     root = workspace_root(settings)
     if not root.exists():
         return 0
-    skip_name = session_workspace_name(skip_session_id) if skip_session_id else ""
+    skip_name = session_workspace_dir(skip_session_id, cfg).name if skip_session_id else ""
     ttl_seconds = settings.inactivity_ttl_hours * 60 * 60
     cutoff = (datetime.now(timezone.utc).timestamp() if now is None else float(now)) - ttl_seconds
     removed = 0

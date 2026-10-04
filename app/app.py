@@ -69,6 +69,7 @@ from services.auth.observability import (
 )
 from services.auth.operator_access import enforce_operator_access
 from services.auth.operator_access import private_response as operator_private_response
+from services.auth.resolver import AnonymousContext, AuthenticatedContext
 from services.metrics_lazy import app_metrics
 from services.workspace.files import cleanup_inactive_workspaces
 
@@ -495,9 +496,20 @@ def _maybe_cleanup_workspaces():
     now = time.monotonic()
     if now - _last_workspace_cleanup_monotonic < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
         return
+    result = get_authentication_result()
+    if result.failed:
+        return
+    context = result.context
+    if isinstance(context, AnonymousContext):
+        skip_session_id = context.anonymous_id
+    elif isinstance(context, AuthenticatedContext):
+        skip_session_id = context.personal_workspace_id
+    else:
+        skip_session_id = ""
+    # Claim the interval only for an attempt, including one that later fails.
     _last_workspace_cleanup_monotonic = now
     try:
-        removed = cleanup_inactive_workspaces(CFG, skip_session_id=get_session_id(required=False))
+        removed = cleanup_inactive_workspaces(CFG, skip_session_id=skip_session_id)
         if removed:
             log.info("WORKSPACE_CLEANUP", extra={"removed": removed})
     except Exception:

@@ -16,6 +16,21 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Browser readiness and terminal confirmation tests stay reliable when startup or stream processing yields.**
+  - **Root cause:** The browser helper could stop waiting before its test hooks existed. Runner unit tests could leave exit events queued against the next test's tab state, and mobile body classes could affect later focus checks.
+  - **Fix:** Hook readiness uses a synchronous polling condition. Finite-stream tests wait for terminal completion, runner fixtures clean up streams and timers, and each case starts with fresh body classes.
+  - **Tests:** Browser coverage holds test hooks back after the shell is ready, and runner coverage forces a stream to yield between output and exit.
+
+- **Expired browser sessions no longer produce workspace cleanup errors or postpone maintenance.**
+  - **Root cause:** A public request with a rejected browser cookie claimed the worker's cleanup interval before resolving its owner. Authentication then raised inside the cleanup block, which logged an ERROR without attempting cleanup.
+  - **Fix:** Cleanup reads the cached authentication result and quietly skips rejected identities before claiming the interval. The next eligible request can run cleanup immediately. Valid owners stay excluded, genuine cleanup failures retain their ERROR traceback and five-minute retry interval, and SQLite checkpoints remain independent.
+  - **Tests:** SQLite and Postgres regressions cover expired, revoked, malformed, and disabled browser identities in open and restricted profiles, public and protected responses, owner exclusions, actual expired-directory removal, retry timing, and text/GELF logging.
+
+- **Cleanup protects the current workspace after it has been kept.**
+  - **Root cause:** Cleanup derived the directory to exclude by hashing the owner id. Keeping an anonymous workspace changes its owner id but preserves its original directory, so cleanup could remove that current workspace when its activity timestamp was old.
+  - **Fix:** The exclusion uses the shared workspace path resolver and its stored directory name.
+  - **Tests:** SQLite and Postgres checks keep an anonymous workspace through the production service, age its directory, and verify that cleanup preserves its files while removing another expired workspace.
+
 - **Workspace requests without an identity return an authentication response instead of a server error.**
   - **Root cause:** Open-profile requests without an anonymous identity or browser session could pass an empty owner id to preferences, starred commands, and the active Project, causing HTTP 500 responses.
   - **Fix:** Workspace helpers require an owner and return HTTP 401 with `credential_required` when none is available. Public content and open-profile run permalinks keep their optional identity behavior, including private-metadata filtering, and invalid credentials retain their specific rejection. A browser that loses its session cookie can sign in again and recover its saved workspace.

@@ -21,6 +21,18 @@ async function flushPromises(times = 6) {
   for (let i = 0; i < times; i += 1) await Promise.resolve()
 }
 
+const runnerCleanups = []
+
+beforeEach(() => {
+  document.body.className = ''
+})
+
+afterEach(() => {
+  for (const cleanup of runnerCleanups.splice(0)) cleanup()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
+
 function brokerStreamResponse(payload) {
   let done = false
   return {
@@ -55,15 +67,7 @@ function brokerApiFetch(payload, { runId = 'run-1' } = {}) {
 }
 
 function pendingBrokerStreamResponse() {
-  return {
-    ok: true,
-    status: 200,
-    body: {
-      getReader: () => ({
-        read: vi.fn(() => new Promise(() => {})),
-      }),
-    },
-  }
+  return controllableBrokerStreamResponse()
 }
 
 function controllableBrokerStreamResponse() {
@@ -119,10 +123,6 @@ describe('_formatElapsed', () => {
 })
 
 describe('stall recovery notices', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
   it('keeps a quiet stalled tab running when the backend still lists the run active', async () => {
     vi.useFakeTimers()
     const appendLine = vi.fn()
@@ -997,6 +997,19 @@ function loadRunnerFns({
   const cancelWelcome = vi.fn()
   const showToast = showToastOverride || vi.fn()
 
+  // Stream batches can yield to a timer. Own those timers so a failed test
+  // can't deliver an old exit event into the next test's shared tab state.
+  const timeouts = new Set()
+  const intervals = new Set()
+  const clearRunnerTimeout = (id) => {
+    clearTimeout(id)
+    timeouts.delete(id)
+  }
+  const clearRunnerInterval = (id) => {
+    clearInterval(id)
+    intervals.delete(id)
+  }
+
   const fns = fromDomScripts(
     [
       'app/static/js/core/runner_core.js',
@@ -1074,8 +1087,21 @@ function loadRunnerFns({
         return `Request to the ${context} failed: ${message}`
       },
       logClientError,
-      clearTimeout,
-      setTimeout,
+      clearTimeout: clearRunnerTimeout,
+      setTimeout: (callback, delay, ...args) => {
+        const id = setTimeout(() => {
+          timeouts.delete(id)
+          callback(...args)
+        }, delay)
+        timeouts.add(id)
+        return id
+      },
+      clearInterval: clearRunnerInterval,
+      setInterval: (...args) => {
+        const id = setInterval(...args)
+        intervals.add(id)
+        return id
+      },
       Event,
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
@@ -1155,6 +1181,11 @@ function loadRunnerFns({
     `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,
   )
   setRuntimeActiveTabIdForTest = fns.__setActiveTabIdForTest
+  runnerCleanups.push(() => {
+    for (const tab of normalizedTabs) fns.detachRunStreamForTab(tab.id)
+    for (const id of timeouts) clearRunnerTimeout(id)
+    for (const id of intervals) clearRunnerInterval(id)
+  })
 
   return {
     ...fns,
@@ -1363,7 +1394,7 @@ describe('runner helpers', () => {
     restoreActiveRunsAfterReload([
       { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
     ])
-    await flushPromises()
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
 
     expect(tabs[0].historyRunId).toBe('run-1')
     expect(tabs[0].historyRunKind).toBe('external')
@@ -1375,7 +1406,6 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('live line', '', 'tab-1')
     expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
     expect(status.className).toBe('status-pill ok')
-    vi.useRealTimers()
   })
 
   it('restoreActiveRunsAfterReload skips runs owned by another live client', () => {
@@ -2203,7 +2233,7 @@ describe('runner helpers', () => {
       'data: {"type":"started","run_id":"run-1"}\n\n' +
       'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
     )
-    const { runCommand } = loadRunnerFns({
+    const { runCommand, tabs } = loadRunnerFns({
       cmdValue: 'ping -c 1 darklab.sh',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
@@ -2211,7 +2241,7 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 darklab.sh')
 
@@ -2229,7 +2259,7 @@ describe('runner helpers', () => {
     })
 
     failedHarness.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(failedHarness.tabs[0].st).toBe('fail'))
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
   })
@@ -2242,7 +2272,7 @@ describe('runner helpers', () => {
       'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
       { runId: 'run-3' },
     )
-    const { runCommand } = loadRunnerFns({
+    const { runCommand, tabs } = loadRunnerFns({
       cmdValue: 'pign darklab.sh',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
@@ -2250,7 +2280,7 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(tabs[0].st).toBe('fail'))
 
     expect(addToRecentPreview).not.toHaveBeenCalled()
   })
@@ -2615,7 +2645,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(clearTab).toHaveBeenCalledWith('tab-1')
     expect(appendLine).not.toHaveBeenCalledWith(
@@ -2645,7 +2675,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(appendLine).toHaveBeenCalledWith(
       "[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
@@ -2675,7 +2705,7 @@ describe('runner helpers', () => {
     window.APP_CONFIG = { max_output_lines: 1234 }
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(appendLine).toHaveBeenCalledWith(
       "[preview truncated — only the last 1234 lines are shown here, but the full output had 2048 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
@@ -2702,7 +2732,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     await vi.waitFor(() => expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1))
     expect(JSON.parse(loaded.storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
@@ -2734,6 +2764,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     await vi.waitFor(() => {
       expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
@@ -2771,7 +2802,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(appendLine).toHaveBeenCalledWith(
       'streamed',
@@ -2801,7 +2832,7 @@ describe('runner helpers', () => {
     window.APP_CONFIG = { high_volume_output_line_threshold: 50000 }
 
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(appendLine).toHaveBeenCalledWith(
       'streamed',
@@ -2811,7 +2842,7 @@ describe('runner helpers', () => {
     )
   })
 
-  it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
+  it.each(['immediate', 'deferred'])('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result (%s exit)', async (drain) => {
     const appendLine = vi.fn()
     const apiFetch = brokerApiFetch(
       [
@@ -2828,8 +2859,13 @@ describe('runner helpers', () => {
       appendLine,
     })
 
+    if (drain === 'deferred') {
+      // Force the real stream queue to yield after output, before its exit.
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => (now += 7))
+    }
     loaded.runCommand()
-    await flushPromises()
+    await vi.waitFor(() => expect(loaded.tabs[0].st).toBe('ok'))
 
     expect(appendLine).not.toHaveBeenCalledWith(
       'Warning: inverse host lookup failed for 107.178.109.44: No address associated with name',
