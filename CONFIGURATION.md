@@ -258,6 +258,8 @@ Sign-out returns to the shared sign-in page. In open mode, **Continue anonymousl
 
 Authenticated browser access requires HTTPS in every profile, including `open`. Browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`. The short-lived provider state cookie is `Secure`, `HttpOnly`, and `SameSite=Lax` so it returns on the provider's redirect. Sign-in won't work over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
 
+Open access still requires a valid anonymous identity or authenticated session for workspace data. Requests with neither receive HTTP 401 with `credential_required`; they don't create a replacement workspace. Public run and snapshot permalinks remain readable without an identity in open mode, with private metadata omitted. If a signed-in browser loses its session cookie, the shell returns to sign-in and saved workspace data stays intact. See [Workspace Access](FEATURES.md#workspace-access) for recovery behavior.
+
 Set the profile and session lifetimes in the installation's `.env`, then recreate the app:
 
 ```bash

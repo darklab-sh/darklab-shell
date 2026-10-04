@@ -78,6 +78,7 @@ _ASSESSMENT_LOG_EVENT_PREFIXES = (
     "HTTPX_",
 )
 _CHANGELOG_ARCHIVES = (
+    _REPO_ROOT / "docs" / "changelog" / "3.x.md",
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
 )
@@ -811,6 +812,7 @@ class TestChangelogArchives:
 
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
+            "3.x.md": ("3.0.0",),
             "2.x.md": (
                 "2.9.2",
                 "2.9.1",
@@ -851,8 +853,18 @@ class TestChangelogArchives:
             for section in _changelog_sections(path):
                 if section["label"] == "Unreleased":
                     continue
+                body = section["body"]
+                if path.name == "3.x.md":
+                    # This archive was published at the repository root. Keep
+                    # its original hashes while rebasing links to the same files.
+                    for archived, original in (
+                        ("(../api.md#", "(docs/api.md#"),
+                        ("(../../CONFIGURATION.md#", "(CONFIGURATION.md#"),
+                        ("(../../FEATURES.md#", "(FEATURES.md#"),
+                    ):
+                        body = body.replace(archived, original)
                 actual[section["version"]] = hashlib.sha256(
-                    section["body"].encode()
+                    body.encode()
                 ).hexdigest()
         assert actual == _PUBLISHED_CHANGELOG_HASHES
 

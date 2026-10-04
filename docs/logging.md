@@ -54,6 +54,8 @@ HTTPx screenshot finalization logs only owner/run ids, counts, limits, and fixed
 
 Configure the minimum emitted level with `log_level`. Applications and browser clients use `WARNING`; some transports or dashboards may display that level as `WARN`.
 
+Workspace requests with no identity return HTTP 401 and use the sampled `CREDENTIAL_AUTHENTICATION_REJECTED` warning with `reason=credential_required`, including in open mode. These expected denials don't emit `UNHANDLED_EXCEPTION` or a traceback. Invalid credentials and expired or revoked browser sessions retain their existing reason codes.
+
 ## Output Formats
 
 The logging layer supports two output formats selected by `log_format` in installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead:
