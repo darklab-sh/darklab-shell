@@ -717,7 +717,7 @@ class TestSecretsRoutes:
         try:
             listed = client.get("/session/secrets")
             assert listed.status_code == 401
-            assert listed.get_json()["error"] == "session_required"
+            assert listed.get_json()["error"] == "credential_required"
 
             created = client.post(
                 "/session/secrets",
@@ -20373,8 +20373,8 @@ class TestWorkspaceRoutes:
         client = get_client()
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             resp = client.get("/workspace/files")
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Files require an active session"
+        assert resp.status_code == 401
+        assert json.loads(resp.data)["error"] == "credential_required"
 
     def test_disabled_workspace_returns_403(self):
         client = get_client()
@@ -23422,9 +23422,9 @@ class TestHistoryRoute:
             assert suggested_payload["assist"]["status"] == "queued"
             assert suggested_payload["assist"]["variant"] == "next_commands"
             assert missing_summary_session.status_code == 401
-            assert json.loads(missing_summary_session.data)["error"] == "session_required"
+            assert json.loads(missing_summary_session.data)["error"] == "credential_required"
             assert missing_next_session.status_code == 401
-            assert json.loads(missing_next_session.data)["error"] == "session_required"
+            assert json.loads(missing_next_session.data)["error"] == "credential_required"
             assert listed.status_code == 200
             assert {assist["id"] for assist in listed_payload["assists"]} == {
                 queued_payload["assist"]["id"],

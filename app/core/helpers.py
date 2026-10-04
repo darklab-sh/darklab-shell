@@ -29,7 +29,7 @@ _AUTH_RESULT_KEY = "darklab_authentication_result"
 
 
 class AuthenticationRejected(RuntimeError):
-    """Raised when a request supplied an identity that failed authentication."""
+    """Raised when a required identity is missing or authentication failed."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -227,8 +227,11 @@ def record_failed_authentication(result):
     record_authentication_failure(result, request_fields=request_audit_fields(request))
 
 
-def get_session_id():
-    """Return the request's validated workspace or anonymous owner id."""
+def get_session_id(*, required: bool = True) -> str:
+    """Return a validated owner; public callers can explicitly allow no identity.
+
+    Optional identity never suppresses a rejected credential or browser session.
+    """
     from services.auth.resolver import (  # noqa: PLC0415
         AnonymousContext,
         AuthenticatedContext,
@@ -242,6 +245,8 @@ def get_session_id():
         return context.anonymous_id
     if isinstance(context, AuthenticatedContext):
         return context.personal_workspace_id
+    if required:
+        raise AuthenticationRejected("credential_required", "A workspace identity is required.")
     return ""
 
 

@@ -222,7 +222,8 @@ class TestKillRoute:
         client = get_client()
 
         with mock.patch("blueprints.run.pid_for_session", return_value=None):
-            resp = client.post("/kill", json={"run_id": "missing-run"})
+            resp = client.post("/kill", json={"run_id": "missing-run"},
+                               headers=browser_identity_headers(anonymous_session_id("missing-run-owner")))
 
         assert resp.status_code == 404
         data = json.loads(resp.data)

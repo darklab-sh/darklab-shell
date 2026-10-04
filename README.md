@@ -370,6 +370,7 @@ Bundled scanners, libraries, fonts, and wordlists keep their own licenses. Relea
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/changelog/1.x.md](docs/changelog/1.x.md) - Published 1.x release history
 - [docs/changelog/2.x.md](docs/changelog/2.x.md) - Published 2.0 through 2.9.1 release history
+- [docs/changelog/3.x.md](docs/changelog/3.x.md) - Archived 3.x release history
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - Contributor contracts for command registry metadata, rewrites, environment, Files, and validation
 - [docs/logging.md](docs/logging.md) - Log levels, formats, event names, fields, redaction rules, and troubleshooting
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide

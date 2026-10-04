@@ -13,6 +13,7 @@ import { ensurePromptReady, keepBrowserWorkspace, openRailAction } from './helpe
 test.setTimeout(120_000)
 
 const protectedReads = [
+  '/session/preferences', '/session/starred', '/projects/active',
   '/config', '/projects', '/atlas', '/history', '/workspace/files',
   '/watchers', '/schedules', '/workflows', '/session/secrets',
   '/session/notification-channels', '/session/notification-events',
@@ -158,6 +159,11 @@ async function prepareStartupProbe(page) {
 
 async function qualifyBrowser(page, context, projectName) {
   const profile = profileFor(projectName)
+  for (const path of ['/session/preferences', '/session/starred', '/projects/active']) {
+    const response = await page.request.get(path)
+    expect(response.status(), `missing identity: ${path}`).toBe(401)
+    expect((await response.json()).error).toBe('credential_required')
+  }
   const startupProbe = await prepareStartupProbe(page)
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   if (profile === 'open') {
