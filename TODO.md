@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Keep expired browser sessions out of workspace cleanup errors](#keep-expired-browser-sessions-out-of-workspace-cleanup-errors)
   - [Autoscale ARM64 release runners on EC2 Spot](#autoscale-arm64-release-runners-on-ec2-spot)
 - [Feature Enhancements](#feature-enhancements)
 - [Technical Debt](#technical-debt)
@@ -31,17 +30,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Open TODOs
 
 Land each coherent change through a short-lived branch and merge request while keeping `main` functional and the complete validation suite green. Keep access-profile changes reviewable with explicit transition tests.
-
-### Keep expired browser sessions out of workspace cleanup errors
-
-Keep expected authentication expiry from being reported as a workspace cleanup failure. A production log review found sixteen `WORKSPACE_CLEANUP_ERROR` records whose only cause was an idle-expired browser session. In [the periodic cleanup hook](app/app.py), `get_session_id()` raises before `cleanup_inactive_workspaces()` is called, after the worker's five-minute cleanup timer has already advanced. This also reproduces on 3.1.1: a public `/health` request with an expired browser cookie returns HTTP 200 while emitting a cleanup ERROR and postponing the next cleanup opportunity.
-
-- [ ] Reproduce the expired-cookie public-request path with a real test browser session and a controllable clock. Assert the response, whether cleanup runs, the timer value, and the emitted event; also check that a protected request keeps its normal HTTP 401 response.
-- [ ] Use the request's already-resolved authentication result to decide whether maintenance can run. Skip cleanup for a rejected identity before claiming the cleanup interval, without calling a helper that raises an authentication exception. Preserve valid anonymous and authenticated owner exclusions and the existing cleanup behavior for identity-free public requests.
-- [ ] Keep scheduling bounded: a skipped authentication case must not consume the interval, the next eligible request must be able to run cleanup, and an actual cleanup attempt must retain a bounded retry interval even when filesystem work fails. Preserve disabled-workspace behavior and the independent SQLite checkpoint hook.
-- [ ] Keep genuine cleanup failures at ERROR with their diagnostic traceback. Expected authentication skips should produce no cleanup ERROR or duplicate authentication warning; if a DEBUG skip event is useful, give it a fixed reason and safe request correlation fields without cookies, credentials, or raw authentication input.
-- [ ] Add regression coverage for idle-expired, absolutely expired, revoked, and malformed cookies on public requests, plus valid anonymous and authenticated requests, missing identity, repeated skips, disabled cleanup, and genuine cleanup failures. Verify the current workspace remains excluded and expired workspace removal still works with test-owned directories; use the existing auth fixtures and cover open and restricted profiles.
-- [ ] Check both text and GELF output for severity, redaction, and duplicate events. On completion, update the maintenance and logging contracts, event inventory, testing guide, and changelog, then remove this TODO.
 
 ### Autoscale ARM64 release runners on EC2 Spot
 

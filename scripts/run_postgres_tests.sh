@@ -83,6 +83,7 @@ default_args=(
   tests/py/test_postgres_backend.py
   tests/py/test_postgres_templates.py
   tests/py/test_missing_workspace_identity.py
+  tests/py/test_workspace_cleanup_auth.py
   tests/py/test_operator_grants.py
   tests/py/test_operator_console.py
   tests/py/test_operator_diagnostics.py

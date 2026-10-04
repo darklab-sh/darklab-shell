@@ -4,6 +4,35 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, openRailAction } from './helpers.js'
 
+test('prompt readiness waits for test hooks even before their loader exists', async ({ page }) => {
+  await page.goto('/')
+  await ensurePromptReady(page)
+  // Keep the real shell ready while reproducing the gap before the hook
+  // loader publishes its promise. Restore the hooks after that gap.
+  await page.evaluate(() => {
+    window.__heldTestHooks = {
+      apiFetch: window.apiFetch,
+      clearTab: window.clearTab,
+      ready: window.__darklabE2ETestHooksReady,
+    }
+    delete window.apiFetch
+    delete window.clearTab
+    delete window.__darklabE2ETestHooksReady
+  })
+  try {
+    await expect(ensurePromptReady(page, { timeout: 500 })).rejects.toThrow(/Timeout/)
+  } finally {
+    await page.evaluate(() => {
+      window.apiFetch = window.__heldTestHooks.apiFetch
+      window.clearTab = window.__heldTestHooks.clearTab
+      window.__darklabE2ETestHooksReady = window.__heldTestHooks.ready
+      delete window.__heldTestHooks
+    })
+  }
+  await ensurePromptReady(page)
+  expect(await page.evaluate(() => typeof apiFetch)).toBe('function')
+})
+
 test.describe('boot resilience', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/allowed-commands', (route) => route.abort('failed'))

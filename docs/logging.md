@@ -56,6 +56,8 @@ Configure the minimum emitted level with `log_level`. Applications and browser c
 
 Workspace requests with no identity return HTTP 401 and use the sampled `CREDENTIAL_AUTHENTICATION_REJECTED` warning with `reason=credential_required`, including in open mode. These expected denials don't emit `UNHANDLED_EXCEPTION` or a traceback. Invalid credentials and expired or revoked browser sessions retain their existing reason codes.
 
+Periodic workspace cleanup quietly skips rejected request identities before claiming its five-minute interval. Public health requests with stale browser cookies don't emit `WORKSPACE_CLEANUP_ERROR` or an extra authentication warning; protected requests retain their normal authentication response and sampled warning. Completed removals emit `WORKSPACE_CLEANUP` at INFO with a count. An exception from an actual cleanup attempt emits `WORKSPACE_CLEANUP_ERROR` at ERROR with its diagnostic traceback, and the interval still limits retries. SQLite WAL checkpoints run independently of a skipped or disabled workspace cleanup.
+
 ## Output Formats
 
 The logging layer supports two output formats selected by `log_format` in installed `conf/config.local.yaml`. Source development uses `app/conf/config.local.yaml` instead:
@@ -167,6 +169,8 @@ The current event inventory is:
 | INFO | `REDIS_FAKE_ENABLED` | process tracking startup | fallback |
 | INFO | `REDIS_FALLBACK_IN_PROCESS` | process tracking startup | redis_configured, workers, fallback |
 | INFO | `ACTIVE_RUN_METADATA_STARTUP_CLEANUP` | active-run startup cleanup | metadata_removed, session_members_removed, team_members_removed, pid, cleanup_owner, lock_type |
+| INFO | `WORKSPACE_CLEANUP` | periodic workspace cleanup completed with removals | removed |
+| ERROR | `WORKSPACE_CLEANUP_ERROR` | actual periodic workspace cleanup attempt failed | diagnostic traceback; rejected authentication doesn't emit this event |
 | INFO | `MIGRATION_APPLIED` | Schema migration runner | migration_version, migration_name |
 | INFO | `CVE_RISK_BOOTSTRAP_LOADED` | bundled public-risk bootstrap | source, source_version, record_count, origin |
 | INFO | `CVE_RISK_REFRESH_COMPLETED` | public-risk feed refresh | source, source_version, record_count, outcome, attempt |
