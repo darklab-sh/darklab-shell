@@ -347,7 +347,7 @@ def faq():
 @content_bp.route("/workflows")
 def workflows():
     """Return user-created, built-in, and custom workflows.yaml entries."""
-    session_id = get_session_id()
+    session_id = get_session_id(required=False)
     user_items = []
     if session_id:
         try:

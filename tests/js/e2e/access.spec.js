@@ -98,6 +98,69 @@ async function expectRedemptionSpacing(page) {
 test.describe('workspace Access', () => {
   test.beforeEach(async ({ page }) => openAnonymousBrowser(page))
 
+  for (const width of [1280, 375]) test.describe(`missing workspace identity at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: width < 600, isMobile: width < 600 })
+
+    test('recovers saved state after the browser session cookie disappears', async ({ page, context }) => {
+      test.setTimeout(60_000)
+      const issued = await keepBrowserWorkspace(page, { label: 'Cookie recovery', returnCredential: true })
+      const paths = ['/session/preferences', '/session/starred', '/projects/active']
+      const before = await page.evaluate(async paths => {
+        const headers = { 'Content-Type': 'application/json' }
+        const saved = await apiFetch('/session/preferences', {
+          method: 'POST', headers, body: JSON.stringify({ preferences: { pref_prompt_username: 'saved-owner' } }),
+        })
+        if (!saved.ok) throw new Error('preference setup failed')
+        const starred = await apiFetch('/session/starred', {
+          method: 'POST', headers, body: JSON.stringify({ command: 'help' }),
+        })
+        if (!starred.ok) throw new Error('star setup failed')
+        const created = await apiFetch('/projects', {
+          method: 'POST', headers, body: JSON.stringify({ name: 'Cookie recovery project' }),
+        })
+        if (created.status !== 201) throw new Error('project setup failed')
+        const projectId = (await created.json()).project.id
+        const active = await apiFetch('/projects/active', {
+          method: 'POST', headers, body: JSON.stringify({ project_id: projectId }),
+        })
+        if (!active.ok) throw new Error('active project setup failed')
+        return Promise.all(paths.map(async path => (await apiFetch(path)).json()))
+      }, paths)
+      // Background requests can start recovery as soon as the cookie is gone.
+      // Hold the sign-in document until the probes and explicit trigger finish.
+      let releaseSignIn
+      const signInReady = new Promise(resolve => { releaseSignIn = resolve })
+      const signInUrl = '**/auth/sign-in?next=*'
+      await page.route(signInUrl, async route => {
+        await signInReady
+        await route.continue()
+      })
+      try {
+        // Keep the CSRF cookie: the loaded page still expects browser auth.
+        await context.clearCookies({ name: 'darklab_browser_session' })
+        const missing = await Promise.all(paths.map(async path => {
+          const response = await context.request.get(path)
+          return { status: response.status(), error: (await response.json()).error }
+        }))
+        expect(missing).toEqual(paths.map(() => ({ status: 401, error: 'credential_required' })))
+        await page.evaluate(() => { void apiFetch('/session/preferences') })
+      } finally {
+        releaseSignIn()
+      }
+      await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
+      await page.unroute(signInUrl)
+      await page.getByLabel('Access credential').fill(issued.secret)
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await ensurePromptReady(page)
+      const after = await page.evaluate(async paths => Promise.all(paths.map(async path =>
+        (await apiFetch(path)).json())), paths)
+      expect(after[0].preferences.pref_prompt_username).toBe('saved-owner')
+      expect(after[1]).toEqual(before[1])
+      expect(after[2].project.id).toBe(before[2].project.id)
+      expect(await page.evaluate(() => localStorage.getItem('access_credential'))).toBeNull()
+    })
+  })
+
   test('exchanges a saved credential without restoring its retired anonymous identity', async ({ page, context }) => {
     const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
     const issued = await keepBrowserWorkspace(page, { label: 'Restored browser', returnCredential: true })

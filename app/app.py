@@ -462,7 +462,7 @@ def _enforce_csrf():
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
     try:
-        session_for_log = get_log_session_id(get_session_id())
+        session_for_log = get_log_session_id(get_session_id(required=False))
     except Exception:
         log.debug(
             "REQUEST_SESSION_RESOLUTION_FAILED",
@@ -497,7 +497,7 @@ def _maybe_cleanup_workspaces():
         return
     _last_workspace_cleanup_monotonic = now
     try:
-        removed = cleanup_inactive_workspaces(CFG, skip_session_id=get_session_id())
+        removed = cleanup_inactive_workspaces(CFG, skip_session_id=get_session_id(required=False))
         if removed:
             log.info("WORKSPACE_CLEANUP", extra={"removed": removed})
     except Exception:
