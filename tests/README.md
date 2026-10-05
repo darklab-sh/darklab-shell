@@ -313,6 +313,10 @@ The browser smoke checks an anonymous request before sign-in, the available sign
 
 `test_authentication_debug.py` checks one cached resolution and one DEBUG outcome for anonymous, portable, PAT, and cookie requests, rejected and conflicting credentials, and cookies ignored by open access. It verifies text/GELF redaction and no diagnostic records at INFO; resolver tests also check the reported credential-use write decision against actual SQL writes.
 
+`test_missing_workspace_identity.py` checks SQLite and disposable Postgres requests without an owner across all access profiles, verifies rejection before workspace services run, and preserves public content and specific invalid-session responses. Public run permalink checks cover HTML and JSON without an identity, private-note and intel-output filtering, missing runs, rejected credentials, and restricted-profile denial. It covers cached resolution, sampled text/GELF warnings without tracebacks, and saved-state recovery with owner isolation. `access.spec.js` removes the browser session cookie on desktop and mobile, checks all three affected reads, and signs in again to recover preferences, stars, and the active Project. The test holds the sign-in document while checking responses so background recovery can't destroy its execution context. The four-profile browser matrix also checks those reads with and without identity in both asset modes and database backends.
+
+`test_workspace_cleanup_auth.py` exercises periodic cleanup with real browser sessions and test-owned directories on SQLite and Postgres. Open and restricted profiles cover idle and absolute expiry, revocation, malformed cookies, parent-credential revocation, and disabled principals. Rejected requests keep public health responses healthy, preserve protected-route denials, and leave cleanup due for the next eligible request. Owner exclusions cover both new personal workspaces and kept anonymous workspaces that retain their original directory. The suite also checks actual expired-directory removal, successful and failed retry intervals, disabled cleanup, independent SQLite checkpoints, cached authentication resolution, and text/GELF severity, traceback, and redaction contracts.
+
 `test_principal_active_runs.py` starts real local processes through browser and API routes in personal and Team scope. It verifies actor attribution, principal-disable cancellation, isolation from another principal's running work, and continued execution after credential revocation. Workflow launch checks retain attribution and reject disabled principals or downgraded Team roles. Direct broker fixtures pass the same explicit owner context as production callers; the standalone path-filter fixture supplies its own current ownership schema.
 
 `test_suspended_work.py` and the PostgreSQL suspension test check the operator inventory across all nine suspended work kinds, isolation between principals, preserved user pauses, migration of existing disabled accounts, and explicit resumption. Browser unit tests cover the shared pause explanation in Schedules, Watchers, notification channels, and Project digests.
@@ -508,6 +512,8 @@ The shared Assessment controller coverage also sets and clears reason-required m
 
 Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/` so high-change areas such as app chrome, session identity, and Files/workspace behavior can share setup without growing individual spec files.
 
+Runner stream tests wait for the terminal status before checking completed output or replacing a fixture. Flushing promises alone doesn't finish batches deferred to a timer. Runner fixtures close their streams, clear their timers, and reset body classes between cases so delayed exits and mobile focus state can't affect another test. The output-filter check also forces a yield before the exit event.
+
 Package wizard tests delay preset and Assessment reads while a user types, then check field continuity, focus, cursor selection, and saved notes through the real browser creation flow.
 
 Assessment lifecycle focus tests cancel during a held reload, check restoration when the current button returns, and preserve a user's intervening focus change.
@@ -543,6 +549,8 @@ The focused Assessment spec runs in both bundle and source modes. It creates and
 The focused probe spec runs in bundle and source modes. It creates active Projects and confirmed targets through the live routes, submits `probe plan` and a declined `probe run` from the terminal at mobile width, and verifies the exact bounded preview, transcript confirmation, same-tab behavior, and lazy module load without contacting those targets. Unit and CLI coverage also pins active-Project slug completion and conversion to canonical route ids for list, plan, and confirmed run requests. Reloading while that approval is pending proves the old prompt can't launch afterward. A separate harmless Ping against the public test endpoint accepts the confirmation, crosses the browser launch and SSE stream paths, keeps the reviewed plan in the origin tab, and verifies the exact saved History command and Project run link.
 
 #### Browser harness
+
+`ensurePromptReady()` waits for the browser test hooks with a synchronous `waitForFunction` condition before checking the shell. An async predicate can stop polling when its Promise resolves to false, so it doesn't reliably wait for hooks that haven't loaded yet. `boot-resilience.spec.js` checks that missing hooks keep readiness pending even when the shell is already usable, then verifies recovery once the hooks are available.
 
 The browser layer now uses a split config model:
 

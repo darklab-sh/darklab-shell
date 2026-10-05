@@ -40,6 +40,8 @@ def test_reporting_arguments_extend_default_postgres_selection(helper_invocation
     args = helper_invocation(*reporting)
     assert "tests/py/test_postgres_backend.py" in args
     assert "tests/py/test_operator_diagnostics.py" in args
+    assert "tests/py/test_missing_workspace_identity.py" in args
+    assert "tests/py/test_workspace_cleanup_auth.py" in args
     assert "not sqlite_backend" in args
     assert "tests/py/test_output_search.py" not in args
     assert not any("test_backend_modules.py" in arg for arg in args)

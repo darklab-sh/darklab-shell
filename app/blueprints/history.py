@@ -136,8 +136,8 @@ BULK_HISTORY_EXPORT_MAX_BYTES = 50 * 1024 * 1024
 
 @history_bp.before_request
 def _require_history_write_session():
-    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not get_session_id():
-        return jsonify({"error": "session_required"}), 401
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        get_session_id()
     return None
 
 
@@ -717,7 +717,7 @@ def history_run_ai_next_commands(run_id):
 @history_bp.route("/history/<run_id>")
 def get_run(run_id):
     """Serve a styled HTML permalink page for a single run, or JSON if ?json is passed."""
-    session_id = get_session_id()
+    session_id = get_session_id(required=False)
     run = history_run_row(run_id)
     if not run:
         log.warning("RUN_NOT_FOUND", extra={

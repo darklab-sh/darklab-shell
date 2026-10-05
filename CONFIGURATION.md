@@ -258,6 +258,8 @@ Sign-out returns to the shared sign-in page. In open mode, **Continue anonymousl
 
 Authenticated browser access requires HTTPS in every profile, including `open`. Browser-session and CSRF cookies are `Secure` and `SameSite=Strict`, and the session identifier is `HttpOnly`. The short-lived provider state cookie is `Secure`, `HttpOnly`, and `SameSite=Lax` so it returns on the provider's redirect. Sign-in won't work over plain HTTP. Put TLS on the app or its trusted reverse proxy and use `HOST_BIND_ADDRESS=127.0.0.1` when only that proxy should connect directly.
 
+Open access still requires a valid anonymous identity or authenticated session for workspace data. Requests with neither receive HTTP 401 with `credential_required`; they don't create a replacement workspace. Public run and snapshot permalinks remain readable without an identity in open mode, with private metadata omitted. If a signed-in browser loses its session cookie, the shell returns to sign-in and saved workspace data stays intact. See [Workspace Access](FEATURES.md#workspace-access) for recovery behavior.
+
 Set the profile and session lifetimes in the installation's `.env`, then recreate the app:
 
 ```bash
@@ -559,7 +561,7 @@ Project workspace settings cap personal- or team-scoped case folders, links, tar
 | `workspace_quota_mb` | `50 MB` | Server-side only. Per-owner workspace quota for each personal or team workspace. HTTPx screenshot finalization also applies the remaining byte budget to new captures and removes excess event-named screenshot output instead of evicting earlier files |
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed file size, including a saved HTTPx screenshot |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per owner workspace. HTTPx screenshot finalization retains only the new captures that fit after counting earlier files |
-| `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
+| `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files. Each worker attempts cleanup at most once every five minutes on eligible requests; rejected identities skip it without consuming that interval |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
 | `max_project_entities_per_project` | `5000` | Server-side only. Maximum Atlas entities linked into one project |
@@ -1474,7 +1476,7 @@ The production Compose file leaves platform selection to the release image index
 
 ## Docker Compose Files
 
-The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:3.1.1` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
+The production [deploy/compose.yaml](deploy/compose.yaml) pulls `docker.io/darklabsh/darklab-shell:3.1.2-rc.1` and lets Docker select its native Linux AMD64 or ARM64 child. It doesn't need a source checkout or build context. The installed copy uses host `./conf`, `./data`, and `./workspaces` paths relative to the installation directory, publishes on every host interface by default, and omits fixed container names so separate Compose project directories don't collide. The default `open` access profile allows anonymous use, so restrict port 8888 to trusted networks with the host or upstream firewall. Private HTTPS deployments can enable the [restricted browser access](#restricted-browser-access) profile. Set `HOST_BIND_ADDRESS=127.0.0.1` when a local reverse proxy should be the only direct client.
 
 Official builds link the rail footer, mobile menu footer, FAQ, and terminal help to the running release's exact GitLab source tag and README through `PROJECT_SOURCE` in `app/config.py`. A modified build exposed over a network must point that value at the complete corresponding source for the modified version and keep the source offer prominent for its remote users. The full [GNU AGPLv3 license](LICENSE) controls.
 
@@ -1588,7 +1590,7 @@ For a local development image, pass the metadata values you want Docker inventor
 
 ```bash
 docker compose -f compose.dev.yaml build \
-  --build-arg APP_VERSION=3.1.1 \
+  --build-arg APP_VERSION=3.1.2-rc.1 \
   --build-arg VCS_REF="$(git rev-parse --short HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```

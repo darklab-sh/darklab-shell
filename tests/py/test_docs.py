@@ -37,7 +37,7 @@ _PRODUCTION_SETUP = _REPO_ROOT / "deploy" / "setup.sh.in"
 _GITLAB_CI = _REPO_ROOT / ".gitlab-ci.yml"
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
 _LOGGING_GUIDE = _REPO_ROOT / "docs" / "logging.md"
-_LOG_EVENT_INVENTORY_HASH = "7b6a03efc924a203dcb3ec7575fcf0946e3bdcca7bb3fe264d72155659e62467"
+_LOG_EVENT_INVENTORY_HASH = "edc611bcbb2903a6aed994af693460ca74d5619ac1c9cb809b00916112a933f1"
 _ASSESSMENT_LOG_SOURCE_GLOBS = (
     "app/blueprints/projects_assessment*.py",
     "app/blueprints/api_v1_assessment*.py",
@@ -78,6 +78,7 @@ _ASSESSMENT_LOG_EVENT_PREFIXES = (
     "HTTPX_",
 )
 _CHANGELOG_ARCHIVES = (
+    _REPO_ROOT / "docs" / "changelog" / "3.x.md",
     _REPO_ROOT / "docs" / "changelog" / "2.x.md",
     _REPO_ROOT / "docs" / "changelog" / "1.x.md",
 )
@@ -811,6 +812,7 @@ class TestChangelogArchives:
 
     def test_archive_coverage_matches_major_release_ranges(self):
         expected = {
+            "3.x.md": ("3.0.0",),
             "2.x.md": (
                 "2.9.2",
                 "2.9.1",
@@ -851,8 +853,18 @@ class TestChangelogArchives:
             for section in _changelog_sections(path):
                 if section["label"] == "Unreleased":
                     continue
+                body = section["body"]
+                if path.name == "3.x.md":
+                    # This archive was published at the repository root. Keep
+                    # its original hashes while rebasing links to the same files.
+                    for archived, original in (
+                        ("(../api.md#", "(docs/api.md#"),
+                        ("(../../CONFIGURATION.md#", "(CONFIGURATION.md#"),
+                        ("(../../FEATURES.md#", "(FEATURES.md#"),
+                    ):
+                        body = body.replace(archived, original)
                 actual[section["version"]] = hashlib.sha256(
-                    section["body"].encode()
+                    body.encode()
                 ).hexdigest()
         assert actual == _PUBLISHED_CHANGELOG_HASHES
 
@@ -878,7 +890,7 @@ class TestLoggingReference:
         assert not missing, "Assessment logging events missing from docs/logging.md:\n" + "\n".join(missing)
         assert hashlib.sha256(body.encode()).hexdigest() == _LOG_EVENT_INVENTORY_HASH
         level = r"(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)"
-        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 404
+        assert len(re.findall(rf"^\| {level}(?: / {level})* \|", body, re.M)) == 406
 
     def test_architecture_links_to_the_canonical_logging_reference(self):
         assert "[Logging Reference](docs/logging.md)" in _ARCHITECTURE.read_text()

@@ -46,8 +46,7 @@ session_bp = Blueprint("session", __name__)
 @session_bp.before_request
 def _require_session_write_session():
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        if not get_session_id():
-            return jsonify({"error": "session_required"}), 401
+        get_session_id()
     return None
 
 

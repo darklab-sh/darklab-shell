@@ -796,15 +796,10 @@ export function makeTestIp(offset = 0) {
 
 async function waitForE2ETestHooks(page, { timeout = 15_000 } = {}) {
   await page.waitForFunction(
-    async () => {
+    () => {
+      // Keep this synchronous: a Promise resolving to false stops Playwright's
+      // polling before the loader has published the hooks.
       if (navigator.webdriver !== true) return true
-      if (typeof window.apiFetch === 'function' && typeof window.clearTab === 'function') {
-        return true
-      }
-      const ready = window.__darklabE2ETestHooksReady
-      if (ready && typeof ready.then === 'function') {
-        await ready.catch(() => false)
-      }
       return typeof window.apiFetch === 'function' && typeof window.clearTab === 'function'
     },
     undefined,
