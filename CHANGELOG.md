@@ -12,13 +12,13 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [3.1.2] - Unreleased
+## [3.1.2] - 2026-10-04
 
-**Upgrade note:** This candidate retains the v3 access model: pseudonymous principals have stable personal workspaces, portable credentials sign browsers in, and scoped PATs authenticate API and CLI requests. Legacy `tok_` values remain intentionally invalid, and databases with retired identity schemas are rejected. Private deployments can require credentials, OIDC, or either sign-in method. Before upgrading, complete the [operator preflight](CONFIGURATION.md#upgrade-preflight), verify a working sign-in and explicit operator grant, and preserve a tested backup of the database, matching secrets key, Files, and operator configuration. These access requirements were introduced in earlier v3 releases; 3.1.2 fixes workspace identity and cleanup handling.
+**Upgrade note:** This release retains the v3 access model: pseudonymous principals have stable personal workspaces, portable credentials sign browsers in, and scoped PATs authenticate API and CLI requests. Legacy `tok_` values remain intentionally invalid, and databases with retired identity schemas are rejected. Private deployments can require credentials, OIDC, or either sign-in method. Before upgrading, complete the [operator preflight](CONFIGURATION.md#upgrade-preflight), verify a working sign-in and explicit operator grant, and preserve a tested backup of the database, matching secrets key, Files, and operator configuration. These access requirements were introduced in earlier v3 releases; 3.1.2 fixes workspace identity and cleanup handling.
 
 ### Changed
 
-- **3.1.2-rc.1 identifies this release candidate.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the candidate version. Installation and signing examples select its exact tag.
+- **3.1.2 is the stable release.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the final version. Installation and signing examples select its exact tag. The dated changelog section is included in the published-text integrity baseline.
 
 ### Fixed
 
