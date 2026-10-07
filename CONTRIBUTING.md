@@ -405,6 +405,8 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 `npm audit` doesn't scan linked local source. `npm run audit:js` therefore first runs the installed-dependency security tests, which check that both linters resolve the patched copy, deeply nested strings and supplied ASTs are rejected, and ordinary glob behavior still works. It then runs `npm audit --audit-level=high` for the registry dependency tree, including the patched package's dependencies. The package is development tooling and isn't included in browser bundles or the release image. When changing the patch or override, run `npm ci`, `npm run audit:js`, `npm run lint:md`, and `npm run lint:css`; retain the upstream MIT notices.
 
+**Markdownlint dependency overrides:** `markdownlint-cli2` pins `smol-toml` to `1.8.0`, and `micromark-extension-math` requires KaTeX `^0.16.0`. Scoped overrides select `smol-toml` `1.9.0` and KaTeX `0.18.2` to address [the TOML parsing advisory](https://github.com/advisories/GHSA-r4xh-jqrq-34v2) and [the KaTeX trust advisory](https://github.com/advisories/GHSA-238p-pmpm-9mq7). These are development dependencies. Validate Markdown math handling and TOML configuration loading when changing these overrides, along with the normal lint and audit checks.
+
 ---
 
 ## Vendor JS Workflow

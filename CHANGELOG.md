@@ -12,7 +12,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [3.1.2] - 2026-10-04
+## [3.1.2] - 2026-10-06
 
 **Upgrade note:** This release retains the v3 access model: pseudonymous principals have stable personal workspaces, portable credentials sign browsers in, and scoped PATs authenticate API and CLI requests. Legacy `tok_` values remain intentionally invalid, and databases with retired identity schemas are rejected. Private deployments can require credentials, OIDC, or either sign-in method. Before upgrading, complete the [operator preflight](CONFIGURATION.md#upgrade-preflight), verify a working sign-in and explicit operator grant, and preserve a tested backup of the database, matching secrets key, Files, and operator configuration. These access requirements were introduced in earlier v3 releases; 3.1.2 fixes workspace identity and cleanup handling.
 
@@ -21,6 +21,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **3.1.2 is the stable release.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the final version. Installation and signing examples select its exact tag. The dated changelog section is included in the published-text integrity baseline.
 
 ### Fixed
+
+- **Development dependencies resolve the reported npm security advisories.** Markdown linting uses patched KaTeX and TOML parsing, while CSS linting and browser tests use patched selector and source-map parsing. The dependency updates preserve the existing Markdownlint release and local `braces` security patch.
 
 - **Browser readiness and terminal confirmation tests stay reliable when startup or stream processing yields.**
   - **Root cause:** The browser helper could stop waiting before its test hooks existed. Runner unit tests could leave exit events queued against the next test's tab state, and mobile body classes could affect later focus checks.
