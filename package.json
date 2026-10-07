@@ -1,6 +1,6 @@
 {
   "name": "darklab_shell",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -60,6 +60,12 @@
     "brace-expansion": "5.0.12",
     "braces": "$braces",
     "js-yaml@^4.0.0": "4.3.2",
+    "markdownlint-cli2": {
+      "smol-toml": "1.9.0"
+    },
+    "micromark-extension-math": {
+      "katex": "0.18.2"
+    },
     "postcss": "8.5.23"
   }
 }
