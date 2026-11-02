@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Container vulnerability scan cleanup passes CI shell linting.** The scan removes its temporary container directly in the exit trap, avoiding a false unreachable-code warning while preserving cleanup and scanner exit status.
+
 - **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.2, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
 
 - **Access recovery tests allow authentication redirects to finish.** Cookie-loss coverage arms its recovery request before removing the cookie and deliberately checks denied reads after navigation. Saved-credential coverage restores into a new page after the previous shell stops polling, preventing navigation from interrupting storage setup under load.

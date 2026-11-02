@@ -16,12 +16,7 @@ docker run --rm --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges --entrypoint /usr/bin/python3 "$2" \
     -c "$(cat "$repo_root/scripts/container/verify_system_trust.py")" >&2
 container=$(docker create --interactive "$1" --config /grype.yaml --only-fixed --fail-on critical -o json)
-# Invoked by the EXIT/signal trap.
-# shellcheck disable=SC2329
-cleanup() {
-    docker rm --force "$container" >/dev/null
-}
-trap cleanup EXIT
+trap 'docker rm --force "$container" >/dev/null' EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
 docker cp "$repo_root/deploy/grype.yaml" "$container:/grype.yaml"
