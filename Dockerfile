@@ -1,8 +1,8 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-ARG PYTHON_BASE_IMAGE=python:3.14.7-slim
+ARG PYTHON_BASE_IMAGE=python:3.15.2-slim
 ARG GO_VERSION=1.27.0
 ARG GO_LINUX_AMD64_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
 ARG GO_LINUX_ARM64_SHA256=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
