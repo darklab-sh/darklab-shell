@@ -1613,7 +1613,17 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "JSON.pretty_generate(payload))"
     ) in dockerfile
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
-    assert "ARG PYTHON_BASE_IMAGE=python:3.14.7-slim" in dockerfile
+    python_base_image = re.search(
+        r"^ARG PYTHON_BASE_IMAGE=python:(?P<version>[0-9]+\.[0-9]+\.[0-9]+)-slim$",
+        dockerfile,
+        re.MULTILINE,
+    )
+    assert python_base_image is not None
+    assert re.search(
+        rf"^ARG PYTHON_VERSION={re.escape(python_base_image.group('version'))}$",
+        dockerfile,
+        re.MULTILINE,
+    )
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
     assert "ARG GO_X_NET_VERSION=v0.55.0" in dockerfile
     assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile

@@ -407,6 +407,8 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 **Markdownlint dependency overrides:** `markdownlint-cli2` pins `smol-toml` to `1.8.0`, and `micromark-extension-math` requires KaTeX `^0.16.0`. Scoped overrides select `smol-toml` `1.9.0` and KaTeX `0.18.2` to address [the TOML parsing advisory](https://github.com/advisories/GHSA-r4xh-jqrq-34v2) and [the KaTeX trust advisory](https://github.com/advisories/GHSA-238p-pmpm-9mq7). These are development dependencies. Validate Markdown math handling and TOML configuration loading when changing these overrides, along with the normal lint and audit checks.
 
+Markdownlint also uses a scoped `markdown-it` `15.0.3` override for its parsing security fixes. ESLint and its configuration loader use `minimatch` `11.0.1` through an ESLint-scoped override for [the glob amplification advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249). These overrides retain ESLint 10, Markdownlint CLI2 0.23, and the existing lint configuration. After changing them, verify a clean `npm ci`, run the lint and browser-global inventory checks, and confirm `npm run audit:js` passes.
+
 ---
 
 ## Vendor JS Workflow
@@ -551,6 +553,8 @@ docker compose -f compose.dev.yaml up --build
 ```bash
 ./scripts/check_versions.sh
 ```
+
+When updating the production Python base image, keep `PYTHON_BASE_IMAGE` and `PYTHON_VERSION` in `Dockerfile` on the same exact version. Update the Python source link and notice paths in `deploy/container-licenses.json` when the minor version changes. CI runner images are pinned separately; passing tests on those images doesn't qualify a newer production Python runtime. Run a fresh deterministic container smoke build for the new base image.
 
 The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. `--docker-only` reports only the production base image; the complete report also includes CI runner images, while the Go, pip, gem, and GitHub flags select Dockerfile tool pins. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 

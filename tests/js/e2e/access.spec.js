@@ -126,29 +126,30 @@ test.describe('workspace Access', () => {
         if (!active.ok) throw new Error('active project setup failed')
         return Promise.all(paths.map(async path => (await apiFetch(path)).json()))
       }, paths)
-      // Background requests can start recovery as soon as the cookie is gone.
-      // Hold the sign-in document until the probes and explicit trigger finish.
-      let releaseSignIn
-      const signInReady = new Promise(resolve => { releaseSignIn = resolve })
-      const signInUrl = '**/auth/sign-in?next=*'
-      await page.route(signInUrl, async route => {
-        await signInReady
-        await route.continue()
+      // Arm the explicit probe while the document still has valid cookies.
+      // After removal, background requests may navigate before another evaluate
+      // can run. Release from Node without blocking that recovery navigation.
+      let releaseRecoveryProbe
+      const cookieRemoved = new Promise(resolve => { releaseRecoveryProbe = resolve })
+      await page.exposeFunction('waitForCookieRemoval', () => cookieRemoved)
+      await page.evaluate(() => {
+        void window.waitForCookieRemoval().then(() => apiFetch('/session/preferences'))
       })
       try {
         // Keep the CSRF cookie: the loaded page still expects browser auth.
         await context.clearCookies({ name: 'darklab_browser_session' })
+        releaseRecoveryProbe()
+        // Exercise the race deliberately: recovery wins before the denial
+        // probes, which must not depend on the old document's execution context.
+        await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
         const missing = await Promise.all(paths.map(async path => {
           const response = await context.request.get(path)
           return { status: response.status(), error: (await response.json()).error }
         }))
         expect(missing).toEqual(paths.map(() => ({ status: 401, error: 'credential_required' })))
-        await page.evaluate(() => { void apiFetch('/session/preferences') })
       } finally {
-        releaseSignIn()
+        releaseRecoveryProbe()
       }
-      await expect(page).toHaveURL(/\/auth\/sign-in\?next=/)
-      await page.unroute(signInUrl)
       await page.getByLabel('Access credential').fill(issued.secret)
       await page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await ensurePromptReady(page)
@@ -164,13 +165,17 @@ test.describe('workspace Access', () => {
   test('exchanges a saved credential without restoring its retired anonymous identity', async ({ page, context }) => {
     const anonymousId = await page.evaluate(() => localStorage.getItem('anonymous_id'))
     const issued = await keepBrowserWorkspace(page, { label: 'Restored browser', returnCredential: true })
-    await context.clearCookies()
     await page.evaluate(({ retiredId, secret }) => {
       localStorage.removeItem('browser_session')
       localStorage.setItem('access_credential', secret)
       localStorage.setItem('anonymous_id', retiredId)
     }, { retiredId: anonymousId, secret: issued.secret })
-    await page.reload({ waitUntil: 'domcontentloaded' })
+    // Restore into a fresh document: the old shell must stop polling before
+    // its cookies disappear, otherwise recovery races the storage setup.
+    await page.close()
+    await context.clearCookies()
+    page = await context.newPage()
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
     await page.waitForFunction(id => {
       const boot = JSON.parse(document.getElementById('app-config-json')?.textContent || '{}')
       return boot.browser_identity?.credential_id === id

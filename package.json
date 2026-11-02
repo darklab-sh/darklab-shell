@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "braces": "file:tools/vendor/braces",
     "esbuild": "0.28.2",
     "eslint": "^10.9.0",
@@ -54,13 +54,17 @@
     "jsdom": "^30.0.1",
     "markdownlint-cli2": "^0.23.3",
     "stylelint": "^17.14.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "brace-expansion": "5.0.12",
     "braces": "$braces",
+    "eslint": {
+      "minimatch": "11.0.1"
+    },
     "js-yaml@^4.0.0": "4.3.2",
     "markdownlint-cli2": {
+      "markdown-it": "15.0.3",
       "smol-toml": "1.9.0"
     },
     "micromark-extension-math": {

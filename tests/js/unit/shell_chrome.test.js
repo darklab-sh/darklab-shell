@@ -67,8 +67,27 @@ const SHELL_CHROME_SRC = readScriptSource('app/static/js/shell_chrome.js').repla
 )
 
 function tick() {
-  return new Promise(resolve => setTimeout(resolve, 0))
+  // Settle mocked request chains on the next event-loop turn without hundreds
+  // of real timer delays accumulating in the longer interaction cases.
+  return new Promise(resolve => setImmediate(resolve))
 }
+
+let shellListenerCleanup = []
+beforeEach(() => {
+  shellListenerCleanup = []
+  for (const target of [window, document]) {
+    const add = target.addEventListener.bind(target)
+    const spy = vi.spyOn(target, 'addEventListener').mockImplementation((type, listener, options) => {
+      const capture = typeof options === 'boolean' ? options : !!options?.capture
+      shellListenerCleanup.push(() => target.removeEventListener(type, listener, capture))
+      add(type, listener, options)
+    })
+    shellListenerCleanup.push(() => spy.mockRestore())
+  }
+})
+afterEach(() => {
+  shellListenerCleanup.reverse().forEach(cleanup => cleanup())
+})
 
 const PRESSABLE_PRIMITIVE_CLASSES = new Set([
   'btn',

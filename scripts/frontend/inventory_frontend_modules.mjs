@@ -370,25 +370,30 @@ function isWindowMember(member) {
   );
 }
 
+// Analysis never mutates the parsed tree. Reuse its child edges across the
+// inventory passes without retaining trees after their source analysis ends.
+const astChildrenCache = new WeakMap();
+
 function walkAst(node, visitor, parent = null) {
   if (!node || typeof node.type !== 'string') return;
   visitor(node, parent);
-  for (const [key, value] of Object.entries(node)) {
-    if (
-      key === 'parent'
-      || key === 'loc'
-      || key === 'range'
-      || key === 'tokens'
-      || key === 'comments'
-    ) {
-      continue;
+  let children = astChildrenCache.get(node);
+  if (!children) {
+    children = [];
+    for (const key of Object.keys(node)) {
+      if (['parent', 'loc', 'range', 'tokens', 'comments'].includes(key)) continue;
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child.type === 'string') children.push(child);
+        }
+      } else if (value && typeof value.type === 'string') {
+        children.push(value);
+      }
     }
-    if (Array.isArray(value)) {
-      for (const child of value) walkAst(child, visitor, node);
-    } else if (value && typeof value.type === 'string') {
-      walkAst(value, visitor, node);
-    }
+    astChildrenCache.set(node, children);
   }
+  for (const child of children) walkAst(child, visitor, node);
 }
 
 function dedupeByNameAndLine(items) {

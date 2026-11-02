@@ -927,7 +927,7 @@ describe('appendLine', () => {
 
   it('observes token removal only while the menu is open and follows output scrolling', () => {
     const observe = vi.spyOn(MutationObserver.prototype, 'observe')
-    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+    let disconnect
     const menuObservations = () => observe.mock.calls.filter(([, options]) => !options.attributes)
     const { appendLine, _showOutputEntityMenu, _closeOutputEntityMenu } = loadOutputFns()
     try {
@@ -939,6 +939,8 @@ describe('appendLine', () => {
       token.getBoundingClientRect = () => ({ left: 24, top: 100, bottom: 120 })
       _showOutputEntityMenu(token)
       expect(menuObservations()).toHaveLength(1)
+      const menuObserverIndex = observe.mock.calls.findIndex(([, options]) => !options.attributes)
+      disconnect = vi.spyOn(observe.mock.contexts[menuObserverIndex], 'disconnect')
       const menu = document.querySelector('.atlas-output-entity-menu')
       const focused = document.activeElement
       expect(menu.style.top).toBe('126px')
@@ -951,7 +953,7 @@ describe('appendLine', () => {
       expect(disconnect).toHaveBeenCalledOnce()
     } finally {
       observe.mockRestore()
-      disconnect.mockRestore()
+      disconnect?.mockRestore()
     }
   })
 

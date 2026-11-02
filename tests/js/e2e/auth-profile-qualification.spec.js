@@ -224,8 +224,14 @@ async function qualifyBrowser(page, context, projectName) {
       await openRailAction(page, 'options')
       await page.locator('#options-tab-access').click()
     }
+    // Access loads credentials and provider details separately. Finish that
+    // layout update before clicking a control in the scrolling panel.
+    await expect(page.locator('#options-access-oidc-status')).toHaveText(
+      'This workspace can be opened through your identity provider.',
+    )
     await page.locator('#options-access-add-btn').click()
     const editor = page.locator('#options-access-editor')
+    await expect(editor.locator('select[data-credential-type]')).toHaveAttribute('data-app-select-enhanced', 'true')
     await expect(editor.getByLabel('Credential type')).toHaveValue('pat')
     await expect(editor.locator('option[value="portable"]')).toHaveCount(0)
     await editor.getByLabel('Label', { exact: true }).fill('Provider workspace CLI')
