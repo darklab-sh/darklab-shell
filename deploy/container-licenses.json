@@ -20,6 +20,7 @@
     "apt:iptables": "Python container base and Debian packages",
     "apt:iputils-ping": "Python container base and Debian packages",
     "apt:libc-bin": "Python container base and Debian packages",
+    "apt:libbrotli1": "Python container base and Debian packages",
     "apt:libc6": "Python container base and Debian packages",
     "apt:libcap2-bin": "Python container base and Debian packages",
     "apt:libjson-perl": "Python container base and Debian packages",
@@ -60,7 +61,7 @@
     "pip:pip": "Python application and intelligence dependencies",
     "pip:schemathesis": "Schemathesis and isolated Python dependencies",
     "pip:setuptools": "Python application and intelligence dependencies",
-    "pip:shodan": "Python application and intelligence dependencies",
+    "pip:shodan": "Shodan",
     "pip:sslyze": "SSLyze",
     "pip:wafw00f": "WAFW00F",
     "pip:wheel": "Python application and intelligence dependencies"
@@ -256,7 +257,7 @@
       "version_arg": "SSLYZE_VERSION",
       "source": "https://github.com/nabla-c0d3/sslyze",
       "license": "AGPL-3.0",
-      "notice_location": "/usr/local/lib/python3.14/site-packages/sslyze-*.dist-info/licenses"
+      "notice_location": "/opt/sslyze/lib/python3.14/site-packages/sslyze-*.dist-info/licenses"
     },
     {
       "name": "WAFW00F",
@@ -353,6 +354,13 @@
       "source": "app/static/fonts",
       "license": "OFL-1.1",
       "notice_location": "/usr/share/doc/darklab-shell/licenses/OFL-1.1.txt"
+    },
+    {
+      "name": "Shodan",
+      "version_arg": "SHODAN_VERSION",
+      "source": "https://github.com/achillean/shodan-python",
+      "license": "MIT",
+      "notice_location": "/usr/local/lib/python3.14/site-packages/shodan-*.dist-info/licenses"
     }
   ]
 }

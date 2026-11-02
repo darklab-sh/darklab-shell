@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.2, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
+
 - **Access recovery tests allow authentication redirects to finish.** Cookie-loss coverage arms its recovery request before removing the cookie and deliberately checks denied reads after navigation. Saved-credential coverage restores into a new page after the previous shell stops polling, preventing navigation from interrupting storage setup under load.
 
 - **Mobile chart preview actions stay reachable after scrolling.** Status Monitor brings a selected preview into view before the next tap. Its own scroll event keeps the preview open; subsequent scrolling still dismisses it without launching a run or opening History. Regression coverage opens a preview from a partially scrolled chart.
@@ -30,7 +32,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Python dependencies include the security fixes for sign-in, certificate trust, and package installation.** Authlib and joserfc use patched releases, the application and isolated Schemathesis scanner share the updated certifi bundle, and development, container, and CLI builds require patched setuptools. The scanner also uses patched GraphQL-core, urllib3, and Werkzeug dependencies. Token-exchange logging follows Authlib's response validation while preserving HTTP status and keeping provider data out of logs.
 
-- **Container builds retain Python 3.14 compatibility with SSLyze.** The production base and image metadata use Python 3.14.7, with matching license notice paths. SSLyze 6.3.1 requires nassl 5.4.x, which doesn't publish Python 3.15 distributions. Installation checks require an exact slim-image version that matches the metadata, so dependency updates no longer require a second hardcoded test pin.
+- **Container builds retain Python 3.14 compatibility with SSLyze.** The production base and image metadata use Python 3.14.10, with matching license notice paths. SSLyze 6.3.1 requires nassl 5.4.x, which doesn't publish Python 3.15 distributions. Installation checks require an exact slim-image version that matches the metadata, so dependency updates no longer require a second hardcoded test pin.
 
 ---
 

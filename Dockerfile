@@ -4,13 +4,13 @@
 
 # SSLyze 6.3.1 requires nassl 5.4.x, whose wheels support Python through 3.14.
 # https://pypi.org/project/nassl/5.4.0/#files
-ARG PYTHON_BASE_IMAGE=python:3.14.7-slim
-ARG GO_VERSION=1.27.0
-ARG GO_LINUX_AMD64_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-ARG GO_LINUX_ARM64_SHA256=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+ARG PYTHON_BASE_IMAGE=python:3.14.10-slim
+ARG GO_VERSION=1.27.2
+ARG GO_LINUX_AMD64_SHA256=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
+ARG GO_LINUX_ARM64_SHA256=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
 ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
-ARG GO_X_NET_VERSION=v0.55.0
+ARG GO_X_NET_VERSION=v0.60.0
 ARG KIN_OPENAPI_VERSION=v0.146.0
 ARG KATANA_PGX_VERSION=v5.9.0
 ARG GOSU_VERSION=1.19
@@ -35,6 +35,9 @@ ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.4
 ARG SSLYZE_VERSION=6.3.1
+ARG SSLYZE_COMMIT=12ad04350a4f57bec846c15211e4d71075ee53c9
+ARG SSLYZE_SHA256=4811e213beb57020ebe1c447ab93d690f7c2caf9448b18d1edb49530ad264ad8
+ARG SHODAN_VERSION=1.31.0
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
 ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
@@ -70,7 +73,7 @@ ARG APP_VERSION=3.1.2
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
-ARG PYTHON_VERSION=3.14.7
+ARG PYTHON_VERSION=3.14.10
 ARG PYTHON_BASE_DIGEST=unresolved
 ARG PYTHON_BASE_INDEX_DIGEST=unresolved
 
@@ -105,6 +108,7 @@ ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
 ENV GO_X_NET_VERSION=${GO_X_NET_VERSION}
+ENV GO_VERSION=${GO_VERSION}
 COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
     mkdir -p /out/usr/local/bin /out/usr/sbin \
@@ -201,7 +205,10 @@ COPY scripts/container/verify_go_dependency.sh /usr/local/bin/verify-go-dependen
 # hadolint ignore=DL3062
 RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}" \
         https://github.com/trufflesecurity/trufflehog.git /tmp/trufflehog && \
+    go -C /tmp/trufflehog get "golang.org/x/net@${GO_X_NET_VERSION}" && \
     go -C /tmp/trufflehog install && \
+    sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog \
+        golang.org/x/net "${GO_X_NET_VERSION}" && \
     sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog \
         github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}" && \
     install -m 0644 /tmp/trufflehog/LICENSE \
@@ -442,6 +449,24 @@ RUN git clone --depth 1 --branch "${SQLMAP_VERSION}" https://github.com/sqlmappr
     sha256sum -c /tmp/sqlmap-license.sha256 && \
     install -m 0644 /tmp/sqlmap/LICENSE /out/usr/share/doc/darklab-shell/licenses/Sqlmap.txt
 
+FROM ${PYTHON_BASE_IMAGE} AS sslyze-asset
+ARG SSLYZE_VERSION
+ARG SSLYZE_COMMIT
+ARG SSLYZE_SHA256
+COPY deploy/sslyze-constraints.txt /tmp/sslyze-constraints.txt
+RUN grep -qx "sslyze==${SSLYZE_VERSION}" /tmp/sslyze-constraints.txt && \
+    python -m venv /opt/sslyze && \
+    /opt/sslyze/bin/pip install --no-cache-dir \
+        "sslyze @ https://codeload.github.com/nabla-c0d3/sslyze/tar.gz/${SSLYZE_COMMIT}#sha256=${SSLYZE_SHA256}" \
+        --constraint=/tmp/sslyze-constraints.txt && \
+    /opt/sslyze/bin/pip check && \
+    /opt/sslyze/bin/sslyze --help && \
+    /opt/sslyze/bin/pip uninstall --yes pip && \
+    find /opt/sslyze -type d -name __pycache__ -prune -exec rm -rf '{}' + && \
+    mkdir -p /out/opt /out/usr/local/bin && \
+    mv /opt/sslyze /out/opt/sslyze && \
+    ln -s /opt/sslyze/bin/sslyze /out/usr/local/bin/sslyze
+
 FROM ${PYTHON_BASE_IMAGE} AS schemathesis-asset
 ARG SCHEMATHESIS_VERSION
 COPY deploy/schemathesis-constraints.txt /tmp/schemathesis-constraints.txt
@@ -472,7 +497,7 @@ ARG BUILD_DATE
 ARG APT_CACHE_EPOCH
 ARG PYTHON_VERSION
 ARG SETUPTOOLS_VERSION
-ARG SSLYZE_VERSION
+ARG SHODAN_VERSION
 ARG WAFW00F_VERSION
 ARG POSTGRESQL_CLIENT_VERSION
 ARG POSTGRESQL_APT_KEY_SHA256
@@ -501,7 +526,7 @@ RUN case "${APT_CACHE_EPOCH}" in \
         > /etc/apt/sources.list.d/pgdg.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        libc6 libc-bin man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
+        libbrotli1 libc6 libc-bin man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
         netcat-traditional mtr whois tcptraceroute dnsrecon git \
         libnet-ssleay-perl rubygems ruby libxml-writer-perl libjson-perl fping \
         python3-requests fierce dnsenum libcap2-bin sudo groff-base \
@@ -509,6 +534,9 @@ RUN case "${APT_CACHE_EPOCH}" in \
         postgresql-client-${POSTGRESQL_CLIENT_VERSION} chromium zlib1g unzip \
         inetutils-telnet httping && \
     rm -rf /var/lib/apt/lists/*
+COPY scripts/container/verify_system_trust.py /usr/local/libexec/darklab-verify-system-trust
+RUN /usr/bin/python3 /usr/local/libexec/darklab-verify-system-trust && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.1.0-2+deb13u1
 RUN mkdir -p /usr/share/doc/darklab-shell/licenses
 
 COPY --from=go-projectdiscovery /out/ /
@@ -519,6 +547,7 @@ COPY --from=rustscan-asset /out/ /
 COPY --from=dalfox-asset /out/ /
 COPY --from=sqlmap-asset /out/ /
 COPY --from=schemathesis-asset /out/ /
+COPY --from=sslyze-asset /out/ /
 COPY --from=ruby-tools /out/ /
 
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
@@ -550,12 +579,14 @@ WORKDIR /app
 # application changes don't invalidate scanner construction.
 RUN pip install --upgrade pip && \
     pip install --upgrade setuptools==${SETUPTOOLS_VERSION} wheel && \
-    pip install --upgrade sslyze==${SSLYZE_VERSION} && \
     pip install --upgrade wafw00f==${WAFW00F_VERSION}
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
-    pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise && \
+    pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan==${SHODAN_VERSION} greynoise && \
+    pip check && \
     rm -f /tmp/requirements.txt
+COPY scripts/container/patch_shodan.py /tmp/patch_shodan.py
+RUN python /tmp/patch_shodan.py && rm /tmp/patch_shodan.py && shodan --help && shodan version
 
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)

@@ -218,6 +218,8 @@ def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
     for path in sorted((build_context / "scripts" / "container").rglob("*")):
         if path.is_file():
             _hash_smoke_build_input(hasher, path)
+    for path in sorted((build_context / "deploy").glob("*constraints.txt")):
+        _hash_smoke_build_input(hasher, path)
     for path in sorted((build_context / "app").rglob("*")):
         if path.is_file() and ".local." not in path.name:
             _hash_smoke_build_input(hasher, path)
@@ -676,6 +678,13 @@ def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> N
     source_stager.write_text("#!/usr/bin/env sh\ncp -R \"$1/.\" \"$2/\"\n", encoding="utf-8")
     go_installer.write_text("#!/usr/bin/env sh\ngo install \"$1\"\n", encoding="utf-8")
     httpx_patch.write_text("initial compatibility patch\n", encoding="utf-8")
+
+    constraints = tmp_path / "deploy" / "sslyze-constraints.txt"
+    constraints.parent.mkdir()
+    constraints.write_text("cryptography==50.0.0\n", encoding="utf-8")
+    before_constraints = _smoke_image_cache_key(tmp_path, dockerfile)
+    constraints.write_text("cryptography==50.0.2\n", encoding="utf-8")
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != before_constraints
 
     original_key = _smoke_image_cache_key(tmp_path, dockerfile)
 
@@ -1878,6 +1887,14 @@ def test_container_smoke_test_notification_worker_log_streams(container_smoke_te
         assert captured.stdout.count("NOTIFICATION_WORKER_STOPPED") == 1
         assert "NOTIFICATION_WORKER_STOPPED" not in captured.stderr
         assert "NOTIFICATION_WORKER_CRASHED" not in captured.stderr
+
+
+def test_container_smoke_test_sslyze_parses_local_certificate(container_smoke_test):
+    program = (ROOT / "tests/py/fixtures/sslyze_certificate_smoke.py").read_text(encoding="utf-8")
+    result = _run(container_smoke_test.compose + [
+        "exec", "-T", "--user", "scanner", "shell", "/opt/sslyze/bin/python", "-c", program,
+    ], timeout=60)
+    assert "SSLyze certificate scan completed" in result.stdout
 
 
 def test_container_smoke_test_trufflehog_scans_offline(container_smoke_test):

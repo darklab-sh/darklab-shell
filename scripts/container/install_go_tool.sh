@@ -28,6 +28,8 @@ if [ -z "$package" ] || [ -z "$requested_version" ] || [ "$package" = "$tool_spe
 fi
 
 : "${GO_X_CRYPTO_VERSION:?GO_X_CRYPTO_VERSION must be set}"
+: "${GO_X_NET_VERSION:?GO_X_NET_VERSION must be set}"
+: "${GO_VERSION:?GO_VERSION must be set}"
 
 for dependency_spec in "$@"; do
     case "$dependency_spec" in
@@ -60,6 +62,7 @@ go mod init darklab.invalid/tool-install
 # requested tool. A tool can raise the dependency when its pinned release
 # requires a newer version, but the floor must never downgrade the tool itself.
 go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"
+go get "golang.org/x/net@${GO_X_NET_VERSION}"
 for dependency_spec in "$@"; do
     go get "$dependency_spec"
 done
@@ -133,3 +136,20 @@ done
 x_crypto_version=$(go list -m -f '{{.Version}}' golang.org/x/crypto)
 printf '%s\n' \
     "Installed Go tool package=$package module=$module_path version=$embedded_version x_crypto=$x_crypto_version${dependency_summary}"
+
+# Tools that use only the standard library need not embed x/net. If present,
+# its embedded version must match the selected module graph without replacement.
+x_net_version=$(go list -m -f '{{.Version}}' golang.org/x/net)
+build_info=$(go version -m "$target")
+printf '%s\n' "$build_info" | awk -v expected="go${GO_VERSION}" '
+    NR == 1 { if ($NF != expected) exit 1 }
+' || { echo "Go toolchain version mismatch: $target" >&2; exit 1; }
+printf '%s\n' "$build_info" | awk -v expected="$x_net_version" '
+    $1 == "dep" && $2 == "golang.org/x/net" {
+        if ($3 != expected) exit 1
+        selected = 1
+        next
+    }
+    selected && $1 == "=>" { exit 1 }
+    { selected = 0 }
+' || { echo "Go x/net dependency mismatch: $target" >&2; exit 1; }
