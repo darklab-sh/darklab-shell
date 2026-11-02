@@ -69,9 +69,9 @@
     {
       "name": "Python container base and Debian packages",
       "version_arg": "PYTHON_VERSION",
-      "source": "https://github.com/docker-library/python/tree/3.15/slim-trixie",
+      "source": "https://github.com/docker-library/python/tree/3.14/slim-trixie",
       "license": "mixed-open-source",
-      "notice_location": "/usr/share/doc/*/copyright and /usr/local/lib/python3.15/site-packages/*-info/licenses"
+      "notice_location": "/usr/share/doc/*/copyright and /usr/local/lib/python3.14/site-packages/*-info/licenses"
     },
     {
       "name": "PostgreSQL 18 client",
@@ -256,14 +256,14 @@
       "version_arg": "SSLYZE_VERSION",
       "source": "https://github.com/nabla-c0d3/sslyze",
       "license": "AGPL-3.0",
-      "notice_location": "/usr/local/lib/python3.15/site-packages/sslyze-*.dist-info/licenses"
+      "notice_location": "/usr/local/lib/python3.14/site-packages/sslyze-*.dist-info/licenses"
     },
     {
       "name": "WAFW00F",
       "version_arg": "WAFW00F_VERSION",
       "source": "https://github.com/EnableSecurity/wafw00f",
       "license": "BSD-3-Clause",
-      "notice_location": "/usr/local/lib/python3.15/site-packages/wafw00f-*.dist-info/licenses"
+      "notice_location": "/usr/local/lib/python3.14/site-packages/wafw00f-*.dist-info/licenses"
     },
     {
       "name": "RustScan",
@@ -298,7 +298,7 @@
       "version_arg": "SCHEMATHESIS_VERSION",
       "source": "https://github.com/schemathesis/schemathesis",
       "license": "mixed-open-source",
-      "notice_location": "/opt/schemathesis/lib/python3.15/site-packages/*-info/licenses"
+      "notice_location": "/opt/schemathesis/lib/python3.14/site-packages/*-info/licenses"
     },
     {
       "name": "WPScan",
@@ -340,7 +340,7 @@
       "version_arg": "SETUPTOOLS_VERSION",
       "source": "app/requirements.txt and Dockerfile pip install declarations",
       "license": "mixed-open-source",
-      "notice_location": "/usr/local/lib/python3.15/site-packages/*-info/licenses"
+      "notice_location": "/usr/local/lib/python3.14/site-packages/*-info/licenses"
     },
     {
       "name": "Browser runtime libraries",

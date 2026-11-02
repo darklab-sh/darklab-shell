@@ -30,7 +30,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Python dependencies include the security fixes for sign-in, certificate trust, and package installation.** Authlib and joserfc use patched releases, the application and isolated Schemathesis scanner share the updated certifi bundle, and development, container, and CLI builds require patched setuptools. The scanner also uses patched GraphQL-core, urllib3, and Werkzeug dependencies. Token-exchange logging follows Authlib's response validation while preserving HTTP status and keeping provider data out of logs.
 
-- **Python image metadata and license notices match the updated base image.** The production image records Python 3.15.2, and its license inventory points to Python 3.15 paths. Installation checks require an exact slim-image version that matches the metadata, so dependency updates no longer require a second hardcoded test pin.
+- **Container builds retain Python 3.14 compatibility with SSLyze.** The production base and image metadata use Python 3.14.7, with matching license notice paths. SSLyze 6.3.1 requires nassl 5.4.x, which doesn't publish Python 3.15 distributions. Installation checks require an exact slim-image version that matches the metadata, so dependency updates no longer require a second hardcoded test pin.
 
 ---
 

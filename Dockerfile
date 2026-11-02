@@ -2,7 +2,9 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-ARG PYTHON_BASE_IMAGE=python:3.15.2-slim
+# SSLyze 6.3.1 requires nassl 5.4.x, whose wheels support Python through 3.14.
+# https://pypi.org/project/nassl/5.4.0/#files
+ARG PYTHON_BASE_IMAGE=python:3.14.7-slim
 ARG GO_VERSION=1.27.0
 ARG GO_LINUX_AMD64_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
 ARG GO_LINUX_ARM64_SHA256=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
@@ -68,7 +70,7 @@ ARG APP_VERSION=3.1.2
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 ARG APT_CACHE_EPOCH=1970-01-01
-ARG PYTHON_VERSION=3.15.2
+ARG PYTHON_VERSION=3.14.7
 ARG PYTHON_BASE_DIGEST=unresolved
 ARG PYTHON_BASE_INDEX_DIGEST=unresolved
 

@@ -556,6 +556,8 @@ docker compose -f compose.dev.yaml up --build
 
 When updating the production Python base image, keep `PYTHON_BASE_IMAGE` and `PYTHON_VERSION` in `Dockerfile` on the same exact version. Update the Python source link and notice paths in `deploy/container-licenses.json` when the minor version changes. CI runner images are pinned separately; passing tests on those images doesn't qualify a newer production Python runtime. Run a fresh deterministic container smoke build for the new base image.
 
+The production image uses Python 3.14 because [SSLyze 6.3.1 requires `nassl>=5.4,<6`](https://github.com/nabla-c0d3/sslyze/blob/6.3.1/setup.py#L94-L99). [nassl 5.4.0 publishes wheels through Python 3.14 and no source distribution](https://pypi.org/project/nassl/5.4.0/#files), so that dependency can't install on Python 3.15. Python base-image upgrades must preserve compatibility with the bundled scanners as well as the application.
+
 The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. `--docker-only` reports only the production base image; the complete report also includes CI runner images, while the Go, pip, gem, and GitHub flags select Dockerfile tool pins. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 
 ---
