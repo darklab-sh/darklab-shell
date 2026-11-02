@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
+
 - **Container vulnerability scan cleanup passes CI shell linting.** The scan removes its temporary container directly in the exit trap, avoiding a false unreachable-code warning while preserving cleanup and scanner exit status.
 
 - **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.2, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
