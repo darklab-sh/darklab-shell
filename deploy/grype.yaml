@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 mmayhew
+# SPDX-License-Identifier: AGPL-3.0-only
+# Debian strips certifi's bundled roots and uses ca-certificates instead.
+# ca-certificates 20250419+deb13u1 removes emSign ECC Root CA - G3.
+# The image build and scan helper verify certifi's delegation and the root's fingerprint is
+# absent from the active bundle. Other certifi copies remain subject to scanning.
+# https://github.com/advisories/GHSA-6q48-6c7w-9gw2
+ignore:
+  - vulnerability: GHSA-6q48-6c7w-9gw2
+    namespace: github:language:python
+    package:
+      name: certifi
+      version: 2025.1.31
+      type: python
+      location: /usr/lib/python3/dist-packages/certifi-2025.1.31.egg-info/*
+    reason: >-
+      Debian certifi contains no bundled CA store and uses the patched system
+      bundle. scripts/container/verify_system_trust.py verifies this at build and scan time.

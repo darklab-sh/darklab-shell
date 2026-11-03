@@ -6,8 +6,8 @@ default:
     - self-hosted
 
 variables:
-  CI_DEFAULT_IMAGE: "python:3.14.7-slim"
-  CI_PYTHON_E2E_IMAGE: "python:3.14.7"
+  CI_DEFAULT_IMAGE: "python:3.14.10-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14.10"
   CI_NODE_IMAGE: "node:26.7.0-slim"
   CI_DOCKER_IMAGE: "docker:29.7.2"
   CI_GITLAB_CLI_IMAGE: "registry.gitlab.com/gitlab-org/cli:v1.114.0@sha256:797256f9f46c6da08a337566eb11b3e53dee31fdef7d2d41b379d5841ed10cd7"
@@ -413,10 +413,12 @@ container-smoke-test-deterministic:
         - app/conf/commands.yaml
         - app/conf/workflows/**/*
         - deploy/schemathesis-constraints.txt
+        - deploy/sslyze-constraints.txt
         - scripts/container/**/*
         - scripts/container_smoke_test.sh
         - tests/py/test_container_smoke_test.py
         - tests/py/fixtures/container_smoke_test-*
+        - tests/py/fixtures/sslyze_certificate_smoke.py
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *container-smoke-changes
   script:
@@ -473,6 +475,10 @@ docker-build:
         - docker-compose*.yml
         - compose*.yaml
         - deploy/compose*.yaml
+        - deploy/schemathesis-constraints.txt
+        - deploy/sslyze-constraints.txt
+        - deploy/grype.yaml
+        - scripts/release/scan_sbom.sh
     # Allow a manual trigger on any branch for one-off verification
     - when: manual
       allow_failure: true
@@ -521,9 +527,7 @@ docker-build:
       > branch-image-evidence/darklab-shell.cdx.json
     - >-
       cat branch-image-evidence/darklab-shell.cdx.json |
-      docker run --rm -i
-      "$GRYPE_IMAGE"
-      --only-fixed --fail-on critical -o json
+      sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE" "darklab_shell:$CI_COMMIT_SHA"
       > branch-image-evidence/vulnerability-report.json
   artifacts:
     when: always
@@ -969,9 +973,7 @@ release-image-amd64-vulnerability-scan:
       > release-evidence-amd64/darklab-shell-amd64.cdx.json
     - >-
       cat release-evidence-amd64/darklab-shell-amd64.cdx.json |
-      docker run --rm -i
-      "$GRYPE_IMAGE"
-      --only-fixed --fail-on critical -o json
+      sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE" "${AMD64_IMAGE}@${AMD64_DIGEST}"
       > release-evidence-amd64/vulnerability-report-amd64.json
   artifacts:
     when: always
@@ -1038,9 +1040,7 @@ release-image-recheck:
       > recheck-evidence/darklab-shell.cdx.json
     - >-
       cat recheck-evidence/darklab-shell.cdx.json |
-      docker run --rm -i
-      "$GRYPE_IMAGE"
-      --only-fixed --fail-on critical -o json
+      sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE" "${recheck_reference}"
       > recheck-evidence/vulnerability-report.json
   artifacts:
     when: always
@@ -1118,9 +1118,7 @@ release-image-arm64-vulnerability-scan:
       > release-evidence-arm64/darklab-shell-arm64.cdx.json
     - >-
       cat release-evidence-arm64/darklab-shell-arm64.cdx.json |
-      docker run --rm -i
-      "$GRYPE_IMAGE"
-      --only-fixed --fail-on critical -o json
+      sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE" "${ARM64_IMAGE}@${ARM64_DIGEST}"
       > release-evidence-arm64/vulnerability-report-arm64.json
   artifacts:
     when: always

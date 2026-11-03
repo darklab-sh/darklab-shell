@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mmayhew
 // SPDX-License-Identifier: AGPL-3.0-only
+// @vitest-environment node
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -49,7 +50,7 @@ describe('frontend browser global boundary inventory', () => {
       intentional_bootstrap: 4,
       lazy_placeholder: 104,
       module_api_bridge: 61,
-      bridge_internal: 10,
+      bridge_internal: 11,
       test_hook: 3,
       compatibility_export: 0,
     }),

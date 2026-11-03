@@ -6,9 +6,37 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## Archives
 
-- [3.x releases](docs/changelog/3.x.md) - version 3.0.0
+- [3.x releases](docs/changelog/3.x.md) - versions 3.0.0 through 3.1.0
 - [2.x releases](docs/changelog/2.x.md) - versions 2.0 through 2.9.2
 - [1.x releases](docs/changelog/1.x.md) - versions 1.0 through 1.7
+
+---
+
+## [3.1.3] - Unreleased
+
+### Fixed
+
+- **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
+
+- **Container vulnerability scan cleanup passes CI shell linting.** The scan removes its temporary container directly in the exit trap, avoiding a false unreachable-code warning while preserving cleanup and scanner exit status.
+
+- **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.2, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
+
+- **Access recovery tests allow authentication redirects to finish.** Cookie-loss coverage arms its recovery request before removing the cookie and deliberately checks denied reads after navigation. Saved-credential coverage restores into a new page after the previous shell stops polling, preventing navigation from interrupting storage setup under load.
+
+- **Mobile chart preview actions stay reachable after scrolling.** Status Monitor brings a selected preview into view before the next tap. Its own scroll event keeps the preview open; subsequent scrolling still dismisses it without launching a run or opening History. Regression coverage opens a preview from a partially scrolled chart.
+
+- **Shell-chrome unit tests release their browser listeners between cases.** Mocked requests settle on the next event-loop turn without accumulating real timer delays, and document/window listeners no longer retain previous fixtures. The long Project interaction test keeps its existing timeout and assertions.
+
+- **Frontend inventory checks reuse syntax-tree structure.** The inventory reuses each parsed node's child list across its analysis passes, reducing cold-scan work without changing the reported browser boundaries, checks, or test timeouts.
+
+- **JavaScript dependencies include the reported security fixes.** Vitest and its coverage package use patched releases, and the lockfile updates DOMPurify, fast-uri, Undici, and Vite. Scoped overrides provide patched Markdown parsing and ESLint glob matching while retaining ESLint 10, Markdownlint CLI2 0.23, and the local `braces` security patch.
+
+- **Repeated UI setup releases the previous select observer.** Shared select enhancement keeps one active observer, preventing old observers from processing later DOM updates. Regression coverage checks observer replacement, browser-global inventory runs in Node, and provider-only credential checks wait for Access data and select enhancement before interacting with the editor.
+
+- **Python dependencies include the security fixes for sign-in, certificate trust, and package installation.** Authlib and joserfc use patched releases, the application and isolated Schemathesis scanner share the updated certifi bundle, and development, container, and CLI builds require patched setuptools. The scanner also uses patched GraphQL-core, urllib3, and Werkzeug dependencies. Token-exchange logging follows Authlib's response validation while preserving HTTP status and keeping provider data out of logs.
+
+- **Container builds retain Python 3.14 compatibility with SSLyze.** The production base and image metadata use Python 3.14.10, with matching license notice paths. SSLyze 6.3.1 requires nassl 5.4.x, which doesn't publish Python 3.15 distributions. Installation checks require an exact slim-image version that matches the metadata, so dependency updates no longer require a second hardcoded test pin.
 
 ---
 
@@ -67,62 +95,3 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **JavaScript dependencies resolve the reported npm security advisories.** The dependency tree uses patched brace-expansion, DOMPurify, fast-uri, js-yaml, Markdown parsing, and Undici releases. Markdownlint's patch release supplies its corrected dependencies without the old overrides. Markdown and CSS linting use a reviewed local `braces` patch that bounds recursive nesting for GHSA-vfj7-8cjw-p6xm. The audit command verifies that patched dependency with security regressions before running the existing high/critical registry audit.
 
 - **Credential lifecycle checks stay valid as the calendar advances.** The workspace-stability test uses a future expiry relative to its run date, preserving the final-credential lockout checks.
-
----
-
-## [3.1.0] - 2026-09-21
-
-**Upgrade note:** Diagnostics, Audit log, and Operator settings now require a verified browser session and an explicit principal grant in every access profile, including `open`. To retain operator access, sign in and grant an active principal access using the [operator setup instructions](CONFIGURATION.md#operator-settings-console). Update audit bookmarks and export links from `/diag/audit` and `/diag/audit/export` to `/audit` and `/audit/export`; the old routes do not redirect. Rename `diagnostics_allowed_cidrs` to `metrics_allowed_cidrs` before upgrading; the removed key is ignored and no longer enables metrics scrapes. Complete the [operator upgrade preflight](CONFIGURATION.md#upgrade-preflight) and keep a verified backup before changing the image.
-
-### Added
-
-- **Operators can inspect settings, diagnostics, and audit activity through one protected console.** Desktop and mobile navigation connects the three read-only pages.
-  - **Settings:** Search and filter reviewed values by group, source, and warning. Filter links survive reloads and verification; refresh preserves expanded details, focus, and position. Cards distinguish loaded values, accepted inputs, host guidance, and unobserved deployment defaults across all themes.
-  - **Snapshots and privacy:** Each snapshot identifies the serving worker, the process that loaded configuration, and its load time. Sensitive settings show approved summaries or withheld markers; diagnostics distinguishes withheld values from unset ones. Private responses and access checks clear stale page data after authority is lost.
-  - **Grants and verification:** Browser sessions in every access profile need an explicit principal grant and recent same-account credential or signed-provider proof. Open mode retains anonymous workspace access; authenticated cookies use the same CSRF, expiry, and privilege-rotation protections. Verification preserves the session's original deadline, explains missing provider freshness, and supports expired-form recovery. Team roles, direct credentials, and PATs don't grant console access; denied requests retain HTTP and failed-authentication limits.
-  - **Browser sessions:** Authenticated browsers in all profiles use protected cookie sessions with CSRF checks; each profile retains its permitted sign-in methods. Open browsers retain anonymous use, migrate older saved credentials once with an authenticated reload, and can return anonymously after sign-out. Removing an older saved credential requires explicit acknowledgment. Workspace attachment and session creation commit together; rejected cookies preserve the one-time credential for recovery, and failed exchanges stay blocked.
-  - **Local administration:** Grant, list, inspect, and revoke operator access independently of Team roles. Grants survive backups and database migration, repeated changes are quiet, and disabled principals can't gain access. CLI changes emit post-commit logs on stderr while stdout remains JSON. `operator-status` separates grant eligibility from the CLI's evaluated access policy and explicitly reports that the serving application and browser verification were not observed.
-  - **Audit and diagnostics:** Audit viewing and exports move to `/audit` and `/audit/export`; old URLs don't redirect. Filters explain operator events and survive verification. Exports recheck authority between pages and abort on access loss or lookup failure; interrupted CSV ends with an incomplete-file warning, while interrupted JSON remains unparseable. Lookup failures and genuine denials have separate safe log classifications, and repeated warnings are sampled.
-  - **Qualification:** All four profiles have SQLite/Postgres and desktop/mobile browser coverage in source and bundle modes, including navigation, filtering, verification, and anonymous sign-in redirects. Request checks cover profile transitions, CSRF, and streamed grant/session/freshness changes. Screenshot scenes cover all three pages in each theme. Production-like staging qualification covers open and restricted modes, including sign-in, recovery, bootstrap, proxy settings, and operator workflows.
-
-- **Managed installations can administer access through `darklab-deploy access`.** Commands preserve principal safeguards, use the selected installation's Compose files, and write credentials to private host files with recovery after interrupted transfers. Host checks support GNU and BSD `stat`, reject unsafe or replaced destinations, and keep secrets out of command output. Required tests execute the shipped private-file transport against disposable paths.
-
-- **Configuration can be validated without a working application process.** `darklab-deploy config check` and the standalone checker evaluate current or candidate YAML without applying changes, initializing services, or creating keys.
-  - **Inputs:** Shared startup rules preserve normalization, validation, environment precedence, and warnings. Current checks honor the selected container mounts and local configuration root; only explicit candidates replace the selected overlay.
-  - **Results:** Strict mode and versioned JSON report reviewed values, source layers, warnings, counts, presence, and withheld markers. A fresh evaluation is distinct from a running worker's captured startup snapshot; the field catalog also explains host apply requirements.
-  - **Qualification:** Loader characterization, invalid-input checks, and generated-helper tests cover precedence, disclosure, custom mounts, and cleanup. Configuration guidance separates installed-image commands from source-checkout commands.
-
-- **Coding agents have a shared repository guide.** `AGENTS.md` links the architecture, security, UI, testing, logging, documentation, and authorized Git/CI contracts. Contributor guidance uses live test inventories instead of maintaining exact totals.
-
-### Changed
-
-- **Shell startup and test feedback do less repeated work while preserving access checks and coverage.**
-  - **Page load:** The shell reuses its embedded configuration and becomes usable without waiting for command recall or secondary catalogs. Late responses preserve privacy defaults, restored runs, typed drafts, and workspace scope. Theme previews load on demand with retry and latest-choice protection; active and exported palettes remain available immediately. Asset-manifest reads use an app-owned cache with file invalidation and existing error behavior.
-  - **Backend tests:** Ordinary SQLite fixtures clone a validated pristine database. Postgres tests and browser profiles clone independent databases from a migrated template, with schema isolation for restricted roles and custom locales. Migration, startup, rollback, and real-pool tests keep their production initialization paths. Request tests reuse stable app wiring with fresh clients and data; repository guards share bounded syntax analysis. Postgres query fixtures match production's JIT default, and report fixtures restore only changed settings.
-  - **Test preparation:** The Postgres lane avoids duplicating required SQLite coverage, Compose reuses runtime-qualified Python dependencies, and focused browser runs start only selected servers. Refreshed project weights account for qualification work. Bundle runs verify generated fingerprints without rebuilding; required CI still checks complete reproducibility. Browser jobs reuse versioned package and headless-browser downloads.
-  - **Evidence and safeguards:** Successful runs retain safe pytest phase/CPU and browser timing summaries, including fresh-context/reload prompt readiness and first paint. Disposable Postgres runs separately record database-container CPU. Isolation, failure recovery, theme loading, late startup responses, cache invalidation, and selected-project behavior have regression coverage. Cache permission tests set their intended modes regardless of the caller's umask. Serial pytest policy, immutable migration history, authentication, and flaky-test guards remain intact.
-
-- **Metrics network permissions are independent of operator access.**
-  - **Before:** Metrics and diagnostics shared the `diagnostics_allowed_cidrs` network gate.
-  - **After:** `metrics_allowed_cidrs` controls `/metrics` only, while granted operators can use the console from any network. The old key is removed starting with 3.1.0: YAML loading warns and ignores it, strict configuration checks fail on the warning, and runtime mutations reject it. Metrics permissions don't bypass AI workspace quotas; diagnostic AI tests retain CSRF and shared per-operator/global limits without charging the operator when global capacity is busy.
-  - **Tests:** Configuration and checker cases preserve canonical layer precedence, source reporting, the empty-list default, and safe warnings. Metrics and operator checks verify independent access controls and AI limits.
-
-- **3.1.0 is the stable release.** Application, npm, container, deployment, license-inventory, OpenAPI, and production-install expectations use the final version. Installation and signing examples select its exact tag. Changelog checks accept both the dated release layout and the active development layout, with the finalized 3.1.0 section included in the published-text integrity baseline.
-
-- **Browser CI uses isolated app servers and preserves failure evidence.** Each project runs one browser worker, with a total CI cap of three; independent workflows and controlled readiness keep shared-runner contention from distorting checks. Traces retain original failed attempts, and CI still rejects flaky results.
-
-### Fixed
-
-- **Pylance resolves shared development and test helpers and checks their callers accurately.** Analysis paths include the shared helper directories, browser-session and configuration accessors preserve their concrete types, and Postgres tests declare dictionary rows explicitly. Tests check optional results and callback signatures without suppressing diagnostics or weakening their assertions.
-
-- **Project Activity keeps pending filter edits during background refreshes.** Refreshing project data no longer clears fields before Apply is clicked. Paging continues to use the applied filters, and Clear resets both pending and applied values. Unit and browser regressions cover refreshes between editing and applying.
-
-- **Container logs use the expected severity streams.** Application, background-worker, and Gunicorn process logs send DEBUG/INFO to stdout and warnings or errors to stderr. Existing verbosity, formatting, redaction, and exception details are preserved, and repeated configuration doesn't duplicate records. Collector guidance covers both streams.
-
-- **Disposable test containers clean up their anonymous volumes.** Postgres tests, release-image checks, CI probes, and smoke-test cleanup remove attached anonymous volumes with their containers. Recovery after interrupted smoke runs also removes volumes that lack Compose project labels.
-
-- **Backup exports reject missing Docker volume sources.** The helper checks source volumes before export, so a misspelled or unavailable source fails instead of creating an empty named volume and recording an empty export. Existing source volumes remain in place.
-
-- **Managed backups include `compose.operator.yaml` when present.** The archive keeps a private, checksum-verified copy for manual recovery alongside `.env` and operator configuration. Restore preserves the destination host's Compose settings, and older backups remain compatible.
-
-- **The bundled TruffleHog uses a patched AMQP dependency.** TruffleHog v3.97.5 includes `amqp091-go` v1.13.0 upstream to address AMQP parser and TLS vulnerabilities, removing the local dependency override. The image build verifies the dependency embedded in the executable and includes its license notice.

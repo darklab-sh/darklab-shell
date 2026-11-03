@@ -119,6 +119,33 @@ describe('app-native select enhancement', () => {
     `
   })
 
+  it('disconnects the previous select observer when helpers are initialized again', async () => {
+    const observers = []
+    const NativeMutationObserver = globalThis.MutationObserver
+    const observerSpy = vi.spyOn(globalThis, 'MutationObserver').mockImplementation(function (callback) {
+      const observer = new NativeMutationObserver(callback)
+      vi.spyOn(observer, 'disconnect')
+      observers.push(observer)
+      return observer
+    })
+    try {
+      loadHelpers()
+      loadHelpers()
+      expect(observers).toHaveLength(2)
+      expect(observers[0].disconnect).toHaveBeenCalledOnce()
+      const select = document.createElement('select')
+      select.className = 'form-select'
+      select.innerHTML = '<option value="new">New</option>'
+      document.body.append(select)
+      await Promise.resolve()
+      expect(select.nextElementSibling?.querySelector('.app-select-value').textContent).toBe('New')
+      expect(select.parentElement.querySelectorAll('.app-select')).toHaveLength(2)
+    } finally {
+      observers.forEach(observer => observer.disconnect())
+      observerSpy.mockRestore()
+    }
+  })
+
   it('keeps the native select as state while rendering a themed trigger', () => {
     const g = loadHelpers()
     const select = document.getElementById('demo-select')
