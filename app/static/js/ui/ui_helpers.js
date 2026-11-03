@@ -1184,6 +1184,7 @@ import { requestWelcomeSettle as importedRequestWelcomeSettle } from '../welcome
         record.addedNodes.forEach((node) => _enhanceAppSelectTree(node));
       });
     });
+    global.__darklabAppSelectObserver = observer;
     observer.observe(document.body, {
       childList: true,
       subtree: true,

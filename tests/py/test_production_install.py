@@ -1613,9 +1613,19 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         "JSON.pretty_generate(payload))"
     ) in dockerfile
     assert 'JSON.pretty_generate(payload) + "\\\\n"' not in dockerfile
-    assert "ARG PYTHON_BASE_IMAGE=python:3.14.7-slim" in dockerfile
+    python_base_image = re.search(
+        r"^ARG PYTHON_BASE_IMAGE=python:(?P<version>[0-9]+\.[0-9]+\.[0-9]+)-slim$",
+        dockerfile,
+        re.MULTILINE,
+    )
+    assert python_base_image is not None
+    assert re.search(
+        rf"^ARG PYTHON_VERSION={re.escape(python_base_image.group('version'))}$",
+        dockerfile,
+        re.MULTILINE,
+    )
     assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
-    assert "ARG GO_X_NET_VERSION=v0.55.0" in dockerfile
+    assert "ARG GO_X_NET_VERSION=v0.60.0" in dockerfile
     assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
     assert "ARG KATANA_PGX_VERSION=v5.9.0" in dockerfile
     assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
@@ -1938,6 +1948,7 @@ def _run_fake_go_tool_installer(
     dependency_selected_version: str = "",
     dependency_embedded_version: str = "",
     source_patch: bool = False,
+    network_embedded_version: str = "v0.60.0",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     fake_bin = tmp_path / "fake-go-bin"
     fake_bin.mkdir(parents=True)
@@ -1974,6 +1985,8 @@ case "$1" in
                 printf '%s\\n' "$FAKE_GO_MODULE_DIR"
             elif [ "$candidate" = "golang.org/x/crypto" ]; then
                 printf '%s\\n' "$FAKE_GO_X_CRYPTO_VERSION"
+            elif [ "$candidate" = "golang.org/x/net" ]; then
+                printf '%s\\n' "v0.60.0"
             elif [ -n "$FAKE_GO_DEPENDENCY_MODULE" ] && [ "$candidate" = "$FAKE_GO_DEPENDENCY_MODULE" ]; then
                 printf '%s\\n' "$FAKE_GO_DEPENDENCY_SELECTED_VERSION"
             elif [ "$candidate" = "${FAKE_GO_MODULE}@${FAKE_GO_REQUESTED_VERSION}" ]; then
@@ -1989,8 +2002,9 @@ case "$1" in
         ;;
     version)
         test "$2" = "-m"
-        printf '%s: go1.26.5\\n' "$FAKE_GO_TARGET"
+        printf '%s: go1.27.2\\n' "$FAKE_GO_TARGET"
         printf '\\tpath\\t%s\\n' "$FAKE_GO_PACKAGE"
+        printf '\\tdep\\tgolang.org/x/net\\t%s\\th1:test\\n' "$FAKE_GO_NETWORK_VERSION"
         printf '\\tmod\\t%s\\t%s\\th1:test\\n' "$FAKE_GO_MODULE" "$FAKE_GO_EMBEDDED_VERSION"
         if [ -n "$FAKE_GO_DEPENDENCY_MODULE" ]; then
             printf '\\tdep\\t%s\\t%s\\th1:test\\n' "$FAKE_GO_DEPENDENCY_MODULE" "$FAKE_GO_DEPENDENCY_EMBEDDED_VERSION"
@@ -2037,8 +2051,11 @@ printf '%s\\n' "$*" >> "$FAKE_GIT_LOG"
         "FAKE_GO_SELECTED_VERSION": selected_version,
         "FAKE_GO_TARGET": str(target),
         "FAKE_GO_X_CRYPTO_VERSION": "v0.53.0",
+        "FAKE_GO_NETWORK_VERSION": network_embedded_version,
         "FAKE_GIT_LOG": str(git_log_path),
         "GO_X_CRYPTO_VERSION": "v0.52.0",
+        "GO_X_NET_VERSION": "v0.60.0",
+        "GO_VERSION": "1.27.2",
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
     }
     if source_patch:
@@ -2144,7 +2161,8 @@ def test_trufflehog_build_verifies_the_upstream_amqp_dependency():
     build = build.split("\nRUN ", 1)[0]
     compile_tool = "go -C /tmp/trufflehog install"
     verify_binary = "sh /usr/local/bin/verify-go-dependency /out/usr/local/bin/trufflehog"
-    assert "go -C /tmp/trufflehog get" not in build
+    assert 'go -C /tmp/trufflehog get "golang.org/x/net@${GO_X_NET_VERSION}"' in build
+    assert build.index("go -C /tmp/trufflehog get") < build.index(compile_tool)
     assert build.index(compile_tool) < build.index(verify_binary)
     assert 'github.com/rabbitmq/amqp091-go "${TRUFFLEHOG_AMQP_VERSION}"' in build
     assert "amqp091-go@${TRUFFLEHOG_AMQP_VERSION}/LICENSE" in build
@@ -2827,7 +2845,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert parsed_ci["docker-build"]["interruptible"] is True
     branch_build_script = "\n".join(parsed_ci["docker-build"]["script"])
     assert "branch-image-evidence/darklab-shell.cdx.json" in branch_build_script
-    assert "--only-fixed --fail-on critical" in branch_build_script
+    assert 'sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE"' in branch_build_script
     # The branch image must read the same cache chain the scheduled warmer fills. A bare
     # base tag resolves to the index digest instead of the pinned amd64 child manifest,
     # which misses every warmed layer from the first toolchain RUN onward.
@@ -3009,7 +3027,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert vulnerability_job["stage"] == "verify"
     assert vulnerability_job["artifacts"]["when"] == "always"
     vulnerability_script = "\n".join(vulnerability_job["script"])
-    assert "--only-fixed --fail-on critical" in vulnerability_script
+    assert 'sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE"' in vulnerability_script
     assert "-o cyclonedx-json" in vulnerability_script
     assert "cat release-evidence-amd64/darklab-shell-amd64.cdx.json |" in (
         vulnerability_script
@@ -3023,7 +3041,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert 'RECHECK_CHILD_DIGEST' in recheck_script
     assert "verify_repository_free_image.sh" in recheck_script
     assert "verify_bundled_tools.sh" in recheck_script
-    assert "--only-fixed --fail-on critical" in recheck_script
+    assert 'sh scripts/release/scan_sbom.sh "$GRYPE_IMAGE"' in recheck_script
     arm64_job = parsed_ci["release-image-arm64"]
     assert arm64_job["stage"] == "publish"
     assert arm64_job["extends"] == ".release-arm64-dind"
@@ -5673,3 +5691,13 @@ def test_managed_lifecycle_upgrades_exact_release_and_preserves_operator_state(t
     assert " down" in remove_log
     _assert_compose_log_uses_operator_override(remove_log, install_dir)
     assert (install_dir / "compose.operator.yaml").is_file()
+
+
+def test_go_tool_installer_rejects_stale_embedded_network_dependency(tmp_path: Path):
+    result, calls = _run_fake_go_tool_installer(
+        tmp_path, selected_version="v1.10.0", embedded_version="v1.10.0",
+        network_embedded_version="v0.59.0",
+    )
+    assert "get golang.org/x/net@v0.60.0" in calls
+    assert result.returncode == 1
+    assert "Go x/net dependency mismatch" in result.stderr

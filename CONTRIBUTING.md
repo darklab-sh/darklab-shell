@@ -407,6 +407,8 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 **Markdownlint dependency overrides:** `markdownlint-cli2` pins `smol-toml` to `1.8.0`, and `micromark-extension-math` requires KaTeX `^0.16.0`. Scoped overrides select `smol-toml` `1.9.0` and KaTeX `0.18.2` to address [the TOML parsing advisory](https://github.com/advisories/GHSA-r4xh-jqrq-34v2) and [the KaTeX trust advisory](https://github.com/advisories/GHSA-238p-pmpm-9mq7). These are development dependencies. Validate Markdown math handling and TOML configuration loading when changing these overrides, along with the normal lint and audit checks.
 
+Markdownlint also uses a scoped `markdown-it` `15.0.3` override for its parsing security fixes. ESLint and its configuration loader use `minimatch` `11.0.1` through an ESLint-scoped override for [the glob amplification advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249). These overrides retain ESLint 10, Markdownlint CLI2 0.23, and the existing lint configuration. After changing them, verify a clean `npm ci`, run the lint and browser-global inventory checks, and confirm `npm run audit:js` passes.
+
 ---
 
 ## Vendor JS Workflow
@@ -449,7 +451,7 @@ Jobs carrying the default `self-hosted` tag, including `docker-build`, `containe
   [runners.docker]
     privileged = false
     volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]
-    image = "python:3.14.7-slim"
+    image = "python:3.14.10-slim"
 ```
 
 The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is ignored. Mounting the Docker socket gives a job control of that host's Docker daemon, so use an isolated runner and limit which projects and protected refs can reach it. The scheduled fanout first assigns its shared AMD64 cache warmer to any runner with the standard `self-hosted` tag. The warmer and every Docker consumer build from a tracked Git archive with fixed file modes, which keeps host ownership, timestamps, ACLs, and SELinux labels out of shared cache keys. The warmer also exports one validated UTC date key; every Docker and Podman fan-out build uses that same value so the refreshed runtime APT layer is shared for the day without rebuilding compiled tools. After that succeeds, `bael`, `bune`, `botis`, `babi`, `bile`, `barbas`, `beleth`, `baka`, and `bana` build concurrently; each runner needs the same socket contract and `self-hosted` capability in addition to its own host tag. The `baku` and `baal` fanout jobs use their dedicated SELinux Docker and rootless Podman runner contracts described below.
@@ -551,6 +553,16 @@ docker compose -f compose.dev.yaml up --build
 ```bash
 ./scripts/check_versions.sh
 ```
+
+When updating the production Python base image, keep `PYTHON_BASE_IMAGE` and `PYTHON_VERSION` in `Dockerfile` on the same exact version. Update the Python source link and notice paths in `deploy/container-licenses.json` when the minor version changes. CI runner images are pinned separately; passing tests on those images doesn't qualify a newer production Python runtime. Run a fresh deterministic container smoke build for the new base image.
+
+The production image uses Python 3.14 because [SSLyze 6.3.1 requires `nassl>=5.4,<6`](https://github.com/nabla-c0d3/sslyze/blob/6.3.1/setup.py#L94-L99). [nassl 5.4.0 publishes wheels through Python 3.14 and no source distribution](https://pypi.org/project/nassl/5.4.0/#files), so that dependency can't install on Python 3.15. Python base-image upgrades must preserve compatibility with the bundled scanners as well as the application.
+
+SSLyze and Schemathesis use isolated Python environments, each checked with `pip check` during image construction. The application environment is checked separately. SSLyze's reviewed dependency pins live in `deploy/sslyze-constraints.txt`. Its source archive is pinned by commit and SHA-256 to [upstream's cryptography compatibility fix](https://github.com/nabla-c0d3/sslyze/commit/12ad04350a4f57bec846c15211e4d71075ee53c9), allowing patched cryptography 50 without changing the scanner's runtime code. Shodan 1.31.0 has a build-time compatibility patch for standard-library plugin discovery and version metadata; changing its pin requires reviewing that patch.
+
+Go tool builds use the patched toolchain and a shared `golang.org/x/net` minimum, with embedded-version checks. TruffleHog's separate source build applies and verifies the same networking dependency. Runtime installation explicitly updates Debian Brotli and checks its patched minimum.
+
+All image security gates use `scripts/release/scan_sbom.sh` with `deploy/grype.yaml`. The helper copies the policy through Docker's API so it works with a shared host daemon. The critical threshold is unchanged. The policy contains one exception for Debian certifi 2025.1.31 under `/usr/lib/python3/dist-packages`: Debian removes its bundled CA store, and `ca-certificates` 20250419+deb13u1 removes the compromised emSign G3 root. The image build and each scan verify both the system-bundle delegation and the root fingerprint's absence in the target image, including historical release rechecks. Other certifi copies remain scanned, and the ignored finding stays in Grype's JSON evidence. See the [certifi advisory](https://github.com/advisories/GHSA-6q48-6c7w-9gw2).
 
 The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, `--github-only`, and `--debug` flags to isolate a single surface. `--docker-only` reports only the production base image; the complete report also includes CI runner images, while the Go, pip, gem, and GitHub flags select Dockerfile tool pins. In GitLab CI the `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact.
 

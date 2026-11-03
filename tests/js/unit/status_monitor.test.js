@@ -1365,6 +1365,23 @@ describe('Status Monitor', () => {
     closeStatusMonitor()
   })
 
+  it('keeps a mobile preview open after revealing it and dismisses it on subsequent scrolling', async () => {
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ mobile: true })
+    await openStatusMonitor()
+    const scroller = document.querySelector('.status-monitor-list')
+    const popover = document.querySelector('.status-monitor-constellation-popover')
+    popover.scrollIntoView = vi.fn(() => { scroller.scrollTop = 140 })
+    tap(document.querySelector('.status-monitor-star-node'))
+    expect(popover.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    // The scroll event from revealing the preview arrives after selection.
+    scroller.dispatchEvent(new Event('scroll'))
+    expect(popover.getAttribute('aria-hidden')).toBe('false')
+    scroller.scrollTop += 10
+    scroller.dispatchEvent(new Event('scroll'))
+    expect(popover.getAttribute('aria-hidden')).toBe('true')
+    closeStatusMonitor()
+  })
+
   it.each(['pointermove', 'pointercancel', 'scroll'])('rejects mobile activation after %s, including popover buttons', async cancellation => {
     const restoreHistoryRun = vi.fn()
     const openHistoryWithFilters = vi.fn()
@@ -1378,8 +1395,11 @@ describe('Status Monitor', () => {
       for (const pressTarget of [target, button]) {
         if (pressTarget === button) tap(target)
         pointer(pressTarget, 'pointerdown')
-        if (cancellation === 'scroll') document.querySelector('.status-monitor-list').dispatchEvent(new Event('scroll'))
-        else pointer(pressTarget, cancellation, { clientY: 70 })
+        if (cancellation === 'scroll') {
+          const scroller = document.querySelector('.status-monitor-list')
+          scroller.scrollTop += 10
+          scroller.dispatchEvent(new Event('scroll'))
+        } else pointer(pressTarget, cancellation, { clientY: 70 })
         // Moving back to the start must not turn a drag into a tap.
         pointer(pressTarget, 'pointerup')
         pointer(pressTarget, 'click', { detail: 1 })

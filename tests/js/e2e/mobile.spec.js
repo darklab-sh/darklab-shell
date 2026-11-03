@@ -784,8 +784,23 @@ test.beforeEach(async ({ page }) => {
     await expect(history).not.toHaveClass(/\bopen\b/)
 
     await openMonitor()
+    // Leave only the selected star near the top of the scroll viewport. Its
+    // preview must reveal itself without a second tap's auto-scroll closing it.
+    await scroller.evaluate(el => new Promise(resolve => {
+      const star = el.querySelector('.status-monitor-star-node')
+      const before = el.scrollTop
+      const done = () => {
+        el.removeEventListener('scrollend', done)
+        resolve()
+      }
+      el.addEventListener('scrollend', done, { once: true })
+      el.scrollTop += star.getBoundingClientRect().top - el.getBoundingClientRect().top - 24
+      if (el.scrollTop === before) done()
+    }))
     await monitor.locator('.status-monitor-star-node').first().tap()
-    await monitor.getByRole('button', { name: 'Open run', exact: true }).tap()
+    const openRun = monitor.getByRole('button', { name: 'Open run', exact: true })
+    await expect(openRun).toBeInViewport({ ratio: 1 })
+    await openRun.tap()
     await expect(monitor).toBeHidden()
     await expect.poll(() => page.evaluate(() => getActiveTab()?.historyRunId)).toBe(run.id)
     await expect(page.locator('.tab-panel.active .output')).toContainText(run.command)

@@ -4,10 +4,10 @@
 # Isolated Schemathesis runtime. Keep every transitive dependency exact so the
 # scanner environment cannot drift independently of the release image.
 anyio==4.14.2
-certifi==2026.7.22
+certifi==2026.10.19
 charset-normalizer==3.5.1
 click==8.4.2
-graphql-core==3.2.11
+graphql-core==3.2.12
 harfile==0.5.0
 hypothesis==6.165.10
 hypothesis-graphql==0.13.1
@@ -30,5 +30,5 @@ sortedcontainers==2.4.0
 starlette==1.6.0
 starlette-testclient==0.4.1
 typing-extensions==4.16.0
-urllib3==2.7.0
-Werkzeug==3.1.8
+urllib3==2.8.0
+Werkzeug==3.1.9

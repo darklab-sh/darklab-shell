@@ -65,6 +65,15 @@ function createStatusMonitorMobileCharts({ monitor, isMobile, hidePopover }) {
     popover.setAttribute('role', 'group');
     popover.setAttribute('aria-label', config.label === 'Open run' ? 'Run preview' : 'Command history preview');
     config.show(payload, target);
+    // A partially scrolled chart can put its preview outside the visible list.
+    // Reveal it before the next tap, then distinguish that queued scroll event
+    // from a new scroll that should dismiss the selection.
+    popover.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    selected.scrollPositions = new Map();
+    for (let node = popover.parentElement; node; node = node.parentElement) {
+      selected.scrollPositions.set(node, [node.scrollLeft, node.scrollTop]);
+    }
+    selected.scrollPositions.set(document, [window.scrollX, window.scrollY]);
     if (keyboard) button.focus({ preventScroll: true });
   }
 
@@ -134,7 +143,13 @@ function createStatusMonitorMobileCharts({ monitor, isMobile, hidePopover }) {
     capture: true,
   });
   document.addEventListener('scroll', event => {
-    if (isMobile() && (monitor.contains(event.target) || event.target === document)) reset();
+    if (!isMobile() || (!monitor.contains(event.target) && event.target !== document)) return;
+    const previous = selected?.scrollPositions.get(event.target);
+    const position = event.target === document
+      ? [window.scrollX, window.scrollY]
+      : [event.target.scrollLeft, event.target.scrollTop];
+    if (previous && previous.every((value, index) => value === position[index])) return;
+    reset();
   }, { capture: true, passive: true });
 
   function register(panel, config) {

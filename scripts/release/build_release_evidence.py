@@ -45,6 +45,12 @@ BUILD_INPUT_FILES = (
     "deploy/container-licenses.json",
     "entrypoint.sh",
     "scripts/container/install_go_tool.sh",
+    "scripts/container/patch_shodan.py",
+    "scripts/container/verify_system_trust.py",
+    "deploy/sslyze-constraints.txt",
+    "deploy/schemathesis-constraints.txt",
+    "deploy/grype.yaml",
+    "scripts/release/scan_sbom.sh",
     "scripts/container/resolve_apt_cache_epoch.sh",
     "scripts/container/patches/httpx-disable-leakless.patch",
 )

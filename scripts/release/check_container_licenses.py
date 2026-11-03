@@ -165,7 +165,7 @@ def _dockerfile_install_refs(dockerfile: str) -> set[str]:
                 continue
             if token.startswith("-"):
                 continue
-            name = re.split(r"[<>=!~\[]", token, maxsplit=1)[0].strip().lower()
+            name = re.split(r"\s*@\s*|[<>=!~\[]", token, maxsplit=1)[0].strip().lower()
             if name:
                 refs.add(f"pip:{name}")
 

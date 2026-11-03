@@ -25,6 +25,8 @@ assets/
 scripts/*
 !scripts/container/
 !scripts/container/install_go_tool.sh
+!scripts/container/patch_shodan.py
+!scripts/container/verify_system_trust.py
 !scripts/container/verify_go_dependency.sh
 !scripts/container/patches/
 !scripts/container/patches/httpx-disable-leakless.patch
