@@ -45,8 +45,8 @@ NEXT_VERSION = "3.1.3"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
 GITLAB_CLI_IMAGE = (
-    "registry.gitlab.com/gitlab-org/cli:v1.114.0@"
-    "sha256:797256f9f46c6da08a337566eb11b3e53dee31fdef7d2d41b379d5841ed10cd7"
+    "registry.gitlab.com/gitlab-org/cli:v1.128.0@"
+    "sha256:00884510ffcbb6b03c0abc5dd058d7728a646cab2a419de4a7108d073ce90a03"
 )
 
 
@@ -1629,15 +1629,21 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
     assert "ARG KATANA_PGX_VERSION=v5.9.0" in dockerfile
     assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
-    assert "ARG GOSU_VERSION=1.19" in dockerfile
-    assert "ARG OPENSSL_VERSION=3.6.4" in dockerfile
-    assert "ARG SCHEMATHESIS_VERSION=4.25.0" in dockerfile
+    assert "ARG GOSU_VERSION=1.20" in dockerfile
+    assert "ARG OPENSSL_VERSION=4.1.0" in dockerfile
+    native_build = dockerfile.split("AS native-tools", 1)[1].split("FROM ", 1)[0]
+    assert "libssl-dev" in native_build
+    assert native_build.index('make -C /tmp/sslscan') < native_build.index('make install_sw')
+    assert '"/usr/local/lib/${multiarch}/ossl-modules"' in native_build
+    assert "engines-3" not in native_build
+    assert "ARG SCHEMATHESIS_VERSION=4.33.0" in dockerfile
+    assert "ARG URLSCAN_CLI_VERSION=v0.0.7-0.20261021083030-961f2e8d0b75" in dockerfile
     dependency_pins = [
         line
         for line in schemathesis_constraints.splitlines()
         if line and not line.startswith("#")
     ]
-    assert "schemathesis==4.25.0" in dependency_pins
+    assert "schemathesis==4.33.0" in dependency_pins
     assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
         dependency_pins
     )
@@ -2155,8 +2161,8 @@ def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
 
 def test_trufflehog_build_verifies_the_upstream_amqp_dependency():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "ARG TRUFFLEHOG_VERSION=v3.97.5" in dockerfile
-    assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0" in dockerfile
+    assert "ARG TRUFFLEHOG_VERSION=v3.99.8" in dockerfile
+    assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0" in dockerfile
     build = dockerfile.split('RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}"', 1)[1]
     build = build.split("\nRUN ", 1)[0]
     compile_tool = "go -C /tmp/trufflehog install"
@@ -2482,7 +2488,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         )
         for notice in (
             "Nmap-7.95-NPSL-0.95.txt",
-            "WPScan-4.1.0.txt",
+            "WPScan-4.2.0.txt",
             "frontend-runtime.txt",
             "OFL-1.1.txt",
         ):
@@ -2515,7 +2521,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
         monkeypatch.setattr(
             container_checker,
             "WPSCAN_LICENSE",
-            license_dir / "WPScan-4.1.0.txt",
+            license_dir / "WPScan-4.2.0.txt",
         )
 
     intact_root = container_fixture("container-intact")
@@ -2558,7 +2564,7 @@ def test_license_checkers_fail_closed_and_preserve_excluded_files(
                 encoding="utf-8",
             )
         else:
-            (fixture_root / "deploy" / "third-party-licenses" / "WPScan-4.1.0.txt").write_text(
+            (fixture_root / "deploy" / "third-party-licenses" / "WPScan-4.2.0.txt").write_text(
                 "changed\n",
                 encoding="utf-8",
             )
@@ -3437,7 +3443,7 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     effective_args = build_inputs["effective_build_args"]
     assert effective_args["APT_CACHE_EPOCH"] == evidence_args["build_date"][:10]
     assert effective_args["VT_CLI_VERSION"] != "latest"
-    assert effective_args["SECLISTS_VERSION"] == "2026.1"
+    assert effective_args["SECLISTS_VERSION"] == "2026.2"
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["SECLISTS_COMMIT"])
     assert effective_args["NIKTO_VERSION"] == "2.6.1"
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["NIKTO_COMMIT"])

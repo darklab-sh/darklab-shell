@@ -209,7 +209,7 @@ def _merge_scenario(
     accumulators: dict[str, _OperationAccumulator],
     seen_case_ids: set[str],
 ) -> None:
-    if payload.get("phase") != "Fuzzing":
+    if payload.get("phase") != "fuzzing":
         raise _error(
             "invalid_scenario_phase",
             "Schemathesis report contains an unexpected phase.",
@@ -455,10 +455,10 @@ def _failure_example(
     response_status: int | None,
 ) -> SchemathesisFailureExample:
     failure_type = str(failure.get("type") or "")
-    message = str(failure.get("message") or "")
+    message = failure.get("message")
     if (
         not _FAILURE_TYPE_RE.fullmatch(failure_type)
-        or not message
+        or not isinstance(message, str)
         or len(message.encode("utf-8")) > _MAX_FAILURE_MESSAGE_BYTES
         or any(character in message for character in ("\x00", "\r"))
     ):

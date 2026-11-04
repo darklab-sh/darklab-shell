@@ -5,32 +5,32 @@
 # SSLyze 6.3.1 requires nassl 5.4.x, whose wheels support Python through 3.14.
 # https://pypi.org/project/nassl/5.4.0/#files
 ARG PYTHON_BASE_IMAGE=python:3.14.10-slim
-ARG GO_VERSION=1.27.2
-ARG GO_LINUX_AMD64_SHA256=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
-ARG GO_LINUX_ARM64_SHA256=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
+ARG GO_VERSION=1.27.3
+ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
 ARG GO_X_NET_VERSION=v0.60.0
 ARG KIN_OPENAPI_VERSION=v0.146.0
 ARG KATANA_PGX_VERSION=v5.9.0
-ARG GOSU_VERSION=1.19
-ARG OPENSSL_VERSION=3.6.4
-ARG OPENSSL_SHA256=9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef
-ARG SSLSCAN_VERSION=2.2.2
+ARG GOSU_VERSION=1.20
+ARG OPENSSL_VERSION=4.1.0
+ARG OPENSSL_SHA256=50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd
+ARG SSLSCAN_VERSION=2.2.3
 ARG NUCLEI_VERSION=v3.11.1
-ARG SUBFINDER_VERSION=v2.16.0
-ARG HTTPX_VERSION=v1.10.0
-ARG DNSX_VERSION=v1.3.0
-ARG NAABU_VERSION=v2.6.1
-ARG KATANA_VERSION=v1.7.0
-ARG TLSX_VERSION=v1.2.2
-ARG CDNCHECK_VERSION=v1.2.50
-ARG AMASS_VERSION=v5.1.1
+ARG SUBFINDER_VERSION=v2.17.0
+ARG HTTPX_VERSION=v1.12.0
+ARG DNSX_VERSION=v1.3.1
+ARG NAABU_VERSION=v2.7.0
+ARG KATANA_VERSION=v1.8.0
+ARG TLSX_VERSION=v1.4.0
+ARG CDNCHECK_VERSION=v1.4.0
+ARG AMASS_VERSION=v5.1.3
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
-ARG FFUF_VERSION=v2.2.1
-ARG TRUFFLEHOG_VERSION=v3.97.5
-ARG TRUFFLEHOG_AMQP_VERSION=v1.13.0
+ARG FFUF_VERSION=v2.3.0
+ARG TRUFFLEHOG_VERSION=v3.99.8
+ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
 ARG MASSDNS_VERSION=v1.1.0
 ARG PUREDNS_VERSION=v2.1.1
 ARG TESTSSL_VERSION=v3.2.4
@@ -44,29 +44,31 @@ ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
-ARG DALFOX_VERSION=v3.2.1
-ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.2.1-linux-x86_64-musl.tar.gz
-ARG DALFOX_LINUX_AMD64_SHA256=99d2bbe01a7c0ac6e455cba0363900c5aef2866bd08a2cd5f00b83d7b9671c20
-ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.2.1-linux-aarch64-musl.tar.gz
-ARG DALFOX_LINUX_ARM64_SHA256=e10f3f95e3033899c0912c1b9032d35f754caeeb002b0b8153e2958e54485694
+ARG DALFOX_VERSION=v3.2.4
+ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.2.4-linux-x86_64-musl.tar.gz
+ARG DALFOX_LINUX_AMD64_SHA256=c11cfd2f8261973f0a2a2a1eba5a147ce77712a29acfa6343f9847fb8bb7eca2
+ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.2.4-linux-aarch64-musl.tar.gz
+ARG DALFOX_LINUX_ARM64_SHA256=fd56b0b7da2d06868cd73b504f41d21314629feffcd5bdc97718db1c9dd2fa70
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
-ARG SCHEMATHESIS_VERSION=4.25.0
+ARG SCHEMATHESIS_VERSION=4.33.0
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
-ARG SQLMAP_VERSION=1.10.8
-ARG SQLMAP_COMMIT=cb8298d55ae9b8eb4f05b6153c158d23479958a8
+ARG SQLMAP_VERSION=1.10.11
+ARG SQLMAP_COMMIT=6faa9bb929347189a62c046d7d02349140e9933d
 ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
 ARG TCPING_VERSION=v2.8.0
-ARG WPSCAN_VERSION=4.1.0
+ARG WPSCAN_VERSION=4.2.0
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
-ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
-ARG URLSCAN_CLI_VERSION=v2026.08.18
+ARG IPINFO_CLI_VERSION=ipinfo-3.3.4
+# urlscan release v2026.10.21 uses a calendar tag incompatible with Go module
+# major-version rules. Its canonical module version pins the same release commit.
+ARG URLSCAN_CLI_VERSION=v0.0.7-0.20261021083030-961f2e8d0b75
 ARG CHAOS_CLIENT_VERSION=v0.5.2
-ARG SECLISTS_VERSION=2026.1
-ARG SECLISTS_COMMIT=190c6f7bd58c847ceadfe57d9853592737f059e8
+ARG SECLISTS_VERSION=2026.2
+ARG SECLISTS_COMMIT=145f1f45ba7bc5fd6b3966d3a79bf95654deb20e
 ARG NIKTO_VERSION=2.6.1
 ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
-ARG SETUPTOOLS_VERSION=84.1.0
+ARG SETUPTOOLS_VERSION=84.2.1
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
 ARG APP_VERSION=3.1.2
@@ -273,9 +275,18 @@ ARG SSLSCAN_VERSION
 ARG MASSDNS_VERSION
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        build-essential ca-certificates git libpcap-dev wget zlib1g-dev && \
+        build-essential ca-certificates git libpcap-dev libssl-dev wget zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /out/usr/local/bin /out/usr/share/doc/darklab-shell/licenses
+# sslscan still needs OpenSSL 3 APIs. Build it against Debian before the
+# standalone OpenSSL 4 command installs its headers and shared libraries.
+RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" \
+        https://github.com/rbsec/sslscan.git /tmp/sslscan && \
+    make -C /tmp/sslscan -j"$(nproc)" && \
+    install -m 0755 /tmp/sslscan/sslscan /out/usr/local/bin/sslscan && \
+    install -m 0644 /tmp/sslscan/LICENSE \
+        /out/usr/share/doc/darklab-shell/licenses/sslscan.txt && \
+    rm -rf /tmp/sslscan
 WORKDIR /tmp
 RUN wget -O openssl.tar.gz \
         "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" && \
@@ -299,20 +310,11 @@ RUN multiarch=$(gcc -print-multiarch) && \
     install -m 0644 LICENSE.txt \
         /out/usr/share/doc/darklab-shell/licenses/OpenSSL.txt
 RUN multiarch=$(gcc -print-multiarch) && \
-    test -d "/usr/local/lib/${multiarch}/engines-3" && \
     test -d "/usr/local/lib/${multiarch}/ossl-modules" && \
     mkdir -p "/out/usr/local/lib/${multiarch}" && \
-    cp -a "/usr/local/lib/${multiarch}/engines-3" \
-        "/usr/local/lib/${multiarch}/ossl-modules" \
+    cp -a "/usr/local/lib/${multiarch}/ossl-modules" \
         "/out/usr/local/lib/${multiarch}/"
 WORKDIR /tmp
-RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" \
-        https://github.com/rbsec/sslscan.git /tmp/sslscan && \
-    make -C /tmp/sslscan -j"$(nproc)" && \
-    install -m 0755 /tmp/sslscan/sslscan /out/usr/local/bin/sslscan && \
-    install -m 0644 /tmp/sslscan/LICENSE \
-        /out/usr/share/doc/darklab-shell/licenses/sslscan.txt && \
-    rm -rf /tmp/sslscan
 RUN git clone --depth 1 --branch "${MASSDNS_VERSION}" \
         https://github.com/blechschmidt/massdns.git /tmp/massdns && \
     make -C /tmp/massdns -j"$(nproc)" && \

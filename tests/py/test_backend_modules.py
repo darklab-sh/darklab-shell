@@ -27570,10 +27570,10 @@ class TestAutocompleteContextLoading:
         smoke_commands = {str(record.get("command") or "") for record in expectations["records"] if isinstance(record, dict)}
 
         for arg_name, version, smoke_command in (
-            ("TLSX_VERSION", "v1.2.2", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.2.50", "cdncheck -h"),
+            ("TLSX_VERSION", "v1.4.0", "tlsx -h"),
+            ("CDNCHECK_VERSION", "v1.4.0", "cdncheck -h"),
             ("GAU_VERSION", "v2.2.4", "gau --version"),
-            ("TRUFFLEHOG_VERSION", "v3.97.5", "trufflehog --help"),
+            ("TRUFFLEHOG_VERSION", "v3.99.8", "trufflehog --help"),
             ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
             ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
         ):

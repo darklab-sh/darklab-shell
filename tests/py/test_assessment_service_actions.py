@@ -249,6 +249,7 @@ def _openapi_artifact(content):
 def _schemathesis_report_bytes(
     *,
     failure=True,
+    failure_message="failure-secret-message\nresponse-secret-body",
     operation="GET /items/{item_id}",
     request_uri="https://api.example.test/v1/items/generated-secret-value",
     tool_version=SCHEMATHESIS_REPORT_TOOL_VERSION,
@@ -274,7 +275,7 @@ def _schemathesis_report_bytes(
                 "failure_info": {
                     "failure": {
                         "type": "JsonSchemaError",
-                        "message": "failure-secret-message\nresponse-secret-body",
+                        "message": failure_message,
                     },
                 },
             }
@@ -290,7 +291,7 @@ def _schemathesis_report_bytes(
         },
         {
             "ScenarioFinished": {
-                "phase": "Fuzzing",
+                "phase": "fuzzing",
                 "status": "failure" if failure else "success",
                 "is_final": False,
                 "recorder": {
@@ -1514,7 +1515,8 @@ def test_schemathesis_report_keeps_bounded_operation_evidence_and_provenance():
     assert report.operations[0].failures == ()
 
 
-def test_schemathesis_report_keeps_safe_failure_shape_without_private_values():
+@pytest.mark.parametrize("failure_message", ["failure-secret-message\nresponse-secret-body", ""])
+def test_schemathesis_report_keeps_safe_failure_shape_without_private_values(failure_message):
     reviewed = review_local_openapi_json(
         _openapi_json(paths={
             "/items/{item_id}": {
@@ -1526,7 +1528,7 @@ def test_schemathesis_report_keeps_safe_failure_shape_without_private_values():
     )
 
     report = parse_schemathesis_ndjson(
-        _schemathesis_report_bytes(stop_reason="failure_limit"),
+        _schemathesis_report_bytes(stop_reason="failure_limit", failure_message=failure_message),
         reviewed,
         profile_key="api",
         profile_version="1.0",
@@ -1544,7 +1546,7 @@ def test_schemathesis_report_keeps_safe_failure_shape_without_private_values():
     assert failure.parameter_names == ("path:item_id",)
     assert len(failure.fingerprint) == 64
     assert len(failure.example_digest) == 64
-    assert len(failure.message_digest) == 64
+    assert failure.message_digest == hashlib.sha256(failure_message.encode()).hexdigest()
     public_result = repr(report)
     assert "generated-secret-value" not in public_result
     assert "failure-secret-message" not in public_result
@@ -1556,7 +1558,15 @@ def test_schemathesis_report_keeps_safe_failure_shape_without_private_values():
     [
         (_schemathesis_report_bytes()[:-1], "incomplete_report"),
         (
-            _schemathesis_report_bytes(tool_version="4.24.4"),
+            _schemathesis_report_bytes(failure_message=None),
+            "invalid_failure_detail",
+        ),
+        (
+            _schemathesis_report_bytes().replace(b'"phase":"fuzzing"', b'"phase":"examples"'),
+            "invalid_scenario_phase",
+        ),
+        (
+            _schemathesis_report_bytes(tool_version="4.25.0"),
             "unsupported_report_version",
         ),
         (
@@ -2000,7 +2010,7 @@ def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
     assert "--workers 1" in display.command
     assert "--max-failures 10" in display.command
     assert "--report ndjson --report-ndjson-path [protected-report]" in display.command
-    assert "--generation-database none" in display.command
+    assert "--generation-database" not in display.command
     assert "--generation-deterministic --no-color" in display.command
     assert "POST" not in display.command
 
