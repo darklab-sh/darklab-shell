@@ -233,9 +233,19 @@ Security note: ProjectDiscovery provider/config files can contain API keys or ot
 
 ---
 
+## Scanner runtime compatibility
+
+urlscan CLI release `v2026.10.21` is pinned with its canonical Go module version, `v0.0.7-0.20261021083030-961f2e8d0b75`. Its calendar release tag cannot be installed directly under Go's module-major rules. The module pin resolves to the same release commit.
+
+Schemathesis 4.33 runs the reviewed command with deterministic generation, which also disables its example database. Passing a separate database option alongside deterministic generation is rejected by that release. Report imports require the same pinned tool version.
+
+The standalone OpenSSL command uses OpenSSL 4.1 with its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries because its protocol checks still use APIs removed in OpenSSL 4. The two tools use separate shared-library versions.
+
+---
+
 ## TruffleHog
 
-The image builds TruffleHog v3.97.5, whose upstream dependency manifest includes `github.com/rabbitmq/amqp091-go` v1.13.0 with the AMQP parser and TLS fixes. It needs no local dependency override. The `TRUFFLEHOG_AMQP_VERSION` build argument records the expected dependency version: the build checks the executable's Go metadata for that exact dependency and rejects replacements. Its BSD-2-Clause notice is included in the container license inventory.
+The image builds TruffleHog v3.99.8, whose upstream dependency manifest includes `github.com/rabbitmq/amqp091-go` v1.14.0 with the AMQP parser and TLS fixes. It needs no local dependency override. The `TRUFFLEHOG_AMQP_VERSION` build argument records the expected dependency version: the build checks the executable's Go metadata for that exact dependency and rejects replacements. Its BSD-2-Clause notice is included in the container license inventory.
 
 TruffleHog is exposed for four managed scan shapes:
 

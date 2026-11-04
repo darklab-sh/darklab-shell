@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "reviewed_for_release": "3.1.2",
-  "reviewed_on": "2026-10-04",
+  "reviewed_on": "2026-11-03",
   "dockerfile_install_coverage": {
     "apt:bsdextrautils": "Python container base and Debian packages",
     "apt:build-essential": "Python container base and Debian packages",
@@ -27,6 +27,7 @@
     "apt:libnet-ssleay-perl": "Python container base and Debian packages",
     "apt:libpcap-dev": "Python container base and Debian packages",
     "apt:libpcap0.8": "Python container base and Debian packages",
+    "apt:libssl-dev": "Python container base and Debian packages",
     "apt:libxml-writer-perl": "Python container base and Debian packages",
     "apt:man-db": "Python container base and Debian packages",
     "apt:masscan": "Debian Masscan package",
@@ -306,7 +307,7 @@
       "version_arg": "WPSCAN_VERSION",
       "source": "https://github.com/wpscanteam/wpscan",
       "license": "LicenseRef-WPScan-Public-Source",
-      "notice_location": "/usr/share/doc/darklab-shell/licenses/WPScan-4.1.0.txt",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/WPScan-4.2.0.txt",
       "usage_note": "Commercialization can require a separate WPScan license; the bundled terms control."
     },
     {
