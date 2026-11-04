@@ -14,13 +14,21 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.1.3] - Unreleased
 
+### Changed
+
+- **Application dependencies, bundled tools, and CI images use current releases.** Python packages, Playwright, Vitest 5, Stylelint 18, Markdownlint, and the packaged scanners are updated, along with checksums, exact scanner dependencies, and WPScan license records. CI uses Python 3.15.2, Node 26.13.0, Docker 29.9.2, and the digest-pinned GitLab CLI 1.128.0. Production Python stays at 3.14.10 for SSLyze compatibility, and the local `braces` security patch remains in place. Lint overrides include the RE2JS security fix.
+
+- **TLS tools use compatible OpenSSL libraries.** The standalone command uses OpenSSL 4.1 and retains its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries, preserving the protocol APIs it still needs.
+
 ### Fixed
+
+- **Schemathesis 4.33 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. A local scan against a disposable API verifies the command and report together.
 
 - **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
 
 - **Container vulnerability scan cleanup passes CI shell linting.** The scan removes its temporary container directly in the exit trap, avoiding a false unreachable-code warning while preserving cleanup and scanner exit status.
 
-- **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.2, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
+- **Container dependencies include the critical security fixes.** Python 3.14.10, Go 1.27.3, the shared Go networking dependency, and Debian Brotli use patched releases. SSLyze runs in an isolated environment with compatible dependencies, and the pinned Shodan CLI uses standard Python package metadata. Builds check Python dependency consistency and Debian certificate trust; vulnerability scans retain the critical gate with one path-scoped exception for Debian certifi, which delegates to the patched system trust store.
 
 - **Access recovery tests allow authentication redirects to finish.** Cookie-loss coverage arms its recovery request before removing the cookie and deliberately checks denied reads after navigation. Saved-credential coverage restores into a new page after the previous shell stops polling, preventing navigation from interrupting storage setup under load.
 
@@ -30,7 +38,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Frontend inventory checks reuse syntax-tree structure.** The inventory reuses each parsed node's child list across its analysis passes, reducing cold-scan work without changing the reported browser boundaries, checks, or test timeouts.
 
-- **JavaScript dependencies include the reported security fixes.** Vitest and its coverage package use patched releases, and the lockfile updates DOMPurify, fast-uri, Undici, and Vite. Scoped overrides provide patched Markdown parsing and ESLint glob matching while retaining ESLint 10, Markdownlint CLI2 0.23, and the local `braces` security patch.
+- **JavaScript dependencies include the reported security fixes.** Vitest and its coverage package use patched releases, and the lockfile updates DOMPurify, fast-uri, Undici, and Vite. Markdownlint supplies patched Markdown and TOML parsers, with scoped overrides for math rendering, regular-expression matching, and ESLint glob matching. The local `braces` security patch remains in use.
 
 - **Repeated UI setup releases the previous select observer.** Shared select enhancement keeps one active observer, preventing old observers from processing later DOM updates. Regression coverage checks observer replacement, browser-global inventory runs in Node, and provider-only credential checks wait for Access data and select enhancement before interacting with the editor.
 

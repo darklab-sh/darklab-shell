@@ -54,7 +54,7 @@ def reviewed_schemathesis_command_plan(
         f"--report ndjson --report-ndjson-path {report_arg} "
         "--output-sanitize true --output-truncate true --mode negative "
         f"--max-examples {SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION} --seed 1 "
-        "--generation-database none --generation-deterministic --no-color"
+        "--generation-deterministic --no-color"
     )
     return CommandPlan(
         command,
