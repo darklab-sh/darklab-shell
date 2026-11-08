@@ -1636,14 +1636,14 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert native_build.index('make -C /tmp/sslscan') < native_build.index('make install_sw')
     assert '"/usr/local/lib/${multiarch}/ossl-modules"' in native_build
     assert "engines-3" not in native_build
-    assert "ARG SCHEMATHESIS_VERSION=4.33.0" in dockerfile
+    assert "ARG SCHEMATHESIS_VERSION=4.33.1" in dockerfile
     assert "ARG URLSCAN_CLI_VERSION=v0.0.7-0.20261021083030-961f2e8d0b75" in dockerfile
     dependency_pins = [
         line
         for line in schemathesis_constraints.splitlines()
         if line and not line.startswith("#")
     ]
-    assert "schemathesis==4.33.0" in dependency_pins
+    assert "schemathesis==4.33.1" in dependency_pins
     assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
         dependency_pins
     )
