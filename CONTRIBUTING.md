@@ -50,10 +50,14 @@ Coding agents should also follow [AGENTS.md](AGENTS.md), which collects the repo
    sudo apt-get install -y shellcheck
 
    # Dockerfile linting
-   curl -fsSL -o /tmp/hadolint \
-     https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
-   chmod +x /tmp/hadolint
-   sudo mv /tmp/hadolint /usr/local/bin/hadolint
+   curl --fail --show-error --location --retry 3 -o /tmp/hadolint \
+     https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+   printf '%s  %s\n' \
+     c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 \
+     /tmp/hadolint | sha256sum --check - && \
+     sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+   hadolint --version
+   rm /tmp/hadolint
    ```
 
 2. Create and activate a local virtual environment from the repo root:
@@ -400,6 +404,8 @@ Run all linters at once (Python + JS/CSS/shell/Docker/YAML/license/Markdown + ve
 Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
+
+CI installs Hadolint 2.15.1 from its Linux x86-64 release asset, retries failed downloads, and verifies the pinned SHA-256 before installation. It checks that Hadolint starts before running the linters. When updating Hadolint, update both the version and checksum in `lint-js` and the Linux setup example above.
 
 **Patched lint dependency:** Markdownlint and Stylelint use the local MIT-licensed `braces` package in `tools/vendor/braces/`. It contains the nesting-depth fix proposed in [upstream PR 72](https://github.com/micromatch/braces/pull/72) for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The published `braces` package has no fixed release; the private version `3.0.3-darklab.1` identifies our patched copy. Its [notice](tools/vendor/braces/NOTICE.txt), [license](tools/vendor/braces/LICENSE), and [source patch](tools/vendor/braces/security.patch) preserve provenance and attribution. The root development dependency and `$braces` override make every lint dependency use this copy through a normal `npm ci`.
 

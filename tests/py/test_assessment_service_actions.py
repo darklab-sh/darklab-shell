@@ -249,7 +249,7 @@ def _openapi_artifact(content):
 def _schemathesis_report_bytes(
     *,
     failure=True,
-    failure_message="failure-secret-message\nresponse-secret-body",
+    failure_message: str | None = "failure-secret-message\nresponse-secret-body",
     operation="GET /items/{item_id}",
     request_uri="https://api.example.test/v1/items/generated-secret-value",
     tool_version=SCHEMATHESIS_REPORT_TOOL_VERSION,

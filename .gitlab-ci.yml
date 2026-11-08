@@ -271,6 +271,9 @@ lint-py:
 lint-js:
   stage: lint
   image: $CI_NODE_IMAGE
+  variables:
+    HADOLINT_VERSION: "2.15.1"
+    HADOLINT_SHA256: "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -280,7 +283,14 @@ lint-js:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
     - apt-get update -q && apt-get install -y -q shellcheck curl
-    - curl -sSL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
+    - |
+      curl --fail --show-error --location --retry 3 \
+        "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" \
+        -o /tmp/hadolint
+      printf '%s  %s\n' "$HADOLINT_SHA256" /tmp/hadolint | sha256sum --check -
+      install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+      hadolint --version
+      rm /tmp/hadolint
     - npm ci
   cache:
     key: "node-$CI_COMMIT_REF_SLUG"
