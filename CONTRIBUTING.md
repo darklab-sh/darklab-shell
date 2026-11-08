@@ -50,10 +50,14 @@ Coding agents should also follow [AGENTS.md](AGENTS.md), which collects the repo
    sudo apt-get install -y shellcheck
 
    # Dockerfile linting
-   curl -fsSL -o /tmp/hadolint \
-     https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
-   chmod +x /tmp/hadolint
-   sudo mv /tmp/hadolint /usr/local/bin/hadolint
+   curl --fail --show-error --location --retry 3 -o /tmp/hadolint \
+     https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+   printf '%s  %s\n' \
+     c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 \
+     /tmp/hadolint | sha256sum --check - && \
+     sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
+   hadolint --version
+   rm /tmp/hadolint
    ```
 
 2. Create and activate a local virtual environment from the repo root:
@@ -401,6 +405,8 @@ Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/esli
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
+CI installs Hadolint 2.15.1 from its Linux x86-64 release asset, retries failed downloads, and verifies the pinned SHA-256 before installation. It checks that Hadolint starts before running the linters. When updating Hadolint, update both the version and checksum in `lint-js` and the Linux setup example above.
+
 **Patched lint dependency:** Markdownlint and Stylelint use the local MIT-licensed `braces` package in `tools/vendor/braces/`. It contains the nesting-depth fix proposed in [upstream PR 72](https://github.com/micromatch/braces/pull/72) for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The published `braces` package has no fixed release; the private version `3.0.3-darklab.1` identifies our patched copy. Its [notice](tools/vendor/braces/NOTICE.txt), [license](tools/vendor/braces/LICENSE), and [source patch](tools/vendor/braces/security.patch) preserve provenance and attribution. The root development dependency and `$braces` override make every lint dependency use this copy through a normal `npm ci`.
 
 `npm audit` doesn't scan linked local source. `npm run audit:js` therefore first runs the installed-dependency security tests, which check that both linters resolve the patched copy, deeply nested strings and supplied ASTs are rejected, and ordinary glob behavior still works. It then runs `npm audit --audit-level=high` for the registry dependency tree, including the patched package's dependencies. The package is development tooling and isn't included in browser bundles or the release image. When changing the patch or override, run `npm ci`, `npm run audit:js`, `npm run lint:md`, and `npm run lint:css`; retain the upstream MIT notices.
@@ -548,6 +554,27 @@ docker compose -f compose.dev.yaml up --build
 
 ## Dependency Version Tracking
 
+The central Ansible Renovate report reads the explicit `# renovate:` comments
+above Dockerfile tool-version defaults. Keep each comment immediately before its
+literal `ARG` assignment, with the upstream module or package name and its version
+scheme. Unannotated install commands aren't scanned for tool versions. The Python
+base image and Dockerfile syntax image use Renovate's native Dockerfile support.
+
+The central preparation policy keeps SSLyze and Schemathesis defaults and their
+constraints together. It also refreshes the configured release commits, archive
+and license hashes, both architecture assets and checksums, the GAU module sum,
+and TruffleHog's upstream AMQP verification version. That verification pin isn't
+an independent update target. Adding a tool with integrity pins requires updating
+both its annotation here and its preparation recipe in Ansible. Missing upstream
+metadata or conflicting versions block the approval plan.
+
+Review source patches, tool compatibility, license notices, and related docs when
+updating a version. SSLyze validation uses the commit-pinned source archive from
+the Dockerfile. Preparation doesn't run a complete container build; the existing
+container smoke and release checks still qualify the resulting image. Build
+metadata, unpinned apt packages, the PostgreSQL client family, and its signing-key
+fingerprint aren't independent annotated update targets.
+
 `scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub versions versus the latest published versions it can find. Container checks read complete OCI registry-v2 tag listings from the image's own registry, reuse one listing per repository, and verify checked-in digest pins before showing the digest for a newer tag. Most Go tools use stable module tags from the public Go proxy. The checker follows each upstream's release shape for exceptions: vt-cli uses the root module's latest canonical Go version; IPinfo, TLSX, and urlscan-cli use their GitHub releases; and SQLMap uses its monthly repository tags. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
 
 ```bash
@@ -560,9 +587,11 @@ The production image uses Python 3.14 because [SSLyze 6.3.1 requires `nassl>=5.4
 
 SSLyze and Schemathesis use isolated Python environments, each checked with `pip check` during image construction. The application environment is checked separately. SSLyze's reviewed dependency pins live in `deploy/sslyze-constraints.txt`. Its source archive is pinned by commit and SHA-256 to [upstream's cryptography compatibility fix](https://github.com/nabla-c0d3/sslyze/commit/12ad04350a4f57bec846c15211e4d71075ee53c9), allowing patched cryptography 50 without changing the scanner's runtime code. Shodan 1.31.0 has a build-time compatibility patch for standard-library plugin discovery and version metadata; changing its pin requires reviewing that patch.
 
+Schemathesis updates must keep the Dockerfile version, `deploy/schemathesis-constraints.txt`, the report parser's `SCHEMATHESIS_REPORT_TOOL_VERSION`, and the container smoke version expectation aligned. Refresh changed help output against the installed CLI, and verify a real scan's NDJSON report with the production parser. The parser accepts only the reviewed scanner version; a successful CLI run alone doesn't establish report compatibility.
+
 OpenSSL 4.1 supplies the TLS command and provider modules. The image includes the legacy provider for existing cipher checks; OpenSSL 4 no longer installs engine modules. sslscan 2.2.3 still needs APIs removed in OpenSSL 4, so it builds against Debian's OpenSSL 3 headers before the standalone OpenSSL build and uses Debian's shared libraries at runtime.
 
-Go tool builds use the patched toolchain and a shared `golang.org/x/net` minimum, with embedded-version checks. TruffleHog's separate source build applies and verifies the same networking dependency. Runtime installation explicitly updates Debian Brotli and checks its patched minimum.
+Go tool builds use the patched toolchain and shared minimum versions for `golang.org/x/net` and `github.com/andybalholm/brotli`, with embedded-version checks that reject stale or replaced dependencies. The Go Brotli minimum is 1.2.7, and its MIT license is included in the image's reviewed notices. TruffleHog's separate source build applies and verifies the same networking dependency. Runtime installation separately updates Debian Brotli and checks its patched minimum; that system package doesn't update Brotli embedded in Go tools.
 
 All image security gates use `scripts/release/scan_sbom.sh` with `deploy/grype.yaml`. The helper copies the policy through Docker's API so it works with a shared host daemon. The critical threshold is unchanged. The policy contains one exception for Debian certifi 2025.1.31 under `/usr/lib/python3/dist-packages`: Debian removes its bundled CA store, and `ca-certificates` 20250419+deb13u1 removes the compromised emSign G3 root. The image build and each scan verify both the system-bundle delegation and the root fingerprint's absence in the target image, including historical release rechecks. Other certifi copies remain scanned, and the ignored finding stays in Grype's JSON evidence. See the [certifi advisory](https://github.com/advisories/GHSA-6q48-6c7w-9gw2).
 

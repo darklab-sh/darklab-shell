@@ -5,69 +5,113 @@
 # SSLyze 6.3.1 requires nassl 5.4.x, whose wheels support Python through 3.14.
 # https://pypi.org/project/nassl/5.4.0/#files
 ARG PYTHON_BASE_IMAGE=python:3.14.10-slim
+# renovate: datasource=golang-version depName=golang versioning=go
 ARG GO_VERSION=1.27.3
 ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
 ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 ARG GO_BUILD_PARALLELISM=2
+# renovate: datasource=go depName=golang.org/x/crypto versioning=go
 ARG GO_X_CRYPTO_VERSION=v0.52.0
+# renovate: datasource=go depName=golang.org/x/net versioning=go
 ARG GO_X_NET_VERSION=v0.60.0
+# renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
+ARG GO_BROTLI_VERSION=v1.2.7
+# renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
 ARG KIN_OPENAPI_VERSION=v0.146.0
+# renovate: datasource=go depName=github.com/jackc/pgx/v5 versioning=go
 ARG KATANA_PGX_VERSION=v5.9.0
+# renovate: datasource=github-tags depName=tianon/gosu
 ARG GOSU_VERSION=1.20
+# renovate: datasource=github-tags depName=openssl/openssl extractVersion=^openssl-(?<version>.*)$
 ARG OPENSSL_VERSION=4.1.0
 ARG OPENSSL_SHA256=50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd
+# renovate: datasource=github-tags depName=rbsec/sslscan
 ARG SSLSCAN_VERSION=2.2.3
+# renovate: datasource=go depName=github.com/projectdiscovery/nuclei/v3 versioning=go
 ARG NUCLEI_VERSION=v3.11.1
+# renovate: datasource=go depName=github.com/projectdiscovery/subfinder/v2 versioning=go
 ARG SUBFINDER_VERSION=v2.17.0
+# renovate: datasource=go depName=github.com/projectdiscovery/httpx versioning=go
 ARG HTTPX_VERSION=v1.12.0
+# renovate: datasource=go depName=github.com/projectdiscovery/dnsx versioning=go
 ARG DNSX_VERSION=v1.3.1
+# renovate: datasource=go depName=github.com/projectdiscovery/naabu/v2 versioning=go
 ARG NAABU_VERSION=v2.7.0
+# renovate: datasource=go depName=github.com/projectdiscovery/katana versioning=go
 ARG KATANA_VERSION=v1.8.0
+# renovate: datasource=github-tags depName=projectdiscovery/tlsx
 ARG TLSX_VERSION=v1.4.0
+# renovate: datasource=go depName=github.com/projectdiscovery/cdncheck versioning=go
 ARG CDNCHECK_VERSION=v1.4.0
+# renovate: datasource=go depName=github.com/owasp-amass/amass/v5 versioning=go
 ARG AMASS_VERSION=v5.1.3
+# renovate: datasource=go depName=github.com/tomnomnom/assetfinder versioning=go
 ARG ASSETFINDER_VERSION=v0.1.1
+# renovate: datasource=go depName=github.com/OJ/gobuster/v3 versioning=go
 ARG GOBUSTER_VERSION=v3.8.2
+# renovate: datasource=go depName=github.com/ffuf/ffuf/v2 versioning=go
 ARG FFUF_VERSION=v2.3.0
+# renovate: datasource=github-tags depName=trufflesecurity/trufflehog
 ARG TRUFFLEHOG_VERSION=v3.99.8
+# renovate: datasource=go depName=github.com/rabbitmq/amqp091-go versioning=go depType=verification
 ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
+# renovate: datasource=github-tags depName=blechschmidt/massdns
 ARG MASSDNS_VERSION=v1.1.0
+# renovate: datasource=go depName=github.com/d3mondev/puredns/v2 versioning=go
 ARG PUREDNS_VERSION=v2.1.1
+# renovate: datasource=github-tags depName=testssl/testssl.sh
 ARG TESTSSL_VERSION=v3.2.4
+# renovate: datasource=pypi depName=sslyze versioning=pep440
 ARG SSLYZE_VERSION=6.3.1
 ARG SSLYZE_COMMIT=12ad04350a4f57bec846c15211e4d71075ee53c9
 ARG SSLYZE_SHA256=4811e213beb57020ebe1c447ab93d690f7c2caf9448b18d1edb49530ad264ad8
+# renovate: datasource=pypi depName=shodan versioning=pep440
 ARG SHODAN_VERSION=1.31.0
+# renovate: datasource=pypi depName=wafw00f versioning=pep440
 ARG WAFW00F_VERSION=2.4.2
+# renovate: datasource=github-tags depName=bee-san/RustScan
 ARG RUSTSCAN_VERSION=2.4.1
 ARG RUSTSCAN_LINUX_AMD64_ASSET=x86_64-linux-rustscan.tar.gz.zip
 ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b3e6fff6152c740be
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
+# renovate: datasource=github-tags depName=hahwul/dalfox
 ARG DALFOX_VERSION=v3.2.4
 ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.2.4-linux-x86_64-musl.tar.gz
 ARG DALFOX_LINUX_AMD64_SHA256=c11cfd2f8261973f0a2a2a1eba5a147ce77712a29acfa6343f9847fb8bb7eca2
 ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.2.4-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=fd56b0b7da2d06868cd73b504f41d21314629feffcd5bdc97718db1c9dd2fa70
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
-ARG SCHEMATHESIS_VERSION=4.33.0
+# renovate: datasource=pypi depName=schemathesis versioning=pep440
+ARG SCHEMATHESIS_VERSION=4.33.1
+# renovate: datasource=go depName=github.com/lc/gau/v2 versioning=go
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
+# renovate: datasource=github-tags depName=sqlmapproject/sqlmap
 ARG SQLMAP_VERSION=1.10.11
 ARG SQLMAP_COMMIT=6faa9bb929347189a62c046d7d02349140e9933d
 ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5a90433fd13
+# renovate: datasource=go depName=github.com/pouriyajamshidi/tcping/v2 versioning=go
 ARG TCPING_VERSION=v2.8.0
+# renovate: datasource=rubygems depName=wpscan versioning=ruby
 ARG WPSCAN_VERSION=4.2.0
+# renovate: datasource=go depName=github.com/VirusTotal/vt-cli versioning=go
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
+# renovate: datasource=github-tags depName=ipinfo/cli versioning=regex:^ipinfo-(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.4
 # urlscan release v2026.10.21 uses a calendar tag incompatible with Go module
 # major-version rules. Its canonical module version pins the same release commit.
+# renovate: datasource=go depName=github.com/urlscan/urlscan-cli versioning=go
 ARG URLSCAN_CLI_VERSION=v0.0.7-0.20261021083030-961f2e8d0b75
+# renovate: datasource=go depName=github.com/projectdiscovery/chaos-client versioning=go
 ARG CHAOS_CLIENT_VERSION=v0.5.2
+# renovate: datasource=github-tags depName=danielmiessler/SecLists
 ARG SECLISTS_VERSION=2026.2
 ARG SECLISTS_COMMIT=145f1f45ba7bc5fd6b3966d3a79bf95654deb20e
+# renovate: datasource=github-tags depName=sullo/Nikto
 ARG NIKTO_VERSION=2.6.1
 ARG NIKTO_COMMIT=d201dac320fc5187eac75e723dd07a716196ec5a
+# renovate: datasource=pypi depName=setuptools versioning=pep440
 ARG SETUPTOOLS_VERSION=84.2.1
 ARG POSTGRESQL_CLIENT_VERSION=18
 ARG POSTGRESQL_APT_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
@@ -89,6 +133,7 @@ ARG GO_LINUX_ARM64_SHA256
 ARG GO_BUILD_PARALLELISM
 ARG GO_X_CRYPTO_VERSION
 ARG GO_X_NET_VERSION
+ARG GO_BROTLI_VERSION
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential ca-certificates git libpcap-dev wget && \
@@ -110,6 +155,7 @@ ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
 ENV GO_X_NET_VERSION=${GO_X_NET_VERSION}
+ENV GO_BROTLI_VERSION=${GO_BROTLI_VERSION}
 ENV GO_VERSION=${GO_VERSION}
 COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
@@ -155,6 +201,9 @@ RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdisc
     install -m 0644 \
         "$(go env GOMODCACHE)/golang.org/x/crypto@${GO_X_CRYPTO_VERSION}/LICENSE" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/andybalholm/brotli@${GO_BROTLI_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/brotli.txt && \
     install -m 0644 \
         "$(go env GOMODCACHE)/github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}/LICENSE" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt && \

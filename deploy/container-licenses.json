@@ -118,6 +118,13 @@
       "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-net.txt"
     },
     {
+      "name": "Go Brotli module",
+      "version_arg": "GO_BROTLI_VERSION",
+      "source": "https://github.com/andybalholm/brotli",
+      "license": "MIT",
+      "notice_location": "/usr/share/doc/darklab-shell/licenses/go-modules/brotli.txt"
+    },
+    {
       "name": "kin-openapi",
       "version_arg": "KIN_OPENAPI_VERSION",
       "source": "https://github.com/getkin/kin-openapi",

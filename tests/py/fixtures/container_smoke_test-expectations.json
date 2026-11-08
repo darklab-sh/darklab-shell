@@ -1455,7 +1455,7 @@
       "command": "schemathesis --help",
       "expected_text": [
         "Usage: schemathesis [OPTIONS] COMMAND [ARGS]...",
-        "Property-based API testing for OpenAPI and GraphQL."
+        "Property-based API testing for OpenAPI, GraphQL, and gRPC."
       ]
     },
     {
@@ -1463,7 +1463,7 @@
       "exit_code": 0,
       "command": "schemathesis --version",
       "expected_text": [
-        "schemathesis, version 4.33.0"
+        "schemathesis, version 4.33.1"
       ]
     },
     {
