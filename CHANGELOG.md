@@ -24,6 +24,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Bundled Go scanners use patched Brotli decoding.** Shared builds require Brotli 1.2.7 or newer and reject stale or replaced embedded copies, addressing the vulnerability scan findings across gau, ffuf, Chaos, and the affected ProjectDiscovery tools. The image includes the module's MIT license, and the fixed-Critical vulnerability gate remains in place.
+
 - **Schemathesis rejection fixtures pass editor type checks.** The report helper explicitly accepts a null failure message so tests can verify that malformed reports are rejected.
 
 - **Dockerfile linting rejects failed or damaged Hadolint downloads during setup.** CI uses the correct release asset name, pins Hadolint 2.15.1 and its SHA-256, retries failed downloads, and checks the installed tool before running the linters. The Linux contributor setup uses the same verified release.

@@ -29,6 +29,7 @@ fi
 
 : "${GO_X_CRYPTO_VERSION:?GO_X_CRYPTO_VERSION must be set}"
 : "${GO_X_NET_VERSION:?GO_X_NET_VERSION must be set}"
+: "${GO_BROTLI_VERSION:?GO_BROTLI_VERSION must be set}"
 : "${GO_VERSION:?GO_VERSION must be set}"
 
 for dependency_spec in "$@"; do
@@ -58,11 +59,12 @@ trap cleanup EXIT HUP INT TERM
 cd "$build_dir"
 go mod init darklab.invalid/tool-install
 
-# Establish the reviewed x/crypto release as a floor before selecting the
+# Establish the reviewed shared dependencies as floors before selecting the
 # requested tool. A tool can raise the dependency when its pinned release
 # requires a newer version, but the floor must never downgrade the tool itself.
 go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}"
 go get "golang.org/x/net@${GO_X_NET_VERSION}"
+go get "github.com/andybalholm/brotli@${GO_BROTLI_VERSION}"
 for dependency_spec in "$@"; do
     go get "$dependency_spec"
 done
@@ -153,3 +155,16 @@ printf '%s\n' "$build_info" | awk -v expected="$x_net_version" '
     selected && $1 == "=>" { exit 1 }
     { selected = 0 }
 ' || { echo "Go x/net dependency mismatch: $target" >&2; exit 1; }
+
+# Only tools that use Brotli embed it. Reject stale or replaced copies while
+# allowing an upstream tool to select a release newer than the shared floor.
+brotli_version=$(go list -m -f '{{.Version}}' github.com/andybalholm/brotli)
+printf '%s\n' "$build_info" | awk -v expected="$brotli_version" '
+    $1 == "dep" && $2 == "github.com/andybalholm/brotli" {
+        if ($3 != expected) exit 1
+        selected = 1
+        next
+    }
+    selected && $1 == "=>" { exit 1 }
+    { selected = 0 }
+' || { echo "Go Brotli dependency mismatch: $target" >&2; exit 1; }

@@ -14,6 +14,8 @@ ARG GO_BUILD_PARALLELISM=2
 ARG GO_X_CRYPTO_VERSION=v0.52.0
 # renovate: datasource=go depName=golang.org/x/net versioning=go
 ARG GO_X_NET_VERSION=v0.60.0
+# renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
+ARG GO_BROTLI_VERSION=v1.2.7
 # renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
 ARG KIN_OPENAPI_VERSION=v0.146.0
 # renovate: datasource=go depName=github.com/jackc/pgx/v5 versioning=go
@@ -131,6 +133,7 @@ ARG GO_LINUX_ARM64_SHA256
 ARG GO_BUILD_PARALLELISM
 ARG GO_X_CRYPTO_VERSION
 ARG GO_X_NET_VERSION
+ARG GO_BROTLI_VERSION
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential ca-certificates git libpcap-dev wget && \
@@ -152,6 +155,7 @@ ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 ENV GO_X_CRYPTO_VERSION=${GO_X_CRYPTO_VERSION}
 ENV GO_X_NET_VERSION=${GO_X_NET_VERSION}
+ENV GO_BROTLI_VERSION=${GO_BROTLI_VERSION}
 ENV GO_VERSION=${GO_VERSION}
 COPY scripts/container/install_go_tool.sh /usr/local/bin/install-go-tool
 RUN chmod 0755 /usr/local/bin/install-go-tool && \
@@ -197,6 +201,9 @@ RUN projectdiscovery_license=$(find "$(go env GOMODCACHE)/github.com/projectdisc
     install -m 0644 \
         "$(go env GOMODCACHE)/golang.org/x/crypto@${GO_X_CRYPTO_VERSION}/LICENSE" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/golang-x-crypto.txt && \
+    install -m 0644 \
+        "$(go env GOMODCACHE)/github.com/andybalholm/brotli@${GO_BROTLI_VERSION}/LICENSE" \
+        /out/usr/share/doc/darklab-shell/licenses/go-modules/brotli.txt && \
     install -m 0644 \
         "$(go env GOMODCACHE)/github.com/getkin/kin-openapi@${KIN_OPENAPI_VERSION}/LICENSE" \
         /out/usr/share/doc/darklab-shell/licenses/go-modules/kin-openapi.txt && \

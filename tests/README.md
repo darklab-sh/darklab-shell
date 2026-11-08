@@ -164,6 +164,8 @@ Configuration loader characterization in `test_config_builder.py` pins overlay a
 
 Environment example checks in `test_production_install.py` reject duplicate active or commented assignments and settings unused by the matching Compose file. They also load both templates' OIDC examples through the app's configuration loader with default and allowlist provisioning, using test credentials without contacting a provider.
 
+Go installer checks in the same suite verify that the shared Brotli minimum is selected before a tool release. They accept patched or newer embedded versions and tools that don't use Brotli, and reject stale versions or module replacements. A fresh deterministic container smoke build checks compatibility with the packaged tools; the image SBOM and Grype scan verify the resulting vulnerability findings.
+
 Run focused slices while iterating:
 
 ```bash
