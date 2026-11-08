@@ -30,7 +30,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Dockerfile linting rejects failed or damaged Hadolint downloads during setup.** CI uses the correct release asset name, pins Hadolint 2.15.1 and its SHA-256, retries failed downloads, and checks the installed tool before running the linters. The Linux contributor setup uses the same verified release.
 
-- **Schemathesis 4.33 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. A local scan against a disposable API verifies the command and report together.
+- **Schemathesis 4.33.1 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. Regression checks keep the packaged version, isolated constraints, parser contract, and smoke version expectation aligned, and reject reports from the preceding release. Smoke expectations include the CLI's updated OpenAPI, GraphQL, and gRPC help text. A local scan against a disposable API verifies the command and report together.
 
 - **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
 

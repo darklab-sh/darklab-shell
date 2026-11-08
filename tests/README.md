@@ -166,6 +166,8 @@ Environment example checks in `test_production_install.py` reject duplicate acti
 
 Go installer checks in the same suite verify that the shared Brotli minimum is selected before a tool release. They accept patched or newer embedded versions and tools that don't use Brotli, and reject stale versions or module replacements. A fresh deterministic container smoke build checks compatibility with the packaged tools; the image SBOM and Grype scan verify the resulting vulnerability findings.
 
+Schemathesis coverage accepts reports explicitly marked with the reviewed release and rejects the preceding release. `test_container_security.py` also checks that the Dockerfile, isolated constraints, parser contract, and smoke version expectation agree, so a dependency update can't leave the parser or smoke fixture on the old version. The container smoke corpus checks the installed CLI's help and version output.
+
 Run focused slices while iterating:
 
 ```bash

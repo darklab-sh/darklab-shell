@@ -5,7 +5,9 @@
 
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -13,8 +15,25 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from services.assessments.schemathesis_report_contracts import SCHEMATHESIS_REPORT_TOOL_VERSION
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_schemathesis_parser_and_smoke_expectations_match_packaged_version():
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    version_match = re.search(r"^ARG SCHEMATHESIS_VERSION=(\S+)$", dockerfile, re.MULTILINE)
+    assert version_match is not None
+    version = version_match.group(1)
+    constraints = (ROOT / "deploy/schemathesis-constraints.txt").read_text().splitlines()
+    assert f"schemathesis=={version}" in constraints
+    assert SCHEMATHESIS_REPORT_TOOL_VERSION == version
+    smoke = json.loads((ROOT / "tests/py/fixtures/container_smoke_test-expectations.json").read_text())
+    records = [record for record in smoke["records"] if record["command"] == "schemathesis --version"]
+    assert len(records) == 1
+    assert records[0]["exit_code"] == 0
+    assert records[0]["expected_text"] == [f"schemathesis, version {version}"]
 
 
 def load_helper(name):
