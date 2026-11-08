@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Bundled tool versions are discoverable by the central Renovate report.** Explicit Dockerfile annotations identify upstream packages and version schemes. Central preparation keeps linked scanner constraints and configured integrity pins together, while build compatibility and license review remain part of the project checks.
+
 - **Application dependencies, bundled tools, and CI images use current releases.** Python packages, Playwright, Vitest 5, Stylelint 18, Markdownlint, and the packaged scanners are updated, along with checksums, exact scanner dependencies, and WPScan license records. CI uses Python 3.15.2, Node 26.13.0, Docker 29.9.2, and the digest-pinned GitLab CLI 1.128.0. Production Python stays at 3.14.10 for SSLyze compatibility, and the local `braces` security patch remains in place. Lint overrides include the RE2JS security fix.
 
 - **TLS tools use compatible OpenSSL libraries.** The standalone command uses OpenSSL 4.1 and retains its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries, preserving the protocol APIs it still needs.

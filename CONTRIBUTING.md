@@ -548,6 +548,27 @@ docker compose -f compose.dev.yaml up --build
 
 ## Dependency Version Tracking
 
+The central Ansible Renovate report reads the explicit `# renovate:` comments
+above Dockerfile tool-version defaults. Keep each comment immediately before its
+literal `ARG` assignment, with the upstream module or package name and its version
+scheme. Unannotated install commands aren't scanned for tool versions. The Python
+base image and Dockerfile syntax image use Renovate's native Dockerfile support.
+
+The central preparation policy keeps SSLyze and Schemathesis defaults and their
+constraints together. It also refreshes the configured release commits, archive
+and license hashes, both architecture assets and checksums, the GAU module sum,
+and TruffleHog's upstream AMQP verification version. That verification pin isn't
+an independent update target. Adding a tool with integrity pins requires updating
+both its annotation here and its preparation recipe in Ansible. Missing upstream
+metadata or conflicting versions block the approval plan.
+
+Review source patches, tool compatibility, license notices, and related docs when
+updating a version. SSLyze validation uses the commit-pinned source archive from
+the Dockerfile. Preparation doesn't run a complete container build; the existing
+container smoke and release checks still qualify the resulting image. Build
+metadata, unpinned apt packages, the PostgreSQL client family, and its signing-key
+fingerprint aren't independent annotated update targets.
+
 `scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, CI runner, Go, pip, gem, and GitHub versions versus the latest published versions it can find. Container checks read complete OCI registry-v2 tag listings from the image's own registry, reuse one listing per repository, and verify checked-in digest pins before showing the digest for a newer tag. Most Go tools use stable module tags from the public Go proxy. The checker follows each upstream's release shape for exceptions: vt-cli uses the root module's latest canonical Go version; IPinfo, TLSX, and urlscan-cli use their GitHub releases; and SQLMap uses its monthly repository tags. The GitLab CLI release image is kept in the `CI_GITLAB_CLI_IMAGE` variable with both an exact version and digest, covered by the production-install contract, and recorded in release evidence. Run the checker locally any time you are about to bump a dependency:
 
 ```bash
