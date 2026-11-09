@@ -788,7 +788,7 @@ Theme loading checks cover a usable current palette without a catalog request, s
 
 ### Dependency update qualification
 
-`test_dependency_updates.py` covers preparation contracts, changelog idempotence,
+`test_dependency_updates.py` covers preparation contracts, changelog spacing and idempotence,
 independent review boundaries, and installed scanner inventory safety. Browser tooling
 checks cover complete upstream license text generation and verified Hadolint installation.
 

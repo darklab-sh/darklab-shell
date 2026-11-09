@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `jsdom` from `^30.1.3` to `^31.0.0`.
+
 - **Dependency updates include preparation and compatibility evidence.** Project-owned checks keep generated assets, complete browser license notices, scanner constraints, and changelog summaries aligned. Production and CI Python resolutions remain separate from isolated scanners. CI exercises real Schemathesis reports against disposable APIs and audits installed scanner dependencies alongside app and development requirements. Hadolint uses one release/checksum manifest. Preparation reports identify independent parser, patch, license, and major-version reviews without claiming target CI has passed.
 
 - **Bundled tool versions are discoverable by the central Renovate report.** Explicit Dockerfile annotations identify upstream packages and version schemes. Central preparation keeps linked scanner constraints and configured integrity pins together, while build compatibility and license review remain part of the project checks.
@@ -25,6 +27,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **TLS tools use compatible OpenSSL libraries.** The standalone command uses OpenSSL 4.1 and retains its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries, preserving the protocol APIs it still needs.
 
 ### Fixed
+
+- **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
 
 - **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.
 

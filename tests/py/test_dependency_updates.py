@@ -76,6 +76,40 @@ def test_changelog_generation_is_idempotent_and_preserves_published_history(tmp_
         updates.update_changelog(tmp_path, [{'package': 'bad\nname', 'current': '1', 'proposed': '2'}])
 
 
+@pytest.mark.parametrize('body', [
+    '### Changed\n\n- Existing entry.\n\n',
+    '### Changed  \n\n- Existing entry.\n\n',
+    '### Changed\n\n',
+    '### Fixed\n\n- Existing fix.\n\n',
+    '',
+], ids=['existing', 'heading-spaces', 'empty-changed', 'new-changed', 'empty-unreleased'])
+def test_changelog_insertion_keeps_one_blank_line_at_each_boundary(tmp_path, body):
+    target = tmp_path / 'CHANGELOG.md'
+    history = '## [1.0.0] - 2026-01-01\n\n### Changed\n\n- Published history.\n'
+    target.write_text('# Changelog\n\n## [1.0.1] - Unreleased\n\n' + body + history)
+    context = [{'package': 'jsdom', 'current': '^30.1.3', 'proposed': '^31.0.0'}]
+    updates.update_changelog(tmp_path, context)
+    result = target.read_text()
+    assert '\n\n\n' not in result
+    assert '### Changed' in result
+    assert '`jsdom` from `^30.1.3` to `^31.0.0`.\n\n' in result
+    assert result.endswith(history)
+    updates.update_changelog(tmp_path, context)
+    assert target.read_text() == result
+    updates.update_changelog(tmp_path, [{'package': 'click', 'current': '8.5.0', 'proposed': '8.5.1'}])
+    assert '\n\n\n' not in target.read_text()
+    assert target.read_text().endswith(history)
+
+
+@pytest.mark.parametrize('body', ['', '\n\n### Changed\n\n'], ids=['new-changed', 'existing-changed'])
+def test_changelog_insertion_at_end_keeps_one_final_newline(tmp_path, body):
+    target = tmp_path / 'CHANGELOG.md'
+    target.write_text('# Changelog\n\n## [1.0.1] - Unreleased' + body)
+    updates.update_changelog(tmp_path, [{'package': 'click', 'current': '8.5.0', 'proposed': '8.5.1'}])
+    assert '\n\n\n' not in target.read_text()
+    assert target.read_text().endswith('`8.5.1`.\n')
+
+
 def test_patch_license_and_major_updates_are_review_boundaries(checkout):
     report = updates.inspect_update(checkout, [{'package': package, 'type': 'major'}
                                              for package in ('sslyze', 'wpscan', 'jspdf')])

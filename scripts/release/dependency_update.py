@@ -93,21 +93,23 @@ def update_changelog(root: Path, updates: list[dict]) -> None:
     entry = f"- **Dependency versions are updated.** Updated {detail}.\n"
     target = root / "CHANGELOG.md"
     source = target.read_text()
-    section = re.search(r"^## \[[^\]]+\] - Unreleased\s*$", source, re.MULTILINE)
+    section = re.search(r"^## \[[^\]]+\] - Unreleased[ \t]*$", source, re.MULTILINE)
     if section is None:
         raise ValueError("No active Unreleased changelog section")
     end = re.search(r"^## \[", source[section.end():], re.MULTILINE)
     limit = section.end() + end.start() if end else len(source)
     if entry in source[section.end():limit]:
         return
-    heading = re.search(r"^### Changed\s*$", source[section.end():limit], re.MULTILINE)
+    heading = re.search(r"^### Changed[ \t]*$", source[section.end():limit], re.MULTILINE)
     if heading is None:
         position = section.end()
         addition = "\n\n### Changed\n\n" + entry
     else:
         position = section.end() + heading.end()
         addition = "\n\n" + entry
-    target.write_text(source[:position] + addition + source[position:])
+    # Own the insertion boundary's newlines instead of adding to its old spacing.
+    remainder = source[position:].lstrip("\r\n")
+    target.write_text(source[:position] + addition + ("\n" if remainder else "") + remainder)
 
 
 def main() -> int:
