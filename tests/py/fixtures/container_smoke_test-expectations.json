@@ -135,7 +135,7 @@
       "exit_code": 0,
       "command": "gau --version",
       "expected_text": [
-        "gau version: 2.2.4"
+        "gau version: ${GAU_VERSION#v}"
       ]
     },
     {
@@ -1463,7 +1463,7 @@
       "exit_code": 0,
       "command": "schemathesis --version",
       "expected_text": [
-        "schemathesis, version 4.33.1"
+        "schemathesis, version ${SCHEMATHESIS_VERSION}"
       ]
     },
     {

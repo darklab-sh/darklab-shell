@@ -7,7 +7,6 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -15,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from container_version_helpers import dockerfile_defaults, pinned_version, resolve_version_text
 from services.assessments.schemathesis_report_contracts import SCHEMATHESIS_REPORT_TOOL_VERSION
 
 
@@ -23,17 +23,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_schemathesis_parser_and_smoke_expectations_match_packaged_version():
     dockerfile = (ROOT / "Dockerfile").read_text()
-    version_match = re.search(r"^ARG SCHEMATHESIS_VERSION=(\S+)$", dockerfile, re.MULTILINE)
-    assert version_match is not None
-    version = version_match.group(1)
+    defaults = dockerfile_defaults(dockerfile)
+    version = pinned_version(defaults, "SCHEMATHESIS_VERSION")
     constraints = (ROOT / "deploy/schemathesis-constraints.txt").read_text().splitlines()
     assert f"schemathesis=={version}" in constraints
-    assert SCHEMATHESIS_REPORT_TOOL_VERSION == version
+    assert SCHEMATHESIS_REPORT_TOOL_VERSION == version, "Schemathesis runtime requires report-format review"
     smoke = json.loads((ROOT / "tests/py/fixtures/container_smoke_test-expectations.json").read_text())
     records = [record for record in smoke["records"] if record["command"] == "schemathesis --version"]
     assert len(records) == 1
     assert records[0]["exit_code"] == 0
-    assert records[0]["expected_text"] == [f"schemathesis, version {version}"]
+    assert records[0]["expected_text"] == ["schemathesis, version ${SCHEMATHESIS_VERSION}"]
+    assert resolve_version_text(records[0]["expected_text"][0], defaults) == f"schemathesis, version {version}"
+
+
+def test_schemathesis_upgrade_still_requires_parser_review(tmp_path, monkeypatch):
+    (tmp_path / "Dockerfile").write_text("ARG SCHEMATHESIS_VERSION=4.99.0\n")
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy/schemathesis-constraints.txt").write_text("schemathesis==4.99.0\n")
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    with pytest.raises(AssertionError, match="requires report-format review"):
+        test_schemathesis_parser_and_smoke_expectations_match_packaged_version()
 
 
 def load_helper(name):

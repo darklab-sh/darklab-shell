@@ -11,15 +11,15 @@ ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac
 ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 ARG GO_BUILD_PARALLELISM=2
 # renovate: datasource=go depName=golang.org/x/crypto versioning=go
-ARG GO_X_CRYPTO_VERSION=v0.52.0
+ARG GO_X_CRYPTO_VERSION=v0.58.0
 # renovate: datasource=go depName=golang.org/x/net versioning=go
-ARG GO_X_NET_VERSION=v0.60.0
+ARG GO_X_NET_VERSION=v0.62.0
 # renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
-ARG GO_BROTLI_VERSION=v1.2.7
+ARG GO_BROTLI_VERSION=v1.2.8
 # renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
-ARG KIN_OPENAPI_VERSION=v0.146.0
+ARG KIN_OPENAPI_VERSION=v0.153.0
 # renovate: datasource=go depName=github.com/jackc/pgx/v5 versioning=go
-ARG KATANA_PGX_VERSION=v5.9.0
+ARG KATANA_PGX_VERSION=v5.12.0
 # renovate: datasource=github-tags depName=tianon/gosu
 ARG GOSU_VERSION=1.20
 # renovate: datasource=github-tags depName=openssl/openssl extractVersion=^openssl-(?<version>.*)$
@@ -40,7 +40,7 @@ ARG NAABU_VERSION=v2.7.0
 # renovate: datasource=go depName=github.com/projectdiscovery/katana versioning=go
 ARG KATANA_VERSION=v1.8.0
 # renovate: datasource=github-tags depName=projectdiscovery/tlsx
-ARG TLSX_VERSION=v1.4.0
+ARG TLSX_VERSION=v1.4.4
 # renovate: datasource=go depName=github.com/projectdiscovery/cdncheck versioning=go
 ARG CDNCHECK_VERSION=v1.4.0
 # renovate: datasource=go depName=github.com/owasp-amass/amass/v5 versioning=go
@@ -60,7 +60,7 @@ ARG MASSDNS_VERSION=v1.1.0
 # renovate: datasource=go depName=github.com/d3mondev/puredns/v2 versioning=go
 ARG PUREDNS_VERSION=v2.1.1
 # renovate: datasource=github-tags depName=testssl/testssl.sh
-ARG TESTSSL_VERSION=v3.2.4
+ARG TESTSSL_VERSION=v3.2.5
 # renovate: datasource=pypi depName=sslyze versioning=pep440
 ARG SSLYZE_VERSION=6.3.1
 ARG SSLYZE_COMMIT=12ad04350a4f57bec846c15211e4d71075ee53c9
@@ -76,11 +76,11 @@ ARG RUSTSCAN_LINUX_AMD64_SHA256=f3a4365d939e3b81f25ba8c37852ce9ac9e938c3cc882c5b
 ARG RUSTSCAN_LINUX_ARM64_ASSET=aarch64-linux-rustscan.zip
 ARG RUSTSCAN_LINUX_ARM64_SHA256=4f49103e2dfc9e9709a36da2cd61f1f81613f8d0a203307f750439fc3ce39eae
 # renovate: datasource=github-tags depName=hahwul/dalfox
-ARG DALFOX_VERSION=v3.2.4
-ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.2.4-linux-x86_64-musl.tar.gz
-ARG DALFOX_LINUX_AMD64_SHA256=c11cfd2f8261973f0a2a2a1eba5a147ce77712a29acfa6343f9847fb8bb7eca2
-ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.2.4-linux-aarch64-musl.tar.gz
-ARG DALFOX_LINUX_ARM64_SHA256=fd56b0b7da2d06868cd73b504f41d21314629feffcd5bdc97718db1c9dd2fa70
+ARG DALFOX_VERSION=v3.3.0
+ARG DALFOX_LINUX_AMD64_ASSET=dalfox-v3.3.0-linux-x86_64-musl.tar.gz
+ARG DALFOX_LINUX_AMD64_SHA256=26e979d0f681d280fcf5121b7e59396c5c495c161ffddf411e4baec9fae8bcb4
+ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.3.0-linux-aarch64-musl.tar.gz
+ARG DALFOX_LINUX_ARM64_SHA256=f63b98296b56f0575df5a4539ce1806f07218100d18d87d8db512648b6c5c6cb
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 # renovate: datasource=pypi depName=schemathesis versioning=pep440
 ARG SCHEMATHESIS_VERSION=4.33.1

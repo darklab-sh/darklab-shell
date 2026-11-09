@@ -26,6 +26,8 @@ from unittest import mock
 import pytest
 import yaml
 
+from container_version_helpers import dockerfile_defaults, pinned_version
+from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOAD_BUILDER = ROOT / "scripts" / "release" / "build_release_payload.py"
@@ -44,6 +46,7 @@ NEXT_RC_VERSION = (
 NEXT_VERSION = "3.1.3"
 LEGACY_BACKUP_VERSION = "2.5.0"
 DEPLOYMENT_ARCHIVE = f"darklab-shell-deploy-{RELEASE_VERSION}.tar.gz"
+# Controlled release-evidence input; the production image pin lives in CI YAML.
 GITLAB_CLI_IMAGE = (
     "registry.gitlab.com/gitlab-org/cli:v1.128.0@"
     "sha256:00884510ffcbb6b03c0abc5dd058d7728a646cab2a419de4a7108d073ce90a03"
@@ -1490,6 +1493,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "deploy/third-party-licenses/" in dockerfile
     assert "org.opencontainers.image.licenses=\"AGPL-3.0-only\"" in dockerfile
     assert "COPY LICENSE /usr/share/doc/darklab-shell/LICENSE" in dockerfile
+    # PostgreSQL's supported client family is an operations compatibility contract.
     assert "ARG POSTGRESQL_CLIENT_VERSION=18" in dockerfile
     assert "ARG APT_CACHE_EPOCH=1970-01-01" in dockerfile
     assert (
@@ -1624,27 +1628,33 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
         dockerfile,
         re.MULTILINE,
     )
-    assert "ARG GO_X_CRYPTO_VERSION=v0.52.0" in dockerfile
-    assert "ARG GO_X_NET_VERSION=v0.60.0" in dockerfile
-    assert "ARG GO_BROTLI_VERSION=v1.2.7" in dockerfile
-    assert "ARG KIN_OPENAPI_VERSION=v0.146.0" in dockerfile
-    assert "ARG KATANA_PGX_VERSION=v5.9.0" in dockerfile
-    assert "ARG NUCLEI_VERSION=v3.11.1" in dockerfile
-    assert "ARG GOSU_VERSION=1.20" in dockerfile
-    assert "ARG OPENSSL_VERSION=4.1.0" in dockerfile
+    defaults = dockerfile_defaults(dockerfile)
+    for name in (
+        "GO_X_CRYPTO_VERSION", "GO_X_NET_VERSION", "GO_BROTLI_VERSION",
+        "KIN_OPENAPI_VERSION", "KATANA_PGX_VERSION", "NUCLEI_VERSION",
+        "GOSU_VERSION", "OPENSSL_VERSION", "URLSCAN_CLI_VERSION",
+    ):
+        pinned_version(defaults, name)
+        assert f"${{{name}}}" in dockerfile, f"Unused build version: {name}"
+    # Independent reviewed security baselines permit newer pins, not downgrades.
+    for name, minimum in (
+        ("GO_X_CRYPTO_VERSION", "0.52.0"),
+        ("GO_X_NET_VERSION", "0.60.0"),
+        ("GO_BROTLI_VERSION", "1.2.7"),
+    ):
+        assert Version(defaults[name]) >= Version(minimum), f"{name} is below {minimum}"
     native_build = dockerfile.split("AS native-tools", 1)[1].split("FROM ", 1)[0]
     assert "libssl-dev" in native_build
     assert native_build.index('make -C /tmp/sslscan') < native_build.index('make install_sw')
     assert '"/usr/local/lib/${multiarch}/ossl-modules"' in native_build
     assert "engines-3" not in native_build
-    assert "ARG SCHEMATHESIS_VERSION=4.33.1" in dockerfile
-    assert "ARG URLSCAN_CLI_VERSION=v0.0.7-0.20261021083030-961f2e8d0b75" in dockerfile
+    schemathesis_version = pinned_version(defaults, "SCHEMATHESIS_VERSION")
     dependency_pins = [
         line
         for line in schemathesis_constraints.splitlines()
         if line and not line.startswith("#")
     ]
-    assert "schemathesis==4.33.1" in dependency_pins
+    assert f"schemathesis=={schemathesis_version}" in dependency_pins
     assert len({pin.partition("==")[0].lower() for pin in dependency_pins}) == len(
         dependency_pins
     )
@@ -1781,7 +1791,7 @@ def test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path: Path):
     assert "RUSTSCAN_LINUX_AMD64_SHA256=" in dockerfile
     assert "RUSTSCAN_LINUX_ARM64_SHA256=" in dockerfile
     assert 'install-go-tool "github.com/lc/gau/v2/cmd/gau@${GAU_VERSION}"' in dockerfile
-    assert "ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=" in dockerfile
+    assert re.fullmatch(r"h1:[A-Za-z0-9+/]{43}=", defaults["GAU_MODULE_SUM"])
     assert 'test "$gau_module_sum" = "$GAU_MODULE_SUM"' in dockerfile
     assert "/usr/share/doc/darklab-shell/licenses/go-modules/gau.txt" in dockerfile
     assert "AS gau-asset" not in dockerfile
@@ -2178,8 +2188,9 @@ def test_go_tool_installer_rejects_a_resolved_or_embedded_downgrade(
 
 def test_trufflehog_build_verifies_the_upstream_amqp_dependency():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "ARG TRUFFLEHOG_VERSION=v3.99.8" in dockerfile
-    assert "ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0" in dockerfile
+    defaults = dockerfile_defaults(dockerfile)
+    pinned_version(defaults, "TRUFFLEHOG_VERSION")
+    pinned_version(defaults, "TRUFFLEHOG_AMQP_VERSION")
     build = dockerfile.split('RUN git clone --depth 1 --branch "${TRUFFLEHOG_VERSION}"', 1)[1]
     build = build.split("\nRUN ", 1)[0]
     compile_tool = "go -C /tmp/trufflehog install"
@@ -2821,7 +2832,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "(-rc\\.[0-9]+)?" in release_rule
     assert "-rc" not in final_release_rule
     assert parsed_ci["release-create"]["extends"] == ".protected-final-release-tag"
-    assert parsed_ci["variables"]["CI_GITLAB_CLI_IMAGE"] == GITLAB_CLI_IMAGE
+    assert re.fullmatch(
+        r"registry\.gitlab\.com/gitlab-org/cli:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
+        parsed_ci["variables"]["CI_GITLAB_CLI_IMAGE"],
+    )
     assert parsed_ci["release-create"]["image"] == "$CI_GITLAB_CLI_IMAGE"
     assert "gitlab-org/cli:latest" not in ci_config
     release_image_pipeline_jobs = (
@@ -3460,9 +3474,10 @@ def test_release_evidence_is_deterministic_bound_and_tamper_evident(tmp_path: Pa
     effective_args = build_inputs["effective_build_args"]
     assert effective_args["APT_CACHE_EPOCH"] == evidence_args["build_date"][:10]
     assert effective_args["VT_CLI_VERSION"] != "latest"
-    assert effective_args["SECLISTS_VERSION"] == "2026.2"
+    defaults = dockerfile_defaults((ROOT / "Dockerfile").read_text())
+    assert effective_args["SECLISTS_VERSION"] == defaults["SECLISTS_VERSION"]
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["SECLISTS_COMMIT"])
-    assert effective_args["NIKTO_VERSION"] == "2.6.1"
+    assert effective_args["NIKTO_VERSION"] == defaults["NIKTO_VERSION"]
     assert re.fullmatch(r"[0-9a-f]{40}", effective_args["NIKTO_COMMIT"])
     assert evidence_index["build_inputs"]["sha256"] == _sha256(build_inputs_path)
     provenance = json.loads((first_evidence / "provenance.intoto.jsonl").read_text())
@@ -5750,3 +5765,39 @@ def test_go_tool_installer_verifies_embedded_brotli(
     assert result.returncode == (0 if succeeds else 1), result.stderr
     if not succeeds:
         assert "Go Brotli dependency mismatch" in result.stderr
+
+
+@pytest.mark.release_integration
+@pytest.mark.parametrize(
+    ("updates", "rejected_minimum"),
+    [
+        ({
+            "GO_X_CRYPTO_VERSION": "v0.58.0", "GO_X_NET_VERSION": "v0.62.0",
+            "GO_BROTLI_VERSION": "v1.2.8", "KIN_OPENAPI_VERSION": "v0.153.0",
+            "KATANA_PGX_VERSION": "v5.12.0", "NUCLEI_VERSION": "v3.12.0",
+            "GOSU_VERSION": "1.21", "OPENSSL_VERSION": "4.2.0",
+        }, ""),
+        ({"GO_X_CRYPTO_VERSION": "v0.51.0"}, "GO_X_CRYPTO_VERSION"),
+        ({"GO_X_NET_VERSION": "v0.59.0"}, "GO_X_NET_VERSION"),
+        ({"GO_BROTLI_VERSION": "v1.2.6"}, "GO_BROTLI_VERSION"),
+    ],
+)
+def test_runtime_version_contract_allows_updates_but_rejects_security_downgrades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, updates: dict[str, str], rejected_minimum: str,
+):
+    dockerfile_path = ROOT / "Dockerfile"
+    source = dockerfile_path.read_text()
+    for name, version in updates.items():
+        source, count = re.subn(rf"^ARG {name}=\S+$", f"ARG {name}={version}", source, flags=re.MULTILINE)
+        assert count == 1
+    original_read = Path.read_text
+
+    def read_text(path: Path, *args, **kwargs):
+        return source if path == dockerfile_path else original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    if rejected_minimum:
+        with pytest.raises(AssertionError, match=f"{rejected_minimum} is below"):
+            test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path)
+    else:
+        test_runtime_image_includes_app_and_excludes_local_overlays(tmp_path)
