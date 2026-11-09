@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency updates include preparation and compatibility evidence.** Project-owned checks keep generated assets, complete browser license notices, scanner constraints, and changelog summaries aligned. Production and CI Python resolutions remain separate from isolated scanners. CI exercises real Schemathesis reports against disposable APIs and audits installed scanner dependencies alongside app and development requirements. Hadolint uses one release/checksum manifest. Preparation reports identify independent parser, patch, license, and major-version reviews without claiming target CI has passed.
+
 - **Bundled tool versions are discoverable by the central Renovate report.** Explicit Dockerfile annotations identify upstream packages and version schemes. Central preparation keeps linked scanner constraints and configured integrity pins together, while build compatibility and license review remain part of the project checks.
 
 - **Application dependencies, bundled tools, and CI images use current releases.** Python packages, Playwright, Vitest 5, Stylelint 18, Markdownlint, and the packaged scanners are updated, along with checksums, exact scanner dependencies, and WPScan license records. CI uses Python 3.15.2, Node 26.13.0, Docker 29.9.2, and the digest-pinned GitLab CLI 1.128.0. Production Python stays at 3.14.10 for SSLyze compatibility, and the local `braces` security patch remains in place. Lint overrides include the RE2JS security fix.
@@ -24,13 +26,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.
+
 - **Bundled Go scanners use patched Brotli decoding.** Shared builds require Brotli 1.2.7 or newer and reject stale or replaced embedded copies, addressing the vulnerability scan findings across gau, ffuf, Chaos, and the affected ProjectDiscovery tools. The image includes the module's MIT license, and the fixed-Critical vulnerability gate remains in place.
 
 - **Schemathesis rejection fixtures pass editor type checks.** The report helper explicitly accepts a null failure message so tests can verify that malformed reports are rejected.
 
 - **Dockerfile linting rejects failed or damaged Hadolint downloads during setup.** CI uses the correct release asset name, pins Hadolint 2.15.1 and its SHA-256, retries failed downloads, and checks the installed tool before running the linters. The Linux contributor setup uses the same verified release.
 
-- **Schemathesis 4.33.1 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. Regression checks keep the packaged version, isolated constraints, parser contract, and smoke version expectation aligned, and reject reports from the preceding release. Smoke expectations include the CLI's updated OpenAPI, GraphQL, and gRPC help text. A local scan against a disposable API verifies the command and report together.
+- **Schemathesis 4.33.1 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. Regression checks keep the packaged version, isolated constraints, parser contract, and smoke version expectation aligned, and reject reports from the preceding release. Smoke expectations check the CLI usage and required configuration option. A local scan against a disposable API verifies the command and report together.
 
 - **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
 

@@ -166,7 +166,11 @@ Environment example checks in `test_production_install.py` reject duplicate acti
 
 Go installer checks in the same suite verify that the shared Brotli minimum is selected before a tool release. They accept patched or newer embedded versions and tools that don't use Brotli, and reject stale versions or module replacements. A fresh deterministic container smoke build checks compatibility with the packaged tools; the image SBOM and Grype scan verify the resulting vulnerability findings.
 
-Schemathesis coverage accepts reports explicitly marked with the reviewed release and rejects the preceding release. `test_container_security.py` also checks that the Dockerfile, isolated constraints, parser contract, and smoke version expectation agree, so a dependency update can't leave the parser or smoke fixture on the old version. The container smoke corpus checks the installed CLI's help and version output.
+Routine container-version checks read the Dockerfile defaults through `container_version_helpers.py`. They check exact pins, build wiring, constraints, and release-evidence consistency while keeping independent minimums for the reviewed Go cryptography, networking, and Brotli security baselines. Regression cases accept routine updates and reject baseline downgrades. Fixed versions in mocked Go-tool and release-evidence inputs are controlled examples, not requirements on the installed tools.
+
+The smoke corpus uses `${SCHEMATHESIS_VERSION}` and `${GAU_VERSION#v}` in version output expectations. The loader resolves these tokens from Dockerfile defaults; `#v` removes a leading `v`. Missing or unpinned versions fail rather than weakening the output assertion. A stale installed binary still fails against the resolved version. Capture helpers retain the real CLI output for review; keep these tokens when updating the JSON expectations.
+
+Schemathesis coverage accepts reports explicitly marked with the reviewed release and rejects the preceding release. `test_container_security.py` checks that the Dockerfile and isolated constraints match the independently reviewed parser contract. The parser version isn't derived automatically from the build pin: an update still needs report-format qualification. The container smoke corpus checks the installed CLI's help and version output.
 
 Run focused slices while iterating:
 
@@ -781,3 +785,18 @@ Theme loading checks cover a usable current palette without a catalog request, s
 - [ARCHITECTURE.md](../ARCHITECTURE.md#test-suite) - testing architecture and runtime boundaries
 - [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation contracts enforced by the meta-tests
 - [ui-capture-scenes.md](ui-capture-scenes.md) - visual-review scenes and capture workflow
+
+### Dependency update qualification
+
+`test_dependency_updates.py` covers preparation contracts, changelog idempotence,
+independent review boundaries, and installed scanner inventory safety. Browser tooling
+checks cover complete upstream license text generation and verified Hadolint installation.
+
+`test_scanner_compatibility.py` is opt-in because it launches the real isolated scanner.
+The `test-dependency-qualification` job runs it against disposable localhost APIs on
+production Python and retains environment inventories and JUnit results. Locally, use
+`sh scripts/release/run_dependency_qualification.sh` for committed source. For a prepared
+scanner environment, set `RUN_SCANNER_COMPATIBILITY=1` and `SCHEMATHESIS_BINARY` to its
+absolute executable path, then run the module through `scripts/run_pytest.sh`.
+The tests assert successful and failing report semantics and exclude private response
+bodies from parsed evidence. The independent parser version still requires review.
