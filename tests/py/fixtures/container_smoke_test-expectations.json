@@ -1455,7 +1455,7 @@
       "command": "schemathesis --help",
       "expected_text": [
         "Usage: schemathesis [OPTIONS] COMMAND [ARGS]...",
-        "Property-based API testing for OpenAPI, GraphQL, and gRPC."
+        "--config-file PATH"
       ]
     },
     {

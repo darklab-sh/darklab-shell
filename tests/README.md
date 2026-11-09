@@ -785,3 +785,18 @@ Theme loading checks cover a usable current palette without a catalog request, s
 - [ARCHITECTURE.md](../ARCHITECTURE.md#test-suite) - testing architecture and runtime boundaries
 - [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation contracts enforced by the meta-tests
 - [ui-capture-scenes.md](ui-capture-scenes.md) - visual-review scenes and capture workflow
+
+### Dependency update qualification
+
+`test_dependency_updates.py` covers preparation contracts, changelog idempotence,
+independent review boundaries, and installed scanner inventory safety. Browser tooling
+checks cover complete upstream license text generation and verified Hadolint installation.
+
+`test_scanner_compatibility.py` is opt-in because it launches the real isolated scanner.
+The `test-dependency-qualification` job runs it against disposable localhost APIs on
+production Python and retains environment inventories and JUnit results. Locally, use
+`sh scripts/release/run_dependency_qualification.sh` for committed source. For a prepared
+scanner environment, set `RUN_SCANNER_COMPATIBILITY=1` and `SCHEMATHESIS_BINARY` to its
+absolute executable path, then run the module through `scripts/run_pytest.sh`.
+The tests assert successful and failing report semantics and exclude private response
+bodies from parsed evidence. The independent parser version still requires review.
