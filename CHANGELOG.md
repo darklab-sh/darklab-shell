@@ -24,6 +24,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.
+
 - **Bundled Go scanners use patched Brotli decoding.** Shared builds require Brotli 1.2.7 or newer and reject stale or replaced embedded copies, addressing the vulnerability scan findings across gau, ffuf, Chaos, and the affected ProjectDiscovery tools. The image includes the module's MIT license, and the fixed-Critical vulnerability gate remains in place.
 
 - **Schemathesis rejection fixtures pass editor type checks.** The report helper explicitly accepts a null failure message so tests can verify that malformed reports are rejected.

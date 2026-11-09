@@ -560,6 +560,13 @@ literal `ARG` assignment, with the upstream module or package name and its versi
 scheme. Unannotated install commands aren't scanned for tool versions. The Python
 base image and Dockerfile syntax image use Renovate's native Dockerfile support.
 
+Routine dependency versions belong in their build or package manifests. Tests read
+those pins and check that builds, constraints, release evidence, and version output
+agree; they don't repeat the current release as an independent requirement.
+Independent version assertions need a reason, such as a reviewed security minimum,
+a compatibility hold, or a parser qualified for one tool release. Controlled test
+inputs can use fixed example versions without tracking production updates.
+
 The central preparation policy keeps SSLyze and Schemathesis defaults and their
 constraints together. It also refreshes the configured release commits, archive
 and license hashes, both architecture assets and checksums, the GAU module sum,
@@ -587,7 +594,7 @@ The production image uses Python 3.14 because [SSLyze 6.3.1 requires `nassl>=5.4
 
 SSLyze and Schemathesis use isolated Python environments, each checked with `pip check` during image construction. The application environment is checked separately. SSLyze's reviewed dependency pins live in `deploy/sslyze-constraints.txt`. Its source archive is pinned by commit and SHA-256 to [upstream's cryptography compatibility fix](https://github.com/nabla-c0d3/sslyze/commit/12ad04350a4f57bec846c15211e4d71075ee53c9), allowing patched cryptography 50 without changing the scanner's runtime code. Shodan 1.31.0 has a build-time compatibility patch for standard-library plugin discovery and version metadata; changing its pin requires reviewing that patch.
 
-Schemathesis updates must keep the Dockerfile version, `deploy/schemathesis-constraints.txt`, the report parser's `SCHEMATHESIS_REPORT_TOOL_VERSION`, and the container smoke version expectation aligned. Refresh changed help output against the installed CLI, and verify a real scan's NDJSON report with the production parser. The parser accepts only the reviewed scanner version; a successful CLI run alone doesn't establish report compatibility.
+Schemathesis updates must keep the Dockerfile version, `deploy/schemathesis-constraints.txt`, and the report parser's `SCHEMATHESIS_REPORT_TOOL_VERSION` aligned. The container smoke version expectation reads the Dockerfile pin automatically. Refresh changed help output against the installed CLI, and verify a real scan's NDJSON report with the production parser before changing its reviewed version. The parser accepts only that reviewed scanner version; a successful CLI run alone doesn't establish report compatibility.
 
 OpenSSL 4.1 supplies the TLS command and provider modules. The image includes the legacy provider for existing cipher checks; OpenSSL 4 no longer installs engine modules. sslscan 2.2.3 still needs APIs removed in OpenSSL 4, so it builds against Debian's OpenSSL 3 headers before the standalone OpenSSL build and uses Debian's shared libraries at runtime.
 
