@@ -38,6 +38,7 @@ from urllib.error import HTTPError
 
 import pytest
 import yaml
+from container_version_helpers import dockerfile_defaults, resolve_version_text
 from services.commands.registry import (
     load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands,
@@ -765,6 +766,10 @@ def test_smoke_image_cache_status_rebuilds_when_image_is_missing(monkeypatch: py
 
 def _load_expectations() -> dict[str, dict[str, object]]:
     data = json.loads(EXPECTATIONS_FILE.read_text())
+    defaults = dockerfile_defaults((ROOT / "Dockerfile").read_text())
+    for record in data["records"]:
+        if "expected_text" in record:
+            record["expected_text"] = [resolve_version_text(text, defaults) for text in record["expected_text"]]
     records: dict[str, dict[str, object]] = {
         str(record["command"]): record for record in data["records"]
     }
@@ -777,6 +782,29 @@ def _load_interactive_expectations() -> dict[str, dict[str, object]]:
         str(record["command"]): record for record in data["records"]
     }
     return records
+
+
+def test_smoke_version_text_follows_build_pin_and_rejects_stale_binary(tmp_path, monkeypatch):
+    (tmp_path / "Dockerfile").write_text("ARG SCHEMATHESIS_VERSION=4.99.0\nARG GAU_VERSION=v9.9.0\n")
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    case = _load_expectations()["schemathesis --version"]
+    expected = _case_string_list(case, "expected_text")
+    assert expected == ["schemathesis, version 4.99.0"]
+    assert _load_expectations()["gau --version"]["expected_text"] == ["gau version: 9.9.0"]
+    _assert_contains(["schemathesis, version 4.99.0"], expected, str(case["command"]))
+    with pytest.raises(AssertionError, match="output did not contain"):
+        _assert_contains(["schemathesis, version 4.33.1"], expected, str(case["command"]))
+
+
+@pytest.mark.parametrize("defaults", [{}, {"SCHEMATHESIS_VERSION": "latest"}])
+def test_smoke_version_text_rejects_missing_or_unpinned_source(defaults):
+    with pytest.raises((KeyError, ValueError)):
+        resolve_version_text("schemathesis, version ${SCHEMATHESIS_VERSION}", defaults)
+
+
+def test_smoke_versions_reject_duplicate_dockerfile_defaults():
+    with pytest.raises(ValueError, match="Duplicate Dockerfile default"):
+        dockerfile_defaults("ARG GAU_VERSION=v2.2.4\nARG GAU_VERSION=v2.3.0\n")
 
 
 def _load_workspace_cases() -> list[dict[str, object]]:

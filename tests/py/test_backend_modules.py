@@ -48,6 +48,7 @@ from typing import Any, IO, cast
 import pytest
 import yaml
 
+from container_version_helpers import dockerfile_defaults, pinned_version
 from identity_helpers import anonymous_session_id, persisted_principal
 from core.helpers import get_log_session_id
 import core.process as process
@@ -27569,15 +27570,17 @@ class TestAutocompleteContextLoading:
         )
         smoke_commands = {str(record.get("command") or "") for record in expectations["records"] if isinstance(record, dict)}
 
-        for arg_name, version, smoke_command in (
-            ("TLSX_VERSION", "v1.4.0", "tlsx -h"),
-            ("CDNCHECK_VERSION", "v1.4.0", "cdncheck -h"),
-            ("GAU_VERSION", "v2.2.4", "gau --version"),
-            ("TRUFFLEHOG_VERSION", "v3.99.8", "trufflehog --help"),
-            ("MASSDNS_VERSION", "v1.1.0", "puredns -h"),
-            ("PUREDNS_VERSION", "v2.1.1", "puredns -h"),
+        defaults = dockerfile_defaults(dockerfile)
+        for arg_name, smoke_command in (
+            ("TLSX_VERSION", "tlsx -h"),
+            ("CDNCHECK_VERSION", "cdncheck -h"),
+            ("GAU_VERSION", "gau --version"),
+            ("TRUFFLEHOG_VERSION", "trufflehog --help"),
+            ("MASSDNS_VERSION", "puredns -h"),
+            ("PUREDNS_VERSION", "puredns -h"),
         ):
-            assert f"ARG {arg_name}={version}" in dockerfile
+            pinned_version(defaults, arg_name)
+            assert f"${{{arg_name}}}" in dockerfile
             assert smoke_command in smoke_commands
 
     def test_container_smoke_test_commands_spread_sensitive_roots(self):
