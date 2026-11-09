@@ -733,11 +733,6 @@ docker-build-barbas:
   tags:
     - barbas
 
-docker-build-beleth:
-  extends: .scheduled-docker-build
-  tags:
-    - beleth
-
 docker-build-baka:
   extends: .scheduled-docker-build
   tags:

@@ -2,8 +2,6 @@
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Test commit
-
 # Development mounts the checkout outside /app because native Linux preserves
 # host ownership and modes on bind mounts. Stage a fresh container-owned,
 # read-only snapshot before any config import or unprivileged process starts.
