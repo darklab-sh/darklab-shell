@@ -2979,7 +2979,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     amd64_warmer = parsed_ci["docker-build-cache-amd64"]
     assert amd64_warmer["stage"] == "cache"
-    assert amd64_warmer["tags"] == ["self-hosted"]
+    assert amd64_warmer["tags"] == ["aws-spot-amd64"]
     assert amd64_warmer["resource_group"] == amd64_resource_group
     assert parsed_ci[".scheduled-docker-build"]["interruptible"] is True
     amd64_warmer_script = "\n".join(amd64_warmer["script"])
@@ -3084,18 +3084,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert arm64_job["extends"] == ".release-arm64-dind"
     assert "resource_group" not in arm64_job
     arm64_template = parsed_ci[".release-arm64-dind"]
-    assert arm64_template["tags"] == ["saas-linux-small-arm64"]
-    assert arm64_template["services"] == [
-        {
-            "name": "${CI_DOCKER_IMAGE}-dind",
-            "alias": "docker",
-            "command": [
-                "--mtu=1360",
-                "--tls=false",
-            ],
-        }
-    ]
-    assert arm64_template["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
+    assert arm64_template["tags"] == ["aws-spot-arm64"]
+    assert arm64_template["services"] == parsed_ci[".docker-dind"]["services"]
+    assert arm64_template["variables"]["DOCKER_HOST"] == "tcp://docker:2376"
     arm64_before_script = "\n".join(arm64_template["before_script"])
     assert "until docker info" in arm64_before_script
     assert "did not become ready after 60 seconds" in arm64_before_script
@@ -3312,13 +3303,10 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         r"@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
     ) in dockerhub_overview
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert 'privileged = false' in contributing
-    assert (
-        'volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]'
-        in contributing
-    )
-    assert 'volumes = ["/certs/client", "/cache"]' not in contributing
-    assert "saas-linux-small-arm64" in contributing
+    assert 'privileged = true' in contributing
+    assert 'volumes = ["/certs/client", "/cache"]' in contributing
+    assert "aws-spot-amd64" in contributing
+    assert "aws-spot-arm64" in contributing
     assert "`selinux`, `self-managed`, and `baku`" in contributing
     assert "`podman`, `self-managed`, and `baal`" in contributing
     assert "A single `v*` rule is the simplest option" in contributing

@@ -793,6 +793,11 @@ independent review boundaries, and installed scanner inventory safety. Browser t
 checks cover complete upstream license text generation and verified Hadolint installation.
 
 `test_scanner_compatibility.py` is opt-in because it launches the real isolated scanner.
+`test_ci_dind.py` checks effective job settings across inherited CI templates,
+TLS access for nested image scanners, native shell-runner exceptions, and bounded
+Docker readiness with both success and failure cases. Live AWS pipelines verify
+provisioning and native architecture behavior separately.
+
 The `test-dependency-qualification` job runs it against disposable localhost APIs on
 production Python and retains environment inventories and JUnit results. Locally, use
 `sh scripts/release/run_dependency_qualification.sh` for committed source. For a prepared

@@ -28,6 +28,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Docker CI jobs run without a worker socket mount.** Build, smoke, cache, image verification, and release jobs share version-matched DinD over TLS with a readiness check. Nested image scanners use that daemon's TLS endpoint; dedicated SELinux and rootless Podman checks retain their native host behavior. Contributor guidance and CI regression checks cover the runner boundaries.
+
+- **Dependency qualification runs on the AWS ephemeral runners.** The CI job uses a version-matched Docker-in-Docker service over TLS instead of requiring the worker's Docker socket, and waits for the daemon before starting its checks.
+
 - **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
 
 - **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.
