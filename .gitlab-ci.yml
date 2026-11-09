@@ -3,7 +3,7 @@
 
 default:
   tags:
-    - self-hosted
+    - aws-spot-amd64
 
 variables:
   CI_DEFAULT_IMAGE: "python:3.15.2-slim"
@@ -857,7 +857,7 @@ release-image-amd64:
         - "--mtu=1360"
         - "--tls=false"
   tags:
-    - saas-linux-small-arm64
+    - aws-spot-arm64
   variables:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
