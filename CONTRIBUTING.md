@@ -49,15 +49,8 @@ Coding agents should also follow [AGENTS.md](AGENTS.md), which collects the repo
    sudo apt-get update
    sudo apt-get install -y shellcheck
 
-   # Dockerfile linting
-   curl --fail --show-error --location --retry 3 -o /tmp/hadolint \
-     https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
-   printf '%s  %s\n' \
-     c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 \
-     /tmp/hadolint | sha256sum --check - && \
-     sudo install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
-   hadolint --version
-   rm /tmp/hadolint
+   # Dockerfile linting (Linux x86-64; uses the checked-in integrity manifest)
+   sudo node scripts/release/install_hadolint.mjs
    ```
 
 2. Create and activate a local virtual environment from the repo root:
@@ -176,7 +169,7 @@ Before merging the release branch back to `main`:
 - Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
 - Update the release version in [app/config.py](app/config.py), [package.json](package.json), both root version fields in `package-lock.json`, the Dockerfile and development Compose build defaults, the production Compose and `deploy/.env.example` image defaults, `deploy/container-licenses.json`, and the release-version anchor in `tests/py/test_production_install.py`.
 - Run `python scripts/check_versions.sh --release-version <version>` and fix every reported app, npm, Docker, Compose, installer, license-inventory, OpenAPI, and production-install test mismatch before creating the tag.
-- Run `python scripts/check_container_licenses.py` after updating `reviewed_for_release` and confirming `reviewed_on` reflects the actual review. The version gate checks the inventory release, while this command checks its component coverage, sources, licenses, and notice paths.
+- Run `python scripts/release/check_container_licenses.py` after updating `reviewed_for_release` and confirming `reviewed_on` reflects the actual review. The version gate checks the inventory release, while this command checks its component coverage, sources, licenses, and notice paths.
 - After changing the app version, regenerate the checked-in API contract with `python scripts/generate_api_openapi.py` so [docs/api-v1-openapi.json](docs/api-v1-openapi.json) matches `/api/v1/openapi.json`.
 - Ensure the version-derived `PROJECT_SOURCE` link in [app/config.py](app/config.py) resolves to the exact public release tag and opens its repository README.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
@@ -405,7 +398,7 @@ Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/esli
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
-CI installs Hadolint 2.15.1 from its Linux x86-64 release asset, retries failed downloads, and verifies the pinned SHA-256 before installation. It checks that Hadolint starts before running the linters. When updating Hadolint, update both the version and checksum in `lint-js` and the Linux setup example above.
+CI and the Linux installer read the Hadolint release and SHA-256 from [`.tooling/hadolint.json`](.tooling/hadolint.json). Downloads must pass both checksum and executable-version checks before installation. Central Renovate discovers that manifest and refreshes its companion checksum from the selected official release asset.
 
 **Patched lint dependency:** Markdownlint and Stylelint use the local MIT-licensed `braces` package in `tools/vendor/braces/`. It contains the nesting-depth fix proposed in [upstream PR 72](https://github.com/micromatch/braces/pull/72) for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The published `braces` package has no fixed release; the private version `3.0.3-darklab.1` identifies our patched copy. Its [notice](tools/vendor/braces/NOTICE.txt), [license](tools/vendor/braces/LICENSE), and [source patch](tools/vendor/braces/security.patch) preserve provenance and attribution. The root development dependency and `$braces` override make every lint dependency use this copy through a normal `npm ci`.
 
@@ -527,7 +520,7 @@ For a branch-image security recheck that needs fresh Debian packages, start a ne
 
 The protected jobs call `scripts/release/publish_release_artifacts.sh` for canonical image publication, Docker Hub promotion, and immutable payload upload. Keep retry, conflict, malformed-response, and command-failure behavior in that script so the local fake-registry regression harness exercises the same branches CI runs.
 
-Any Dockerfile tool-version or top-level apt, pip, or Git install change must update `deploy/container-licenses.json`. Run `python scripts/check_container_licenses.py` before publishing; it verifies that every install maps to a reviewed component with a source, license, and notice location and that the bundled WPScan terms still match upstream exactly. The image smoke job performs the second half of the gate against the built filesystem, including notice-path resolution and the generated RubyGem dependency manifest. Ordinary push and merge-request pipelines also run the offline release-version consistency check; the protected tag job repeats it against the tag itself.
+Any Dockerfile tool-version or top-level apt, pip, or Git install change must update `deploy/container-licenses.json`. Run `python scripts/release/check_container_licenses.py` before publishing; it verifies that every install maps to a reviewed component with a source, license, and notice location and that the bundled WPScan terms still match upstream exactly. The image smoke job performs the second half of the gate against the built filesystem, including notice-path resolution and the generated RubyGem dependency manifest. Ordinary push and merge-request pipelines also run the offline release-version consistency check; the protected tag job repeats it against the tag itself.
 
 Before testing a release payload locally, check the version boundary and build into an empty output directory:
 
@@ -559,6 +552,34 @@ above Dockerfile tool-version defaults. Keep each comment immediately before its
 literal `ARG` assignment, with the upstream module or package name and its version
 scheme. Unannotated install commands aren't scanned for tool versions. The Python
 base image and Dockerfile syntax image use Renovate's native Dockerfile support.
+
+The project preparation interface is `python scripts/release/dependency_update.py prepare`;
+`check` performs the same contract checks without changing tracked files. Central
+Renovate supplies the approved update context and an external report path through
+`RENOVATE_PREPARATION_CONTEXT` and `RENOVATE_PREPARATION_REPORT`. Preparation adds
+an idempotent summary to the active changelog section and checks scanner constraints,
+production Python metadata, reviewed security minimums, and the container-license
+inventory. It records parser, scanner-patch, WPScan terms, browser-license, and major
+version review requirements separately from completed mechanical checks.
+
+Browser package updates also run `npm run vendor:sync`, `npm run notices:sync`, and
+`npm run assets:sync`. Their check commands verify the saved output. Frontend notices
+contain the complete license texts from the installed runtime packages; review terms
+changes rather than treating regeneration as license approval. Node and Python
+preparation versions come from the project's edited CI and Dockerfile pins. Python
+resolution records cover app/dev dependencies on both production and CI Python, with
+each scanner resolved separately on production Python.
+
+The `test-dependency-qualification` CI job uses the production Python image to test
+application compatibility and the real Schemathesis command/report against disposable
+localhost APIs. Run `sh scripts/release/run_dependency_qualification.sh` to exercise
+the committed source with the same container boundary. It passes no host directories,
+Docker socket, or GitLab credentials into that container. The normal Python lanes
+cover CI Python. `audit-py` audits app and development requirements; `docker-build`
+also audits the actual distributions installed in each isolated scanner environment.
+Image builds, deterministic smoke tests, and the fixed-Critical SBOM gate remain
+required image qualification. Passing preparation doesn't replace those checks or
+approve an independent parser or license change.
 
 Routine dependency versions belong in their build or package manifests. Tests read
 those pins and check that builds, constraints, release evidence, and version output

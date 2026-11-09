@@ -140,6 +140,8 @@ test-js-e2e-postgres-auth-profiles:
   before_script:
     - apt-get update -q && apt-get install -y -q curl git jq
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
+    - mkdir -p test-results
+    - pip list --format=json > test-results/ci-python-environment.json
 
 test-py-pytest-fast:
   extends: .pytest-lane
@@ -160,6 +162,7 @@ test-py-pytest-fast:
       - test-results/pytest-fast.xml
       - test-results/pytest-fast-durations.txt
       - test-results/pytest-fast-files.txt
+      - test-results/ci-python-environment.json
       - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-fast.xml
@@ -183,6 +186,7 @@ test-py-pytest-release:
       - test-results/pytest-release.xml
       - test-results/pytest-release-durations.txt
       - test-results/pytest-release-files.txt
+      - test-results/ci-python-environment.json
       - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-release.xml
@@ -232,6 +236,7 @@ test-py-postgres:
     - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
     - mkdir -p test-results
+    - pip list --format=json > test-results/ci-python-environment.json
     - bash -o pipefail -c 'bash scripts/run_postgres_tests.sh | tee test-results/pytest-postgres-durations.txt'
   after_script:
     - python scripts/test-support/summarize_pytest_junit.py test-results/pytest-postgres.xml test-results/pytest-postgres-files.txt --lane postgres
@@ -241,6 +246,7 @@ test-py-postgres:
       - test-results/pytest-postgres.xml
       - test-results/pytest-postgres-durations.txt
       - test-results/pytest-postgres-files.txt
+      - test-results/ci-python-environment.json
       - test-results/pytest-timings.json
     reports:
       junit: test-results/pytest-postgres.xml
@@ -268,12 +274,40 @@ lint-py:
     - python scripts/release/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
+test-dependency-qualification:
+  stage: test
+  image: $CI_DOCKER_IMAGE
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - apk add --no-cache git
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
+      when: never
+    - changes:
+        - Dockerfile
+        - .gitlab-ci.yml
+        - app/requirements.txt
+        - requirements-dev.txt
+        - deploy/*-constraints.txt
+        - scripts/release/*
+        - tests/py/test_dependency_updates.py
+        - tests/py/test_scanner_compatibility.py
+        - app/services/assessments/schemathesis*.py
+  script:
+    - sh scripts/release/run_dependency_qualification.sh
+  artifacts:
+    when: always
+    paths:
+      - test-results/dependency-qualification/
+    reports:
+      junit: test-results/dependency-qualification/dependency-qualification.xml
+    expire_in: 1 week
+
 lint-js:
   stage: lint
   image: $CI_NODE_IMAGE
-  variables:
-    HADOLINT_VERSION: "2.15.1"
-    HADOLINT_SHA256: "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -283,14 +317,7 @@ lint-js:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
     - apt-get update -q && apt-get install -y -q shellcheck curl
-    - |
-      curl --fail --show-error --location --retry 3 \
-        "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" \
-        -o /tmp/hadolint
-      printf '%s  %s\n' "$HADOLINT_SHA256" /tmp/hadolint | sha256sum --check -
-      install -m 0755 /tmp/hadolint /usr/local/bin/hadolint
-      hadolint --version
-      rm /tmp/hadolint
+    - node scripts/release/install_hadolint.mjs
     - npm ci
   cache:
     key: "node-$CI_COMMIT_REF_SLUG"
@@ -304,6 +331,7 @@ lint-js:
     - npm run lint:md
     - npm run lint:json
     - npm run vendor:check
+    - npm run notices:check
     - npm run assets:check
 
 audit-py:
@@ -316,8 +344,8 @@ audit-py:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - pip install -q pip-audit
-    - pip-audit -r app/requirements.txt
+    - pip install -q -r requirements-dev.txt
+    - pip-audit -r app/requirements.txt -r requirements-dev.txt
 
 audit-js:
   stage: audit
@@ -465,7 +493,7 @@ docker-build:
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
   before_script:
-    - apk add --no-cache jq
+    - apk add --no-cache jq python3 py3-pip
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
       when: never
@@ -524,6 +552,9 @@ docker-build:
         --build-arg "APT_CACHE_EPOCH=${apt_cache_epoch}" \
         --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}:buildcache-amd64" \
         --load --tag "darklab_shell:$CI_COMMIT_SHA" - < "$build_context"
+    - python3 -m venv /tmp/scanner-audit
+    - /tmp/scanner-audit/bin/pip install "$(sed -n '/^pip-audit==/p' requirements-dev.txt)"
+    - /tmp/scanner-audit/bin/python scripts/release/audit_scanner_environments.py "darklab_shell:$CI_COMMIT_SHA"
     - docker pull "$SYFT_IMAGE"
     - docker pull "$GRYPE_IMAGE"
     - mkdir -p branch-image-evidence
@@ -542,6 +573,7 @@ docker-build:
   artifacts:
     when: always
     paths:
+      - test-results/scanner-audits/
       - branch-image-evidence/darklab-shell.cdx.json
       - branch-image-evidence/vulnerability-report.json
     expire_in: 1 week

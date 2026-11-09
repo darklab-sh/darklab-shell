@@ -1203,10 +1203,11 @@
       "app/static/js/workspace_bridge.js": "431541f795197e0b7809ed1a72b795da2ac5e8af27d21c5d65dd8f5e83e87f0f",
       "assets.config.json": "e6fd52be121127eecc89de2de6a3a71ec225644e9b7bd53125b212ad1cd0bcdd",
       "package-lock.json": "f8fb0d4e532eced408cbfc4f2d846d4cff767984c696f3a68a98615a61b0f0fc",
-      "package.json": "bb93031121fbda6bb4c735b94d32b1efdb6b19410962bdcc88ed0fab8d4c7c34",
+      "package.json": "7d3a9b1e32b93b6fc95626eba37221df88c0336ed0e15f1b16818a55f5ccba7b",
       "scripts/frontend/asset_freshness.mjs": "a3286c801ce65fdd407c6870f29c648bf5eb08741bf3bc95158ab3958ba8577a",
       "scripts/frontend/build_assets.mjs": "cce8f9a69f65aa8c7bd53c3ca7be7af20f4b754fd16d50072211169d2be91d1c",
       "scripts/frontend/build_vendor.mjs": "31091d594968d3e29a63770c684887b075592dc1274a2c7157e6ce8a14516382",
+      "scripts/frontend/generate_frontend_notices.mjs": "b30f85dd1fa7a110c4d2cdfd37421f9f4c5a737ddddf81305fb5868e9808a0ff",
       "scripts/frontend/inventory_frontend_modules.mjs": "e43f383cb5403e2f3b629f8db9514dcd8d6ed298b633f07f5e9337601507ed7f",
       "scripts/frontend/lint_json.mjs": "b3257ee310540b0b2a849d267d631fb775a7b2b37b3177a6df35193bf8c4dad8"
     },

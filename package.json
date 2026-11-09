@@ -17,7 +17,7 @@
     "test:e2e:ui": "bash scripts/run_playwright.sh --ui",
     "capture:container-smoke-test": "node scripts/test-support/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/development/capture_ui_screenshots.sh",
-    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check && npm run assets:check && npm run assets:inventory:check",
+    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check && npm run assets:check && npm run assets:inventory:check && npm run notices:check",
     "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ scripts/*.py scripts/development/*.py scripts/generate/*.py scripts/operations/ scripts/release/*.py scripts/release/check_versions.sh scripts/test-support/*.py && bandit -r app/ -ll -q && python scripts/release/check_source_licenses.py",
     "lint:js": "npx eslint --no-warn-ignored --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/",
     "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
@@ -36,7 +36,9 @@
     "assets:inventory:check": "node scripts/frontend/inventory_frontend_modules.mjs --check",
     "assets:fresh": "node scripts/frontend/asset_freshness.mjs",
     "assets:sync": "node scripts/frontend/build_assets.mjs",
-    "assets:check": "tmp=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$tmp\" --check && root_cwd=$(mktemp -d) && scripts_cwd=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$root_cwd\" --no-precompress && (cd scripts/frontend && node build_assets.mjs --out-dir \"$scripts_cwd\" --no-precompress) && diff -qr \"$root_cwd\" \"$scripts_cwd\""
+    "assets:check": "tmp=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$tmp\" --check && root_cwd=$(mktemp -d) && scripts_cwd=$(mktemp -d) && node scripts/frontend/build_assets.mjs --out-dir \"$root_cwd\" --no-precompress && (cd scripts/frontend && node build_assets.mjs --out-dir \"$scripts_cwd\" --no-precompress) && diff -qr \"$root_cwd\" \"$scripts_cwd\"",
+    "notices:sync": "node scripts/frontend/generate_frontend_notices.mjs",
+    "notices:check": "node scripts/frontend/generate_frontend_notices.mjs --check"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
