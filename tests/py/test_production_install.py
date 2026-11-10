@@ -3021,13 +3021,13 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "docker-build-barbas": ["barbas"],
         "docker-build-baka": ["baka"],
         "docker-build-bana": ["bana"],
-        "docker-build-baku": ["selinux", "self-managed", "baku"],
-        "docker-build-baal": ["podman", "self-managed", "baal"],
+        "docker-build-selinux": ["aws-spot-selinux"],
+        "podman-build-rootless": ["aws-spot-podman"],
     }
     for job_name, tags in scheduled_build_tags.items():
         assert parsed_ci[job_name]["extends"] == ".scheduled-docker-build"
         assert parsed_ci[job_name]["tags"] == tags
-    podman_warmer_script = "\n".join(parsed_ci["docker-build-baal"]["script"])
+    podman_warmer_script = "\n".join(parsed_ci["podman-build-rootless"]["script"])
     assert "podman build" in podman_warmer_script
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
@@ -3129,7 +3129,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "RELEASE_REGISTRY_CLEANUP_TOKEN" in cleanup_script
     assert 'RELEASE_STAGING_CLEANUP_ENABLED == "1"' in cleanup_job["rules"][0]["if"]
     selinux_job = parsed_ci["release-image-selinux-smoke"]
-    assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
+    assert selinux_job["tags"] == ["aws-spot-selinux"]
     assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (
         selinux_job["rules"][0]["if"]
     )
@@ -3143,7 +3143,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert ".darklab-release-deployment.*" in selinux_pre_get_sources
     assert '"$stale_dir:/cleanup:Z"' in selinux_pre_get_sources
     podman_job = parsed_ci["release-image-rootless-podman-smoke"]
-    assert podman_job["tags"] == ["podman", "self-managed", "baal"]
+    assert podman_job["tags"] == ["aws-spot-podman"]
     assert "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == \"1\"" in (
         podman_job["rules"][0]["if"]
     )
@@ -3306,8 +3306,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert 'volumes = ["/certs/client", "/cache"]' in contributing
     assert "aws-spot-amd64" in contributing
     assert "aws-spot-arm64" in contributing
-    assert "`selinux`, `self-managed`, and `baku`" in contributing
-    assert "`podman`, `self-managed`, and `baal`" in contributing
+    assert "`aws-spot-selinux`" in contributing
+    assert "`aws-spot-podman`" in contributing
     assert "A single `v*` rule is the simplest option" in contributing
     assert "protected, masked, and hidden variable" in contributing
     assert "needs only **Read & Write** access" in contributing

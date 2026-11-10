@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Release CI checks use the AWS compatibility job names and runner tags.** Scheduled SELinux and rootless Podman builds and release smoke assertions match the migrated CI jobs while retaining their build and host-behavior checks.
+
 - Host worker smoke jobs skip the global pip install and inherited service containers, so qualification only requires the runtime baked into each worker image.
 
 ### Changed
