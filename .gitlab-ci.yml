@@ -1897,6 +1897,9 @@ release-public-smoke:
     # Host profiles use the instance executor; image/services settings don't apply.
 .host-smoke:
   stage: test
+  # These host checks do not need the consuming project's Python setup.
+  before_script: []
+  services: []
   rules:
     - if: '$RUN_WORKER_QUALIFICATION == "true"'
       when: manual

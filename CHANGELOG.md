@@ -14,6 +14,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.1.3] - Unreleased
 
+### Fixed
+
+- Host worker smoke jobs skip the global pip install and inherited service containers, so qualification only requires the runtime baked into each worker image.
+
 ### Changed
 
 - **SELinux and rootless Podman checks target disposable AWS workers.** Scheduled builds and optional release gates use capability tags with native host execution, preserving enforcing SELinux, rootless ownership, and bind mounts. CI regression checks cover all four jobs and prevent inherited Docker-in-Docker settings.
