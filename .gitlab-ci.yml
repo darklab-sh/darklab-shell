@@ -758,7 +758,7 @@ docker-build-buta:
   tags:
     - buta
 
-docker-build-baku:
+docker-build-selinux:
   extends: .scheduled-docker-build
   services: []
   before_script: []
@@ -769,11 +769,9 @@ docker-build-baku:
     DOCKER_CERT_PATH: ""
     CONTAINER_MOUNT_MODE: "bind"
   tags:
-    - selinux
-    - self-managed
-    - baku
+    - aws-spot-selinux
 
-docker-build-baal:
+podman-build-rootless:
   extends: .scheduled-docker-build
   services: []
   before_script: []
@@ -784,9 +782,7 @@ docker-build-baal:
     DOCKER_CERT_PATH: ""
     CONTAINER_MOUNT_MODE: "bind"
   tags:
-    - podman
-    - self-managed
-    - baal
+    - aws-spot-podman
   script:
     - |
       python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
@@ -1223,9 +1219,14 @@ release-image-selinux-smoke:
   stage: verify
   image: $CI_DOCKER_IMAGE
   tags:
-    - selinux
-    - self-managed
-    - baku
+    - aws-spot-selinux
+  services: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_SELINUX_COMPATIBILITY_ENABLED == "1"'
     - when: never
@@ -1261,9 +1262,14 @@ release-image-selinux-smoke:
 release-image-rootless-podman-smoke:
   stage: verify
   tags:
-    - podman
-    - self-managed
-    - baal
+    - aws-spot-podman
+  services: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == "1"'
     - when: never
@@ -1887,3 +1893,37 @@ release-public-smoke:
       - release-install/release-manifest.json
       - release-compose.log
     expire_in: 1 week
+
+    # Host profiles use the instance executor; image/services settings don't apply.
+.host-smoke:
+  stage: test
+  rules:
+    - if: '$RUN_WORKER_QUALIFICATION == "true"'
+      when: manual
+    - when: never
+  allow_failure: false
+  timeout: 20 minutes
+  script:
+    - test "$(uname -m)" = x86_64
+    - test "$(id -un)" = gitlab-runner
+    - /usr/local/libexec/runner-host-ready "$IMAGE_PROFILE" "$(cat /usr/local/share/runner-image/runner-version)"
+    - test "$(df -Pk "$HOME" | awk 'NR == 2 {print $2}')" -ge 240000000
+    - $CONTAINER_RUNTIME run --rm docker.io/library/debian:13-slim uname -m
+    - printf '%s\n' "$IMAGE_PROFILE" > host-qualification.txt
+  artifacts:
+    paths: [host-qualification.txt]
+
+smoke-podman:
+  extends: .host-smoke
+  tags: [aws-spot-podman]
+  variables:
+    IMAGE_PROFILE: debian-podman
+    CONTAINER_RUNTIME: podman
+
+smoke-selinux:
+  extends: .host-smoke
+  tags: [aws-spot-selinux]
+  variables:
+    IMAGE_PROFILE: fedora-selinux
+    CONTAINER_RUNTIME: docker
+

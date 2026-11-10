@@ -62,9 +62,13 @@ def test_docker_jobs_use_the_job_daemon_and_share_client_certificates():
     assert '/var/run/docker.sock' not in (ROOT / '.gitlab-ci.yml').read_text()
 
 
-@pytest.mark.parametrize('name', ['docker-build-baku', 'docker-build-baal'])
-def test_native_scheduled_checks_do_not_inherit_dind(name):
+@pytest.mark.parametrize('name', [
+    'docker-build-selinux', 'podman-build-rootless',
+    'release-image-selinux-smoke', 'release-image-rootless-podman-smoke',
+])
+def test_native_host_checks_do_not_inherit_dind(name):
     job = effective_job(name)
+    assert job['tags'] == ['aws-spot-selinux' if 'selinux' in name else 'aws-spot-podman']
     assert job['services'] == []
     assert job['before_script'] == []
     for key in ('DOCKER_HOST', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'DOCKER_TLS_CERTDIR'):
