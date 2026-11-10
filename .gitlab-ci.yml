@@ -1929,4 +1929,3 @@ smoke-selinux:
   variables:
     IMAGE_PROFILE: fedora-selinux
     CONTAINER_RUNTIME: docker
-
