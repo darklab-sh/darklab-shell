@@ -3019,7 +3019,6 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "docker-build-babi": ["babi"],
         "docker-build-bile": ["bile"],
         "docker-build-barbas": ["barbas"],
-        "docker-build-beleth": ["beleth"],
         "docker-build-baka": ["baka"],
         "docker-build-bana": ["bana"],
         "docker-build-baku": ["selinux", "self-managed", "baku"],
