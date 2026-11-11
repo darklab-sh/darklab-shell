@@ -16,6 +16,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **CI runs on disposable AWS workers with separate native compatibility checks.**
+  - **Before:** Ordinary Docker jobs used a worker socket, and ARM64 release jobs used a GitLab-hosted runner.
+  - **After:** AMD64 and ARM64 Docker jobs use version-matched Docker-in-Docker over TLS with bounded readiness checks. Scheduled SELinux and rootless Podman builds and optional release gates use `aws-spot-selinux` and `aws-spot-podman`, preserving native host policy and bind mounts. The retired `beleth` build and temporary worker qualification jobs are removed.
+  - **Tests:** CI contracts check runner routing, inherited Docker settings, nested scanner TLS access, native host exceptions, and readiness success and failure. CI configuration changes also require deterministic container smoke coverage. Contributor and architecture guidance describe the runner boundaries.
+
 - **Dependency versions are updated.** Updated `jsdom` from `^30.1.3` to `^31.0.0`.
 
 - **Dependency updates include preparation and compatibility evidence.** Project-owned checks keep generated assets, complete browser license notices, scanner constraints, and changelog summaries aligned. Production and CI Python resolutions remain separate from isolated scanners. CI exercises real Schemathesis reports against disposable APIs and audits installed scanner dependencies alongside app and development requirements. Hadolint uses one release/checksum manifest. Preparation reports identify independent parser, patch, license, and major-version reviews without claiming target CI has passed.
