@@ -6,16 +6,16 @@
 # https://pypi.org/project/nassl/5.4.0/#files
 ARG PYTHON_BASE_IMAGE=python:3.14.10-slim
 # renovate: datasource=golang-version depName=golang versioning=go
-ARG GO_VERSION=1.27.3
-ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
-ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+ARG GO_VERSION=1.27.4
+ARG GO_LINUX_AMD64_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+ARG GO_LINUX_ARM64_SHA256=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 ARG GO_BUILD_PARALLELISM=2
 # renovate: datasource=go depName=golang.org/x/crypto versioning=go
 ARG GO_X_CRYPTO_VERSION=v0.58.0
 # renovate: datasource=go depName=golang.org/x/net versioning=go
 ARG GO_X_NET_VERSION=v0.62.0
 # renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
-ARG GO_BROTLI_VERSION=v1.2.8
+ARG GO_BROTLI_VERSION=v1.3.0
 # renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
 ARG KIN_OPENAPI_VERSION=v0.153.0
 # renovate: datasource=go depName=github.com/jackc/pgx/v5 versioning=go
@@ -40,7 +40,7 @@ ARG NAABU_VERSION=v2.7.0
 # renovate: datasource=go depName=github.com/projectdiscovery/katana versioning=go
 ARG KATANA_VERSION=v1.8.0
 # renovate: datasource=github-tags depName=projectdiscovery/tlsx
-ARG TLSX_VERSION=v1.4.4
+ARG TLSX_VERSION=v1.4.5
 # renovate: datasource=go depName=github.com/projectdiscovery/cdncheck versioning=go
 ARG CDNCHECK_VERSION=v1.4.0
 # renovate: datasource=go depName=github.com/owasp-amass/amass/v5 versioning=go
@@ -83,7 +83,7 @@ ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.3.0-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=f63b98296b56f0575df5a4539ce1806f07218100d18d87d8db512648b6c5c6cb
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 # renovate: datasource=pypi depName=schemathesis versioning=pep440
-ARG SCHEMATHESIS_VERSION=4.33.1
+ARG SCHEMATHESIS_VERSION=4.33.2
 # renovate: datasource=go depName=github.com/lc/gau/v2 versioning=go
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=

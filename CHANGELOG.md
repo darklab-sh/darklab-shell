@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `github.com/andybalholm/brotli` from `v1.2.8` to `v1.3.0`; `golang` from `1.27.3` to `1.27.4`; `jsonschema-rs` from `==0.60.3` to `==0.61.1`; `markdown-it-py` from `==4.2.0` to `==4.3.0`; `minimatch` from `11.0.5` to `11.0.7`; `projectdiscovery/tlsx` from `v1.4.4` to `v1.4.5`; `re2js` from `2.9.1` to `2.10.0`; `schemathesis` from `4.33.1` to `4.33.2`; `schemathesis` from `==4.33.1` to `==4.33.2`.
+
 - **Dependency versions are updated.** Updated `croniter` from `==6.2.4` to `==7.0.0`; `gunicorn` from `==26.2.0` to `==27.0.0`.
 
 - **CI runs on disposable AWS workers with separate native compatibility checks.**
@@ -35,6 +37,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **CI runner tests use the current scheduled build names.** The job inventory maps `docker-build-amd64` and `docker-build-arm64` to their AWS runner tags explicitly. SELinux and rootless Podman builds remain covered by native-host checks, while Docker jobs retain the inherited TLS, certificate-sharing, and readiness assertions.
+
 - **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
 
 - **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.
@@ -45,7 +49,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 - **Dockerfile linting rejects failed or damaged Hadolint downloads during setup.** CI uses the correct release asset name, pins Hadolint 2.15.1 and its SHA-256, retries failed downloads, and checks the installed tool before running the linters. The Linux contributor setup uses the same verified release.
 
-- **Schemathesis 4.33.1 scans and reports remain compatible with reviewed Assessments.** Commands use the current deterministic-generation options. Report parsing accepts the release's lowercase phase names and empty failure descriptions while checking the exact tool version, approved operations, evidence limits, and private-data handling. Regression checks keep the packaged version, isolated constraints, parser contract, and smoke version expectation aligned, and reject reports from the preceding release. Smoke expectations check the CLI usage and required configuration option. A local scan against a disposable API verifies the command and report together.
+- **Schemathesis 4.33.2 scans and reports remain compatible with reviewed Assessments.**
+  - **Root cause:** Updating the scanner and its `jsonschema-rs` validator left the independently reviewed report version behind, so valid reports were rejected.
+  - **Fix:** The parser accepts the reviewed 4.33.2 runtime paired with `jsonschema-rs` 0.61.1. Complete scanner dependency resolution replaces the obsolete separate `<0.61.0` Renovate cap. Deterministic commands, lowercase phase names, empty failure descriptions, exact provenance, approved operations, evidence limits, and private-data handling remain enforced.
+  - **Tests:** Real scans against disposable APIs cover clean responses, server errors, response-schema violations, and private-data redaction. Regression checks keep the packaged version, isolated constraints, parser contract, and smoke expectations aligned and reject reports from the preceding release.
 
 - **Container helpers handle file paths and module loading explicitly.** The Shodan patch uses a writable filesystem path, and security tests reject missing module loaders before importing helpers, resolving the reported editor type errors.
 

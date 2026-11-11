@@ -438,7 +438,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 ## GitLab Runner Setup
 
-The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled fanout to named Docker runners. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
+The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled build fanout. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
 
 ### AWS Docker Runners
 
@@ -467,10 +467,9 @@ and [Docker Autoscaler guide](https://docs.gitlab.com/runner/executors/docker_au
 for the complete runner configuration.
 
 The scheduled fanout assigns its shared AMD64 cache warmer to `aws-spot-amd64`.
-Its host-specific Docker consumers keep their individual runner tags and use the same
-DinD settings; those Docker-executor runners also need privileged mode and the
-`/certs/client` volume. A matching runner must exist for each retained host tag;
-the manager does not itself execute build jobs. The `docker-build-selinux`
+Its `docker-build-amd64` and `docker-build-arm64` consumers select `aws-spot-amd64`
+and `aws-spot-arm64`, respectively, and use the same DinD settings. Both runner pools
+need privileged mode and the `/certs/client` volume. The `docker-build-selinux`
 and `podman-build-rootless` fanout jobs use the native SELinux Docker and rootless Podman contracts
 below, with DinD services and TLS settings disabled.
 
@@ -514,7 +513,7 @@ Complete this setup before creating a final or release-candidate tag:
 - Keep the GitLab project public, with the Container Registry, Package Registry, and Releases enabled. Confirm anonymous users can pull the canonical image and download Generic Package Registry files; the post-release job checks both without registry credentials.
 - Keep `docker.io/darklabsh/darklab-shell` public. Configure Docker Hub's immutable-tag rule as `^[0-9]+\.[0-9]+\.[0-9]+$` so final image tags can't move while `X.Y.Z-rc.N` tags remain removable after testing.
 - Keep the public Docker Hub repository overview synchronized with the reviewed `deploy/dockerhub-overview.txt`. The anonymous release check requires its GitLab OIDC issuer and final-or-candidate signing-identity pattern.
-- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners and retained host-tagged runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
+- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
 
 ### Release Images And Installer Payloads
 
@@ -650,6 +649,8 @@ The production image uses Python 3.14 because [SSLyze 6.3.1 requires `nassl>=5.4
 SSLyze and Schemathesis use isolated Python environments, each checked with `pip check` during image construction. The application environment is checked separately. SSLyze's reviewed dependency pins live in `deploy/sslyze-constraints.txt`. Its source archive is pinned by commit and SHA-256 to [upstream's cryptography compatibility fix](https://github.com/nabla-c0d3/sslyze/commit/12ad04350a4f57bec846c15211e4d71075ee53c9), allowing patched cryptography 50 without changing the scanner's runtime code. Shodan 1.31.0 has a build-time compatibility patch for standard-library plugin discovery and version metadata; changing its pin requires reviewing that patch.
 
 Schemathesis updates must keep the Dockerfile version, `deploy/schemathesis-constraints.txt`, and the report parser's `SCHEMATHESIS_REPORT_TOOL_VERSION` aligned. The container smoke version expectation reads the Dockerfile pin automatically. Refresh changed help output against the installed CLI, and verify a real scan's NDJSON report with the production parser before changing its reviewed version. The parser accepts only that reviewed scanner version; a successful CLI run alone doesn't establish report compatibility.
+
+`jsonschema-rs` is resolved with the complete isolated Schemathesis environment using the scanner's upstream dependency bounds. Qualification checks clean responses, server errors, and response-schema violations through the real scanner and production report parser, including private-response redaction.
 
 OpenSSL 4.1 supplies the TLS command and provider modules. The image includes the legacy provider for existing cipher checks; OpenSSL 4 no longer installs engine modules. sslscan 2.2.3 still needs APIs removed in OpenSSL 4, so it builds against Debian's OpenSSL 3 headers before the standalone OpenSSL build and uses Debian's shared libraries at runtime.
 
