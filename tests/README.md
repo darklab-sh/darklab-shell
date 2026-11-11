@@ -675,7 +675,7 @@ The deterministic tier also runs TruffleHog against an innocuous temporary file 
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI automatically requires `container-smoke-test-deterministic` when the Dockerfile, packaged dependencies, container helpers, command/workflow catalogs, wrapper, or smoke fixtures change. Scheduled pipelines run `container-smoke-test-public-network` with the normal retries and retain its JUnit, duration log, and JSONL retry evidence even when a later attempt passes. The broader `container-smoke-test` job remains available manually for the complete corpus. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. The build contract derives one runtime APT cache key per UTC day, carries the warmer's value through every scheduled Docker and Podman build, and keeps compiled-tool stages outside that invalidation boundary. Protected tags derive the same key from their recorded build time, build native AMD64 and ARM64 staging children, and run production-installation, bundled-tool, Syft, and Grype checks against each child before the canonical image index can exist. The ARM64 smoke also starts Redis and Postgres. Later evidence and signing jobs consume the retained platform contracts, SBOMs, reports, and effective build arguments. A protected branch rehearsal publishes a temporary index and repeats anonymous native pulls without promoting or creating release artifacts. Maintainers can use `release-image-recheck` to rerun production startup, bundled tools, and the scan against either an existing child digest or an index digest plus its selected platform without rebuilding it.
+GitLab CI automatically requires `container-smoke-test-deterministic` when CI configuration, the Dockerfile, packaged dependencies, container helpers, command/workflow catalogs, wrapper, or smoke fixtures change. Scheduled pipelines run `container-smoke-test-public-network` with the normal retries and retain its JUnit, duration log, and JSONL retry evidence even when a later attempt passes. The broader `container-smoke-test` job remains available manually for the complete corpus. Ordinary branch image builds also retain a CycloneDX SBOM and full Grype report and fail on fixed Critical findings before a release tag is created. The build contract derives one runtime APT cache key per UTC day, carries the warmer's value through every scheduled Docker and Podman build, and keeps compiled-tool stages outside that invalidation boundary. Protected tags derive the same key from their recorded build time, build native AMD64 and ARM64 staging children, and run production-installation, bundled-tool, Syft, and Grype checks against each child before the canonical image index can exist. The ARM64 smoke also starts Redis and Postgres. Later evidence and signing jobs consume the retained platform contracts, SBOMs, reports, and effective build arguments. A protected branch rehearsal publishes a temporary index and repeats anonymous native pulls without promoting or creating release artifacts. Maintainers can use `release-image-recheck` to rerun production startup, bundled tools, and the scan against either an existing child digest or an index digest plus its selected platform without rebuilding it.
 
 ---
 
@@ -792,12 +792,12 @@ Theme loading checks cover a usable current palette without a catalog request, s
 independent review boundaries, and installed scanner inventory safety. Browser tooling
 checks cover complete upstream license text generation and verified Hadolint installation.
 
-`test_scanner_compatibility.py` is opt-in because it launches the real isolated scanner.
-`test_ci_dind.py` checks effective job settings across inherited CI templates,
-TLS access for nested image scanners, native shell-runner exceptions, and bounded
-Docker readiness with both success and failure cases. Live AWS pipelines verify
-provisioning and native architecture behavior separately.
+`test_ci_dind.py` checks runner routing and effective job settings across inherited
+CI templates, TLS access for nested image scanners, native instance-worker exceptions,
+and bounded Docker readiness with success and failure cases. Live AWS pipelines
+verify provisioning and native architecture behavior separately.
 
+`test_scanner_compatibility.py` is opt-in because it launches the real isolated scanner.
 The `test-dependency-qualification` job runs it against disposable localhost APIs on
 production Python and retains environment inventories and JUnit results. Locally, use
 `sh scripts/release/run_dependency_qualification.sh` for committed source. For a prepared

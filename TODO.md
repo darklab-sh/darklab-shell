@@ -33,7 +33,7 @@ Land each coherent change through a short-lived branch and merge request while k
 
 ### Autoscale ARM64 release runners on EC2 Spot
 
-Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker pool managed by GitLab Runner's Docker Autoscaler and AWS fleeting plugin. Keep the runner manager on existing self-hosted infrastructure, scale the AWS Auto Scaling Group from zero only after the manager accepts a matching job, and destroy each worker after one job. Preserve a documented On-Demand or hosted-runner fallback so Spot capacity does not become a hard release blocker.
+Finish operational qualification of the AWS ARM64 release pool and retain evidence for the infrastructure checks below. The canonical CI jobs already select `aws-spot-arm64`; runner routing and TLS DinD configuration are documented in [GitLab Runner Setup](CONTRIBUTING.md#gitlab-runner-setup). Keep the runner manager on existing self-hosted infrastructure, scale the AWS Auto Scaling Group from zero only after the manager accepts a matching job, and destroy each worker after one job. Preserve a documented On-Demand or hosted-runner fallback so Spot capacity does not become a hard release blocker.
 
 - [ ] Define the runner and worker contract before provisioning infrastructure:
   - Use the `docker-autoscaler` executor so the existing Docker job images, service containers, privileged Docker-in-Docker flow, and release scripts keep their current execution model.
@@ -64,16 +64,12 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Validate the rendered runner configuration, installed plugin, AWS identity, ASG discovery, and service health before restarting the GitLab Runner service. Keep the Ansible run idempotent.
   - Add runner-manager logging and monitoring for scale requests, worker acquisition time, preparation failures, Spot interruption failures, orphaned instances, and ASG desired capacity that remains above zero without an active job.
 - [ ] Prove the network and security boundaries:
+  - Confirm the autoscaled runner is protected, locked to the intended project or group scope, and unable to accept untagged jobs.
   - Confirm the runner manager can reach GitLab.com and the required AWS APIs over HTTPS and can connect to workers over SSH, while workers accept no other inbound application traffic.
   - If workers use public addresses, restrict SSH to a fixed runner-manager source address. If workers use private addresses, document and validate the VPN or routed connection into the VPC.
   - Confirm workers can resolve DNS and reach GitLab registries, Docker Hub, GitHub, language package indexes, and every other source used by the release image build without requiring broad inbound access.
   - Verify the runtime IAM identity cannot modify unrelated Auto Scaling Groups or EC2 instances.
-- [ ] Migrate the ARM64 CI lane behind a temporary runner tag:
-  - Register the autoscaled runner as protected, locked to the intended project or group scope, and unable to accept untagged jobs.
-  - Point a temporary ARM64 build job at the new tag before changing the canonical release jobs.
-  - Preserve the current DinD service, MTU handling, native architecture checks, artifact contracts, timeouts, and disk measurements.
-  - Add a bounded retry for runner-system failures so a Spot interruption or failed worker acquisition can retry an idempotent build without hiding repeatable product failures.
-  - Keep the current ARM64 runner path available until the EC2 lane passes qualification and the fallback procedure has been exercised.
+- [ ] Qualify bounded retries for runner-system failures so Spot interruptions and failed worker acquisition can retry safely without conflicting with immutable staging tags or hiding product failures.
 - [ ] Qualify performance, cleanup, failure handling, and cost:
   - Demonstrate scale from desired capacity `0` to `1` after job acceptance and back to `0` after completion, with no worker or EBS volume left behind.
   - Run an uncached release image build and record provisioning time, build and export duration, peak disk use, final free-space percentage, CPU and memory pressure, and total Spot runtime.
@@ -82,7 +78,7 @@ Replace the long-running hosted ARM64 release lane with an ephemeral EC2 worker 
   - Trigger a controlled Spot interruption, confirm the interrupted job fails as a runner-system failure, and confirm its retry starts on a fresh instance without conflicting with staging tags or publication state.
   - Exercise the On-Demand fallback and return the ASG to Spot afterward.
   - Add an AWS budget or cost alarm and confirm the idle-state cost is limited to the always-on runner manager and any intentionally retained supporting infrastructure.
-- [ ] Cut over only after three consecutive ARM64 release rehearsals complete without manual repair. Then update the maintained CI and contributor documentation, remove the obsolete runner path, and record the final instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
+- [ ] Retain evidence from three consecutive ARM64 release rehearsals without manual repair, then record the qualified instance pool, storage floor, fallback policy, and measured build timings in `DECISIONS.md` and `CHANGELOG.md`.
 
 ## Feature Enhancements
 

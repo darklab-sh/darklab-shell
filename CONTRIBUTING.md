@@ -438,7 +438,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 ## GitLab Runner Setup
 
-The pipeline uses four runner shapes. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
+The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled fanout to named Docker runners. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
 
 ### AWS Docker Runners
 
@@ -446,7 +446,7 @@ Ordinary jobs use the `aws-spot-amd64` tag. Native ARM64 release and verificatio
 use `aws-spot-arm64`. Each Docker job starts a version-matched DinD service and connects
 to it over TLS on `tcp://docker:2376`; no worker Docker socket is mounted into the job.
 The shared CI settings wait for Docker readiness and use a conservative `1360` MTU.
-Configure both autoscaled runner entries with:
+The Docker settings for both autoscaled runner entries are:
 
 ```toml
 [[runners]]
@@ -458,22 +458,26 @@ Configure both autoscaled runner entries with:
 ```
 
 The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is
-ignored. Each worker runs one job and is discarded afterward. Treat these privileged
-jobs as trusted workloads. Nested Syft containers connect to the job's DinD daemon
-through its loopback TLS endpoint with read-only client certificates.
+ignored. Configure each AWS pool for one job per instance and one use per instance
+(`capacity_per_instance = 1`, `max_use_count = 1`), so the worker is discarded after
+the job. Treat these privileged jobs as trusted workloads. Nested Syft containers connect to the job's DinD daemon
+through its loopback TLS endpoint with read-only client certificates. See GitLab's
+[TLS DinD setup](https://docs.gitlab.com/ci/docker/docker_in_docker/#docker-in-docker-with-tls-enabled-in-the-docker-executor-recommended)
+and [Docker Autoscaler guide](https://docs.gitlab.com/runner/executors/docker_autoscaler/)
+for the complete runner configuration.
 
 The scheduled fanout assigns its shared AMD64 cache warmer to `aws-spot-amd64`.
 Its host-specific Docker consumers keep their individual runner tags and use the same
 DinD settings; those Docker-executor runners also need privileged mode and the
-`/certs/client` volume. A matching runner must exist for each retained host tag,
-including `beleth`; the new manager does not itself execute build jobs. The `docker-build-selinux`
+`/certs/client` volume. A matching runner must exist for each retained host tag;
+the manager does not itself execute build jobs. The `docker-build-selinux`
 and `podman-build-rootless` fanout jobs use the native SELinux Docker and rootless Podman contracts
 below, with DinD services and TLS settings disabled.
 
 The warmer and every Docker consumer build from a tracked Git archive with fixed
 file modes, keeping host ownership, timestamps, ACLs, and SELinux labels out of shared
 cache keys. The warmer exports one validated UTC date key that every fanout build
-uses for the refreshed runtime APT layer. Workers do not retain a local image cache
+uses for the refreshed runtime APT layer. AWS workers do not retain a local image cache
 between jobs; the registry cache supplies reusable AMD64 build layers.
 
 ### Native ARM64 Runner
@@ -492,11 +496,11 @@ limit. ARM64 registry caching is disabled.
 
 ### SELinux Docker Runner
 
-`release-image-selinux-smoke` selects `aws-spot-selinux` and uses the instance executor on a disposable Fedora worker. Jobs connect as the unprivileged `gitlab-runner` user, with access to the host Docker daemon. Before registering it, confirm that `getenforce` prints `Enforcing`, `docker info` lists SELinux in its security options, and the service user can pull images, create networks, add `NET_RAW`/`NET_ADMIN`, and bind/relabel job-owned config, data, and workspace directories. Don't use a Docker executor for this lane; the check needs the host's real SELinux policy.
+`docker-build-selinux` and `release-image-selinux-smoke` select `aws-spot-selinux` and use the instance executor on a disposable Fedora worker. Jobs connect as the unprivileged `gitlab-runner` user, with access to the host Docker daemon. Before registering it, confirm that `getenforce` prints `Enforcing`, `docker info` lists SELinux in its security options, and the service user can pull images, create networks, add `NET_RAW`/`NET_ADMIN`, and bind/relabel job-owned config, data, and workspace directories. Don't use a Docker executor for this lane; the check needs the host's real SELinux policy.
 
 ### Rootless Podman Runner
 
-`release-image-rootless-podman-smoke` selects `aws-spot-podman` and uses the instance executor on a disposable Debian worker. Jobs connect as the same non-root `gitlab-runner` account that owns the rootless Podman configuration. Give that account valid `/etc/subuid` and `/etc/subgid` ranges, working rootless networking and storage, and access to its user runtime directory. From that account, `podman info --format '{{.Host.Security.Rootless}}'` must print `true`; it must also be able to pull the release image, create a network, bind the three job-owned directories, add the namespaced scanner capabilities, and execute the image's unprivileged SYN probe. The job deliberately fails when `id -u` is `0`.
+`podman-build-rootless` and `release-image-rootless-podman-smoke` select `aws-spot-podman` and use the instance executor on a disposable Debian worker. Jobs connect as the same non-root `gitlab-runner` account that owns the rootless Podman configuration. Give that account valid `/etc/subuid` and `/etc/subgid` ranges, working rootless networking and storage, and access to its user runtime directory. From that account, `podman info --format '{{.Host.Security.Rootless}}'` must print `true`; it must also be able to pull the release image, create a network, bind the three job-owned directories, add the namespaced scanner capabilities, and execute the image's unprivileged SYN probe. The release smoke job deliberately fails when `id -u` is `0`.
 
 ### One-Time Release Administration
 
@@ -510,7 +514,7 @@ Complete this setup before creating a final or release-candidate tag:
 - Keep the GitLab project public, with the Container Registry, Package Registry, and Releases enabled. Confirm anonymous users can pull the canonical image and download Generic Package Registry files; the post-release job checks both without registry credentials.
 - Keep `docker.io/darklabsh/darklab-shell` public. Configure Docker Hub's immutable-tag rule as `^[0-9]+\.[0-9]+\.[0-9]+$` so final image tags can't move while `X.Y.Z-rc.N` tags remain removable after testing.
 - Keep the public Docker Hub repository overview synchronized with the reviewed `deploy/dockerhub-overview.txt`. The anonymous release check requires its GitLab OIDC issuer and final-or-candidate signing-identity pattern.
-- Confirm the `self-hosted`, `aws-spot-selinux`, and `aws-spot-podman` runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
+- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners and retained host-tagged runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
 
 ### Release Images And Installer Payloads
 

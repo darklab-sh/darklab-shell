@@ -3021,6 +3021,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "docker-build-barbas": ["barbas"],
         "docker-build-baka": ["baka"],
         "docker-build-bana": ["bana"],
+        "docker-build-bolla": ["bolla"],
+        "docker-build-bannik": ["bannik"],
+        "docker-build-buta": ["buta"],
         "docker-build-selinux": ["aws-spot-selinux"],
         "podman-build-rootless": ["aws-spot-podman"],
     }

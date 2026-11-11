@@ -14,15 +14,12 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ## [3.1.3] - Unreleased
 
-### Fixed
-
-- **Release CI checks use the AWS compatibility job names and runner tags.** Scheduled SELinux and rootless Podman builds and release smoke assertions match the migrated CI jobs while retaining their build and host-behavior checks.
-
-- Host worker smoke jobs skip the global pip install and inherited service containers, so qualification only requires the runtime baked into each worker image.
-
 ### Changed
 
-- **SELinux and rootless Podman checks target disposable AWS workers.** Scheduled builds and optional release gates use capability tags with native host execution, preserving enforcing SELinux, rootless ownership, and bind mounts. CI regression checks cover all four jobs and prevent inherited Docker-in-Docker settings.
+- **CI runs on disposable AWS workers with separate native compatibility checks.**
+  - **Before:** Ordinary Docker jobs used a worker socket, and ARM64 release jobs used a GitLab-hosted runner.
+  - **After:** AMD64 and ARM64 Docker jobs use version-matched Docker-in-Docker over TLS with bounded readiness checks. Scheduled SELinux and rootless Podman builds and optional release gates use `aws-spot-selinux` and `aws-spot-podman`, preserving native host policy and bind mounts. The retired `beleth` build and temporary worker qualification jobs are removed.
+  - **Tests:** CI contracts check runner routing, inherited Docker settings, nested scanner TLS access, native host exceptions, and readiness success and failure. CI configuration changes also require deterministic container smoke coverage. Contributor and architecture guidance describe the runner boundaries.
 
 - **Dependency versions are updated.** Updated `jsdom` from `^30.1.3` to `^31.0.0`.
 
@@ -35,10 +32,6 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **TLS tools use compatible OpenSSL libraries.** The standalone command uses OpenSSL 4.1 and retains its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries, preserving the protocol APIs it still needs.
 
 ### Fixed
-
-- **Docker CI jobs run without a worker socket mount.** Build, smoke, cache, image verification, and release jobs share version-matched DinD over TLS with a readiness check. Nested image scanners use that daemon's TLS endpoint; dedicated SELinux and rootless Podman checks retain their native host behavior. Contributor guidance and CI regression checks cover the runner boundaries.
-
-- **Dependency qualification runs on the AWS ephemeral runners.** The CI job uses a version-matched Docker-in-Docker service over TLS instead of requiring the worker's Docker socket, and waits for the daemon before starting its checks.
 
 - **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
 

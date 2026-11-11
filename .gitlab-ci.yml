@@ -274,7 +274,7 @@ lint-py:
     - python scripts/release/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
-# Docker jobs use their own daemon; the runner shares only the TLS client certs.
+# Docker jobs use their own daemon and share TLS client certs with the service.
 .docker-dind:
   image: $CI_DOCKER_IMAGE
   services: &docker-dind-services
@@ -475,6 +475,7 @@ container-smoke-test-deterministic:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "push"'
       changes: &container-smoke-changes
+        - .gitlab-ci.yml
         - Dockerfile
         - entrypoint.sh
         - app/requirements.txt
@@ -1893,39 +1894,3 @@ release-public-smoke:
       - release-install/release-manifest.json
       - release-compose.log
     expire_in: 1 week
-
-    # Host profiles use the instance executor; image/services settings don't apply.
-.host-smoke:
-  stage: test
-  # These host checks do not need the consuming project's Python setup.
-  before_script: []
-  services: []
-  rules:
-    - if: '$RUN_WORKER_QUALIFICATION == "true"'
-      when: manual
-    - when: never
-  allow_failure: false
-  timeout: 20 minutes
-  script:
-    - test "$(uname -m)" = x86_64
-    - test "$(id -un)" = gitlab-runner
-    - /usr/local/libexec/runner-host-ready "$IMAGE_PROFILE" "$(cat /usr/local/share/runner-image/runner-version)"
-    - test "$(df -Pk "$HOME" | awk 'NR == 2 {print $2}')" -ge 240000000
-    - $CONTAINER_RUNTIME run --rm docker.io/library/debian:13-slim uname -m
-    - printf '%s\n' "$IMAGE_PROFILE" > host-qualification.txt
-  artifacts:
-    paths: [host-qualification.txt]
-
-smoke-podman:
-  extends: .host-smoke
-  tags: [aws-spot-podman]
-  variables:
-    IMAGE_PROFILE: debian-podman
-    CONTAINER_RUNTIME: podman
-
-smoke-selinux:
-  extends: .host-smoke
-  tags: [aws-spot-selinux]
-  variables:
-    IMAGE_PROFILE: fedora-selinux
-    CONTAINER_RUNTIME: docker
