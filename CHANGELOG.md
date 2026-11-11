@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `croniter` from `==6.2.4` to `==7.0.0`; `gunicorn` from `==26.2.0` to `==27.0.0`.
+
 - **CI runs on disposable AWS workers with separate native compatibility checks.**
   - **Before:** Ordinary Docker jobs used a worker socket, and ARM64 release jobs used a GitLab-hosted runner.
   - **After:** AMD64 and ARM64 Docker jobs use version-matched Docker-in-Docker over TLS with bounded readiness checks. Scheduled SELinux and rootless Podman builds and optional release gates use `aws-spot-selinux` and `aws-spot-podman`, preserving native host policy and bind mounts. The retired `beleth` build and temporary worker qualification jobs are removed.
