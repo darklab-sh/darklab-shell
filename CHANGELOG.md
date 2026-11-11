@@ -37,6 +37,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **CI runner tests use the current scheduled build names.** The job inventory maps `docker-build-amd64` and `docker-build-arm64` to their AWS runner tags explicitly. SELinux and rootless Podman builds remain covered by native-host checks, while Docker jobs retain the inherited TLS, certificate-sharing, and readiness assertions.
+
 - **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
 
 - **Routine dependency updates use the build pins in version checks.** Production-image tests check exact pins, wiring, constraints, and release evidence without duplicating current dependency versions. Gau and Schemathesis smoke version expectations read the Dockerfile defaults. Reviewed security minimums, compatibility contracts, and the independent Schemathesis parser version remain enforced; regression coverage accepts routine updates and rejects downgrades and stale binary output.

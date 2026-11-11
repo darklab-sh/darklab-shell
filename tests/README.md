@@ -792,7 +792,7 @@ Theme loading checks cover a usable current palette without a catalog request, s
 independent review boundaries, and installed scanner inventory safety. Browser tooling
 checks cover complete upstream license text generation and verified Hadolint installation.
 
-`test_ci_dind.py` checks runner routing and effective job settings across inherited
+`test_ci_dind.py` checks an explicit job-to-runner mapping and effective settings across inherited
 CI templates, TLS access for nested image scanners, native instance-worker exceptions,
 and bounded Docker readiness with success and failure cases. Live AWS pipelines
 verify provisioning and native architecture behavior separately.

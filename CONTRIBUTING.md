@@ -438,7 +438,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 ## GitLab Runner Setup
 
-The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled fanout to named Docker runners. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
+The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled build fanout. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
 
 ### AWS Docker Runners
 
@@ -467,10 +467,9 @@ and [Docker Autoscaler guide](https://docs.gitlab.com/runner/executors/docker_au
 for the complete runner configuration.
 
 The scheduled fanout assigns its shared AMD64 cache warmer to `aws-spot-amd64`.
-Its host-specific Docker consumers keep their individual runner tags and use the same
-DinD settings; those Docker-executor runners also need privileged mode and the
-`/certs/client` volume. A matching runner must exist for each retained host tag;
-the manager does not itself execute build jobs. The `docker-build-selinux`
+Its `docker-build-amd64` and `docker-build-arm64` consumers select `aws-spot-amd64`
+and `aws-spot-arm64`, respectively, and use the same DinD settings. Both runner pools
+need privileged mode and the `/certs/client` volume. The `docker-build-selinux`
 and `podman-build-rootless` fanout jobs use the native SELinux Docker and rootless Podman contracts
 below, with DinD services and TLS settings disabled.
 
@@ -514,7 +513,7 @@ Complete this setup before creating a final or release-candidate tag:
 - Keep the GitLab project public, with the Container Registry, Package Registry, and Releases enabled. Confirm anonymous users can pull the canonical image and download Generic Package Registry files; the post-release job checks both without registry credentials.
 - Keep `docker.io/darklabsh/darklab-shell` public. Configure Docker Hub's immutable-tag rule as `^[0-9]+\.[0-9]+\.[0-9]+$` so final image tags can't move while `X.Y.Z-rc.N` tags remain removable after testing.
 - Keep the public Docker Hub repository overview synchronized with the reviewed `deploy/dockerhub-overview.txt`. The anonymous release check requires its GitLab OIDC issuer and final-or-candidate signing-identity pattern.
-- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners and retained host-tagged runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
+- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
 
 ### Release Images And Installer Payloads
 

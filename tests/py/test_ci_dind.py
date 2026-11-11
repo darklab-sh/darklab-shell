@@ -25,9 +25,10 @@ ARM64_JOBS = {
     "release-image-arm64-vulnerability-scan",
     "release-image-rehearsal-arm64-index-smoke",
 }
-SCHEDULED_HOSTS = (
-    "aws-spot-amd64", "aws-spot-arm64", "aws-spot-selinux", "aws-spot-podman"
-)
+SCHEDULED_DIND_JOBS = {
+    "docker-build-amd64": "aws-spot-amd64",
+    "docker-build-arm64": "aws-spot-arm64",
+}
 DIND_JOBS = (
     "test-dependency-qualification",
     "container-smoke-test-deterministic",
@@ -35,7 +36,7 @@ DIND_JOBS = (
     "container-smoke-test-public-network",
     "docker-build",
     "docker-build-cache-amd64",
-    *(f"docker-build-{host}" for host in SCHEDULED_HOSTS),
+    *SCHEDULED_DIND_JOBS,
     "release-python-base-resolution",
     "release-image-amd64",
     "release-image-amd64-smoke",
@@ -85,8 +86,7 @@ def effective_job(name):
 
 def test_ci_runner_routing_and_docker_job_inventory():
     assert CI["default"]["tags"] == ["aws-spot-amd64"]
-    scheduled_tags = {f"docker-build-{host}": host for host in SCHEDULED_HOSTS}
-    expected_tags = {**scheduled_tags, **NATIVE_JOBS, **dict.fromkeys(ARM64_JOBS, "aws-spot-arm64")}
+    expected_tags = {**SCHEDULED_DIND_JOBS, **NATIVE_JOBS, **dict.fromkeys(ARM64_JOBS, "aws-spot-arm64")}
     for name, job in CI.items():
         if not isinstance(job, dict) or name.startswith(".") or not (
             "script" in job or "extends" in job
