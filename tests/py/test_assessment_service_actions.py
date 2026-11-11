@@ -1490,13 +1490,13 @@ def test_schemathesis_report_keeps_bounded_operation_evidence_and_provenance():
     )
 
     report = parse_schemathesis_ndjson(
-        _schemathesis_report_bytes(failure=False, tool_version="4.33.1"),
+        _schemathesis_report_bytes(failure=False, tool_version="4.33.2"),
         reviewed,
         profile_key="api",
         profile_version="1.0",
     )
 
-    assert report.tool_version == "4.33.1"
+    assert report.tool_version == "4.33.2"
     assert report.profile_key == "api"
     assert report.profile_version == "1.0"
     assert report.schema_artifact_id == reviewed.source_artifact_id
@@ -1566,7 +1566,7 @@ def test_schemathesis_report_keeps_safe_failure_shape_without_private_values(fai
             "invalid_scenario_phase",
         ),
         (
-            _schemathesis_report_bytes(tool_version="4.33.0"),
+            _schemathesis_report_bytes(tool_version="4.33.1"),
             "unsupported_report_version",
         ),
         (

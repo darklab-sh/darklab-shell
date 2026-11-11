@@ -704,60 +704,15 @@ docker-build-cache-amd64:
         --cache-from "type=registry,ref=${SCHEDULED_AMD64_CACHE_REF}" \
         --load --tag "darklab_shell:${CI_COMMIT_SHA}" - < "$build_context"
 
-docker-build-bael:
+docker-build-amd64:
   extends: .scheduled-docker-build
   tags:
-    - bael
+    - aws-spot-amd64
 
-docker-build-bune:
+docker-build-arm64:
   extends: .scheduled-docker-build
   tags:
-    - bune
-
-docker-build-botis:
-  extends: .scheduled-docker-build
-  tags:
-    - botis
-
-docker-build-babi:
-  extends: .scheduled-docker-build
-  tags:
-    - babi
-
-docker-build-bile:
-  extends: .scheduled-docker-build
-  tags:
-    - bile
-
-docker-build-barbas:
-  extends: .scheduled-docker-build
-  tags:
-    - barbas
-
-docker-build-baka:
-  extends: .scheduled-docker-build
-  tags:
-    - baka
-
-docker-build-bana:
-  extends: .scheduled-docker-build
-  tags:
-    - bana
-
-docker-build-bolla:
-  extends: .scheduled-docker-build
-  tags:
-    - bolla
-
-docker-build-bannik:
-  extends: .scheduled-docker-build
-  tags:
-    - bannik
-
-docker-build-buta:
-  extends: .scheduled-docker-build
-  tags:
-    - buta
+    - aws-spot-arm64
 
 docker-build-selinux:
   extends: .scheduled-docker-build
