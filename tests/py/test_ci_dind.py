@@ -26,7 +26,7 @@ ARM64_JOBS = {
     "release-image-rehearsal-arm64-index-smoke",
 }
 SCHEDULED_HOSTS = (
-    "bael", "bune", "botis", "babi", "bile", "barbas", "baka", "bana", "bolla", "bannik", "buta",
+    "aws-spot-amd64", "aws-spot-arm64", "aws-spot-selinux", "aws-spot-podman"
 )
 DIND_JOBS = (
     "test-dependency-qualification",
