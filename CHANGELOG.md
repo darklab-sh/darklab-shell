@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `croniter` from `==6.2.4` to `==7.0.0`; `gunicorn` from `==26.2.0` to `==27.0.0`.
+
 - **Dependency versions are updated.** Updated `jsdom` from `^30.1.3` to `^31.0.0`.
 
 - **Dependency updates include preparation and compatibility evidence.** Project-owned checks keep generated assets, complete browser license notices, scanner constraints, and changelog summaries aligned. Production and CI Python resolutions remain separate from isolated scanners. CI exercises real Schemathesis reports against disposable APIs and audits installed scanner dependencies alongside app and development requirements. Hadolint uses one release/checksum manifest. Preparation reports identify independent parser, patch, license, and major-version reviews without claiming target CI has passed.
