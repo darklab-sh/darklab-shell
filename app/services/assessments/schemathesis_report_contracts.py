@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-SCHEMATHESIS_REPORT_TOOL_VERSION = "4.33.1"
+SCHEMATHESIS_REPORT_TOOL_VERSION = "4.33.2"
 
 
 class SchemathesisReportError(ValueError):

@@ -803,5 +803,7 @@ production Python and retains environment inventories and JUnit results. Locally
 `sh scripts/release/run_dependency_qualification.sh` for committed source. For a prepared
 scanner environment, set `RUN_SCANNER_COMPATIBILITY=1` and `SCHEMATHESIS_BINARY` to its
 absolute executable path, then run the module through `scripts/run_pytest.sh`.
-The tests assert successful and failing report semantics and exclude private response
-bodies from parsed evidence. The independent parser version still requires review.
+The tests cover clean responses, server errors, and response-schema violations from
+the real scanner, including its `jsonschema-rs` validator. They check the expected
+failure categories and exclude private response bodies and invalid response values
+from parsed evidence. The independent parser version still requires review.

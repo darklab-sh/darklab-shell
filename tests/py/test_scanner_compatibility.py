@@ -22,16 +22,18 @@ pytestmark = pytest.mark.skipif(os.environ.get("RUN_SCANNER_COMPATIBILITY") != "
                                 reason="requires the isolated scanner environment")
 
 
-@pytest.mark.parametrize("findings", [False, True])
-def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, findings):
+@pytest.mark.parametrize("expected_check", [None, "not_a_server_error", "response_schema_conformance"],
+                         ids=["clean", "server-error", "schema-violation"])
+def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, expected_check):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             value = parse_qs(urlsplit(self.path).query).get("limit", [""])[0]
             valid = value.isascii() and value.isdecimal() and len(value) < 4 and 1 <= int(value) <= 3
-            self.send_response(500 if findings else 200 if valid else 400)
+            self.send_response(500 if expected_check == "not_a_server_error" else 200 if valid else 400)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b'{"ok":true,"private":"private-response-body"}')
+            ok = "invalid-boolean" if expected_check == "response_schema_conformance" else True
+            self.wfile.write(json.dumps({"ok": ok, "private": "private-response-body"}).encode())
 
         def log_message(self, format, *args):
             pass
@@ -40,7 +42,11 @@ def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, findin
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
-    response = {"description": "Fixture", "content": {"application/json": {"schema": {"type": "object"}}}}
+    response = {"description": "Fixture", "content": {"application/json": {"schema": {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}, "private": {"type": "string"}},
+        "required": ["ok", "private"],
+    }}}}
     source = json.dumps({"openapi": "3.0.3", "info": {"title": "Disposable fixture", "version": "1.0"},
                          "servers": [{"url": base}], "paths": {"/items": {"get": {
                              "parameters": [{"name": "limit", "in": "query", "required": True,
@@ -60,12 +66,15 @@ def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, findin
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=90)
         (folder / "scanner.log").write_text(result.stdout + result.stderr)
-        assert result.returncode == (1 if findings else 0), result.stdout + result.stderr
+        assert result.returncode == (1 if expected_check else 0), result.stdout + result.stderr
         parsed = parse_schemathesis_ndjson(report.read_bytes(), reviewed, profile_key="api", profile_version="1.0")
         assert parsed.complete
         assert parsed.case_count > 0
-        assert bool(parsed.failure_count) is findings
+        assert bool(parsed.failure_count) is bool(expected_check)
+        if expected_check:
+            assert any(failure.check_name == expected_check for operation in parsed.operations for failure in operation.failures)
         assert "private-response-body" not in repr(parsed)
+        assert "invalid-boolean" not in repr(parsed)
     finally:
         server.shutdown()
         server.server_close()
