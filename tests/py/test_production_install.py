@@ -3013,17 +3013,8 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "create_portable_build_context.sh" in scheduled_build_script
     assert '- < "$build_context"' in scheduled_build_script
     scheduled_build_tags = {
-        "docker-build-bael": ["bael"],
-        "docker-build-bune": ["bune"],
-        "docker-build-botis": ["botis"],
-        "docker-build-babi": ["babi"],
-        "docker-build-bile": ["bile"],
-        "docker-build-barbas": ["barbas"],
-        "docker-build-baka": ["baka"],
-        "docker-build-bana": ["bana"],
-        "docker-build-bolla": ["bolla"],
-        "docker-build-bannik": ["bannik"],
-        "docker-build-buta": ["buta"],
+        "docker-build-amd64": ["aws-spot-amd64"],
+        "docker-build-arm64": ["aws-spot-arm64"],
         "docker-build-selinux": ["aws-spot-selinux"],
         "podman-build-rootless": ["aws-spot-podman"],
     }
