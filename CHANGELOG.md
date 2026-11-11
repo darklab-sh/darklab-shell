@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `brace-expansion` from `5.0.12` to `5.0.13`; `docker/dockerfile` from `1.28` to `1.29`; `github.com/jackc/pgx/v5` from `v5.12.0` to `v5.13.0`; `golang.org/x/crypto` from `v0.58.0` to `v0.59.0`; `minimatch` from `11.0.7` to `11.0.8`.
+
 - **Dependency versions are updated.** Updated `github.com/andybalholm/brotli` from `v1.2.8` to `v1.3.0`; `golang` from `1.27.3` to `1.27.4`; `jsonschema-rs` from `==0.60.3` to `==0.61.1`; `markdown-it-py` from `==4.2.0` to `==4.3.0`; `minimatch` from `11.0.5` to `11.0.7`; `projectdiscovery/tlsx` from `v1.4.4` to `v1.4.5`; `re2js` from `2.9.1` to `2.10.0`; `schemathesis` from `4.33.1` to `4.33.2`; `schemathesis` from `==4.33.1` to `==4.33.2`.
 
 - **Dependency versions are updated.** Updated `croniter` from `==6.2.4` to `==7.0.0`; `gunicorn` from `==26.2.0` to `==27.0.0`.

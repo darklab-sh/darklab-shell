@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 # SPDX-FileCopyrightText: 2026 mmayhew
 # SPDX-License-Identifier: AGPL-3.0-only
 
@@ -11,7 +11,7 @@ ARG GO_LINUX_AMD64_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef000342
 ARG GO_LINUX_ARM64_SHA256=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 ARG GO_BUILD_PARALLELISM=2
 # renovate: datasource=go depName=golang.org/x/crypto versioning=go
-ARG GO_X_CRYPTO_VERSION=v0.58.0
+ARG GO_X_CRYPTO_VERSION=v0.59.0
 # renovate: datasource=go depName=golang.org/x/net versioning=go
 ARG GO_X_NET_VERSION=v0.62.0
 # renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
@@ -19,7 +19,7 @@ ARG GO_BROTLI_VERSION=v1.3.0
 # renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
 ARG KIN_OPENAPI_VERSION=v0.153.0
 # renovate: datasource=go depName=github.com/jackc/pgx/v5 versioning=go
-ARG KATANA_PGX_VERSION=v5.12.0
+ARG KATANA_PGX_VERSION=v5.13.0
 # renovate: datasource=github-tags depName=tianon/gosu
 ARG GOSU_VERSION=1.20
 # renovate: datasource=github-tags depName=openssl/openssl extractVersion=^openssl-(?<version>.*)$
