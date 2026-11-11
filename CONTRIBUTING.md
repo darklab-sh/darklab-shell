@@ -438,38 +438,69 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 ## GitLab Runner Setup
 
-The pipeline uses four runner shapes. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
+The pipeline uses AWS AMD64 and ARM64 Docker workers, native SELinux and rootless Podman workers, and a scheduled fanout to named Docker runners. Keep their tags and container access separate so an ordinary build runner doesn't accidentally stand in for a host-policy compatibility check.
 
-### Standard Self-Managed Docker Runners
+### AWS Docker Runners
 
-Jobs carrying the default `self-hosted` tag, including `docker-build`, `container-smoke-test`, and protected AMD64 release jobs, use the host Docker daemon through `/var/run/docker.sock`. They don't start a Docker-in-Docker service and don't use DinD TLS. Register a dedicated Docker-executor runner with the `self-hosted` tag and mount the socket into job containers:
+Ordinary jobs use the `aws-spot-amd64` tag. Native ARM64 release and verification jobs
+use `aws-spot-arm64`. Each Docker job starts a version-matched DinD service and connects
+to it over TLS on `tcp://docker:2376`; no worker Docker socket is mounted into the job.
+The shared CI settings wait for Docker readiness and use a conservative `1360` MTU.
+The Docker settings for both autoscaled runner entries are:
 
 ```toml
 [[runners]]
-  executor = "docker"
+  executor = "docker-autoscaler"
   [runners.docker]
-    privileged = false
-    volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]
+    privileged = true
+    volumes = ["/certs/client", "/cache"]
     image = "python:3.15.2-slim"
 ```
 
-The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is ignored. Mounting the Docker socket gives a job control of that host's Docker daemon, so use an isolated runner and limit which projects and protected refs can reach it. The scheduled fanout first assigns its shared AMD64 cache warmer to any runner with the standard `self-hosted` tag. The warmer and every Docker consumer build from a tracked Git archive with fixed file modes, which keeps host ownership, timestamps, ACLs, and SELinux labels out of shared cache keys. The warmer also exports one validated UTC date key; every Docker and Podman fan-out build uses that same value so the refreshed runtime APT layer is shared for the day without rebuilding compiled tools. After that succeeds, `bael`, `bune`, `botis`, `babi`, `bile`, `barbas`, `beleth`, `baka`, and `bana` build concurrently; each runner needs the same socket contract and `self-hosted` capability in addition to its own host tag. The `baku` and `baal` fanout jobs use their dedicated SELinux Docker and rootless Podman runner contracts described below.
+The `volumes` entry belongs inside `[runners.docker]`; a top-level `volumes` key is
+ignored. Configure each AWS pool for one job per instance and one use per instance
+(`capacity_per_instance = 1`, `max_use_count = 1`), so the worker is discarded after
+the job. Treat these privileged jobs as trusted workloads. Nested Syft containers connect to the job's DinD daemon
+through its loopback TLS endpoint with read-only client certificates. See GitLab's
+[TLS DinD setup](https://docs.gitlab.com/ci/docker/docker_in_docker/#docker-in-docker-with-tls-enabled-in-the-docker-executor-recommended)
+and [Docker Autoscaler guide](https://docs.gitlab.com/runner/executors/docker_autoscaler/)
+for the complete runner configuration.
 
-The systemd runner reads `/etc/gitlab-runner/config.toml`. Registering as a non-root user writes `~/.gitlab-runner/config.toml` instead, so install the intended file where the service actually reads it.
+The scheduled fanout assigns its shared AMD64 cache warmer to `aws-spot-amd64`.
+Its host-specific Docker consumers keep their individual runner tags and use the same
+DinD settings; those Docker-executor runners also need privileged mode and the
+`/certs/client` volume. A matching runner must exist for each retained host tag;
+the manager does not itself execute build jobs. The `docker-build-selinux`
+and `podman-build-rootless` fanout jobs use the native SELinux Docker and rootless Podman contracts
+below, with DinD services and TLS settings disabled.
 
-### Hosted ARM64 Runner
+The warmer and every Docker consumer build from a tracked Git archive with fixed
+file modes, keeping host ownership, timestamps, ACLs, and SELinux labels out of shared
+cache keys. The warmer exports one validated UTC date key that every fanout build
+uses for the refreshed runtime APT layer. AWS workers do not retain a local image cache
+between jobs; the registry cache supplies reusable AMD64 build layers.
 
-`release-image-arm64` and its native verification jobs use GitLab's `saas-linux-small-arm64` runner. This is the release chain's one DinD path: the jobs start the version-matched Docker service on `tcp://docker:2375` with TLS disabled and a conservative `1360` MTU inside GitLab's isolated hosted environment. The publisher pushes an immutable ARM64 child without a registry cache because the complete scanner and SecLists cache exceeds the small runner's storage budget. The runtime stage inherits the SecLists asset stage so that large tree remains one shared layer instead of becoming a second BuildKit snapshot during assembly. The job artifact records wall time, job timeout, daemon storage before and after publication, and `docker system df -v`.
+### Native ARM64 Runner
 
-The accepted floor is completion within 75 percent of the 3,600-second job timeout with at least 20 percent free daemon storage after export. Rehearse the protected multi-platform path after Dockerfile or packaged-tool changes that can materially affect either limit. No self-managed runner configuration or `/certs/client` mount is used for this lane. Keep ARM64 caching disabled unless a replacement runner passes the same storage and timing checks with cache import and export enabled.
+`release-image-arm64` and its verification jobs run on native AWS ARM64 workers using
+the same TLS DinD settings and `/certs/client` mount. The publisher pushes an immutable
+ARM64 child without a registry cache. The runtime stage inherits the SecLists asset
+stage so that large tree remains one shared layer instead of becoming a second
+BuildKit snapshot during assembly. The job artifact records wall time, job timeout,
+daemon storage before and after publication, and `docker system df -v`.
+
+The accepted floor is completion within 75 percent of the 3,600-second job timeout
+with at least 20 percent free daemon storage after export. Rehearse the protected
+multi-platform path after Dockerfile or packaged-tool changes that affect either
+limit. ARM64 registry caching is disabled.
 
 ### SELinux Docker Runner
 
-`release-image-selinux-smoke` selects the `selinux`, `self-managed`, and `baku` tags and expects a shell executor on a dedicated Fedora host. Run the GitLab Runner service as its normal unprivileged service user and make Docker available to that user. Before registering it, confirm that `getenforce` prints `Enforcing`, `docker info` lists SELinux in its security options, and the service user can pull images, create networks, add `NET_RAW`/`NET_ADMIN`, and bind/relabel job-owned config, data, and workspace directories. Don't use a Docker executor for this lane; the check needs the host's real SELinux policy.
+`docker-build-selinux` and `release-image-selinux-smoke` select `aws-spot-selinux` and use the instance executor on a disposable Fedora worker. Jobs connect as the unprivileged `gitlab-runner` user, with access to the host Docker daemon. Before registering it, confirm that `getenforce` prints `Enforcing`, `docker info` lists SELinux in its security options, and the service user can pull images, create networks, add `NET_RAW`/`NET_ADMIN`, and bind/relabel job-owned config, data, and workspace directories. Don't use a Docker executor for this lane; the check needs the host's real SELinux policy.
 
 ### Rootless Podman Runner
 
-`release-image-rootless-podman-smoke` selects the `podman`, `self-managed`, and `baal` tags and expects a shell executor on Debian. Run the runner itself as the same non-root account that owns the rootless Podman configuration. Give that account valid `/etc/subuid` and `/etc/subgid` ranges, working rootless networking and storage, and access to its user runtime directory. From that account, `podman info --format '{{.Host.Security.Rootless}}'` must print `true`; it must also be able to pull the release image, create a network, bind the three job-owned directories, add the namespaced scanner capabilities, and execute the image's unprivileged SYN probe. The job deliberately fails when `id -u` is `0`.
+`podman-build-rootless` and `release-image-rootless-podman-smoke` select `aws-spot-podman` and use the instance executor on a disposable Debian worker. Jobs connect as the same non-root `gitlab-runner` account that owns the rootless Podman configuration. Give that account valid `/etc/subuid` and `/etc/subgid` ranges, working rootless networking and storage, and access to its user runtime directory. From that account, `podman info --format '{{.Host.Security.Rootless}}'` must print `true`; it must also be able to pull the release image, create a network, bind the three job-owned directories, add the namespaced scanner capabilities, and execute the image's unprivileged SYN probe. The release smoke job deliberately fails when `id -u` is `0`.
 
 ### One-Time Release Administration
 
@@ -483,14 +514,14 @@ Complete this setup before creating a final or release-candidate tag:
 - Keep the GitLab project public, with the Container Registry, Package Registry, and Releases enabled. Confirm anonymous users can pull the canonical image and download Generic Package Registry files; the post-release job checks both without registry credentials.
 - Keep `docker.io/darklabsh/darklab-shell` public. Configure Docker Hub's immutable-tag rule as `^[0-9]+\.[0-9]+\.[0-9]+$` so final image tags can't move while `X.Y.Z-rc.N` tags remain removable after testing.
 - Keep the public Docker Hub repository overview synchronized with the reviewed `deploy/dockerhub-overview.txt`. The anonymous release check requires its GitLab OIDC issuer and final-or-candidate signing-identity pattern.
-- Confirm the `self-hosted`, `baku`, and `baal` runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
+- Confirm the `aws-spot-amd64`, `aws-spot-arm64`, `aws-spot-selinux`, and `aws-spot-podman` runners and retained host-tagged runners are locked to this project or otherwise protected from untrusted jobs. GitLab's built-in `CI_REGISTRY_*` and `CI_JOB_TOKEN` values handle canonical image and package publication; don't create replacement long-lived secrets for them.
 
 ### Release Images And Installer Payloads
 
 Ordinary branches and merge requests build verification-only images. A protected tag matching `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` starts the public artifact path:
 
 1. skip the branch-only verification image, validate the reviewed container-license inventory, including Nmap's NPSL 0.95 record and hash-pinned license text, and resolve the Python base tag once to one immutable index plus its Linux AMD64 and ARM64 manifests
-2. build native AMD64 and ARM64 children from that shared base snapshot and push immutable attempt references; AMD64 uses the shared serialized registry cache, while ARM64 stays uncached on the hosted DinD runner
+2. build native AMD64 and ARM64 children from that shared base snapshot and push immutable attempt references; AMD64 uses the shared serialized registry cache, while ARM64 stays uncached on its native AWS DinD worker
 3. pull each child by digest on its native architecture, run production-installation and bundled-tool checks, measure pull and installed size, generate a CycloneDX SBOM and full Grype report, and fail each platform independently on fixed Critical findings; SELinux Docker and rootless Podman verify the AMD64 child in parallel when enabled
 4. after every child required by `RELEASE_PLATFORM_MODE` passes, create durable child anchors and one canonical GitLab OCI index, then reject any descriptor, digest, base snapshot, source commit, or release-mode mismatch
 5. copy that complete index directly to `docker.io/darklabsh/darklab-shell` with Buildx imagetools and require Docker Hub to expose the same index digest and exact platform set
@@ -508,7 +539,7 @@ Before creating a candidate tag, change every release-version source to the same
 
 The Docker Hub repository overview is maintained from `deploy/dockerhub-overview.txt`. Paste that reviewed text into the public repository overview before the protected tag runs; the anonymous post-release check reads Docker Hub's public repository API and fails when the expected GitLab OIDC issuer or semantic-version certificate-identity regexp is missing.
 
-Native AMD64 and ARM64 are required platform gates on normal protected tags. The GitLab-hosted `saas-linux-small-arm64` lane uses uncached, version-matched Docker-in-Docker with a `1360` MTU, while standard AMD64 publication uses the self-managed host socket and shared registry cache. Two additional AMD64 compatibility gates are available: the SELinux-enforcing Fedora shell runner `baku`, selected by `selinux`, `self-managed`, and `baku`, uses `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`; the non-root Debian shell runner `baal`, selected by `podman`, `self-managed`, and `baal`, uses `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1`. These jobs block index assembly on packaged-tool execution, relabeled `/config`, `/data`, or `/workspaces` binds, durable restart, unprivileged SYN capability, or production startup failures. Scheduled fanout pipelines first serialize one runner-agnostic AMD64 cache writer, then let every standard and SELinux Docker runner import that cache without writing it. The cache artifact carries the warmer's UTC package-refresh date into every Docker and Podman build. Branch pipelines derive the same input from their creation timestamp, while protected AMD64 and ARM64 publishers derive it from the recorded release build time. Those BuildKit paths and protected image publication all use `scripts/container/create_portable_build_context.sh`; the rootless Podman job starts at the same time as the Docker builds and warms its own image store from its checkout.
+Native AMD64 and ARM64 are required platform gates on normal protected tags. Both AWS lanes use version-matched Docker-in-Docker over TLS with a `1360` MTU. ARM64 builds are uncached; AMD64 publication uses the shared registry cache. Two additional AMD64 compatibility gates are available: the SELinux-enforcing Fedora instance worker, selected by `aws-spot-selinux`, uses `RELEASE_SELINUX_COMPATIBILITY_ENABLED=1`; the rootless Debian Podman instance worker, selected by `aws-spot-podman`, uses `RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED=1`. These jobs block index assembly on packaged-tool execution, relabeled `/config`, `/data`, or `/workspaces` binds, durable restart, unprivileged SYN capability, or production startup failures. Scheduled fanout pipelines first serialize one runner-agnostic AMD64 cache writer, then let every standard and SELinux Docker runner import that cache without writing it. The cache artifact carries the warmer's UTC package-refresh date into every Docker and Podman build. Branch pipelines derive the same input from their creation timestamp, while protected AMD64 and ARM64 publishers derive it from the recorded release build time. Those BuildKit paths and protected image publication all use `scripts/container/create_portable_build_context.sh`; the rootless Podman job starts at the same time as the Docker builds and checks a fresh build from its checkout. Its local image store is discarded with the worker; this job does not warm a later worker.
 
 To rehearse the multi-platform publication path without creating release artifacts, start a protected branch web pipeline with `RELEASE_MULTIARCH_REHEARSAL=1` and keep `RELEASE_PLATFORM_MODE=dual`. It creates commit- and pipeline-addressed staging children plus a temporary GitLab index, then runs anonymous native AMD64 and ARM64 pulls. Tag-only Docker Hub promotion, signing, payload upload, Postgres release smoke, and GitLab Release jobs remain absent.
 
@@ -570,7 +601,10 @@ preparation versions come from the project's edited CI and Dockerfile pins. Pyth
 resolution records cover app/dev dependencies on both production and CI Python, with
 each scanner resolved separately on production Python.
 
-The `test-dependency-qualification` CI job uses the production Python image to test
+The `test-dependency-qualification` CI job uses a version-matched Docker-in-Docker
+service over TLS on the AWS AMD64 runner. The runner must enable privileged services
+and share `/certs/client` between the job and service. The job waits up to 60 seconds
+for Docker before starting qualification. It uses the production Python image to test
 application compatibility and the real Schemathesis command/report against disposable
 localhost APIs. Run `sh scripts/release/run_dependency_qualification.sh` to exercise
 the committed source with the same container boundary. It passes no host directories,

@@ -3,7 +3,7 @@
 
 default:
   tags:
-    - self-hosted
+    - aws-spot-amd64
 
 variables:
   CI_DEFAULT_IMAGE: "python:3.15.2-slim"
@@ -274,13 +274,42 @@ lint-py:
     - python scripts/release/check_source_licenses.py
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
+# Docker jobs use their own daemon and share TLS client certs with the service.
+.docker-dind:
+  image: $CI_DOCKER_IMAGE
+  services: &docker-dind-services
+    - name: "${CI_DOCKER_IMAGE}-dind"
+      alias: docker
+      command: ["--mtu=1360"]
+      variables:
+        HEALTHCHECK_TCP_PORT: "2376"
+  variables: &docker-dind-variables
+    DOCKER_HOST: "tcp://docker:2376"
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+    CONTAINER_MOUNT_MODE: "volume"
+  before_script:
+    - &docker-ready |
+      attempts=0
+      until docker info >/dev/null 2>&1; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 30 ]; then
+          echo "Docker daemon did not become ready after 60 seconds" >&2
+          docker info
+          exit 1
+        fi
+        sleep 2
+      done
+
 test-dependency-qualification:
   stage: test
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache git
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
@@ -414,10 +443,11 @@ dependency-version-check:
 .container-smoke-lane:
   stage: build
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache python3 py3-pip py3-pytest docker-cli-compose
     - python3 -m pip install --break-system-packages --root-user-action=ignore --quiet -r app/requirements.txt
   script:
@@ -445,6 +475,7 @@ container-smoke-test-deterministic:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "push"'
       changes: &container-smoke-changes
+        - .gitlab-ci.yml
         - Dockerfile
         - entrypoint.sh
         - app/requirements.txt
@@ -487,12 +518,13 @@ container-smoke-test-public-network:
 docker-build:
   stage: build
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   interruptible: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     DOCKER_BUILDKIT: "1"
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3 py3-pip
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"'
@@ -561,7 +593,11 @@ docker-build:
     - >-
       docker run --rm
       --user 0:0
-      -v /var/run/docker.sock:/var/run/docker.sock
+      --network host
+      -e DOCKER_HOST=tcp://127.0.0.1:2376
+      -e DOCKER_TLS_VERIFY=1
+      -e DOCKER_CERT_PATH=/certs/client
+      -v /certs/client:/certs/client:ro
       "$SYFT_IMAGE"
       "docker:darklab_shell:$CI_COMMIT_SHA"
       -o cyclonedx-json
@@ -581,15 +617,16 @@ docker-build:
 docker-build-cache-amd64:
   stage: cache
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   interruptible: true
   tags:
-    - self-hosted
+    - aws-spot-amd64
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     DOCKER_BUILDKIT: "1"
   resource_group: release-cache-amd64
   before_script:
+    - *docker-ready
     - apk add --no-cache jq
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
@@ -634,15 +671,16 @@ docker-build-cache-amd64:
 .scheduled-docker-build:
   stage: build
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   interruptible: true
   needs:
     - job: docker-build-cache-amd64
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     DOCKER_BUILDKIT: "1"
-  before_script: []
+  before_script:
+    - *docker-ready
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
     - when: never
@@ -696,11 +734,6 @@ docker-build-barbas:
   tags:
     - barbas
 
-docker-build-beleth:
-  extends: .scheduled-docker-build
-  tags:
-    - beleth
-
 docker-build-baka:
   extends: .scheduled-docker-build
   tags:
@@ -726,19 +759,31 @@ docker-build-buta:
   tags:
     - buta
 
-docker-build-baku:
+docker-build-selinux:
   extends: .scheduled-docker-build
+  services: []
+  before_script: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   tags:
-    - selinux
-    - self-managed
-    - baku
+    - aws-spot-selinux
 
-docker-build-baal:
+podman-build-rootless:
   extends: .scheduled-docker-build
+  services: []
+  before_script: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   tags:
-    - podman
-    - self-managed
-    - baal
+    - aws-spot-podman
   script:
     - |
       python_base_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile)
@@ -773,11 +818,12 @@ docker-build-baal:
 release-python-base-resolution:
   stage: publish
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .release-image-pipeline
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3
   script:
     - scripts/release/publish_release_artifacts.sh resolve-base
@@ -822,17 +868,18 @@ release-image-staging-cleanup:
 release-image-amd64:
   stage: publish
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .release-image-pipeline
   needs:
     - job: release-python-base-resolution
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     DOCKER_BUILDKIT: "1"
     RELEASE_ARCHITECTURE: "amd64"
   resource_group: release-cache-amd64
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3
   script:
     - scripts/release/publish_release_artifacts.sh gitlab-platform-image
@@ -850,30 +897,15 @@ release-image-amd64:
 
 .release-arm64-dind:
   image: $CI_DOCKER_IMAGE
-  services:
-    - name: "${CI_DOCKER_IMAGE}-dind"
-      alias: docker
-      command:
-        - "--mtu=1360"
-        - "--tls=false"
+  services: *docker-dind-services
   tags:
-    - saas-linux-small-arm64
+    - aws-spot-arm64
   variables:
-    DOCKER_HOST: "tcp://docker:2375"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     DOCKER_BUILDKIT: "1"
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3
-    - |
-      attempts=0
-      until docker info >/dev/null 2>&1; do
-        attempts=$((attempts + 1))
-        if [ "$attempts" -ge 30 ]; then
-          echo "Docker daemon did not become ready after 60 seconds" >&2
-          exit 1
-        fi
-        sleep 2
-      done
     - |
       [ "$(uname -m)" = "aarch64" ] || {
         printf 'ARM64 publication requires a native aarch64 runner; found %s\n' "$(uname -m)" >&2
@@ -942,14 +974,15 @@ release-image-arm64:
 release-image-amd64-smoke:
   stage: verify
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .release-image-pipeline
   needs:
     - job: release-image-amd64
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache jq
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
@@ -991,14 +1024,15 @@ release-image-amd64-smoke:
 release-image-amd64-vulnerability-scan:
   stage: verify
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .release-image-pipeline
   needs:
     - job: release-image-amd64
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
-  before_script: []
+    <<: *docker-dind-variables
+  before_script:
+    - *docker-ready
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker pull "$AMD64_IMAGE@$AMD64_DIGEST"
@@ -1008,7 +1042,11 @@ release-image-amd64-vulnerability-scan:
     - >-
       docker run --rm
       --user 0:0
-      -v /var/run/docker.sock:/var/run/docker.sock
+      --network host
+      -e DOCKER_HOST=tcp://127.0.0.1:2376
+      -e DOCKER_TLS_VERIFY=1
+      -e DOCKER_CERT_PATH=/certs/client
+      -v /certs/client:/certs/client:ro
       "$SYFT_IMAGE"
       "docker:${AMD64_IMAGE}@${AMD64_DIGEST}"
       -o cyclonedx-json
@@ -1027,17 +1065,18 @@ release-image-amd64-vulnerability-scan:
 release-image-recheck:
   stage: verify
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   rules:
     - if: '$CI_PIPELINE_SOURCE == "web"'
       when: manual
       allow_failure: true
     - when: never
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
     RECHECK_ARCHITECTURE: "amd64"
     RECHECK_REFERENCE_KIND: "child"
-  before_script: []
+  before_script:
+    - *docker-ready
   script:
     - test -n "$RECHECK_IMAGE"
     - printf '%s' "$RECHECK_IMAGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -1075,7 +1114,11 @@ release-image-recheck:
     - >-
       docker run --rm
       --user 0:0
-      -v /var/run/docker.sock:/var/run/docker.sock
+      --network host
+      -e DOCKER_HOST=tcp://127.0.0.1:2376
+      -e DOCKER_TLS_VERIFY=1
+      -e DOCKER_CERT_PATH=/certs/client
+      -v /certs/client:/certs/client:ro
       "$SYFT_IMAGE"
       "docker:${recheck_reference}"
       -o cyclonedx-json
@@ -1153,7 +1196,11 @@ release-image-arm64-vulnerability-scan:
     - >-
       docker run --rm
       --user 0:0
-      -v /var/run/docker.sock:/var/run/docker.sock
+      --network host
+      -e DOCKER_HOST=tcp://127.0.0.1:2376
+      -e DOCKER_TLS_VERIFY=1
+      -e DOCKER_CERT_PATH=/certs/client
+      -v /certs/client:/certs/client:ro
       "$SYFT_IMAGE"
       "docker:${ARM64_IMAGE}@${ARM64_DIGEST}"
       -o cyclonedx-json
@@ -1173,9 +1220,14 @@ release-image-selinux-smoke:
   stage: verify
   image: $CI_DOCKER_IMAGE
   tags:
-    - selinux
-    - self-managed
-    - baku
+    - aws-spot-selinux
+  services: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_SELINUX_COMPATIBILITY_ENABLED == "1"'
     - when: never
@@ -1211,9 +1263,14 @@ release-image-selinux-smoke:
 release-image-rootless-podman-smoke:
   stage: verify
   tags:
-    - podman
-    - self-managed
-    - baal
+    - aws-spot-podman
+  services: []
+  variables:
+    DOCKER_HOST: ""
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_TLS_VERIFY: ""
+    DOCKER_CERT_PATH: ""
+    CONTAINER_MOUNT_MODE: "bind"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$/ && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == "1"'
     - when: never
@@ -1250,6 +1307,7 @@ release-image-rootless-podman-smoke:
 release-image-gitlab-index:
   stage: promote
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .release-image-pipeline
   needs:
     - job: release-python-base-resolution
@@ -1267,9 +1325,9 @@ release-image-gitlab-index:
     - job: release-image-rootless-podman-smoke
       optional: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3
   script:
     - scripts/release/publish_release_artifacts.sh gitlab-index
@@ -1293,6 +1351,7 @@ release-image-gitlab-index:
 release-image-rehearsal-amd64-index-smoke:
   stage: attest
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   rules:
     - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_REF_PROTECTED == "true" && $RELEASE_MULTIARCH_REHEARSAL == "1"'
     - when: never
@@ -1300,9 +1359,9 @@ release-image-rehearsal-amd64-index-smoke:
     - job: release-image-gitlab-index
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
-  before_script: []
+    <<: *docker-dind-variables
+  before_script:
+    - *docker-ready
   script:
     - docker pull --platform linux/amd64 "$GITLAB_INDEX_IMAGE@$GITLAB_INDEX_DIGEST"
     - >-
@@ -1331,6 +1390,7 @@ release-image-rehearsal-arm64-index-smoke:
 release-image-dockerhub:
   stage: promote
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .protected-release-tag
   needs:
     - job: release-python-base-resolution
@@ -1343,9 +1403,9 @@ release-image-dockerhub:
     - job: release-image-gitlab-index
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache jq python3
   script:
     - scripts/release/publish_release_artifacts.sh dockerhub-image
@@ -1364,6 +1424,7 @@ release-image-dockerhub:
 release-supply-chain:
   stage: attest
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .protected-release-tag
   needs:
     - job: release-image-gitlab-index
@@ -1380,9 +1441,9 @@ release-supply-chain:
       aud: sigstore
   variables:
     COSIGN_YES: "true"
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache cosign jq python3
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
@@ -1498,6 +1559,7 @@ release-payload-upload:
 release-postgres-smoke:
   stage: release
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .protected-release-tag
   needs:
     - job: release-image-dockerhub
@@ -1505,9 +1567,9 @@ release-postgres-smoke:
     - job: release-payload-upload
       artifacts: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache curl jq
   script:
     - sh scripts/release/verify_repository_free_postgres.sh "$CI_PROJECT_DIR/release-payload"
@@ -1575,6 +1637,7 @@ release-create:
 release-public-smoke:
   stage: post-release
   image: $CI_DOCKER_IMAGE
+  services: *docker-dind-services
   extends: .protected-release-tag
   needs:
     - job: release-image-gitlab-index
@@ -1585,9 +1648,9 @@ release-public-smoke:
     - job: release-create
       optional: true
   variables:
-    DOCKER_HOST: "unix:///var/run/docker.sock"
-    DOCKER_TLS_CERTDIR: ""
+    <<: *docker-dind-variables
   before_script:
+    - *docker-ready
     - apk add --no-cache cosign curl jq python3
   script:
     - |

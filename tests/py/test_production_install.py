@@ -2979,7 +2979,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     )
     amd64_warmer = parsed_ci["docker-build-cache-amd64"]
     assert amd64_warmer["stage"] == "cache"
-    assert amd64_warmer["tags"] == ["self-hosted"]
+    assert amd64_warmer["tags"] == ["aws-spot-amd64"]
     assert amd64_warmer["resource_group"] == amd64_resource_group
     assert parsed_ci[".scheduled-docker-build"]["interruptible"] is True
     amd64_warmer_script = "\n".join(amd64_warmer["script"])
@@ -3019,16 +3019,18 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         "docker-build-babi": ["babi"],
         "docker-build-bile": ["bile"],
         "docker-build-barbas": ["barbas"],
-        "docker-build-beleth": ["beleth"],
         "docker-build-baka": ["baka"],
         "docker-build-bana": ["bana"],
-        "docker-build-baku": ["selinux", "self-managed", "baku"],
-        "docker-build-baal": ["podman", "self-managed", "baal"],
+        "docker-build-bolla": ["bolla"],
+        "docker-build-bannik": ["bannik"],
+        "docker-build-buta": ["buta"],
+        "docker-build-selinux": ["aws-spot-selinux"],
+        "podman-build-rootless": ["aws-spot-podman"],
     }
     for job_name, tags in scheduled_build_tags.items():
         assert parsed_ci[job_name]["extends"] == ".scheduled-docker-build"
         assert parsed_ci[job_name]["tags"] == tags
-    podman_warmer_script = "\n".join(parsed_ci["docker-build-baal"]["script"])
+    podman_warmer_script = "\n".join(parsed_ci["podman-build-rootless"]["script"])
     assert "podman build" in podman_warmer_script
     assert "docker.io/library/${python_base_image}" in podman_warmer_script
     assert '--build-arg "TARGETARCH=amd64"' in podman_warmer_script
@@ -3084,18 +3086,9 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert arm64_job["extends"] == ".release-arm64-dind"
     assert "resource_group" not in arm64_job
     arm64_template = parsed_ci[".release-arm64-dind"]
-    assert arm64_template["tags"] == ["saas-linux-small-arm64"]
-    assert arm64_template["services"] == [
-        {
-            "name": "${CI_DOCKER_IMAGE}-dind",
-            "alias": "docker",
-            "command": [
-                "--mtu=1360",
-                "--tls=false",
-            ],
-        }
-    ]
-    assert arm64_template["variables"]["DOCKER_HOST"] == "tcp://docker:2375"
+    assert arm64_template["tags"] == ["aws-spot-arm64"]
+    assert arm64_template["services"] == parsed_ci[".docker-dind"]["services"]
+    assert arm64_template["variables"]["DOCKER_HOST"] == "tcp://docker:2376"
     arm64_before_script = "\n".join(arm64_template["before_script"])
     assert "until docker info" in arm64_before_script
     assert "did not become ready after 60 seconds" in arm64_before_script
@@ -3139,7 +3132,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert "RELEASE_REGISTRY_CLEANUP_TOKEN" in cleanup_script
     assert 'RELEASE_STAGING_CLEANUP_ENABLED == "1"' in cleanup_job["rules"][0]["if"]
     selinux_job = parsed_ci["release-image-selinux-smoke"]
-    assert selinux_job["tags"] == ["selinux", "self-managed", "baku"]
+    assert selinux_job["tags"] == ["aws-spot-selinux"]
     assert "RELEASE_SELINUX_COMPATIBILITY_ENABLED == \"1\"" in (
         selinux_job["rules"][0]["if"]
     )
@@ -3153,7 +3146,7 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
     assert ".darklab-release-deployment.*" in selinux_pre_get_sources
     assert '"$stale_dir:/cleanup:Z"' in selinux_pre_get_sources
     podman_job = parsed_ci["release-image-rootless-podman-smoke"]
-    assert podman_job["tags"] == ["podman", "self-managed", "baal"]
+    assert podman_job["tags"] == ["aws-spot-podman"]
     assert "RELEASE_ROOTLESS_PODMAN_COMPATIBILITY_ENABLED == \"1\"" in (
         podman_job["rules"][0]["if"]
     )
@@ -3312,15 +3305,12 @@ def test_release_payload_is_exact_versioned_neutral_and_checksummed(tmp_path: Pa
         r"@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
     ) in dockerhub_overview
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert 'privileged = false' in contributing
-    assert (
-        'volumes = ["/var/run/docker.sock:/var/run/docker.sock", "/cache"]'
-        in contributing
-    )
-    assert 'volumes = ["/certs/client", "/cache"]' not in contributing
-    assert "saas-linux-small-arm64" in contributing
-    assert "`selinux`, `self-managed`, and `baku`" in contributing
-    assert "`podman`, `self-managed`, and `baal`" in contributing
+    assert 'privileged = true' in contributing
+    assert 'volumes = ["/certs/client", "/cache"]' in contributing
+    assert "aws-spot-amd64" in contributing
+    assert "aws-spot-arm64" in contributing
+    assert "`aws-spot-selinux`" in contributing
+    assert "`aws-spot-podman`" in contributing
     assert "A single `v*` rule is the simplest option" in contributing
     assert "protected, masked, and hidden variable" in contributing
     assert "needs only **Read & Write** access" in contributing
