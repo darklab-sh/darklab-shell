@@ -39,6 +39,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Public-network smoke checks accept changing DNS names, runner addresses, and quiet OpenSSL output.** Ping checks recognize resolved hostnames, the IP-service check accepts a valid IPv4 response, and OpenSSL 4.1's quiet mode must exit successfully without visible output. WHOIS timeouts still fail their checks.
+
 - **CI runner tests use the current scheduled build names.** The job inventory maps `docker-build-amd64` and `docker-build-arm64` to their AWS runner tags explicitly. SELinux and rootless Podman builds remain covered by native-host checks, while Docker jobs retain the inherited TLS, certificate-sharing, and readiness assertions.
 
 - **Generated dependency changelog entries keep valid Markdown spacing.** Preparation inserts one blank line around new entries and newly created Changed sections without altering published history. Regression coverage checks repeated updates and empty sections.
