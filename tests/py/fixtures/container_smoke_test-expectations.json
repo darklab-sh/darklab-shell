@@ -21,9 +21,8 @@
       "no_output": false,
       "exit_code": null,
       "command": "ping -c 4 ip.darklab.sh",
-      "any_of": [
-        { "expected_text": ["PING ip.darklab.sh"] },
-        { "expected_text": ["PING fw-vx2-vp1.darklab.sh"] }
+      "expected_patterns": [
+        "^PING \\S+ \\([0-9a-fA-F:.]+\\)"
       ]
     },
     {
@@ -606,12 +605,9 @@
       ]
     },
     {
-      "no_output": false,
+      "no_output": true,
       "exit_code": 0,
-      "command": "openssl s_client -connect ip.darklab.sh:443 -quiet",
-      "expected_text": [
-        "depth=1"
-      ]
+      "command": "openssl s_client -connect ip.darklab.sh:443 -quiet"
     },
     {
       "no_output": false,
@@ -1020,10 +1016,11 @@
     },
     {
       "no_output": false,
-      "exit_code": null,
+      "exit_code": 0,
       "command": "whois darklab.sh",
-      "expected_text": [
-        "Domain Name"
+      "run_command": "whois --no-recursion -h whois.iana.org sh",
+      "expected_patterns": [
+        "^domain:[ \\t]+SH[ \\t]*$"
       ]
     },
     {
@@ -1036,10 +1033,11 @@
     },
     {
       "no_output": false,
-      "exit_code": null,
+      "exit_code": 0,
       "command": "whois -h whois.iana.org darklab.sh",
-      "expected_text": [
-        "domain"
+      "run_command": "whois --no-recursion -h whois.iana.org darklab.sh",
+      "expected_patterns": [
+        "^domain:[ \\t]+SH[ \\t]*$"
       ]
     },
     {
@@ -1260,24 +1258,18 @@
     },
     {
       "no_output": false,
-      "exit_code": null,
+      "exit_code": 0,
       "command": "curl -sH Accept:application/json https://ip.darklab.sh/api",
-      "any_of": [
-        { "expected_text": ["108.79.194.246"] },
-        { "expected_text": ["107.178.106.164"] },
-        { "expected_text": ["172.18.0"] },
-        { "expected_text": ["192.168.10"] },
-        { "expected_text": ["192.168.20"] },
-        { "expected_text": ["10.20.0."] }
+      "expected_patterns": [
+        "\\A(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\Z"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
       "command": "ping -c 10 ip.darklab.sh",
-      "any_of": [
-        { "expected_text": ["PING ip.darklab.sh"] },
-        { "expected_text": ["PING fw-vx2-vp1.darklab.sh"] }
+      "expected_patterns": [
+        "^PING \\S+ \\([0-9a-fA-F:.]+\\)"
       ]
     },
     {

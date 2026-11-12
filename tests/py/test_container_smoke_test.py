@@ -895,6 +895,36 @@ def _load_cases() -> list[dict[str, object]]:
     return cases
 
 
+@pytest.mark.parametrize(("source_command", "run_command"), [
+    ("whois darklab.sh", "whois --no-recursion -h whois.iana.org sh"),
+    ("whois -h whois.iana.org darklab.sh", "whois --no-recursion -h whois.iana.org darklab.sh"),
+])
+def test_whois_smoke_queries_iana_without_following_referrals(monkeypatch, source_command, run_command):
+    case = next(case for case in _load_cases() if case["command"] == source_command)
+    calls = []
+    output = "refer: whois.nic.sh\ndomain:       SH\n"
+    exit_code = 0
+
+    def fake_post_run(base_url, command, session_id, **kwargs):
+        calls.append(command)
+        return [
+            {"type": "output", "text": output},
+            {"type": "exit", "code": exit_code},
+        ], False
+
+    monkeypatch.setattr(sys.modules[__name__], "_post_run", fake_post_run)
+    _assert_smoke_case_matches("http://example.test", "unused", case)
+    assert calls == [run_command]
+
+    for output in ("Timeout.", "% IANA WHOIS server", "domain: COM", "refer: whois.nic.sh", ""):
+        with pytest.raises(AssertionError, match="output did not match"):
+            _assert_smoke_case_matches("http://example.test", "unused", case)
+    output = "domain: SH"
+    exit_code = 1
+    with pytest.raises(AssertionError, match="exited with the wrong status"):
+        _assert_smoke_case_matches("http://example.test", "unused", case)
+
+
 def _load_interactive_cases() -> list[dict[str, object]]:
     records = _load_interactive_expectations()
     commands = load_container_smoke_test_interactive_commands()
@@ -2209,7 +2239,7 @@ def _assert_smoke_case_matches(
     session_id: str,
     case: Mapping[str, object],
 ) -> None:
-    command = str(case["command"])
+    command = str(case.get("run_command") or case["command"])
     expected_exit_code = _case_exit_code(case)
 
     any_of = _case_outcomes(case)
@@ -2430,7 +2460,7 @@ def test_container_smoke_test_command_matches_expected_output(
     container_smoke_test_nuclei_templates,
     case,
 ):
-    command = str(case["command"])
+    command = str(case.get("run_command") or case["command"])
     max_attempts = max(1, SMOKE_COMMAND_RETRIES + 1)
 
     for attempt in range(1, max_attempts + 1):

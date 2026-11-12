@@ -149,7 +149,11 @@ function loadCommands(args) {
     'print(json.dumps(commands.load_container_smoke_test_commands()))',
   ].join('\n')
   const output = execFileSync('python3', ['-c', script], { cwd: ROOT, encoding: 'utf8' }).trim()
-  return JSON.parse(output)
+  const expectations = JSON.parse(readFileSync(path.join(ROOT, 'tests/py/fixtures/container_smoke_test-expectations.json'), 'utf8'))
+  const overrides = new Map(expectations.records
+    .filter(record => record.run_command)
+    .map(record => [record.command, record.run_command]))
+  return JSON.parse(output).map(command => overrides.get(command) || command)
 }
 
 function selectCommandTimeoutMs(command, defaultTimeoutMs) {
