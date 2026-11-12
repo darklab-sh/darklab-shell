@@ -1016,10 +1016,11 @@
     },
     {
       "no_output": false,
-      "exit_code": null,
+      "exit_code": 0,
       "command": "whois darklab.sh",
-      "expected_text": [
-        "Domain Name"
+      "run_command": "whois --no-recursion -h whois.iana.org sh",
+      "expected_patterns": [
+        "^domain:[ \\t]+SH[ \\t]*$"
       ]
     },
     {
@@ -1032,10 +1033,11 @@
     },
     {
       "no_output": false,
-      "exit_code": null,
+      "exit_code": 0,
       "command": "whois -h whois.iana.org darklab.sh",
-      "expected_text": [
-        "domain"
+      "run_command": "whois --no-recursion -h whois.iana.org darklab.sh",
+      "expected_patterns": [
+        "^domain:[ \\t]+SH[ \\t]*$"
       ]
     },
     {

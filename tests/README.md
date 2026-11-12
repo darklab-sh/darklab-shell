@@ -660,7 +660,11 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-Public-network checks accept the hostname resolved by `ping` and a valid IPv4 response from the IP service, so DNS changes and disposable runners don't require new address fixtures. These ping examples check command output without requiring ICMP replies. OpenSSL's `-quiet` example requires a successful exit with no visible output; the other TLS examples check certificate and connection output. WHOIS lookups still require registry output, and timeouts remain failures.
+Public-network checks accept the hostname resolved by `ping` and a valid IPv4 response from the IP service, so DNS changes and disposable runners don't require new address fixtures. These ping examples check command output without requiring ICMP replies. OpenSSL's `-quiet` example requires a successful exit with no visible output; the other TLS examples check certificate and connection output.
+
+The two domain WHOIS smoke cases query `whois.iana.org` with `--no-recursion` and require its `.sh` delegation record. This avoids the `.sh` registry endpoint that times out from the AWS runners, including referrals back to it. These cases check IANA delegation data, not the full `darklab.sh` registration record; the ARIN IP-allocation case remains separate. Timeouts and missing records still fail.
+
+An expectation record can supply `run_command` for a test-only provider or target override. The source `command` stays the key for corpus coverage, pytest IDs, and `--cmd` selection; execution logs and retry evidence report the command actually run. Default browser captures use the same overrides. With `--commands-file`, list the literal commands to capture, including any provider flags. App autocomplete examples and workflows keep their normal commands.
 
 The deterministic tier scans a disposable local TLS certificate with SSLyze to check its patched cryptography integration. Container security regressions cover Shodan plugin discovery without `pkg_resources`, fail-closed certificate-store checks, and the image scanner's critical threshold and exit status. Image builds check Python dependency consistency in the application and isolated scanner environments. The Debian certifi exception is scoped to its exact package location and backed by the built image's trust-store check; see [dependency updates](../CONTRIBUTING.md#dependency-version-tracking).
 
