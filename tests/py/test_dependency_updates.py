@@ -4,10 +4,12 @@
 """Dependency preparation keeps mechanical outputs separate from review decisions."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -59,6 +61,51 @@ def test_scanner_update_requires_independent_parser_review(checkout):
     report = updates.inspect_update(checkout, [])
     assert any('independent parser pin' in reason for reason in report['reviewRequired'])
     assert updates.reviewed_scanner(checkout) == version
+
+
+def test_preparation_promotes_only_after_qualification_and_check_preserves_evidence(checkout, monkeypatch):
+    qualifier = load_script('scanner_qualification')
+    monkeypatch.setitem(sys.modules, 'scanner_qualification', qualifier)
+    monkeypatch.setattr(updates, 'ROOT', checkout)
+    monkeypatch.setattr(qualifier.platform, 'python_version', lambda: updates.defaults(checkout)['PYTHON_VERSION'])
+    contract = checkout / qualifier.CONTRACT
+    original = updates.reviewed_scanner(checkout)
+    contract.write_text(contract.read_text().replace(original, '4.0.0'))
+    calls = []
+    def exercise(snapshot, *_args):
+        calls.append(snapshot)
+        assert updates.reviewed_scanner(checkout) == '4.0.0'
+        return {'tests': {name: 1 for name in qualifier.SUITES}, 'environments': {'scanner': [], 'runner': []}}
+    monkeypatch.setattr(qualifier, 'exercise', exercise)
+    monkeypatch.setattr(updates.subprocess, 'run', lambda *_a, **_kw: None)
+    context, report = checkout / 'context.json', checkout / 'report.json'
+    context.write_text(json.dumps({'updates': [
+        {'package': 'schemathesis', 'file': 'Dockerfile', 'current': '4.0.0', 'proposed': original, 'type': 'minor'},
+    ]}))
+    # This fixture doesn't need a changelog mutation to exercise qualification.
+    monkeypatch.setattr(updates, 'update_changelog', lambda *_a: None)
+    argv = ['dependency_update', 'prepare', '--qualify-scanner', '--context', str(context), '--report', str(report)]
+    monkeypatch.setattr(sys, 'argv', argv)
+    assert updates.main() == 0
+    prepared = report.read_bytes()
+    assert updates.reviewed_scanner(checkout) == original
+    argv[1] = 'check'
+    assert updates.main() == 0
+    assert report.read_bytes() == prepared
+    assert len(calls) == 1
+    path = checkout / 'deploy/schemathesis-constraints.txt'
+    path.write_text(path.read_text() + '# changed after qualification\n')
+    with pytest.raises(ValueError, match='stale'):
+        updates.main()
+
+
+def test_scanner_qualification_trigger_includes_constraints_and_production_python(checkout):
+    assert updates.scanner_requalification_required(checkout, [{'package': 'schemathesis'}])
+    assert updates.scanner_requalification_required(checkout, [{'package': 'jsonschema-rs',
+                                                               'file': 'deploy/schemathesis-constraints.txt'}])
+    assert updates.scanner_requalification_required(checkout, [{'package': 'python', 'file': 'Dockerfile'}])
+    assert not updates.scanner_requalification_required(checkout, [{'package': 'python', 'file': '.gitlab-ci.yml'}])
+    assert not updates.scanner_requalification_required(checkout, [{'package': 'eslint', 'file': 'package.json'}])
 
 
 def test_changelog_generation_is_idempotent_and_preserves_published_history(tmp_path):

@@ -589,8 +589,12 @@ Renovate supplies the approved update context and an external report path throug
 `RENOVATE_PREPARATION_CONTEXT` and `RENOVATE_PREPARATION_REPORT`. Preparation adds
 an idempotent summary to the active changelog section and checks scanner constraints,
 production Python metadata, reviewed security minimums, and the container-license
-inventory. It records parser, scanner-patch, WPScan terms, browser-license, and major
-version review requirements separately from completed mechanical checks.
+inventory. The central policy adds `--qualify-scanner` to both commands. For scanner,
+scanner-constraint, and production-Python changes, preparation runs the shared
+`scripts/release/scanner_qualification.py` helper against the proposed files. Minor
+and patch scanner updates advance the independent parser pin only after qualification
+passes. Major scanner changes and downgrades require manual review. Scanner-patch,
+WPScan terms, browser-license, and other major-version reviews remain separate.
 
 Browser package updates also run `npm run vendor:sync`, `npm run notices:sync`, and
 `npm run assets:sync`. Their check commands verify the saved output. Frontend notices
@@ -605,14 +609,33 @@ service over TLS on the AWS AMD64 runner. The runner must enable privileged serv
 and share `/certs/client` between the job and service. The job waits up to 60 seconds
 for Docker before starting qualification. It uses the production Python image to test
 application compatibility and the real Schemathesis command/report against disposable
-localhost APIs. Run `sh scripts/release/run_dependency_qualification.sh` to exercise
-the committed source with the same container boundary. It passes no host directories,
+localhost APIs. Both CI and preparation use the same Python qualification helper.
+It copies the proposed source into a temporary directory, changes only the candidate
+parser version there, and installs separate app/test and scanner environments. Real
+reports exercise every enabled check, GET/HEAD operations, OpenAPI 3.0/3.1, privacy,
+and incomplete-report rejection. Parser and evidence-persistence tests plus application
+compatibility checks must also pass, with no skipped or empty suites. Source changes
+during qualification stop promotion.
+
+The helper writes stage logs, JUnit results, scanner fixture reports, installed package
+lists, and a `qualification.json` receipt outside the source tree. Receipts identify
+the tested source, constraints, interpreter, platform, and test totals. Preparation's
+read-only check rejects stale evidence; saved plans retain the version, test totals,
+and source, constraints, and installed-environment hashes. The pin remains a literal
+runtime requirement: it isn't derived from scanner output or a browser setting.
+
+Run `sh scripts/release/run_dependency_qualification.sh` to exercise the committed
+source with the same container boundary. To qualify current working files, use the
+production Python version with
+`python scripts/release/scanner_qualification.py --output /tmp/schemathesis-qualification`;
+add `--promote` to qualify and advance a compatible candidate pin. Qualification only
+targets disposable localhost APIs. It passes no host directories,
 Docker socket, or GitLab credentials into that container. The normal Python lanes
 cover CI Python. `audit-py` audits app and development requirements; `docker-build`
 also audits the actual distributions installed in each isolated scanner environment.
 Image builds, deterministic smoke tests, and the fixed-Critical SBOM gate remain
 required image qualification. Passing preparation doesn't replace those checks or
-approve an independent parser or license change.
+approve parser-rule or license changes.
 
 Routine dependency versions belong in their build or package manifests. Tests read
 those pins and check that builds, constraints, release evidence, and version output

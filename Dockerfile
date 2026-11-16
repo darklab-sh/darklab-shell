@@ -26,7 +26,7 @@ ARG GOSU_VERSION=1.20
 ARG OPENSSL_VERSION=4.1.0
 ARG OPENSSL_SHA256=50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd
 # renovate: datasource=github-tags depName=rbsec/sslscan
-ARG SSLSCAN_VERSION=2.2.3
+ARG SSLSCAN_VERSION=2.2.4
 # renovate: datasource=go depName=github.com/projectdiscovery/nuclei/v3 versioning=go
 ARG NUCLEI_VERSION=v3.11.1
 # renovate: datasource=go depName=github.com/projectdiscovery/subfinder/v2 versioning=go
@@ -40,7 +40,7 @@ ARG NAABU_VERSION=v2.7.0
 # renovate: datasource=go depName=github.com/projectdiscovery/katana versioning=go
 ARG KATANA_VERSION=v1.8.0
 # renovate: datasource=github-tags depName=projectdiscovery/tlsx
-ARG TLSX_VERSION=v1.4.5
+ARG TLSX_VERSION=v1.4.6
 # renovate: datasource=go depName=github.com/projectdiscovery/cdncheck versioning=go
 ARG CDNCHECK_VERSION=v1.4.0
 # renovate: datasource=go depName=github.com/owasp-amass/amass/v5 versioning=go
@@ -52,7 +52,7 @@ ARG GOBUSTER_VERSION=v3.8.2
 # renovate: datasource=go depName=github.com/ffuf/ffuf/v2 versioning=go
 ARG FFUF_VERSION=v2.3.0
 # renovate: datasource=github-tags depName=trufflesecurity/trufflehog
-ARG TRUFFLEHOG_VERSION=v3.99.8
+ARG TRUFFLEHOG_VERSION=v3.99.9
 # renovate: datasource=go depName=github.com/rabbitmq/amqp091-go versioning=go depType=verification
 ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
 # renovate: datasource=github-tags depName=blechschmidt/massdns
@@ -83,7 +83,7 @@ ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.3.0-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=f63b98296b56f0575df5a4539ce1806f07218100d18d87d8db512648b6c5c6cb
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 # renovate: datasource=pypi depName=schemathesis versioning=pep440
-ARG SCHEMATHESIS_VERSION=4.33.2
+ARG SCHEMATHESIS_VERSION=4.33.4
 # renovate: datasource=go depName=github.com/lc/gau/v2 versioning=go
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=

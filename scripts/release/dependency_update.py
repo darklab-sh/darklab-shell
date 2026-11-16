@@ -82,6 +82,13 @@ def inspect_update(root: Path, updates: list[dict]) -> dict:
                            "Image build, deterministic smoke and SBOM gates when image inputs change"]}
 
 
+def scanner_requalification_required(root: Path, updates: list[dict]) -> bool:
+    return reviewed_scanner(root) != defaults(root)["SCHEMATHESIS_VERSION"] or any(
+        item["package"] == "schemathesis" or item.get("file") == "deploy/schemathesis-constraints.txt"
+        or (item["package"] == "python" and item.get("file") == "Dockerfile") for item in updates
+    )
+
+
 def update_changelog(root: Path, updates: list[dict]) -> None:
     if not updates:
         return
@@ -117,9 +124,34 @@ def main() -> int:
     parser.add_argument("mode", choices=("prepare", "check"))
     parser.add_argument("--context", default=os.environ.get("RENOVATE_PREPARATION_CONTEXT"))
     parser.add_argument("--report", default=os.environ.get("RENOVATE_PREPARATION_REPORT"))
+    parser.add_argument("--qualify-scanner", action="store_true",
+                        help="Qualify scanner changes during preparation and verify their evidence during checks")
     args = parser.parse_args()
     context = json.loads(Path(args.context).read_text()) if args.context else {"updates": []}
     report = inspect_update(ROOT, context["updates"])
+    receipt = None
+    scanner_checks = []
+    if args.qualify_scanner:
+        from scanner_qualification import evidence_checks, qualify  # noqa: PLC0415
+
+        if not args.report:
+            parser.error("--qualify-scanner requires an external --report path")
+        previous = json.loads(Path(args.report).read_text()) if args.mode == "check" and Path(args.report).exists() else {}
+        if scanner_requalification_required(ROOT, context["updates"]) or previous.get("scannerQualification") is not None:
+            if any(item["package"] == "schemathesis" and item.get("type") == "major" for item in context["updates"]):
+                raise ValueError("Major Schemathesis updates require manual parser review")
+            if args.mode == "prepare":
+                receipt = qualify(ROOT, Path(args.report).parent / "scanner-qualification", promote=True)
+            else:
+                receipt = previous.get("scannerQualification")
+                if not isinstance(receipt, dict):
+                    raise ValueError("Missing scanner qualification evidence")
+        if receipt is not None:
+            scanner_checks = evidence_checks(ROOT, receipt)
+    if receipt is not None:
+        report = inspect_update(ROOT, context["updates"])
+        report["scannerQualification"] = receipt
+        report["checks"].extend(scanner_checks)
     if args.mode == "prepare":
         update_changelog(ROOT, context["updates"])
     subprocess.run([sys.executable, str(ROOT / "scripts/release/check_container_licenses.py")], check=True)

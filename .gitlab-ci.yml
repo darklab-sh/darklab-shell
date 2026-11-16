@@ -323,6 +323,9 @@ test-dependency-qualification:
         - scripts/release/*
         - tests/py/test_dependency_updates.py
         - tests/py/test_scanner_compatibility.py
+        - tests/py/test_scanner_qualification.py
+        - tests/py/test_assessment_service_actions.py
+        - tests/py/test_assessment_evidence.py
         - app/services/assessments/schemathesis*.py
   script:
     - sh scripts/release/run_dependency_qualification.sh
@@ -331,7 +334,7 @@ test-dependency-qualification:
     paths:
       - test-results/dependency-qualification/
     reports:
-      junit: test-results/dependency-qualification/dependency-qualification.xml
+      junit: test-results/dependency-qualification/*.xml
     expire_in: 1 week
 
 lint-js:
