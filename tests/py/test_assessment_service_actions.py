@@ -1490,13 +1490,13 @@ def test_schemathesis_report_keeps_bounded_operation_evidence_and_provenance():
     )
 
     report = parse_schemathesis_ndjson(
-        _schemathesis_report_bytes(failure=False, tool_version="4.33.2"),
+        _schemathesis_report_bytes(failure=False, tool_version=SCHEMATHESIS_REPORT_TOOL_VERSION),
         reviewed,
         profile_key="api",
         profile_version="1.0",
     )
 
-    assert report.tool_version == "4.33.2"
+    assert report.tool_version == SCHEMATHESIS_REPORT_TOOL_VERSION
     assert report.profile_key == "api"
     assert report.profile_version == "1.0"
     assert report.schema_artifact_id == reviewed.source_artifact_id
