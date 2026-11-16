@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `@playwright/test` from `^1.65.0` to `^1.65.1`; `authlib` from `==1.9.5` to `==1.9.8`; `eslint` from `^10.9.0` to `^10.15.0`; `gunicorn` from `==27.0.0` to `==27.0.1`; `jsdom` from `^31.0.0` to `^31.0.1`; `jsonschema-rs` from `==0.61.1` to `==0.61.2`; `markdownlint-cli2` from `^0.24.0` to `^0.24.1`; `projectdiscovery/tlsx` from `v1.4.5` to `v1.4.6`; `psycopg` from `>=3.3.8,<4` to `>=3.3.9,<4`; `rbsec/sslscan` from `2.2.3` to `2.2.4`; `ruff` from `==0.17.4` to `==0.17.5`; `schemathesis` from `4.33.2` to `4.33.4`; `schemathesis` from `==4.33.2` to `==4.33.4`; `trufflesecurity/trufflehog` from `v3.99.8` to `v3.99.9`.
+
 - **Dependency versions are updated.** Updated `brace-expansion` from `5.0.12` to `5.0.13`; `docker/dockerfile` from `1.28` to `1.29`; `github.com/jackc/pgx/v5` from `v5.12.0` to `v5.13.0`; `golang.org/x/crypto` from `v0.58.0` to `v0.59.0`; `minimatch` from `11.0.7` to `11.0.8`.
 
 - **Dependency versions are updated.** Updated `github.com/andybalholm/brotli` from `v1.2.8` to `v1.3.0`; `golang` from `1.27.3` to `1.27.4`; `jsonschema-rs` from `==0.60.3` to `==0.61.1`; `markdown-it-py` from `==4.2.0` to `==4.3.0`; `minimatch` from `11.0.5` to `11.0.7`; `projectdiscovery/tlsx` from `v1.4.4` to `v1.4.5`; `re2js` from `2.9.1` to `2.10.0`; `schemathesis` from `4.33.1` to `4.33.2`; `schemathesis` from `==4.33.1` to `==4.33.2`.
