@@ -52,7 +52,7 @@ ARG GOBUSTER_VERSION=v3.8.2
 # renovate: datasource=go depName=github.com/ffuf/ffuf/v2 versioning=go
 ARG FFUF_VERSION=v2.3.0
 # renovate: datasource=github-tags depName=trufflesecurity/trufflehog
-ARG TRUFFLEHOG_VERSION=v3.100.0
+ARG TRUFFLEHOG_VERSION=v3.100.1
 # renovate: datasource=go depName=github.com/rabbitmq/amqp091-go versioning=go depType=verification
 ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
 # renovate: datasource=github-tags depName=blechschmidt/massdns
