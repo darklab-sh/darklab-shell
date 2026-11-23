@@ -4,16 +4,16 @@
 # Isolated Schemathesis runtime. Keep every transitive dependency exact so the
 # scanner environment cannot drift independently of the release image.
 anyio==4.16.0
-certifi==2026.10.23
-charset-normalizer==3.5.2
+certifi==2026.11.20
+charset-normalizer==3.5.3
 click==8.5.1
 graphql-core==3.3.2
-harfile==0.6.0
-hypothesis==6.170.15
-hypothesis-graphql==0.13.6
+harfile==0.7.1
+hypothesis==6.170.17
+hypothesis-graphql==0.13.7
 idna==3.20
 iniconfig==2.3.1
-jsonschema-rs==0.61.2
+jsonschema-rs==0.63.1
 markdown-it-py==4.3.0
 MarkupSafe==3.0.4
 mdurl==0.1.2
@@ -22,10 +22,10 @@ pluggy==1.7.0
 Pygments==2.21.0
 pyrate-limiter==4.5.1
 pytest==9.2.0
-PyYAML==6.0.3
+PyYAML==6.0.4
 requests==2.34.2
 rich==15.0.0
-schemathesis==4.33.4
+schemathesis==4.34.0
 sortedcontainers==2.4.0
 typing-extensions==4.16.0
 urllib3==2.8.0
