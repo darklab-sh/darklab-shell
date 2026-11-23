@@ -13,7 +13,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from services.assessments.schemathesis_command import reviewed_schemathesis_command_plan
+from services.assessments.schemathesis_command import (
+    SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION, reviewed_schemathesis_command_plan,
+)
 from services.assessments.schemathesis_report import parse_schemathesis_ndjson
 from services.assessments.schemathesis_report_contracts import SCHEMATHESIS_REPORT_TOOL_VERSION, SchemathesisReportError
 from services.assessments.schemathesis_schema import review_local_openapi_json
@@ -30,8 +32,11 @@ pytestmark = pytest.mark.skipif(os.environ.get("RUN_SCANNER_COMPATIBILITY") != "
     ("get", "negative_data_rejection"), ("head", None), ("head", "not_a_server_error"),
 ], ids=["clean", "server-error", "status-code", "content-type", "schema-violation", "invalid-accepted", "head", "head-error"])
 def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, schema_version, method, expected_check):
+    requests_seen = []
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            requests_seen.append((self.command, urlsplit(self.path).path))
             value = parse_qs(urlsplit(self.path).query).get("limit", [""])[0]
             valid = value.isascii() and value.isdecimal() and len(value) < 4 and 1 <= int(value) <= 3
             status = {"not_a_server_error": 500, "status_code_conformance": 418, "negative_data_rejection": 200}.get(
@@ -84,7 +89,14 @@ def test_real_scanner_report_obeys_reviewed_command_and_privacy(tmp_path, schema
         assert parsed.expected_operation_count == parsed.observed_operation_count == 1
         assert parsed.missing_operations == ()
         assert parsed.operations[0].operation == f"{method.upper()} /items"
-        assert parsed.case_count > 0
+        operation_requests = [verb for verb, path in requests_seen if path == "/items"]
+        # Capability probes precede generated cases and are not operation examples.
+        assert [(verb, path) for verb, path in requests_seen if path != "/items"] == [
+            ("GET", "/"), ("GET", "/schemathesis-probe%5C%1B%01"),
+        ]
+        assert 0 < len(operation_requests) <= SCHEMATHESIS_MAX_EXAMPLES_PER_OPERATION
+        assert all(verb == method.upper() for verb in operation_requests)
+        assert parsed.case_count == len(operation_requests)
         assert bool(parsed.failure_count) is bool(expected_check)
         if expected_check:
             assert any(failure.check_name == expected_check for operation in parsed.operations for failure in operation.failures)

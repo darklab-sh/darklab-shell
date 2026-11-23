@@ -513,16 +513,18 @@ def _request_shape(case: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
             names.extend(f"body:{key}" for key in body if key != "$base64")
         names.append("body")
     normalized = tuple(sorted(set(str(name) for name in names)))
-    if len(normalized) > _MAX_PARAMETER_NAMES or any(
-        not name
-        or len(name) > _MAX_PARAMETER_NAME_LENGTH
-        or any(ord(char) < 32 for char in name)
-        for name in normalized
-    ):
+    if len(normalized) > _MAX_PARAMETER_NAMES:
         raise _error(
             "case_parameter_limit_exceeded",
             "Schemathesis case has too many parameters.",
         )
+    # Negative tests can generate non-displayable or oversized names. Keep their
+    # identities without storing unsafe text or rejecting otherwise valid evidence.
+    normalized = tuple(sorted(
+        name if len(name) <= _MAX_PARAMETER_NAME_LENGTH and name.isprintable()
+        else f"{name.partition(':')[0]}:sha256:{_digest_json(name)}"
+        for name in normalized
+    ))
     media_type = str(case.get("media_type") or "")
     if len(media_type) > 128 or any(ord(character) < 32 for character in media_type):
         raise _error(

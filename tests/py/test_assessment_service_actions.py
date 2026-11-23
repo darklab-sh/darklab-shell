@@ -1553,6 +1553,64 @@ def test_schemathesis_report_keeps_safe_failure_shape_without_private_values(fai
     assert "response-secret-body" not in public_result
 
 
+@pytest.mark.parametrize(("field", "prefix"), [
+    ("path_parameters", "path"), ("query", "query"), ("body", "body"),
+])
+@pytest.mark.parametrize("generated_name", [
+    "bell\x07name", "null\x00name", "delete\x7fname", "next\x85line",
+    "direction\u202ename", "surrogate\ud800name", "long" * 40,
+])
+def test_schemathesis_report_hashes_unsafe_generated_parameter_names(field, prefix, generated_name):
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={"/items/{item_id}": {
+            "get": {"responses": {"200": {"description": "OK"}}},
+        }}),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    events = [json.loads(line) for line in _schemathesis_report_bytes().splitlines()]
+    case = events[1]["ScenarioFinished"]["recorder"]["cases"]["case_01"]["value"]
+    case[field] = {"readable": "private-value", generated_name: "generated-secret-value"}
+    raw = ("\n".join(json.dumps(event) for event in events) + "\n").encode()
+
+    report = parse_schemathesis_ndjson(raw, reviewed, profile_key="api", profile_version="1.0")
+
+    assert report.complete and report.failure_count == 1
+    failure = report.operations[0].failures[0]
+    digest = hashlib.sha256(json.dumps(f"{prefix}:{generated_name}").encode()).hexdigest()
+    assert f"{prefix}:sha256:{digest}" in failure.parameter_names
+    assert f"{prefix}:readable" in failure.parameter_names
+    assert all(name.isprintable() and len(name) <= 128 for name in failure.parameter_names)
+    assert "generated-secret-value" not in repr(report)
+    assert "private-value" not in repr(report)
+    assert json.dumps(generated_name)[1:-1] not in json.dumps(failure.parameter_names)
+    assert report == parse_schemathesis_ndjson(raw, reviewed, profile_key="api", profile_version="1.0")
+
+
+@pytest.mark.parametrize("count", [32, 33])
+def test_schemathesis_report_preserves_generated_parameter_count_limit(count):
+    reviewed = review_local_openapi_json(
+        _openapi_json(paths={"/items/{item_id}": {
+            "get": {"responses": {"200": {"description": "OK"}}},
+        }}),
+        source_artifact_id="rfa_0123456789abcdef",
+        base_url="https://api.example.test/v1",
+    )
+    events = [json.loads(line) for line in _schemathesis_report_bytes().splitlines()]
+    case = events[1]["ScenarioFinished"]["recorder"]["cases"]["case_01"]["value"]
+    case["path_parameters"] = {}
+    case["query"] = {f"generated\x07{index}": "private-value" for index in range(count)}
+    raw = ("\n".join(json.dumps(event) for event in events) + "\n").encode()
+
+    if count > 32:
+        with pytest.raises(SchemathesisReportError) as rejected:
+            parse_schemathesis_ndjson(raw, reviewed, profile_key="api", profile_version="1.0")
+        assert rejected.value.code == "case_parameter_limit_exceeded"
+    else:
+        report = parse_schemathesis_ndjson(raw, reviewed, profile_key="api", profile_version="1.0")
+        assert len(set(report.operations[0].failures[0].parameter_names)) == count
+
+
 @pytest.mark.parametrize(
     ("raw_report", "error_code"),
     [
@@ -2015,7 +2073,7 @@ def test_reviewed_schemathesis_command_is_exact_read_only_and_request_bounded():
     assert "--max-failures 10" in display.command
     assert "--report ndjson --report-ndjson-path [protected-report]" in display.command
     assert "--generation-database" not in display.command
-    assert "--generation-deterministic --no-color" in display.command
+    assert "--generation-deterministic --no-shrink --no-color" in display.command
     assert "POST" not in display.command
 
     schema_path = "/tmp/private-http-runs/run-0123456789abcdef/schema.json"

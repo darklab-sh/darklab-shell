@@ -237,7 +237,7 @@ Security note: ProjectDiscovery provider/config files can contain API keys or ot
 
 urlscan CLI release `v2026.10.21` is pinned with its canonical Go module version, `v0.0.7-0.20261021083030-961f2e8d0b75`. Its calendar release tag cannot be installed directly under Go's module-major rules. The module pin resolves to the same release commit.
 
-Schemathesis 4.33 runs the reviewed command with deterministic generation, which also disables its example database. Passing a separate database option alongside deterministic generation is rejected by that release. Report imports require the same pinned tool version.
+Schemathesis runs the reviewed command with deterministic generation, which also disables its example database. The command includes `--no-shrink` so failure simplification does not add requests beyond the reviewed example budget. Passing a separate database option alongside deterministic generation is rejected. Report imports require the same pinned tool version.
 
 The standalone OpenSSL command uses OpenSSL 4.1 with its legacy provider. sslscan 2.2.3 builds against Debian's OpenSSL 3 libraries because its protocol checks still use APIs removed in OpenSSL 4. The two tools use separate shared-library versions.
 

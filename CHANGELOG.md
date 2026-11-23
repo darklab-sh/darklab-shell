@@ -43,6 +43,11 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Schemathesis update qualification preserves findings and request bounds.**
+  - **Root cause:** Generated parameter names containing control characters caused report rejection. Schemathesis 4.34 also enables failure shrinking, which adds requests beyond the reviewed case limit.
+  - **Fix:** Non-printable or oversized parameter names become stable SHA-256 labels, while readable names and the parameter-count limit stay unchanged. Reviewed commands explicitly disable shrinking; report limits and the independently qualified version pin remain enforced.
+  - **Tests:** Regressions cover path, query, and body names, private-value omission, and the count boundary. Real-scanner checks separate startup capability probes from operation requests and compare those requests with the reviewed limit and report evidence.
+
 - **Public-network smoke checks accept changing DNS names, runner addresses, and quiet OpenSSL output.** Ping checks recognize resolved hostnames, the IP-service check accepts a valid IPv4 response, and OpenSSL 4.1's quiet mode must exit successfully without visible output. Domain WHOIS probes use IANA delegation records without following referrals to the registry endpoint unreachable from AWS runners; timeouts and missing records still fail.
 
 - **CI runner tests use the current scheduled build names.** The job inventory maps `docker-build-amd64` and `docker-build-arm64` to their AWS runner tags explicitly. SELinux and rootless Podman builds remain covered by native-host checks, while Docker jobs retain the inherited TLS, certificate-sharing, and readiness assertions.
