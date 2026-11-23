@@ -48,21 +48,21 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "braces": "file:tools/vendor/braces",
     "esbuild": "0.28.2",
     "eslint": "^10.15.0",
     "js-yaml": "5.5.0",
     "jsdom": "^31.0.1",
-    "markdownlint-cli2": "^0.24.1",
-    "stylelint": "^18.0.0",
-    "vitest": "^5.1.0"
+    "markdownlint-cli2": "^0.24.2",
+    "stylelint": "^18.1.0",
+    "vitest": "^5.1.1"
   },
   "overrides": {
-    "brace-expansion": "5.0.13",
+    "brace-expansion": "5.1.0",
     "braces": "$braces",
     "eslint": {
-      "minimatch": "11.0.8"
+      "minimatch": "11.0.9"
     },
     "js-yaml@^4.0.0": "4.3.2",
     "markdownlint-cli2": {

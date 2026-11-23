@@ -13,7 +13,7 @@ ARG GO_BUILD_PARALLELISM=2
 # renovate: datasource=go depName=golang.org/x/crypto versioning=go
 ARG GO_X_CRYPTO_VERSION=v0.59.0
 # renovate: datasource=go depName=golang.org/x/net versioning=go
-ARG GO_X_NET_VERSION=v0.62.0
+ARG GO_X_NET_VERSION=v0.63.0
 # renovate: datasource=go depName=github.com/andybalholm/brotli versioning=go
 ARG GO_BROTLI_VERSION=v1.3.0
 # renovate: datasource=go depName=github.com/getkin/kin-openapi versioning=go
@@ -40,7 +40,7 @@ ARG NAABU_VERSION=v2.7.0
 # renovate: datasource=go depName=github.com/projectdiscovery/katana versioning=go
 ARG KATANA_VERSION=v1.8.0
 # renovate: datasource=github-tags depName=projectdiscovery/tlsx
-ARG TLSX_VERSION=v1.4.6
+ARG TLSX_VERSION=v1.5.0
 # renovate: datasource=go depName=github.com/projectdiscovery/cdncheck versioning=go
 ARG CDNCHECK_VERSION=v1.4.0
 # renovate: datasource=go depName=github.com/owasp-amass/amass/v5 versioning=go
@@ -52,7 +52,7 @@ ARG GOBUSTER_VERSION=v3.8.2
 # renovate: datasource=go depName=github.com/ffuf/ffuf/v2 versioning=go
 ARG FFUF_VERSION=v2.3.0
 # renovate: datasource=github-tags depName=trufflesecurity/trufflehog
-ARG TRUFFLEHOG_VERSION=v3.99.9
+ARG TRUFFLEHOG_VERSION=v3.100.0
 # renovate: datasource=go depName=github.com/rabbitmq/amqp091-go versioning=go depType=verification
 ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
 # renovate: datasource=github-tags depName=blechschmidt/massdns
@@ -83,7 +83,7 @@ ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.3.0-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=f63b98296b56f0575df5a4539ce1806f07218100d18d87d8db512648b6c5c6cb
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 # renovate: datasource=pypi depName=schemathesis versioning=pep440
-ARG SCHEMATHESIS_VERSION=4.33.4
+ARG SCHEMATHESIS_VERSION=4.34.0
 # renovate: datasource=go depName=github.com/lc/gau/v2 versioning=go
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=
@@ -94,7 +94,7 @@ ARG SQLMAP_LICENSE_SHA256=b1bbb62f5b272a6247d442d5e4f644a5bca7138e70776539ec84a5
 # renovate: datasource=go depName=github.com/pouriyajamshidi/tcping/v2 versioning=go
 ARG TCPING_VERSION=v2.8.0
 # renovate: datasource=rubygems depName=wpscan versioning=ruby
-ARG WPSCAN_VERSION=4.2.0
+ARG WPSCAN_VERSION=4.2.1
 # renovate: datasource=go depName=github.com/VirusTotal/vt-cli versioning=go
 ARG VT_CLI_VERSION=v0.0.0-20260707165039-b4cf77c4340f
 # renovate: datasource=github-tags depName=ipinfo/cli versioning=regex:^ipinfo-(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$
