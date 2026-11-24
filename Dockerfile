@@ -52,7 +52,7 @@ ARG GOBUSTER_VERSION=v3.8.2
 # renovate: datasource=go depName=github.com/ffuf/ffuf/v2 versioning=go
 ARG FFUF_VERSION=v2.3.0
 # renovate: datasource=github-tags depName=trufflesecurity/trufflehog
-ARG TRUFFLEHOG_VERSION=v3.100.0
+ARG TRUFFLEHOG_VERSION=v3.100.1
 # renovate: datasource=go depName=github.com/rabbitmq/amqp091-go versioning=go depType=verification
 ARG TRUFFLEHOG_AMQP_VERSION=v1.14.0
 # renovate: datasource=github-tags depName=blechschmidt/massdns
@@ -83,7 +83,7 @@ ARG DALFOX_LINUX_ARM64_ASSET=dalfox-v3.3.0-linux-aarch64-musl.tar.gz
 ARG DALFOX_LINUX_ARM64_SHA256=f63b98296b56f0575df5a4539ce1806f07218100d18d87d8db512648b6c5c6cb
 ARG DALFOX_LICENSE_SHA256=ffb8b51dc4186526fa4cc8226e458f8655dcfa2feed8e90a8543d77441b8e572
 # renovate: datasource=pypi depName=schemathesis versioning=pep440
-ARG SCHEMATHESIS_VERSION=4.34.0
+ARG SCHEMATHESIS_VERSION=4.34.2
 # renovate: datasource=go depName=github.com/lc/gau/v2 versioning=go
 ARG GAU_VERSION=v2.2.4
 ARG GAU_MODULE_SUM=h1:FKPek3tA4fSp/hFgM9NILpGUbC1ArKKab1KQGpNfxAQ=

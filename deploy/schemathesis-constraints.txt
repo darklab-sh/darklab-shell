@@ -17,7 +17,7 @@ jsonschema-rs==0.63.1
 markdown-it-py==4.3.0
 MarkupSafe==3.0.4
 mdurl==0.1.2
-packaging==26.3
+packaging==26.4
 pluggy==1.7.0
 Pygments==2.21.0
 pyrate-limiter==4.5.1
@@ -25,7 +25,7 @@ pytest==9.2.0
 PyYAML==6.0.4
 requests==2.34.2
 rich==15.0.0
-schemathesis==4.34.0
+schemathesis==4.34.2
 sortedcontainers==2.4.0
 typing-extensions==4.16.0
 urllib3==2.8.0
