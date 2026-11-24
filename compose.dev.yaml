@@ -30,7 +30,7 @@ services:
       start_period: 5s
 
   postgres:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     profiles:
       - postgres
     environment:
