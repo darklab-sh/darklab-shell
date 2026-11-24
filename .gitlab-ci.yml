@@ -111,7 +111,7 @@ test-js-e2e-source:
 test-js-e2e-postgres-auth-profiles:
   extends: .playwright-lane
   services:
-    - name: postgres:18-alpine
+    - name: postgres:19-alpine
       alias: postgres
   variables:
     POSTGRES_DB: darklab_shell
@@ -214,7 +214,7 @@ test-js-unit:
 test-py-postgres:
   stage: test
   services:
-    - name: postgres:18-alpine
+    - name: postgres:19-alpine
       alias: postgres
   variables:
     POSTGRES_DB: darklab_shell
