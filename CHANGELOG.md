@@ -16,6 +16,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Dependency versions are updated.** Updated `@vitest/coverage-v8` from `^5.1.1` to `^5.1.2`; `eslint` from `^10.15.0` to `^10.16.0`; `hypothesis` from `==6.170.17` to `==6.170.23`; `jsonschema-rs` from `==0.63.1` to `==0.63.2`; `pyrate-limiter` from `==4.5.1` to `==4.6.0`; `schemathesis` from `4.34.2` to `4.34.4`; `schemathesis` from `==4.34.2` to `==4.34.4`; `vitest` from `^5.1.1` to `^5.1.2`.
+
 - **Dependency versions are updated.** Updated `postgres` from `18-alpine` to `19-alpine`.
 
 - **Dependency versions are updated.** Updated `packaging` from `==26.3` to `==26.4`; `schemathesis` from `4.34.0` to `4.34.2`; `schemathesis` from `==4.34.0` to `==4.34.2`; `trufflesecurity/trufflehog` from `v3.100.0` to `v3.100.1`.
